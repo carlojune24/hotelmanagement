@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+.svelte-kit/
+.env
+.env.*
+!.env.example
+*.log
+coverage/
+playwright-report/
+test-results/
+.DS_Store
+pgdata/
+.tunnel-url

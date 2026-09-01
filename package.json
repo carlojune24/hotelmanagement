@@ -1,0 +1,29 @@
+{
+  "name": "mmhotel",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.1.2",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @mm/hotel dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "check": "pnpm -r check",
+    "test": "pnpm -r test",
+    "test:e2e": "pnpm --filter @mm/hotel test:e2e",
+    "db:generate": "pnpm --filter @mm/hotel db:generate",
+    "db:migrate": "pnpm --filter @mm/hotel db:migrate",
+    "db:push": "pnpm --filter @mm/hotel db:push",
+    "db:seed": "pnpm --filter @mm/hotel db:seed",
+    "db:studio": "pnpm --filter @mm/hotel db:studio",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down"
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3"
+  }
+}
