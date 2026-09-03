@@ -18,9 +18,7 @@
     "db:migrate": "pnpm --filter @mm/hotel db:migrate",
     "db:push": "pnpm --filter @mm/hotel db:push",
     "db:seed": "pnpm --filter @mm/hotel db:seed",
-    "db:studio": "pnpm --filter @mm/hotel db:studio",
-    "db:up": "docker compose up -d",
-    "db:down": "docker compose down"
+    "db:studio": "pnpm --filter @mm/hotel db:studio"
   },
   "devDependencies": {
     "prettier": "^3.4.2",

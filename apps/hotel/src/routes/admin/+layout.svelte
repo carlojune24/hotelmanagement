@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { ui } from '$lib/components/ui';
+	import { Button } from '$lib/components/ui/button/index.js';
 
 	let { children } = $props();
 
@@ -33,7 +33,7 @@
 				</nav>
 			</div>
 			<form method="POST" action="/auth/logout">
-				<button class="{ui.btn} {ui.btnGhost}" type="submit">Sign out</button>
+				<Button variant="outline" type="submit">Sign out</Button>
 			</form>
 		</div>
 	</header>

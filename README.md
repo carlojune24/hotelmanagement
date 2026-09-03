@@ -15,19 +15,16 @@ consolidate against.
 ## Prerequisites
 
 - Node 20+ and pnpm 11+
-- A PostgreSQL 16+ database. Either:
-  - **Docker**: `docker compose up -d` (uses `postgres://mmhotel:mmhotel@localhost:5432/mmhotel`), or
-  - **Existing Postgres**: create a database and set `DATABASE_URL` in `apps/hotel/.env`.
+- A local PostgreSQL 16+ database — create a database and set `DATABASE_URL` in `apps/hotel/.env`.
 
 ## Setup
 
 ```bash
 pnpm install
-cp apps/hotel/.env.example apps/hotel/.env    # adjust DATABASE_URL if not using Docker
-pnpm db:up                                     # start the Docker Postgres (skip if using your own)
+cp apps/hotel/.env.example apps/hotel/.env    # adjust DATABASE_URL
 pnpm db:migrate                                # apply migrations in apps/hotel/drizzle
 pnpm db:seed                                   # create the demo hotel + admin/manager logins
-pnpm dev                                        # http://localhost:5173
+pnpm dev                                        # http://localhost:5175
 ```
 
 `pnpm db:seed` prints the seeded logins:

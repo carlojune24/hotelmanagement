@@ -3,6 +3,7 @@ import { asc } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import { hotels } from '$lib/server/db/schema/index';
+import { seedHotelAmenities } from '$lib/server/amenities/catalog';
 import { writeAudit } from '$lib/server/audit';
 import { mintRef } from '$lib/server/ids';
 import { slugError } from '$lib/server/tenant';
@@ -49,6 +50,9 @@ export const actions: Actions = {
 			}
 			throw e;
 		}
+
+		// Give the new hotel the standard amenity catalogue to start from.
+		await seedHotelAmenities(db, newId);
 
 		await writeAudit({
 			actor: event.locals.user,

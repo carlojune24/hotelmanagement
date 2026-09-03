@@ -38,7 +38,12 @@ export const load: PageServerLoad = async ({ params }) => {
 		.where(eq(memberships.hotelId, hotel.id));
 
 	const pendingInvites = await db
-		.select({ id: invites.id, email: invites.email, role: invites.role, expiresAt: invites.expiresAt })
+		.select({
+			id: invites.id,
+			email: invites.email,
+			role: invites.role,
+			expiresAt: invites.expiresAt
+		})
 		.from(invites)
 		.where(and(eq(invites.hotelId, hotel.id), eq(invites.status, 'pending')));
 
@@ -159,9 +164,7 @@ export const actions: Actions = {
 		await db
 			.update(memberships)
 			.set({ role: parsed.data.role as MembershipRole })
-			.where(
-				and(eq(memberships.hotelId, hotel.id), eq(memberships.userId, parsed.data.userId))
-			);
+			.where(and(eq(memberships.hotelId, hotel.id), eq(memberships.userId, parsed.data.userId)));
 		await writeAudit({
 			hotelId: hotel.id,
 			actor: event.locals.user,

@@ -6,3 +6,5 @@
 export * from './auth';
 export * from './hotels';
 export * from './audit';
+export * from './inventory';
+export * from './amenities';

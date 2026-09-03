@@ -4,11 +4,7 @@ import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import { users } from '$lib/server/db/schema/index';
 import { verifyPassword } from '$lib/server/auth/password';
-import {
-	createSession,
-	generateSessionToken,
-	setSessionCookie
-} from '$lib/server/auth/session';
+import { createSession, generateSessionToken, setSessionCookie } from '$lib/server/auth/session';
 import type { Actions, PageServerLoad } from './$types';
 
 const schema = z.object({

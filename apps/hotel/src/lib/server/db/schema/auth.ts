@@ -44,7 +44,9 @@ export const invites = pgTable(
 		tokenHash: text('token_hash').notNull().unique(),
 		hotelId: uuid('hotel_id'),
 		role: text('role'),
-		invitedByUserId: uuid('invited_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		invitedByUserId: uuid('invited_by_user_id').references(() => users.id, {
+			onDelete: 'set null'
+		}),
 		status: inviteStatus('status').notNull().default('pending'),
 		expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 		acceptedAt: timestamp('accepted_at', { withTimezone: true }),

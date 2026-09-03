@@ -8,6 +8,48 @@
       "when": 1788177637166,
       "tag": "0000_premium_salo",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788235344248,
+      "tag": "0001_tired_gabe_jones",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788238865069,
+      "tag": "0002_curved_saracen",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788238885935,
+      "tag": "0003_strange_diamondback",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788243085148,
+      "tag": "0004_mixed_reavers",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788309004778,
+      "tag": "0005_glamorous_hex",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788337013401,
+      "tag": "0006_luxuriant_war_machine",
+      "breakpoints": true
     }
   ]
 }

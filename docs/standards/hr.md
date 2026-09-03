@@ -6,8 +6,28 @@ Owning package: `@mm/hr-core`. Read the [shared rules](./README.md) first.
 
 ### Org
 
-The legal/employing entity. In the hotel app one org maps to one hotel company
-(a hotel group with a single SEC registration may share an org across properties).
+The legal/employing entity. In the hotel app, org identity is **not a separate
+table** — it is carried directly on the entity that legally employs staff:
+
+- **Grouped hotel** (`hotels.group_id` is set): the org is the owning
+  `hotel_groups` row. All hotels in that group share one `org_ref` — one
+  legal employer across properties (e.g. a single SEC-registered company
+  operating several properties). `hotel_groups` carries the org fields below
+  in addition to its portfolio fields (`slug`, `name`, `owner_user_id`).
+- **Standalone hotel** (`hotels.group_id` is null): the org is that hotel's
+  own row — `hotels.org_ref` (already present since Phase 0), unchanged.
+
+`employees.org_ref` is resolved at write time to whichever of the two applies
+for the employee's org — never both, never a third source. This mirrors the
+`org_ref` field elsewhere in this doc as a *cross-app identity* (no local FK;
+see `hotels.orgRef`, which already has no DB-level reference for the same
+reason).
+
+`timezone` below is the **portable-standard default only**. The operative
+wall-clock for a specific shift/DTR entry is always that shift's own
+`hotels.timezone` (via `schedules.hotel_id`), because two properties in the
+same group can in principle sit in different timezones even though today all
+target hotels are `Asia/Manila`.
 
 | field | type | notes |
 |---|---|---|
@@ -43,6 +63,7 @@ consumer that does not understand an extension key ignores it.
 | `position` | string | |
 | `department` | string \| null | |
 | `cost_center` | string \| null | ties payroll cost to a GL dimension |
+| `primary_hotel_id` | uuid \| null | **app-local, hotel-app specific.** Nullable FK to this app's `hotels` table — the employee's home-base property. Not part of the payload for non-hotel consumers of `@mm/hr-core`; omit/ignore outside this app. Per-shift property is carried on `schedules`/`dtr_entries`, not here. |
 | `pay_basis` | enum | `monthly \| daily \| hourly` |
 | `base_rate` | `amount_minor` | per the `pay_basis` unit |
 | `gov_ids` | object | `{ sss, philhealth, pagibig, tin }` — strings, natural keys |
@@ -55,13 +76,25 @@ consumer that does not understand an extension key ignores it.
 ### Schedule (app-owned shape, referenced by DTR)
 
 Per employee per calendar date: a shift (`start`, `end`, `break_minutes`,
-`night_diff_window`) or a rest day. Holidays carried on an org calendar
-(`regular` / `special_non_working`). Consumers usually need only the payroll-run
-result, not raw schedules, but the endpoint exists for audit.
+`night_diff_window`) or a rest day, plus **`hotel_id`** (required, not
+nullable — the specific property this shift is worked at). One employee can
+have schedule rows at different `hotel_id`s within the same cutoff as long as
+every `hotel_id` resolves to the same org as the employee's `org_ref`
+(same group, or the same standalone hotel). `dtr_entries` derived from a
+schedule row carry the same `hotel_id`, denormalized, so payroll-cost-by-
+property reporting doesn't require a join back through `schedules`. Holidays
+carried on an org calendar (`regular` / `special_non_working`). Consumers
+usually need only the payroll-run result, not raw schedules, but the endpoint
+exists for audit.
 
 ### Payroll-run result
 
-Immutable once posted. One run covers one cutoff for one org.
+Immutable once posted. One run covers one cutoff for one org. For a grouped
+hotel, "one org" means **all hotels in the group** — a run is group-wide, not
+per-property. The per-property split (payroll cost by property) is a
+**derived report**, computed by the app by joining `schedules`/`dtr_entries`
+`hotel_id` against this run's lines; it is intentionally not a field on the
+line shape below, so this standard stays portable to non-hotel consumers.
 
 | field | type | notes |
 |---|---|---|

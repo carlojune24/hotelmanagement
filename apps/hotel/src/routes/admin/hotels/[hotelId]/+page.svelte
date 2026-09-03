@@ -1,143 +1,179 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { ui } from '$lib/components/ui';
+	import { toast } from 'svelte-sonner';
+	import { Button } from '$lib/components/ui/button/index.js';
+	import { Input } from '$lib/components/ui/input/index.js';
+	import { Label } from '$lib/components/ui/label/index.js';
+	import * as Select from '$lib/components/ui/select/index.js';
+	import * as Table from '$lib/components/ui/table/index.js';
+	import { Separator } from '$lib/components/ui/separator/index.js';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
 	const h = $derived(data.hotel);
 	const vatPct = $derived((h.vatRateBps / 100).toString());
+
+	let currency = $state('PHP');
+	$effect(() => {
+		currency = h.currency;
+	});
+
+	let roleForms: Record<string, HTMLFormElement> = {};
+	let inviteRole = $state<string>('');
+
+	$effect(() => {
+		if (form?.error) toast.error(form.error);
+		if (form?.ok) toast.success(form.ok);
+	});
 </script>
 
-<div class={ui.page}>
+<div class="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
 	<div class="mb-6 flex items-center justify-between">
 		<div>
-			<h1 class={ui.h1}>{h.name}</h1>
+			<h1 class="text-xl font-semibold tracking-tight text-ink">{h.name}</h1>
 			<p class="text-sm text-ink-muted">
 				<code>/{h.slug}</code> · {h.status} · org <code class="text-xs">{h.orgRef}</code>
 			</p>
 		</div>
-		<a class="{ui.btn} {ui.btnGhost}" href="/admin/hotels">← All hotels</a>
+		<Button variant="outline" href="/admin/hotels">← All hotels</Button>
 	</div>
 
-	{#if form?.error}<p class="{ui.alertErr} mb-4">{form.error}</p>{/if}
-	{#if form?.ok}<p class="{ui.alertOk} mb-4">{form.ok}</p>{/if}
 	{#if form?.inviteLink}
-		<p class="{ui.card} mb-4 break-all text-sm">
+		<p class="mb-4 break-all rounded-xl border border-border bg-surface-2 p-5 text-sm shadow-sm">
 			Send this link to the invitee:<br /><code>{form.inviteLink}</code>
 		</p>
 	{/if}
 
 	<div class="grid gap-6 lg:grid-cols-2">
-		<section class={ui.card}>
-			<h2 class={ui.h2}>Configuration</h2>
+		<section class="rounded-xl border border-border bg-surface-2 p-5 shadow-sm">
+			<h2 class="text-sm font-semibold uppercase tracking-wide text-ink-muted">Configuration</h2>
 			<form method="POST" action="?/updateConfig" use:enhance class="mt-3 space-y-3">
 				<div>
-					<label class={ui.label} for="name">Name</label>
-					<input class={ui.input} id="name" name="name" value={h.name} required />
+					<Label for="name">Name</Label>
+					<Input id="name" name="name" value={h.name} required class="mt-1" />
 				</div>
 				<div>
-					<label class={ui.label} for="legalName">Legal name</label>
-					<input class={ui.input} id="legalName" name="legalName" value={h.legalName ?? ''} />
+					<Label for="legalName">Legal name</Label>
+					<Input id="legalName" name="legalName" value={h.legalName ?? ''} class="mt-1" />
 				</div>
 				<div class="grid grid-cols-2 gap-3">
 					<div>
-						<label class={ui.label} for="city">City</label>
-						<input class={ui.input} id="city" name="city" value={h.city ?? ''} />
+						<Label for="city">City</Label>
+						<Input id="city" name="city" value={h.city ?? ''} class="mt-1" />
 					</div>
 					<div>
-						<label class={ui.label} for="timezone">Timezone</label>
-						<input class={ui.input} id="timezone" name="timezone" value={h.timezone} required />
+						<Label for="timezone">Timezone</Label>
+						<Input id="timezone" name="timezone" value={h.timezone} required class="mt-1" />
 					</div>
 				</div>
 				<div>
-					<label class={ui.label} for="addressLine">Address</label>
-					<input class={ui.input} id="addressLine" name="addressLine" value={h.addressLine ?? ''} />
+					<Label for="addressLine">Address</Label>
+					<Input id="addressLine" name="addressLine" value={h.addressLine ?? ''} class="mt-1" />
 				</div>
 				<div class="grid grid-cols-3 gap-3">
 					<div>
-						<label class={ui.label} for="currency">Currency</label>
-						<select class={ui.select} id="currency" name="currency">
-							<option value="PHP" selected={h.currency === 'PHP'}>PHP</option>
-						</select>
+						<Label for="currency">Currency</Label>
+						<Select.Root type="single" name="currency" bind:value={currency}>
+							<Select.Trigger id="currency" class="mt-1 w-full">{currency}</Select.Trigger>
+							<Select.Content>
+								<Select.Item value="PHP" label="PHP" />
+							</Select.Content>
+						</Select.Root>
 					</div>
 					<div>
-						<label class={ui.label} for="vatRatePct">VAT %</label>
-						<input
-							class={ui.input}
+						<Label for="vatRatePct">VAT %</Label>
+						<Input
 							id="vatRatePct"
 							name="vatRatePct"
 							type="number"
 							step="0.01"
 							value={vatPct}
 							required
+							class="mt-1"
 						/>
 					</div>
 					<div>
-						<label class={ui.label} for="orSeriesPrefix">OR prefix</label>
-						<input
-							class={ui.input}
+						<Label for="orSeriesPrefix">OR prefix</Label>
+						<Input
 							id="orSeriesPrefix"
 							name="orSeriesPrefix"
 							value={h.orSeriesPrefix}
 							required
+							class="mt-1"
 						/>
 					</div>
 				</div>
-				<button class="{ui.btn} {ui.btnPrimary}" type="submit">Save configuration</button>
+				<Button type="submit">Save configuration</Button>
 			</form>
 
-			<hr class="my-4 border-border" />
-			<h2 class={ui.h2}>Status</h2>
+			<Separator class="my-4" />
+			<h2 class="text-sm font-semibold uppercase tracking-wide text-ink-muted">Status</h2>
 			<div class="mt-2 flex gap-2">
 				<form method="POST" action="?/setStatus" use:enhance>
 					<input type="hidden" name="status" value="published" />
-					<button class="{ui.btn} {ui.btnPrimary}" disabled={h.status === 'published'}>Publish</button>
+					<Button type="submit" disabled={h.status === 'published'}>Publish</Button>
 				</form>
 				<form method="POST" action="?/setStatus" use:enhance>
 					<input type="hidden" name="status" value="draft" />
-					<button class="{ui.btn} {ui.btnGhost}" disabled={h.status === 'draft'}>Unpublish</button>
+					<Button variant="outline" type="submit" disabled={h.status === 'draft'}>Unpublish</Button>
 				</form>
 				<form method="POST" action="?/setStatus" use:enhance>
 					<input type="hidden" name="status" value="archived" />
-					<button class="{ui.btn} {ui.btnDanger}" disabled={h.status === 'archived'}>Archive</button>
+					<Button variant="destructive" type="submit" disabled={h.status === 'archived'}>
+						Archive
+					</Button>
 				</form>
 			</div>
 		</section>
 
-		<section class={ui.card}>
-			<h2 class={ui.h2}>Members</h2>
+		<section class="rounded-xl border border-border bg-surface-2 p-5 shadow-sm">
+			<h2 class="text-sm font-semibold uppercase tracking-wide text-ink-muted">Members</h2>
 			{#if data.members.length === 0}
 				<p class="mt-2 text-sm text-ink-muted">No members yet.</p>
 			{:else}
-				<table class="{ui.table} mt-2">
-					<tbody>
+				<Table.Root class="mt-2">
+					<Table.Body>
 						{#each data.members as m (m.userId)}
-							<tr>
-								<td class={ui.td}>
+							<Table.Row>
+								<Table.Cell>
 									<div class="font-medium">{m.name}</div>
 									<div class="text-xs text-ink-muted">{m.email}</div>
-								</td>
-								<td class={ui.td}>
-									<form method="POST" action="?/changeRole" use:enhance class="flex items-center gap-2">
+								</Table.Cell>
+								<Table.Cell>
+									<form
+										method="POST"
+										action="?/changeRole"
+										use:enhance
+										bind:this={roleForms[m.userId]}
+										class="flex items-center gap-2"
+									>
 										<input type="hidden" name="userId" value={m.userId} />
-										<select class={ui.select} name="role" onchange={(e) => e.currentTarget.form?.requestSubmit()}>
-											{#each data.roles as r (r)}
-												<option value={r} selected={r === m.role}>{r}</option>
-											{/each}
-										</select>
+										<Select.Root
+											type="single"
+											name="role"
+											value={m.role}
+											onValueChange={() => roleForms[m.userId]?.requestSubmit()}
+										>
+											<Select.Trigger class="w-32">{m.role}</Select.Trigger>
+											<Select.Content>
+												{#each data.roles as r (r)}
+													<Select.Item value={r} label={r} />
+												{/each}
+											</Select.Content>
+										</Select.Root>
 									</form>
-								</td>
-								<td class={ui.td}>
+								</Table.Cell>
+								<Table.Cell>
 									<form method="POST" action="?/removeMember" use:enhance>
 										<input type="hidden" name="userId" value={m.userId} />
 										<button class="text-xs text-danger hover:underline">Remove</button>
 									</form>
-								</td>
-							</tr>
+								</Table.Cell>
+							</Table.Row>
 						{/each}
-					</tbody>
-				</table>
+					</Table.Body>
+				</Table.Root>
 			{/if}
 
 			{#if data.pendingInvites.length > 0}
@@ -149,22 +185,27 @@
 				</ul>
 			{/if}
 
-			<hr class="my-4 border-border" />
+			<Separator class="my-4" />
 			<h3 class="text-xs font-semibold uppercase text-ink-muted">Invite a member</h3>
 			<form method="POST" action="?/inviteMember" use:enhance class="mt-2 space-y-3">
 				<div>
-					<label class={ui.label} for="inviteEmail">Email</label>
-					<input class={ui.input} id="inviteEmail" name="email" type="email" required />
+					<Label for="inviteEmail">Email</Label>
+					<Input id="inviteEmail" name="email" type="email" required class="mt-1" />
 				</div>
 				<div>
-					<label class={ui.label} for="inviteRole">Role</label>
-					<select class={ui.select} id="inviteRole" name="role">
-						{#each data.roles as r (r)}
-							<option value={r}>{r}</option>
-						{/each}
-					</select>
+					<Label for="inviteRole">Role</Label>
+					<Select.Root type="single" name="role" bind:value={inviteRole}>
+						<Select.Trigger id="inviteRole" class="mt-1 w-full">
+							{inviteRole || 'Select a role'}
+						</Select.Trigger>
+						<Select.Content>
+							{#each data.roles as r (r)}
+								<Select.Item value={r} label={r} />
+							{/each}
+						</Select.Content>
+					</Select.Root>
 				</div>
-				<button class="{ui.btn} {ui.btnPrimary}" type="submit">Create invite</button>
+				<Button type="submit">Create invite</Button>
 			</form>
 		</section>
 	</div>

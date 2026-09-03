@@ -9,7 +9,7 @@ Check items off as they land. `[~]` = partially done / stubbed.
 
 - [x] pnpm monorepo: `apps/hotel` + `packages/{hr-core,finance-core,integration}`
 - [x] `docs/standards/{hr,finance}.md` first drafts + `@mm/integration` primitives & events
-- [x] Drizzle + local Postgres wiring, `docker-compose.yml` (optional), `.env.example`
+- [x] Drizzle + local Postgres wiring, `.env.example`
 - [x] Schema: `hotels`, `hotel_groups`, `users`, `memberships`, `sessions`, `invites`, `audit_log`
 - [x] Auth: Argon2id passwords, opaque cookie sessions, login / logout / accept-invite
 - [x] Tenant resolution + guards in `hooks.server.ts`; reserved prefixes; `scopedDb` helper
@@ -19,7 +19,7 @@ Check items off as they land. `[~]` = partially done / stubbed.
 - [x] Unit tests (slug rules, RBAC, standard primitives) + typecheck green
 
 ### Phase 0 loose ends (do before/with Phase 1)
-- [ ] `git init` + initial commit + push to a remote
+- [x] `git init` + initial commit + push to a remote
 - [ ] Password reset flow (request + token email + set new password) — currently only login/invite
 - [ ] `scopedDb(hotelId)` actually enforced (helper exists; wire a lint rule / query wrapper)
 - [ ] Rate-limit login + invite-accept (basic in-memory or `pg-boss`-backed)
@@ -31,17 +31,19 @@ Check items off as they land. `[~]` = partially done / stubbed.
 
 ## Phase 1 — Core PMS + Online Booking + PayMongo (MVP)
 
-### UI foundation (do first)
-- [ ] `pnpm dlx shadcn-svelte@latest init` in `apps/hotel`; wire its CSS variables to the existing `src/app.css` theme tokens (surface/ink/border/brand/danger/ok, light + dark)
-- [ ] Add the primitives Phase 1 needs: button, input, select, label, dialog, dropdown-menu, popover, calendar/date-picker, table, badge, sonner (toast), form
-- [ ] Migrate current `$lib/components/ui.ts` recipes + existing admin/auth screens to shadcn components; delete `ui.ts` once nothing imports it
-- [ ] Toast on every form action result (replace inline `form?.ok` / `form?.error` banners)
+### UI foundation (do first) ✅
+- [x] `pnpm dlx shadcn-svelte@latest init` in `apps/hotel`; wire its CSS variables to the existing `src/app.css` theme tokens (surface/ink/border/brand/danger/ok, light + dark)
+- [x] Add the primitives Phase 1 needs: button, input, select, label, dialog, dropdown-menu, popover, calendar/date-picker, table, badge, sonner (toast), form
+- [x] Migrate current `$lib/components/ui.ts` recipes + existing admin/auth screens to shadcn components; delete `ui.ts` once nothing imports it
+- [x] Toast on every form action result (replace inline `form?.ok` / `form?.error` banners)
 
 ### Inventory & rates
-- [ ] Schema: `room_types`, `rooms`, `rate_plans`, `daily_rates`, `taxes_fees` (reservation fee, resort fee, VAT), `cancellation_policies`
-- [ ] Settings UI: `/{slug}/settings/rooms` (room types + rooms CRUD), `/{slug}/settings/rates` (rate plans, seasonal overrides, promo codes)
-- [ ] `lib/server/availability.ts` — date range + occupancy → available room types + price breakdown (reused by booking + front desk)
-- [ ] `lib/server/pricing.ts` — bill builder: nightly rates + fees + VAT (12% configurable) → total in centavos
+- [x] Schema: `room_types`, `rooms`, `rate_plans`, `daily_rates`, `taxes_fees` (reservation fee, resort fee, VAT), `cancellation_policies`
+- [x] Schema: `amenities` (per-hotel master, category + scope), `hotel_amenities`, `room_type_amenities` (`is_highlighted`) — informational only; seeded from `STANDARD_AMENITIES` on hotel create. Replaced the free-text `room_types.amenities[]` column (migration `0006` backfills existing values). NB Phase 2 `amenity_items` stays separate = *sellable* services.
+- [x] Settings UI: `/{slug}/settings/rooms` (room types + rooms CRUD), `/{slug}/settings/rates` (rate plans, seasonal overrides, promo codes), `/{slug}/settings/amenities` (master list CRUD + hotel-wide toggle); room-type Amenities tab picks from the list with highlight flags
+- [ ] Show amenities on the public hotel page + room cards (highlighted subset on the card, full list behind "See all") — do with the booking flow below
+- [x] `lib/server/availability.ts` — date range + occupancy → available room types + price breakdown (reused by booking + front desk); room-count side is done, still needs to subtract overlapping bookings once `bookings`/`booking_rooms` land below
+- [x] `lib/server/pricing.ts` — bill builder: nightly rates + fees + VAT (12% configurable) → total in centavos
 
 ### Guests & bookings
 - [ ] Schema: `guests`, `bookings` (status: `pending_payment | confirmed | checked_in | checked_out | cancelled | no_show`), `booking_rooms`, `booking_status_history`
@@ -57,7 +59,7 @@ Check items off as they land. `[~]` = partially done / stubbed.
 - [ ] `lib/server/paymongo/client.ts` — REST client (secret key from env)
 - [ ] `lib/server/paymongo/checkout.ts` — create Checkout Session (line items = bill, success/cancel URLs)
 - [ ] `lib/server/paymongo/webhook.ts` — verify `Paymongo-Signature` (HMAC-SHA256)
-- [ ] `routes/webhooks/paymongo/+server.ts` — receive → enqueue → worker handles `checkout_session.payment.paid`
+- [~] `routes/api/webhooks/paymongo/+server.ts` — verifies `Paymongo-Signature`, handles `checkout_session.payment.paid` (route is under `/api/` not `/webhooks/` — already registered with PayMongo, kept as-is); booking status update still TODO pending the bookings/payments schema below
 - [ ] Idempotency on PayMongo event id; booking `pending_payment → confirmed`; write `payment` row
 - [ ] Balance-payment link (guest) + at front desk, reusing the same checkout
 
@@ -116,18 +118,26 @@ Check items off as they land. `[~]` = partially done / stubbed.
 - [ ] Finalize `docs/standards/hr.md`
 - [ ] ⚠️ Verify statutory values against latest SSS circular / PhilHealth advisory / Pag-IBIG circular / BIR RMC before go-live
 
+### Schema — group-scoped HR (centralization)
+- [ ] `hotel_groups`: add `org_ref`, `legal_name`, `trade_name`, `tin`, `default_currency` (nullable, populated when a group is HR-active)
+- [ ] `employees.org_ref` (resolves to `hotel_groups.org_ref` when grouped, else the standalone hotel's own `hotels.org_ref`) + `employees.primary_hotel_id` (nullable FK → `hotels.id`, home base)
+- [ ] `schedules.hotel_id` (required FK → `hotels.id`, per-shift property); `dtr_entries.hotel_id` denormalized from schedule
+- [ ] `group_memberships(user_id, group_id, role)` — mirrors `memberships`; reuses the existing `membership_role` enum; new `ASSIGNABLE_GROUP_ROLES` in `authz.ts` (`group_owner`, `hr`, `accountant`, `read_only` — no `front_desk`/`housekeeping` at group scope)
+- [ ] `hooks.server.ts`: resolve `/group/{groupSlug}/…` — load `hotel_groups` by slug, resolve `locals.groupRole` via `group_memberships`, separately from the existing hotel-path `locals.hotel`/`locals.role`
+- [ ] Admin: create/edit `hotel_groups`, assign `hotels.group_id`, set the group's org identity fields, manage `group_memberships`
+
 ### App
-- [ ] Employees CRUD `/{slug}/hr` (profile, employment, pay setup, gov IDs, `biometric_enroll_id`, disbursement)
-- [ ] Scheduling: `shift_templates`, `schedules` (employee × date), weekly roster grid, holiday calendar (regular / special non-working)
+- [ ] Employees CRUD — hotel-scoped `/{slug}/hr` (standalone hotels, and a per-property filtered view for hotel-scoped roles) **and** group-scoped `/group/{groupSlug}/hr` (centralized HR across every hotel in the group) — same underlying employee model, both routes filter by resolved `org_ref`
+- [ ] Scheduling: `shift_templates`, `schedules` (employee × date **× hotel_id**), weekly roster grid per property, holiday calendar (regular / special non-working)
 - [ ] Biometric import: `parse-attlog.ts` (ZKTeco `ATTLOG.TXT`), `parse-sheet.ts` (CSV/XLS via SheetJS + column mapping)
-- [ ] `pair-punches.ts`: pair in/out vs schedule → worked hours, tardiness, undertime, OT, night diff, absences → `dtr_entries`; manual-correction UI with audit; unmatched enroll ids surfaced
-- [ ] DTR print `/{slug}/print/dtr` — per employee per cutoff, laid out against schedule; batch print; PDF
-- [ ] Payroll run `/{slug}/payroll` — per cutoff (semi-monthly default, configurable): pull DTR → compute → review → lock → post to cashflow as cash-out
+- [ ] `pair-punches.ts`: pair in/out vs schedule → worked hours, tardiness, undertime, OT, night diff, absences → `dtr_entries` (carrying `hotel_id`); manual-correction UI with audit; unmatched enroll ids surfaced
+- [ ] DTR print `/{slug}/print/dtr` (and `/group/{groupSlug}/print/dtr` for centralized HR) — per employee per cutoff, laid out against schedule; batch print; PDF
+- [ ] Payroll run — hotel-scoped `/{slug}/payroll` for standalone hotels; group-scoped `/group/{groupSlug}/payroll` for grouped hotels (one run per cutoff covers every employee under the group's org): pull DTR → compute → review → lock → post to cashflow as cash-out; payroll-cost-by-property derived report groups run lines by `schedules`/`dtr_entries.hotel_id`
 - [ ] Cash advances: request → approval → disbursement (cash-out) → amortization auto-deducted; per-employee CA ledger
-- [ ] Payslips `/{slug}/print/payslip` — per employee per run; PDF + optional email
+- [ ] Payslips `/{slug}/print/payslip` (and group equivalent) — per employee per run; PDF + optional email
 - [ ] Payroll register export (CSV/Excel); remittance summaries (SSS R-3-style, PhilHealth, Pag-IBIG, BIR 1601-C figures)
 - [ ] `@mm/integration`: `GET /api/v1/hr/orgs|employees|schedules|payroll-runs` (cursor + `updated_since`) + `employee.updated` / `payroll_run.posted` events
-- [ ] Verify: employee + schedule → upload sample `ATTLOG.TXT` → DTR correct → run payroll → deductions match an independent 2026 calculator (±₱1) → payslip PDF → net pay as cash-out → `GET /api/v1/hr/employees` returns standard shape with `person_ref`
+- [ ] Verify: create a `hotel_group` with 2 hotels + an HR-role `group_membership` → add an employee with `primary_hotel_id` = hotel A → schedule shifts at both hotel A and hotel B → upload sample `ATTLOG.TXT` → DTR correct per hotel → run one group-wide payroll → payroll-cost-by-property report splits correctly between A and B → deductions match an independent 2026 calculator (±₱1) → payslip PDF → net pay as cash-out → `GET /api/v1/hr/employees` returns standard shape with `person_ref`
 
 ---
 
@@ -149,12 +159,18 @@ Check items off as they land. `[~]` = partially done / stubbed.
 
 ## Phase 6 — Group / owner consolidation
 
-- [ ] Schema: use existing `hotel_groups`; wire `hotels.group_id`; role `group_owner` grants read across the group
-- [ ] `/group/{groupSlug}/…` area (reserved prefix already set)
+Group access plumbing (`hotel_groups` org fields, `group_memberships`,
+`/group/{groupSlug}/…` resolution in `hooks.server.ts`) is now built in
+**Phase 4**, since centralized HR needs it first. Phase 6 is a pure consumer
+of that existing area — it does not re-build routing or membership, it adds
+finance/report routes onto it.
+
+- [ ] `ROLE_CAPS`/`ASSIGNABLE_GROUP_ROLES`: confirm `group_owner` (`*:read`, `reports:*`) and `accountant` (group-scoped `finance:*`/`reports:*`) cover the report surface below; no new roles
+- [ ] `/group/{groupSlug}/…` area (already routed/authorized from Phase 4)
   - [ ] Portfolio dashboard: occupancy / ADR / RevPAR / revenue / cash position per hotel + rolled up
   - [ ] Consolidated income statement / balance sheet / trial balance (per-hotel columns + eliminations column)
   - [ ] Consolidated accounting ledger report (filter by hotel or all)
-  - [ ] Cross-hotel comparisons, payroll cost by property, expense benchmarking
+  - [ ] Cross-hotel comparisons, payroll cost by property (reuses the derived report from Phase 4), expense benchmarking
 - [ ] Consolidated views call the same `@mm/finance-core` report builders with all group `hotelIds`
 - [ ] Verify: add `hotel2`, post activity in both, group ledger + trial balance == sum of per-hotel reports
 
@@ -163,7 +179,7 @@ Check items off as they land. `[~]` = partially done / stubbed.
 ## Cross-cutting (ongoing, not a phase)
 
 - [ ] Audit log on every mutation (extend `writeAudit` coverage as modules land)
-- [ ] Promo codes / discounts, seasonal rates, length-of-stay rules (schema in Phase 1, UI polish later)
+- [~] Promo codes / discounts, seasonal rates, length-of-stay rules — schema + settings UI done (room-type code/category/gallery, room connecting/active flags + maintenance status, rate-plan weekend pricing, child/extra-bed fees, free-child age, inclusions, plan min/max stay, `seasonal_rates` date ranges w/ multiplier); still to do: enforce min-stay from `daily_rates`/`seasonal_rates` rows, promo-code redemption flow, occupancy-based dynamic pricing
 - [ ] Guest feedback capture post-checkout
 - [ ] Backups: documented `pg_dump` cron + restore runbook
 - [ ] Roles & permissions matrix documented in `$lib/authz.ts`

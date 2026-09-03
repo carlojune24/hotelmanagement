@@ -1,29 +1,29 @@
 <script lang="ts">
-	import { ui } from '$lib/components/ui';
+	import { Button } from '$lib/components/ui/button/index.js';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 </script>
 
-<div class={ui.page}>
+<div class="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
 	<header class="mb-8 flex items-center justify-between">
-		<h1 class={ui.h1}>MM Hotel</h1>
+		<h1 class="text-xl font-semibold tracking-tight text-ink">MM Hotel</h1>
 		<nav class="flex gap-2">
 			{#if data.user}
 				{#if data.user.isPlatformAdmin}
-					<a class="{ui.btn} {ui.btnGhost}" href="/admin">Admin</a>
+					<Button variant="outline" href="/admin">Admin</Button>
 				{/if}
 				<form method="POST" action="/auth/logout">
-					<button class="{ui.btn} {ui.btnGhost}" type="submit">Sign out</button>
+					<Button variant="outline" type="submit">Sign out</Button>
 				</form>
 			{:else}
-				<a class="{ui.btn} {ui.btnPrimary}" href="/auth/login">Sign in</a>
+				<Button href="/auth/login">Sign in</Button>
 			{/if}
 		</nav>
 	</header>
 
-	<section class={ui.card}>
-		<h2 class={ui.h2}>Published hotels</h2>
+	<section class="rounded-xl border border-border bg-surface-2 p-5 shadow-sm">
+		<h2 class="text-sm font-semibold uppercase tracking-wide text-ink-muted">Published hotels</h2>
 		{#if data.published.length === 0}
 			<p class="mt-3 text-sm text-ink-muted">No hotels have been published yet.</p>
 		{:else}
@@ -35,8 +35,8 @@
 							{#if h.city}<div class="text-xs text-ink-muted">{h.city}</div>{/if}
 						</div>
 						<div class="flex gap-2">
-							<a class="{ui.btn} {ui.btnGhost}" href="/{h.slug}">Staff</a>
-							<a class="{ui.btn} {ui.btnPrimary}" href="/{h.slug}/book">Book</a>
+							<Button variant="outline" href="/{h.slug}">Staff</Button>
+							<Button href="/{h.slug}/book">Book</Button>
 						</div>
 					</li>
 				{/each}

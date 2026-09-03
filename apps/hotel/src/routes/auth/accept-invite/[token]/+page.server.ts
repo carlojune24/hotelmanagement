@@ -1,11 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { acceptInvite, getUsableInvite } from '$lib/server/auth/invite';
-import {
-	createSession,
-	generateSessionToken,
-	setSessionCookie
-} from '$lib/server/auth/session';
+import { createSession, generateSessionToken, setSessionCookie } from '$lib/server/auth/session';
 import type { Actions, PageServerLoad } from './$types';
 
 const schema = z
@@ -14,7 +10,10 @@ const schema = z
 		password: z.string().min(10, 'Use at least 10 characters.'),
 		confirm: z.string()
 	})
-	.refine((v) => v.password === v.confirm, { message: 'Passwords do not match.', path: ['confirm'] });
+	.refine((v) => v.password === v.confirm, {
+		message: 'Passwords do not match.',
+		path: ['confirm']
+	});
 
 export const load: PageServerLoad = async ({ params }) => {
 	const invite = await getUsableInvite(params.token);

@@ -24,7 +24,10 @@ export const load: PageServerLoad = async () => {
 
 export const actions: Actions = {
 	invitePlatformAdmin: async (event) => {
-		const email = z.string().email().safeParse((await event.request.formData()).get('email'));
+		const email = z
+			.string()
+			.email()
+			.safeParse((await event.request.formData()).get('email'));
 		if (!email.success) return fail(400, { error: 'Enter a valid email.' });
 
 		const { token } = await createInvite({
