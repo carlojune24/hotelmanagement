@@ -58,7 +58,14 @@ const configSchema = z.object({
 	timezone: z.string().min(1).max(64),
 	currency: z.enum(['PHP']),
 	vatRatePct: z.coerce.number().min(0).max(30),
-	orSeriesPrefix: z.string().min(1).max(12)
+	orSeriesPrefix: z.string().min(1).max(12),
+	/** Bare hostname only — no protocol, no path, no port. Empty clears the mapping. */
+	customDomain: z
+		.string()
+		.max(255)
+		.regex(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/i, 'Enter a bare domain, e.g. mmhotel.com — no https:// or path')
+		.optional()
+		.or(z.literal(''))
 });
 
 async function getHotelOr404(id: string) {
@@ -78,20 +85,28 @@ export const actions: Actions = {
 		const before = await getHotelOr404(event.params.hotelId!);
 		const d = parsed.data;
 
-		await db
-			.update(hotels)
-			.set({
-				name: d.name.trim(),
-				legalName: d.legalName?.trim() || null,
-				addressLine: d.addressLine?.trim() || null,
-				city: d.city?.trim() || null,
-				timezone: d.timezone,
-				currency: d.currency,
-				vatRateBps: Math.round(d.vatRatePct * 100),
-				orSeriesPrefix: d.orSeriesPrefix.trim().toUpperCase(),
-				updatedAt: new Date()
-			})
-			.where(eq(hotels.id, before.id));
+		try {
+			await db
+				.update(hotels)
+				.set({
+					name: d.name.trim(),
+					legalName: d.legalName?.trim() || null,
+					addressLine: d.addressLine?.trim() || null,
+					city: d.city?.trim() || null,
+					timezone: d.timezone,
+					currency: d.currency,
+					vatRateBps: Math.round(d.vatRatePct * 100),
+					orSeriesPrefix: d.orSeriesPrefix.trim().toUpperCase(),
+					customDomain: d.customDomain?.trim().toLowerCase() || null,
+					updatedAt: new Date()
+				})
+				.where(eq(hotels.id, before.id));
+		} catch (e) {
+			if (e instanceof Error && 'code' in e && (e as { code: string }).code === '23505') {
+				return fail(400, { error: 'That domain is already mapped to another hotel.' });
+			}
+			throw e;
+		}
 
 		await writeAudit({
 			hotelId: before.id,
@@ -99,8 +114,8 @@ export const actions: Actions = {
 			action: 'hotel.update_config',
 			entityType: 'hotel',
 			entityId: before.id,
-			before: { name: before.name, vatRateBps: before.vatRateBps },
-			after: { name: d.name, vatRateBps: Math.round(d.vatRatePct * 100) }
+			before: { name: before.name, vatRateBps: before.vatRateBps, customDomain: before.customDomain },
+			after: { name: d.name, vatRateBps: Math.round(d.vatRatePct * 100), customDomain: d.customDomain || null }
 		});
 		return { ok: 'Configuration saved.' };
 	},

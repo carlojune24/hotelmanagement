@@ -10,6 +10,7 @@ export const RESERVED_PREFIXES = new Set([
 	'auth',
 	'api',
 	'webhooks',
+	'uploads',
 	'_app',
 	'assets',
 	'favicon.svg',

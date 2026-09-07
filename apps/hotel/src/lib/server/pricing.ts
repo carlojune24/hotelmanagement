@@ -1,6 +1,14 @@
 import { and, eq, gte, lte, lt } from 'drizzle-orm';
 import { db } from './db/index';
-import { dailyRates, hotels, ratePlans, seasonalRates, taxesFees } from './db/schema/index';
+import {
+	dailyRates,
+	functionHalls,
+	hotels,
+	ratePlans,
+	seasonalRates,
+	taxesFees,
+	type TaxFee
+} from './db/schema/index';
 
 /** Calendar dates `[checkIn, checkOut)` as `YYYY-MM-DD` strings, one per night. */
 export function nightsBetween(checkIn: string, checkOut: string): string[] {
@@ -83,6 +91,50 @@ export interface PriceBreakdown {
 	totalCentavos: number;
 }
 
+/**
+ * Applies a hotel's active `taxesFees` + VAT to a subtotal already computed by
+ * the caller. `periodAmounts` drives `appliesTo: 'per_night'` fixed-fee
+ * unit-counting and percentage-per-period rounding — for a room stay this is
+ * each night's price; for an hourly function-hall booking (no "night" concept)
+ * this is a single-item array `[subtotalCentavos]`, which makes `per_night`
+ * fees degrade to applying exactly once, same as `per_stay`.
+ *
+ * Shared by `priceStay` and `priceEventHall` — each product line computes its
+ * own fees/VAT independently; an order combining a room and a hall sums two
+ * already-taxed lines rather than re-deriving one combined bill (see
+ * `orders.ts`'s doc comment for why this is an accepted v1 simplification).
+ */
+export function computeFeesAndVat(params: {
+	subtotalCentavos: number;
+	periodAmounts: number[];
+	activeFees: TaxFee[];
+	vatRateBps: number;
+}): { fees: FeeLine[]; vatCentavos: number; totalCentavos: number } {
+	const { subtotalCentavos, periodAmounts, activeFees, vatRateBps } = params;
+
+	const fees: FeeLine[] = activeFees.map((f) => {
+		if (f.type === 'fixed') {
+			const units = f.appliesTo === 'per_night' ? periodAmounts.length : 1;
+			return { name: f.name, amountCentavos: (f.valueCentavos ?? 0) * units };
+		}
+		// Percentage: per_night rounds each period's share individually before summing;
+		// per_stay rounds once against the subtotal. Both approximate the same rate.
+		const amountCentavos =
+			f.appliesTo === 'per_night'
+				? periodAmounts.reduce(
+						(sum, p) => sum + Math.round((p * (f.valueBps ?? 0)) / 10000),
+						0
+					)
+				: Math.round((subtotalCentavos * (f.valueBps ?? 0)) / 10000);
+		return { name: f.name, amountCentavos };
+	});
+	const feesTotalCentavos = fees.reduce((sum, f) => sum + f.amountCentavos, 0);
+
+	const vatCentavos = Math.round(((subtotalCentavos + feesTotalCentavos) * vatRateBps) / 10000);
+
+	return { fees, vatCentavos, totalCentavos: subtotalCentavos + feesTotalCentavos + vatCentavos };
+}
+
 /** Bill builder: nightly rates (with per-date overrides) + fees + VAT → total, in centavos. */
 export async function priceStay(params: {
 	hotelId: string;
@@ -153,33 +205,86 @@ export async function priceStay(params: {
 		.from(taxesFees)
 		.where(and(eq(taxesFees.hotelId, hotelId), eq(taxesFees.isActive, true)));
 
-	const fees: FeeLine[] = activeFees.map((f) => {
-		if (f.type === 'fixed') {
-			const units = f.appliesTo === 'per_night' ? nights.length : 1;
-			return { name: f.name, amountCentavos: (f.valueCentavos ?? 0) * units };
-		}
-		// Percentage: per_night rounds each night's share individually before summing;
-		// per_stay rounds once against the subtotal. Both approximate the same rate.
-		const amountCentavos =
-			f.appliesTo === 'per_night'
-				? nights.reduce(
-						(sum, n) => sum + Math.round((n.priceCentavos * (f.valueBps ?? 0)) / 10000),
-						0
-					)
-				: Math.round((subtotalCentavos * (f.valueBps ?? 0)) / 10000);
-		return { name: f.name, amountCentavos };
+	const { fees, vatCentavos, totalCentavos } = computeFeesAndVat({
+		subtotalCentavos,
+		periodAmounts: nights.map((n) => n.priceCentavos),
+		activeFees,
+		vatRateBps: hotel.vatRateBps
 	});
-	const feesTotalCentavos = fees.reduce((sum, f) => sum + f.amountCentavos, 0);
 
-	const vatCentavos = Math.round(
-		((subtotalCentavos + feesTotalCentavos) * hotel.vatRateBps) / 10000
-	);
+	return { nights, subtotalCentavos, fees, vatCentavos, totalCentavos };
+}
+
+function toMinutes(hhmm: string): number {
+	const [h, m] = hhmm.split(':').map(Number);
+	return (h ?? 0) * 60 + (m ?? 0);
+}
+
+export interface HallPriceBreakdown {
+	hours: number;
+	baseHours: number;
+	extraHours: number;
+	basePriceCentavos: number;
+	extraHourFeeCentavos: number;
+	extraHoursCostCentavos: number;
+	subtotalCentavos: number;
+	fees: FeeLine[];
+	vatCentavos: number;
+	totalCentavos: number;
+}
+
+/**
+ * Bill builder for an hourly function-hall rental: base block + extra-hour
+ * rate + fees/VAT. `startTime`/`endTime` are `"HH:MM"` strings — callers must
+ * Zod-validate their format before calling; this function only checks that
+ * the resulting duration is positive.
+ */
+export async function priceEventHall(params: {
+	hotelId: string;
+	functionHallId: string;
+	startTime: string;
+	endTime: string;
+}): Promise<HallPriceBreakdown> {
+	const { hotelId, functionHallId, startTime, endTime } = params;
+	const hours = (toMinutes(endTime) - toMinutes(startTime)) / 60;
+	if (!(hours > 0)) throw new Error('endTime must be after startTime');
+
+	const [hotel] = await db.select().from(hotels).where(eq(hotels.id, hotelId)).limit(1);
+	if (!hotel) throw new Error('Hotel not found');
+
+	const [hall] = await db
+		.select()
+		.from(functionHalls)
+		.where(and(eq(functionHalls.id, functionHallId), eq(functionHalls.hotelId, hotelId)))
+		.limit(1);
+	if (!hall) throw new Error('Function hall not found');
+
+	const extraHours = Math.max(0, hours - hall.baseHours);
+	const extraHoursCostCentavos = Math.round(extraHours * hall.extraHourFeeCentavos);
+	const subtotalCentavos = hall.basePriceCentavos + extraHoursCostCentavos;
+
+	const activeFees = await db
+		.select()
+		.from(taxesFees)
+		.where(and(eq(taxesFees.hotelId, hotelId), eq(taxesFees.isActive, true)));
+
+	const { fees, vatCentavos, totalCentavos } = computeFeesAndVat({
+		subtotalCentavos,
+		periodAmounts: [subtotalCentavos],
+		activeFees,
+		vatRateBps: hotel.vatRateBps
+	});
 
 	return {
-		nights,
+		hours,
+		baseHours: hall.baseHours,
+		extraHours,
+		basePriceCentavos: hall.basePriceCentavos,
+		extraHourFeeCentavos: hall.extraHourFeeCentavos,
+		extraHoursCostCentavos,
 		subtotalCentavos,
 		fees,
 		vatCentavos,
-		totalCentavos: subtotalCentavos + feesTotalCentavos + vatCentavos
+		totalCentavos
 	};
 }

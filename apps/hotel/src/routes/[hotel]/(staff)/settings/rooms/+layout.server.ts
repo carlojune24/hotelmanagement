@@ -26,7 +26,7 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 		.select()
 		.from(rooms)
 		.where(eq(rooms.hotelId, hotelId))
-		.orderBy(asc(rooms.roomNumber));
+		.orderBy(asc(rooms.sortOrder), asc(rooms.roomNumber));
 	const typeById = new Map(types.map((t) => [t.id, t]));
 
 	return {

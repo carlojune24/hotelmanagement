@@ -37,7 +37,7 @@ export const ASSIGNABLE_HOTEL_ROLES: MembershipRole[] = [
 export const ROLE_CAPS: Record<MembershipRole, string[]> = {
 	hotel_admin: ['*'],
 	group_owner: ['*:read', 'reports:*'],
-	front_desk: ['booking:*', 'folio:*', 'guest:*', 'room:read', 'reports:read'],
+	front_desk: ['booking:*', 'folio:*', 'guest:*', 'room:read', 'reports:read', 'review:*'],
 	housekeeping: ['housekeeping:*', 'room:read'],
 	accountant: ['finance:*', 'ledger:*', 'reports:*'],
 	hr: ['hr:*', 'payroll:*', 'reports:read'],

@@ -32,8 +32,10 @@
 	const t = $derived(data.roomType);
 
 	let beds = $state<BedConfigEntry[]>((t.bedConfiguration as BedConfigEntry[]) ?? []);
-	let photos = $state<RoomPhoto[]>((t.photos as RoomPhoto[]) ?? []);
+	const photos = $derived((t.photos as RoomPhoto[]) ?? []);
 	let viewType = $state(t.viewType ?? '');
+	let photoFileInput = $state<HTMLInputElement | undefined>(undefined);
+	let photoTag = $state<'cover' | 'gallery'>('gallery');
 
 	// Amenity picker — seeded once from load data (the page remounts per room type).
 	const selectedAmenityIds = new SvelteSet(data.selectedAmenities.map((a) => a.amenityId));
@@ -71,13 +73,6 @@
 		suite: 'Suite',
 		executive: 'Executive'
 	};
-
-	function addPhoto() {
-		photos = [...photos, { url: '', tag: 'cover' }];
-	}
-	function removePhoto(i: number) {
-		photos = photos.filter((_, idx) => idx !== i);
-	}
 
 	const bedSummary = $derived(
 		beds.length === 0 ? '—' : beds.map((b) => `${b.quantity} ${b.type}`).join(', ')
@@ -139,7 +134,6 @@
 
 <form id="roomTypeForm" method="POST" action="?/update" use:enhance class="mt-6">
 	<input type="hidden" name="bedConfigurationJson" value={JSON.stringify(beds)} />
-	<input type="hidden" name="photosJson" value={JSON.stringify(photos)} />
 	{#each [...selectedAmenityIds] as id (id)}
 		<input type="hidden" name="amenityIds" value={id} />
 	{/each}
@@ -333,39 +327,6 @@
 						placeholder="Can be converted into 2 Single Beds"
 						class="mt-1"
 					/>
-				</div>
-			</div>
-
-			<div class="rounded-xl border border-border bg-surface p-4 shadow-sm">
-				<h3 class="flex items-center gap-2 text-sm font-semibold text-ink">
-					<ImageIcon class="size-4 text-brand" /> Photos & Gallery
-				</h3>
-				<p class="mt-1 text-xs text-ink-muted">
-					Guests and OTAs compare by room type — these are the gallery images for every room of this
-					type.
-				</p>
-				<div class="mt-3 space-y-2">
-					{#each photos as photo, i (i)}
-						<div class="flex items-center gap-2">
-							<Input bind:value={photo.url} placeholder="https://…" class="flex-[2]" />
-							<Input bind:value={photo.tag} placeholder="cover" class="flex-1" />
-							<Button
-								type="button"
-								variant="outline"
-								size="icon"
-								onclick={() => removePhoto(i)}
-								aria-label="Remove photo"
-							>
-								<XIcon class="size-4" />
-							</Button>
-						</div>
-					{/each}
-					<Button type="button" variant="outline" onclick={addPhoto}>
-						<PlusIcon class="size-4" /> Add photo URL
-					</Button>
-					<p class="text-xs text-ink-muted">
-						Pasted image URLs only for now — upload storage isn't wired up yet.
-					</p>
 				</div>
 			</div>
 
@@ -654,6 +615,75 @@
 		</Tabs.Content>
 	</Tabs.Root>
 </form>
+
+<div class="mt-6 rounded-xl border border-border bg-surface p-4 shadow-sm">
+	<h3 class="flex items-center gap-2 text-sm font-semibold text-ink">
+		<ImageIcon class="size-4 text-brand" /> Photos & Gallery
+	</h3>
+	<p class="mt-1 text-xs text-ink-muted">
+		Guests and OTAs compare by room type — these are the gallery images for every room of this
+		type. The cover photo is used on the booking page's room card.
+	</p>
+
+	{#if photos.length > 0}
+		<div class="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
+			{#each photos as photo (photo.url)}
+				<div class="group relative">
+					<img
+						src={photo.url}
+						alt=""
+						class="aspect-square w-full rounded-md border border-border object-cover"
+					/>
+					<span
+						class="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white uppercase"
+					>
+						{photo.tag}
+					</span>
+					<form method="POST" action="?/removePhoto" use:enhance>
+						<input type="hidden" name="url" value={photo.url} />
+						<button
+							type="submit"
+							aria-label="Remove photo"
+							class="absolute top-1 right-1 flex size-6 items-center justify-center rounded-full bg-black/60 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100"
+						>
+							✕
+						</button>
+					</form>
+				</div>
+			{/each}
+		</div>
+	{/if}
+
+	<form
+		method="POST"
+		action="?/uploadPhotos"
+		enctype="multipart/form-data"
+		use:enhance={() => {
+			return async ({ update }) => {
+				await update();
+				if (photoFileInput) photoFileInput.value = '';
+			};
+		}}
+		class="mt-3 flex flex-wrap items-center gap-2"
+	>
+		<input
+			bind:this={photoFileInput}
+			name="photos"
+			type="file"
+			multiple
+			accept="image/jpeg,image/png,image/webp,image/gif"
+			class="text-sm"
+		/>
+		<Select.Root type="single" name="tag" bind:value={photoTag}>
+			<Select.Trigger class="w-32">{photoTag === 'cover' ? 'Cover' : 'Gallery'}</Select.Trigger>
+			<Select.Content>
+				<Select.Item value="gallery" label="Gallery" />
+				<Select.Item value="cover" label="Cover" />
+			</Select.Content>
+		</Select.Root>
+		<Button type="submit" variant="outline" size="sm">Upload photos</Button>
+	</form>
+</div>
 
 <Separator class="my-6" />
 

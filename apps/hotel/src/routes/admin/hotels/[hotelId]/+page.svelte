@@ -104,6 +104,21 @@
 						/>
 					</div>
 				</div>
+				<div>
+					<Label for="customDomain">Custom domain (optional)</Label>
+					<Input
+						id="customDomain"
+						name="customDomain"
+						value={h.customDomain ?? ''}
+						placeholder="mmhotel.com"
+						class="mt-1"
+					/>
+					<p class="mt-1 text-xs text-ink-muted">
+						Point this domain's DNS at this platform, then enter it here — bare hostname only, no
+						<code>https://</code> or trailing path. DNS/hosting setup for the domain itself happens
+						outside this app.
+					</p>
+				</div>
 				<Button type="submit">Save configuration</Button>
 			</form>
 

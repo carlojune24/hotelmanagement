@@ -218,6 +218,41 @@ async function seedInventory(hotelId: string) {
 	});
 }
 
+/** Idempotent property-wide amenity picks for the seed hotel's storefront "About" section. */
+async function seedHotelAmenityLinks(hotelId: string) {
+	const existing = await db
+		.select({ id: schema.hotelAmenities.id })
+		.from(schema.hotelAmenities)
+		.where(eq(schema.hotelAmenities.hotelId, hotelId))
+		.limit(1);
+	if (existing.length > 0) return;
+
+	const rows = await db
+		.select({ id: schema.amenities.id, slug: schema.amenities.slug })
+		.from(schema.amenities)
+		.where(eq(schema.amenities.hotelId, hotelId));
+	const bySlug = new Map(rows.map((r) => [r.slug, r.id]));
+
+	const picks: Array<{ slug: string; note?: string }> = [
+		{ slug: 'front-desk-24h' },
+		{ slug: 'free-wifi' },
+		{ slug: 'swimming-pool' },
+		{ slug: 'parking' },
+		{ slug: 'restaurant', note: 'Breakfast 6–10am, dinner 6–10pm' },
+		{ slug: 'security-24h' },
+		{ slug: 'elevator' }
+	];
+	const links = picks
+		.map((p, i) => {
+			const amenityId = bySlug.get(p.slug);
+			return amenityId
+				? { hotelId, amenityId, note: p.note, sortOrder: i }
+				: null;
+		})
+		.filter((v): v is NonNullable<typeof v> => v !== null);
+	if (links.length > 0) await db.insert(schema.hotelAmenities).values(links);
+}
+
 async function main() {
 	const adminId = await upsertUser({
 		email: ADMIN_EMAIL,
@@ -249,7 +284,14 @@ async function main() {
 				orgRef: `org_${ulid()}`,
 				city: 'Manila',
 				timezone: 'Asia/Manila',
-				status: 'published'
+				status: 'published',
+				config: {
+					branding: {
+						tagline: 'A quiet stay in the middle of the city.',
+						about:
+							'Demo Hotel sits a short walk from the bay, with rooms built for both a weekend trip and a longer work stay. Every rate you see here is the same one our front desk quotes — no third-party markup.'
+					}
+				}
 			})
 			.returning();
 		hotel = row!;
@@ -264,6 +306,7 @@ async function main() {
 		});
 
 	await seedHotelAmenities(db, hotel.id);
+	await seedHotelAmenityLinks(hotel.id);
 	await seedInventory(hotel.id);
 
 	console.log('Seed complete:');

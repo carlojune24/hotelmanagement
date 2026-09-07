@@ -1,5 +1,6 @@
 import { relations } from 'drizzle-orm';
 import {
+	bigint,
 	index,
 	integer,
 	jsonb,
@@ -7,6 +8,7 @@ import {
 	pgTable,
 	primaryKey,
 	text,
+	time,
 	uniqueIndex,
 	uuid
 } from 'drizzle-orm/pg-core';
@@ -46,6 +48,22 @@ export const hotels = pgTable(
 		/** VAT rate in basis points (1200 = 12%). */
 		vatRateBps: integer('vat_rate_bps').notNull().default(1200),
 		orSeriesPrefix: text('or_series_prefix').notNull().default('OR'),
+		/** A client's own domain (bare hostname, e.g. "mmhotel.com" — no protocol/path), mapped to this
+		 *  hotel's slug by `hooks.server.ts`'s `reroute` hook. Null = reached only via the platform's own
+		 *  `/{slug}/…` path. DNS/hosting for the domain itself is set up outside this app. */
+		customDomain: text('custom_domain').unique(),
+		/** Standard check-in/check-out clock time, published as policy — not enforced against actual check-in/check-out actions. */
+		checkInTime: time('check_in_time').notNull().default('14:00:00'),
+		checkOutTime: time('check_out_time').notNull().default('12:00:00'),
+		/** Per-hour rate for a late checkout or early check-in, chargeable to a booking's folio
+		 *  (`lib/server/folio.ts`'s `addExtensionFeeCharge`) — how many hours late/early is judged
+		 *  by front desk, not tracked anywhere, so this is a rate, not a total. */
+		lateCheckoutFeePerHourCentavos: bigint('late_checkout_fee_per_hour_centavos', { mode: 'number' })
+			.notNull()
+			.default(0),
+		earlyCheckInFeePerHourCentavos: bigint('early_check_in_fee_per_hour_centavos', { mode: 'number' })
+			.notNull()
+			.default(0),
 		/** Free-form per-hotel configuration (branding, policies, defaults). */
 		config: jsonb('config').notNull().default({}),
 		status: hotelStatus('status').notNull().default('draft'),

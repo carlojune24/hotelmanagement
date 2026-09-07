@@ -14,6 +14,7 @@ import {
 import { AMENITY_CATEGORY_LABELS, AMENITY_CATEGORY_ORDER } from '$lib/server/amenities/catalog';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
+import { deleteUploadIfOwned, saveUpload, UploadValidationError } from '$lib/server/uploads';
 import type { BedConfigEntry, RoomPhoto } from '$lib/server/db/schema/inventory';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -88,7 +89,6 @@ const updateSchema = z.object({
 	code: z.string().max(40).optional(),
 	category: z.enum(roomCategory.enumValues).optional().or(z.literal('')),
 	description: z.string().max(4000).optional(),
-	photosJson: z.string(),
 	baseOccupancy: z.coerce.number().int().min(1).max(20),
 	maxOccupancy: z.coerce.number().int().min(1).max(20),
 	maxAdults: z.coerce.number().int().min(0).max(20).optional(),
@@ -137,7 +137,6 @@ export const actions: Actions = {
 		}
 
 		const bedConfiguration = parseJsonArray<BedConfigEntry>(parsed.data.bedConfigurationJson);
-		const photos = parseJsonArray<RoomPhoto>(parsed.data.photosJson).filter((p) => p.url?.trim());
 		const submittedAmenityIds = [...new Set(formData.getAll('amenityIds').map(String))];
 		const highlightIds = new Set(formData.getAll('highlightIds').map(String));
 
@@ -149,7 +148,6 @@ export const actions: Actions = {
 					code: parsed.data.code?.trim() || null,
 					category: parsed.data.category || null,
 					description: parsed.data.description?.trim() || null,
-					photos,
 					baseOccupancy: parsed.data.baseOccupancy,
 					maxOccupancy: parsed.data.maxOccupancy,
 					maxAdults: parsed.data.maxAdults ?? null,
@@ -217,6 +215,105 @@ export const actions: Actions = {
 		});
 
 		return { ok: 'Room type updated.' };
+	},
+
+	uploadPhotos: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		const hotelId = event.locals.hotel!.id;
+		const roomTypeId = event.params.roomTypeId;
+
+		const [roomType] = await db
+			.select({ photos: roomTypes.photos })
+			.from(roomTypes)
+			.where(and(eq(roomTypes.id, roomTypeId), eq(roomTypes.hotelId, hotelId)))
+			.limit(1);
+		if (!roomType) return fail(404, { error: 'Room type not found.' });
+		let existing = (roomType.photos as RoomPhoto[]) ?? [];
+
+		const raw = await event.request.formData();
+		const files = raw.getAll('photos').filter((f): f is File => f instanceof File && f.size > 0);
+		if (files.length === 0) return fail(400, { error: 'Choose at least one photo.' });
+
+		const tag = raw.get('tag') === 'cover' ? 'cover' : 'gallery';
+		// A room type has one cover shot — uploading a new one demotes whichever
+		// photo (if any) currently holds that tag, rather than leaving two.
+		if (tag === 'cover') {
+			existing = existing.map((p) => (p.tag === 'cover' ? { ...p, tag: 'gallery' } : p));
+		}
+
+		const MAX_ROOM_PHOTOS = 24;
+		const room = MAX_ROOM_PHOTOS - existing.length;
+		if (room <= 0) {
+			return fail(400, { error: `You already have ${MAX_ROOM_PHOTOS} photos — remove one first.` });
+		}
+
+		try {
+			const uploaded = await Promise.all(
+				files.slice(0, room).map(async (f) => ({ url: await saveUpload(hotelId, f), tag }))
+			);
+			// Only the first upload in this batch keeps the "cover" tag if more than one
+			// file was chosen at once — a room type still has exactly one cover shot.
+			if (tag === 'cover' && uploaded.length > 1) {
+				for (let i = 1; i < uploaded.length; i++) uploaded[i]!.tag = 'gallery';
+			}
+
+			await db
+				.update(roomTypes)
+				.set({ photos: [...existing, ...uploaded], updatedAt: new Date() })
+				.where(and(eq(roomTypes.id, roomTypeId), eq(roomTypes.hotelId, hotelId)));
+
+			await writeAudit({
+				hotelId,
+				actor: event.locals.user,
+				action: 'room_type.update',
+				entityType: 'room_type',
+				entityId: roomTypeId
+			});
+
+			const skipped = files.length - uploaded.length;
+			return {
+				ok:
+					`Added ${uploaded.length} photo${uploaded.length === 1 ? '' : 's'}.` +
+					(skipped > 0 ? ` ${skipped} skipped — photo limit reached.` : '')
+			};
+		} catch (e) {
+			if (e instanceof UploadValidationError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
+	removePhoto: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		const hotelId = event.locals.hotel!.id;
+		const roomTypeId = event.params.roomTypeId;
+
+		const [roomType] = await db
+			.select({ photos: roomTypes.photos })
+			.from(roomTypes)
+			.where(and(eq(roomTypes.id, roomTypeId), eq(roomTypes.hotelId, hotelId)))
+			.limit(1);
+		if (!roomType) return fail(404, { error: 'Room type not found.' });
+
+		const raw = await event.request.formData();
+		const url = String(raw.get('url') ?? '');
+		const existing = (roomType.photos as RoomPhoto[]) ?? [];
+		const next = existing.filter((p) => p.url !== url);
+
+		await deleteUploadIfOwned(url);
+		await db
+			.update(roomTypes)
+			.set({ photos: next, updatedAt: new Date() })
+			.where(and(eq(roomTypes.id, roomTypeId), eq(roomTypes.hotelId, hotelId)));
+
+		await writeAudit({
+			hotelId,
+			actor: event.locals.user,
+			action: 'room_type.update',
+			entityType: 'room_type',
+			entityId: roomTypeId
+		});
+
+		return { ok: 'Photo removed.' };
 	},
 
 	delete: async (event) => {

@@ -118,6 +118,8 @@ export const rooms = pgTable(
 		isConnecting: boolean('is_connecting').notNull().default(false),
 		/** False = temporarily pulled from inventory without deleting it. */
 		isActive: boolean('is_active').notNull().default(true),
+		/** Manual display order — same convention as `roomTypes.sortOrder`, `functionHalls.sortOrder`, etc. */
+		sortOrder: integer('sort_order').notNull().default(0),
 
 		// Media & marketing — per physical room, not shared across the type.
 		displayTitle: text('display_title'),

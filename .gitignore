@@ -12,3 +12,4 @@ test-results/
 .DS_Store
 pgdata/
 .tunnel-url
+apps/*/uploads/

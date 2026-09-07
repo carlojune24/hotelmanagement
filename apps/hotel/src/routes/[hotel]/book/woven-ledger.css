@@ -1,0 +1,1619 @@
+/*
+ * The Woven Ledger world — scoped to the public guest booking flow only.
+ * See apps/hotel/DESIGN.md. Never imported by the authenticated staff app.
+ * `--hotel-accent` is set inline per request from the hotel's branding.
+ */
+@import '@fontsource-variable/literata';
+@import '@fontsource-variable/playfair-display';
+@import '@fontsource-variable/fraunces';
+@import '@fontsource-variable/cormorant-garamond';
+@import '@fontsource-variable/jetbrains-mono';
+
+.woven-ledger {
+	--ledger-paper: oklch(1 0 0);
+	--ledger-paper-2: oklch(0.97 0.006 70);
+	--ledger-ink: oklch(0.26 0.02 60);
+	--ledger-ink-muted: oklch(0.5 0.018 60);
+	--ledger-rule: oklch(0.82 0.02 65);
+	--ledger-danger: oklch(0.58 0.19 25);
+	/* Per-hotel Display-register font — overridden inline per request from branding
+	   (see `+layout.svelte`'s `rootStyle`); this is just the world's own default. */
+	--ledger-font-display: 'Literata Variable', Georgia, serif;
+
+	background: var(--ledger-paper);
+	color: var(--ledger-ink);
+	font-family: 'Inter Variable', ui-sans-serif, sans-serif;
+	min-height: 100vh;
+}
+
+.woven-ledger :is(h1, h2, h3, .ledger-display) {
+	font-family: var(--ledger-font-display);
+	font-weight: 500;
+	letter-spacing: -0.01em;
+	color: var(--ledger-ink);
+}
+
+.woven-ledger .ledger-data {
+	font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+	font-weight: 500;
+	letter-spacing: 0.01em;
+	font-variant-numeric: tabular-nums;
+}
+
+.woven-ledger .ledger-label {
+	font-family: 'Inter Variable', ui-sans-serif, sans-serif;
+	font-weight: 500;
+	font-size: 0.75rem;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--ledger-ink-muted);
+}
+
+.woven-ledger .ledger-hairline {
+	border-bottom: 1px solid var(--ledger-rule);
+}
+
+/* Hero + section dividers: the accent as a woven field, never a flat block (DESIGN.md "Woven, Not Flat" rule). */
+.woven-ledger .ledger-woven-band {
+	background-color: var(--ledger-paper-2);
+	background-image: var(--hotel-woven-pattern);
+	background-repeat: repeat;
+	background-size: 28px 28px;
+	background-blend-mode: normal;
+}
+
+/* Buttons */
+.woven-ledger .ledger-btn-primary {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.5rem;
+	background: var(--hotel-accent);
+	color: var(--ledger-paper);
+	border-radius: 4px;
+	padding: 0.75rem 1.5rem;
+	font-weight: 600;
+	font-size: 0.9375rem;
+	transition: background-color 0.15s ease;
+}
+.woven-ledger .ledger-btn-primary:hover {
+	background: var(--hotel-accent-deep);
+}
+.woven-ledger .ledger-btn-primary:focus-visible {
+	outline: 2px solid var(--hotel-accent);
+	outline-offset: 2px;
+}
+.woven-ledger .ledger-btn-primary:disabled {
+	opacity: 0.5;
+	pointer-events: none;
+}
+
+.woven-ledger .ledger-btn-ghost {
+	color: var(--ledger-ink);
+	background: transparent;
+	border-bottom: 1px solid transparent;
+	padding: 0.5rem 0.125rem;
+	font-weight: 500;
+	font-size: 0.9375rem;
+}
+.woven-ledger .ledger-btn-ghost:hover {
+	border-bottom-color: var(--ledger-rule);
+}
+
+/* Fields — underline style, per DESIGN.md */
+.woven-ledger .ledger-field {
+	border: none;
+	border-bottom: 1px solid var(--ledger-rule);
+	border-radius: 0;
+	background: transparent;
+	padding: 0.5rem 0.25rem;
+	width: 100%;
+	color: var(--ledger-ink);
+}
+.woven-ledger .ledger-field:focus-visible,
+.woven-ledger .ledger-field:focus {
+	outline: none;
+	border-bottom: 2px solid var(--hotel-accent);
+}
+.woven-ledger .ledger-field.ledger-field-error {
+	border-bottom-color: var(--ledger-danger);
+}
+
+/*
+ * The Confirmation Ticket (signature component). Two layers: `-frame` carries the
+ * woven pattern as its background and shows through as a 7px "border stripe" on
+ * every edge (per DESIGN.md — this must be the actual weave, never a flat
+ * accent-colored border); `-ticket` is the paper interior sitting on top of it.
+ */
+.woven-ledger .ledger-ticket-frame {
+	position: relative;
+	border-radius: 0 0 18px 18px;
+	background-color: var(--hotel-accent);
+	background-image: var(--hotel-woven-pattern);
+	background-repeat: repeat;
+	background-size: 28px 28px;
+	box-shadow: 0 8px 24px -8px oklch(0.26 0.02 60 / 0.18);
+	padding: 7px 7px 0;
+}
+.woven-ledger .ledger-ticket {
+	border-radius: 0 0 12px 12px;
+	background: var(--ledger-paper);
+	padding: 2rem 1.75rem 1.75rem;
+}
+/* Perforated top edge: paint page-colored circles over the frame's flat top,
+   simulating a torn stub — simpler and more robust across browsers than a composited mask. */
+.woven-ledger .ledger-ticket-frame::before {
+	content: '';
+	position: absolute;
+	top: -1px;
+	left: 0;
+	right: 0;
+	height: 14px;
+	background-image: radial-gradient(
+		circle 6px at 12px 0,
+		var(--ledger-page-bg, var(--ledger-paper)) 6px,
+		transparent 6.5px
+	);
+	background-repeat: repeat-x;
+	background-size: 24px 14px;
+}
+
+.woven-ledger .ledger-step {
+	font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+	font-size: 0.75rem;
+	letter-spacing: 0.04em;
+	color: var(--ledger-ink-muted);
+}
+
+/* Desktop left-rail step ledger (DESIGN.md Layout: "a persistent left-rail step
+   ledger on desktop ≥1024px, never a modal wizard"). */
+.woven-ledger .ledger-rail-step {
+	display: flex;
+	align-items: baseline;
+	gap: 0.625rem;
+	padding: 0.5rem 0;
+	font-size: 0.875rem;
+	color: var(--ledger-ink-muted);
+	border-bottom: 1px solid transparent;
+}
+.woven-ledger .ledger-rail-step .ledger-data {
+	font-size: 0.75rem;
+	color: var(--hotel-accent-light);
+}
+.woven-ledger .ledger-rail-step.is-done .ledger-data {
+	color: var(--hotel-accent-light);
+}
+.woven-ledger .ledger-rail-step.is-active {
+	color: var(--ledger-ink);
+	font-weight: 600;
+}
+.woven-ledger .ledger-rail-step.is-active .ledger-data {
+	color: var(--hotel-accent);
+}
+
+/* Horizontal step tracker (replaces the earlier vertical left-rail — same active/done
+   semantics and tokens as `.ledger-rail-step`, new geometry per the Acacia-shaped wizard). */
+.woven-ledger .ledger-stepper-horizontal {
+	display: flex;
+	align-items: center;
+	list-style: none;
+}
+.woven-ledger .ledger-stepper-node {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	flex: 1 1 0;
+	color: var(--ledger-ink-muted);
+	font-size: 0.8125rem;
+}
+.woven-ledger .ledger-stepper-node:not(:last-child)::after {
+	content: '';
+	flex: 1 1 auto;
+	height: 1px;
+	background: var(--ledger-rule);
+	margin: 0 0.75rem;
+}
+.woven-ledger .ledger-stepper-node-circle {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.75rem;
+	height: 1.75rem;
+	border-radius: 999px;
+	border: 1px solid var(--ledger-rule);
+	font-size: 0.6875rem;
+	color: var(--ledger-ink-muted);
+	flex-shrink: 0;
+}
+.woven-ledger .ledger-stepper-node-label {
+	white-space: nowrap;
+}
+.woven-ledger .ledger-stepper-node.is-active {
+	color: var(--ledger-ink);
+	font-weight: 600;
+}
+.woven-ledger .ledger-stepper-node.is-active .ledger-stepper-node-circle {
+	border-color: var(--hotel-accent);
+	color: var(--hotel-accent-deep);
+	background: var(--hotel-accent-light);
+}
+.woven-ledger .ledger-stepper-node.is-done .ledger-stepper-node-circle {
+	border-color: var(--hotel-accent-light);
+	color: var(--hotel-accent-deep);
+}
+
+/* Row hover picks up the accent's lighter thread — a sanctioned use of
+   `--hotel-accent-light` beyond the rail, per DESIGN.md's restrained-accent rule. */
+.woven-ledger .ledger-room-row summary:hover {
+	background-color: color-mix(in oklch, var(--hotel-accent-light) 18%, transparent);
+}
+
+/* shadcn Table, restyled onto ledger tokens rather than its default neutral border/hover. */
+.woven-ledger table tr {
+	border-color: var(--ledger-rule);
+}
+.woven-ledger table tr:hover {
+	background-color: color-mix(in oklch, var(--hotel-accent-light) 14%, transparent);
+}
+
+/* =====================================================================
+   Storefront — the undated landing page only (`book/+page.svelte`). The
+   guest hasn't committed to a room yet: this is Persuade mode, running its
+   own running-head nav and hero instead of the wizard's step chrome. Every
+   component below stays inside the Woven Ledger world (same three type
+   registers, same flat/ruled/woven vocabulary) rather than starting a new one.
+   ===================================================================== */
+
+/* Running-head nav: a ledger's title line, not an app bar — no shadow, a rule
+   underneath, gold reserved for the one action that matters. */
+.storefront-nav {
+	position: sticky;
+	top: 0;
+	z-index: 30;
+	background: var(--ledger-paper);
+	border-bottom: 1px solid var(--ledger-rule);
+}
+.storefront-nav-inner {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	max-width: 72rem;
+	margin: 0 auto;
+	padding: 0.5rem 1rem;
+}
+.storefront-nav-links {
+	display: none;
+	align-items: center;
+	gap: 1.75rem;
+}
+@media (min-width: 768px) {
+	.storefront-nav-links {
+		display: flex;
+	}
+}
+.storefront-nav-link {
+	font-size: 0.875rem;
+	font-weight: 500;
+	color: var(--ledger-ink-muted);
+	border-bottom: 1px solid transparent;
+	padding-bottom: 0.125rem;
+	transition: color 0.15s ease;
+}
+.storefront-nav-link:hover {
+	color: var(--ledger-ink);
+	border-bottom-color: var(--hotel-accent);
+}
+
+/* Transparent-over-hero nav: only the homepage passes `transparentOverHero`, and
+   only while unscrolled — every other page (and the homepage itself once scrolled
+   past the hero) keeps the plain solid nav above unchanged. Light text/logo color
+   matches the hero's own on-media text (`.storefront-hero.has-media .ledger-label`
+   etc.) so the two read as one continuous surface. The brand name is targeted
+   directly (`.storefront-nav-brand-name`, not just the `.storefront-nav-brand`
+   wrapper) because it also carries `.ledger-display`, whose own `color` rule
+   (`.woven-ledger :is(h1, h2, h3, .ledger-display)`) is a direct match on that
+   element and so wins over a color merely inherited from an ancestor. */
+.storefront-nav.is-transparent {
+	background: transparent;
+	border-bottom-color: transparent;
+}
+.storefront-nav.is-transparent .storefront-nav-brand-name,
+.storefront-nav.is-transparent .storefront-nav-link {
+	color: oklch(0.98 0.008 75);
+}
+.storefront-nav.is-transparent .storefront-nav-link:hover {
+	color: oklch(0.98 0.008 75);
+	border-bottom-color: oklch(0.98 0.008 75);
+}
+
+/* Hero: the folio's opening page. With a hero photo or video, a scrim earns the
+   overlaid title real contrast; without either, the woven band carries identity
+   at full strength instead of sitting behind a flat color block. */
+.storefront-hero {
+	position: relative;
+	overflow: hidden;
+}
+/* Pulls the hero up underneath the sticky nav's own box so the transparent nav
+   (above) visually sits over the media instead of pushing it down — nav stays
+   `position: sticky`, this is a pure layout trick, not a positioning change.
+   Matches the transparent-phase nav's rendered height (there's no breadcrumb
+   row anymore to add to it — just the one nav-inner row). Only ever applies on
+   the homepage, where `has-media` and the nav's `transparentOverHero` are set
+   from the same `heroVideoUrl`/`heroImageUrl` check. */
+.storefront-hero.has-media {
+	margin-top: -73px;
+	/* Full-page, matching Acacia's own near-full-viewport banner — the woven-band
+	   (no-media) fallback below deliberately stays sized to its content instead;
+	   stretching a flat pattern band to fill the viewport would read as an empty
+	   wall, not a banner. `100vh` first for browsers without `svh` support. */
+	min-height: 100vh;
+	min-height: 100svh;
+}
+/* Single full-bleed hero backdrop — a photo, or a muted/looped video when the
+   hotel has set one (video wins; the photo still serves as its poster frame and
+   as the fallback when no video is set). Text and the search dock sit over it
+   via the scrim below. */
+.storefront-hero-photo {
+	position: absolute;
+	inset: 0;
+}
+.storefront-hero-photo img,
+.storefront-hero-photo video {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+.storefront-hero-gallery-cta {
+	position: absolute;
+	left: 1.25rem;
+	bottom: 1.25rem;
+	z-index: 1;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	background: oklch(0.16 0.02 60 / 0.55);
+	color: oklch(0.98 0.008 75);
+	border: 1px solid oklch(0.98 0.008 75 / 0.4);
+	border-radius: 4px;
+	padding: 0.5rem 0.875rem;
+	font-size: 0.8125rem;
+	font-weight: 500;
+}
+.storefront-hero-gallery-cta:hover {
+	background: oklch(0.16 0.02 60 / 0.75);
+}
+.storefront-hero-gallery-cta :global(svg) {
+	width: 16px;
+	height: 16px;
+}
+.storefront-hero-scrim {
+	position: absolute;
+	inset: 0;
+	background: linear-gradient(
+		to top,
+		oklch(0.16 0.02 60 / 0.82) 0%,
+		oklch(0.16 0.02 60 / 0.38) 45%,
+		oklch(0.16 0.02 60 / 0.08) 75%
+	);
+}
+.storefront-hero-inner {
+	position: relative;
+	max-width: 72rem;
+	margin: 0 auto;
+	padding: 4.5rem 1.25rem 6.5rem;
+}
+@media (min-width: 640px) {
+	.storefront-hero-inner {
+		padding: 6rem 1.5rem 8rem;
+	}
+}
+/* With media, the hero is now full-page tall — pin the text/CTA block to the
+   bottom of that tall box (same visual position as before) rather than letting
+   it float in the middle or top of a much larger area. */
+.storefront-hero.has-media {
+	display: flex;
+	flex-direction: column;
+}
+.storefront-hero.has-media .storefront-hero-inner {
+	margin-top: auto;
+}
+.storefront-hero.has-media .storefront-hero-inner :is(h1, p) {
+	color: oklch(0.98 0.008 75);
+}
+.storefront-hero.has-media .storefront-hero-inner .ledger-label {
+	color: oklch(0.9 0.02 75 / 0.85);
+}
+
+/* Search dock: overlaps the hero's bottom edge like a folded-in booking
+   slip, per the Flat Ledger Rule — a hairline border does the separating,
+   never a shadow. */
+.storefront-search-dock {
+	position: relative;
+	max-width: 72rem;
+	margin: -3.5rem auto 0;
+	padding: 0 1.25rem;
+}
+@media (min-width: 640px) {
+	.storefront-search-dock {
+		margin-top: -5rem;
+		padding: 0 1.5rem;
+	}
+}
+.storefront-search-dock-panel {
+	/* Docks under the sticky nav once scrolled to, instead of scrolling away —
+	   `top` is the nav's own measured height (no breadcrumb row anymore). */
+	position: sticky;
+	top: 4.5625rem;
+	z-index: 20;
+	background: var(--ledger-paper);
+	border: 1px solid var(--ledger-rule);
+	border-radius: 10px;
+	padding: 1.25rem 1.25rem 1.5rem;
+}
+@media (min-width: 640px) {
+	.storefront-search-dock-panel {
+		padding: 1.5rem 1.75rem 1.75rem;
+	}
+}
+
+/* About: text left, a real property photo right — never an empty placeholder
+   box, so the grid collapses to one column (`.storefront-about-grid` without
+   `.has-photo`) when no photo is available at all. */
+.storefront-about-grid.has-photo {
+	display: grid;
+	gap: 2.5rem;
+	align-items: start;
+}
+@media (min-width: 1024px) {
+	.storefront-about-grid.has-photo {
+		grid-template-columns: 1.1fr 1fr;
+		gap: 3.5rem;
+	}
+}
+.storefront-about-photo {
+	position: relative;
+	aspect-ratio: 4 / 5;
+	overflow: hidden;
+	border-radius: 10px;
+	background-color: var(--ledger-paper-2);
+}
+.storefront-about-photo img {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+/* Section rhythm: heading owns the space above it, per the ledger page-break
+   convention already established for the results ledger. */
+.storefront-section {
+	max-width: 72rem;
+	margin: 0 auto;
+	padding: 4.5rem 1.25rem 0;
+	scroll-margin-top: 4.5rem;
+}
+@media (min-width: 640px) {
+	.storefront-section {
+		padding: 5.5rem 1.5rem 0;
+	}
+}
+.storefront-section:last-of-type {
+	padding-bottom: 4.5rem;
+}
+.storefront-section-head {
+	max-width: 40rem;
+}
+.storefront-section-lede {
+	margin-top: 0.625rem;
+	max-width: 60ch;
+	color: var(--ledger-ink-muted);
+}
+/* Section headlines (About, Amenities, Rooms & Rates, Function Hall, Gallery, Reviews,
+   and the top-of-page title on Dining/Meetings & Events/Contact) carry the hotel's own
+   accent instead of plain ink — gives the page's chapter breaks some of the hotel's own
+   color, the way the accent already shows up in the woven pattern and buttons. Deliberately
+   `--hotel-accent-deep`, not the raw accent: legible at body-headline sizes on `--ledger-paper`
+   the way the flat accent (tuned for fills) isn't guaranteed to be. Individual content-item
+   names (a specific room card, dining venue, or hall) stay plain ink — this class marks page
+   chrome, not content. */
+/* Scoped and element-qualified to outrank two rules this needs to beat regardless of
+   source order: the base `.woven-ledger :is(h1, h2, h3, .ledger-display)` ink-color rule
+   every heading already carries, and `.storefront-amenity-group-head`'s own `color`
+   (used together with this class on category h3s). A bare `.storefront-section-title`
+   class alone isn't specific enough to beat the first of those. */
+.woven-ledger :is(h1, h2, h3).storefront-section-title {
+	color: var(--hotel-accent-deep);
+}
+
+/* Amenity list: a running inventory line, not a grid of icon-cards — each
+   entry is a mark plus a word, separated by a rule the way a manifest lists
+   contents, refusing the same-size-card default. */
+.storefront-amenity-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0;
+	margin-top: 1.75rem;
+	border-top: 1px solid var(--ledger-rule);
+}
+.storefront-amenity-item {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.75rem 1.25rem 0.75rem 0;
+	margin-right: 1.25rem;
+	border-bottom: 1px solid var(--ledger-rule);
+	font-size: 0.875rem;
+	color: var(--ledger-ink);
+	flex: 0 0 auto;
+}
+.storefront-amenity-item :global(svg) {
+	width: 16px;
+	height: 16px;
+	color: var(--hotel-accent-deep);
+	flex-shrink: 0;
+}
+.storefront-amenity-note {
+	color: var(--ledger-ink-muted);
+}
+
+/* Amenities section (homepage): a column layout, not the stacked-rows default
+   above — each category becomes its own column with its items listed one per
+   line, so the section actually uses the page's width instead of running a
+   single narrow strip down the left with empty space to the right. Scoped to
+   this wrapper only; Room Detail Page and Meetings & Events keep the plain
+   stacked-row `.storefront-amenity-list` above untouched. */
+.storefront-amenity-columns {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: 2rem 2.5rem;
+	margin-top: 1.75rem;
+}
+@media (min-width: 640px) {
+	.storefront-amenity-columns {
+		grid-template-columns: repeat(2, 1fr);
+	}
+}
+@media (min-width: 1024px) {
+	.storefront-amenity-columns {
+		grid-template-columns: repeat(4, 1fr);
+	}
+}
+.storefront-amenity-columns .storefront-amenity-group-head {
+	margin-top: 0;
+}
+.storefront-amenity-columns .storefront-amenity-list {
+	flex-direction: column;
+	flex-wrap: nowrap;
+	gap: 0;
+	margin-top: 0.625rem;
+	border-top: none;
+}
+.storefront-amenity-columns .storefront-amenity-item {
+	width: 100%;
+	margin-right: 0;
+	padding: 0.625rem 0;
+}
+
+/* Room row: the browsing counterpart to the dated search-results ledger row
+   (`.ledger-row`), widened to carry a real photo — this is where "rooms as a
+   gallery" actually lives, not a bolted-on carousel. */
+.ledger-room-row {
+	border-bottom: 1px solid var(--ledger-rule);
+}
+.ledger-room-photo {
+	position: relative;
+	flex: 0 0 auto;
+	width: 100%;
+	aspect-ratio: 3 / 2;
+	overflow: hidden;
+	background-color: var(--ledger-paper-2);
+	background-image: var(--hotel-woven-pattern);
+	background-repeat: repeat;
+	background-size: 20px 20px;
+}
+@media (min-width: 640px) {
+	.ledger-room-photo {
+		width: 21rem;
+		aspect-ratio: auto;
+	}
+}
+.ledger-room-photo img {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+.ledger-room-photo-mark {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-family: var(--ledger-font-display);
+	font-size: 2.5rem;
+	color: var(--hotel-accent-deep);
+	opacity: 0.55;
+}
+.ledger-room-body {
+	flex: 1 1 auto;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	padding: 1.75rem;
+}
+
+/* Rooms & Rates browse grid (homepage, undated) — Acacia's own "Rooms & Suites"
+   treatment: large photo cards, name/facts/CTA overlaid on the photo itself, not
+   a ruled row. The dated results screen (`/book/rooms`) keeps `.ledger-room-row`
+   above unchanged — this is a browse surface, that one's a transactional one. */
+.storefront-room-grid {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: 3px;
+}
+@media (min-width: 640px) {
+	.storefront-room-grid {
+		grid-template-columns: repeat(2, 1fr);
+	}
+}
+.storefront-room-card {
+	display: block;
+}
+.storefront-room-card-photo {
+	position: relative;
+	aspect-ratio: 16 / 10;
+	overflow: hidden;
+	background-color: var(--ledger-paper-2);
+}
+.storefront-room-card-photo img {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	transition: transform 0.3s ease;
+}
+.storefront-room-card:hover .storefront-room-card-photo img {
+	transform: scale(1.03);
+}
+.storefront-room-card-scrim {
+	position: absolute;
+	inset: 0;
+	background: linear-gradient(
+		to top,
+		oklch(0.16 0.02 60 / 0.85) 0%,
+		oklch(0.16 0.02 60 / 0.3) 40%,
+		oklch(0.16 0.02 60 / 0) 70%
+	);
+}
+.storefront-room-card-overlay {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	padding: 1.25rem 1.375rem;
+}
+.storefront-room-card-name {
+	font-family: var(--ledger-font-display);
+	font-weight: 500;
+	font-size: 1.375rem;
+	color: oklch(0.98 0.008 75);
+}
+.storefront-room-card-rule {
+	margin-top: 0.5rem;
+	height: 1px;
+	background: oklch(0.98 0.008 75 / 0.35);
+}
+.storefront-room-card-row {
+	margin-top: 0.625rem;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem;
+}
+.storefront-room-card-glance {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem 0.75rem;
+}
+.storefront-room-card-glance .storefront-glance-item {
+	color: oklch(0.92 0.012 75 / 0.9);
+}
+.storefront-room-card-glance .storefront-glance-item :global(svg) {
+	color: oklch(0.98 0.008 75);
+}
+.storefront-room-card-cta {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	flex-shrink: 0;
+	font-size: 0.8125rem;
+	color: oklch(0.92 0.012 75 / 0.9);
+}
+.storefront-room-card-details {
+	font-weight: 600;
+	color: oklch(0.98 0.008 75);
+	border-bottom: 1px solid transparent;
+	transition: border-color 0.15s ease;
+}
+.storefront-room-card:hover .storefront-room-card-details {
+	border-bottom-color: oklch(0.98 0.008 75);
+}
+
+/* Gallery: an uneven contact sheet, not a uniform thumbnail wall — a few
+   frames run wide to give the page a scroll rhythm. */
+.storefront-gallery-grid {
+	display: grid;
+	grid-template-columns: repeat(2, 1fr);
+	gap: 0.5rem;
+	margin-top: 1.75rem;
+}
+@media (min-width: 640px) {
+	.storefront-gallery-grid {
+		grid-template-columns: repeat(4, 1fr);
+		gap: 0.625rem;
+	}
+}
+.storefront-gallery-item {
+	position: relative;
+	aspect-ratio: 1 / 1;
+	overflow: hidden;
+	border-radius: 4px;
+	background-color: var(--ledger-paper-2);
+	background-image: var(--hotel-woven-pattern);
+	background-repeat: repeat;
+	background-size: 20px 20px;
+	cursor: zoom-in;
+	padding: 0;
+	border: none;
+	display: block;
+}
+.storefront-gallery-item.is-wide {
+	grid-column: span 2;
+}
+.storefront-gallery-item img {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.storefront-gallery-item:hover img {
+	transform: scale(1.04);
+}
+.storefront-gallery-item:focus-visible {
+	outline: 2px solid var(--hotel-accent);
+	outline-offset: 2px;
+}
+
+.storefront-lightbox {
+	position: fixed;
+	inset: 0;
+	z-index: 50;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 2rem 1.25rem;
+	background: oklch(0.16 0.02 60 / 0.92);
+}
+.storefront-lightbox img {
+	max-width: 100%;
+	max-height: 100%;
+	border-radius: 4px;
+}
+.storefront-lightbox-close {
+	position: absolute;
+	top: 1rem;
+	right: 1.25rem;
+	color: oklch(0.98 0.008 75);
+	background: transparent;
+	font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+	font-size: 0.8125rem;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	padding: 0.5rem 0.75rem;
+	border: 1px solid oklch(0.98 0.008 75 / 0.35);
+	border-radius: 4px;
+}
+.storefront-lightbox-close:hover {
+	border-color: oklch(0.98 0.008 75 / 0.8);
+}
+
+/* Footer: the ledger's closing line — the direct-booking trust claim earns
+   its place here because it's product truth (see PRODUCT.md Positioning),
+   not invented social proof. */
+.storefront-footer {
+	margin-top: 5rem;
+	border-top: 1px solid var(--ledger-rule);
+	background: var(--ledger-paper-2);
+}
+.storefront-footer-inner {
+	max-width: 72rem;
+	margin: 0 auto;
+	padding: 3rem 1.25rem;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	justify-content: space-between;
+	gap: 1.5rem;
+}
+@media (min-width: 640px) {
+	.storefront-footer-inner {
+		padding: 3rem 1.5rem;
+	}
+}
+
+.storefront-stepper-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0.5rem 0;
+	border-bottom: 1px solid var(--ledger-rule);
+}
+.storefront-stepper-row:last-of-type {
+	border-bottom: none;
+}
+.storefront-stepper {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+}
+.storefront-stepper button {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 26px;
+	border-radius: 999px;
+	border: 1px solid var(--ledger-rule);
+	color: var(--ledger-ink);
+	background: transparent;
+}
+.storefront-stepper button:hover {
+	border-color: var(--hotel-accent);
+	color: var(--hotel-accent-deep);
+}
+.storefront-stepper button:disabled {
+	opacity: 0.4;
+	pointer-events: none;
+}
+.storefront-stepper button :global(svg) {
+	width: 14px;
+	height: 14px;
+}
+.storefront-stepper span {
+	min-width: 1.25rem;
+	text-align: center;
+}
+
+.storefront-checkbox-row {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	font-size: 0.8125rem;
+	color: var(--ledger-ink-muted);
+}
+.storefront-checkbox-row input {
+	accent-color: var(--hotel-accent);
+}
+
+/* Room-at-a-glance: bed configuration and top amenities as a small icon-plus-word
+   row under the room's description — the same non-card, non-eyebrow list device
+   used for the About section's amenity inventory, just denser. */
+.storefront-glance-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem 0.875rem;
+	margin-top: 0.5rem;
+}
+.storefront-glance-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3125rem;
+	font-size: 0.75rem;
+	color: var(--ledger-ink-muted);
+}
+.storefront-glance-item :global(svg) {
+	width: 14px;
+	height: 14px;
+	color: var(--hotel-accent-deep);
+	flex-shrink: 0;
+}
+
+/* Cancellation badge: a verified fact about the rate, so it earns the small
+   check/x glyph the craft floor otherwise reserves for real semantic state. */
+.storefront-cancel-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3125rem;
+	margin-top: 0.375rem;
+	font-size: 0.75rem;
+	color: var(--ledger-ink-muted);
+}
+.storefront-cancel-badge.is-free {
+	color: oklch(0.5 0.13 150);
+}
+.storefront-cancel-badge :global(svg) {
+	width: 13px;
+	height: 13px;
+	flex-shrink: 0;
+}
+
+/* Amenity group heading: the About section's amenities grouped by real
+   `amenity_category` values instead of one flat list — a Title-weight label,
+   not a tracked uppercase eyebrow repeated per group. */
+.storefront-amenity-group-head {
+	margin-top: 1.75rem;
+	font-family: 'Inter Variable', ui-sans-serif, sans-serif;
+	font-weight: 600;
+	font-size: 0.9375rem;
+	color: var(--ledger-ink);
+}
+.storefront-amenity-group-head + .storefront-amenity-list {
+	margin-top: 0.625rem;
+	border-top: none;
+}
+
+/* Function Hall reservation card — a self-contained flat card (not a ruled row
+   like Rooms & Rates, since it also hosts a live reservation form, not just a
+   browse link), matching the reference mockup's photo+summary/Event Details/
+   Quotation Summary+Note/CTA stack. Booking commits and navigates straight into
+   the same guest-info wizard rooms use (`bookHall` in +page.svelte) — there is
+   no cart-visit step for halls anymore. */
+.woven-ledger select.ledger-field {
+	appearance: none;
+	background-image: none;
+	border-radius: 0;
+}
+.storefront-hall-card {
+	border: 1px solid var(--ledger-rule);
+	border-radius: 10px;
+	overflow: hidden;
+	background: var(--ledger-paper);
+}
+.storefront-hall-card-photo {
+	position: relative;
+	width: 100%;
+	aspect-ratio: 3 / 2;
+	overflow: hidden;
+	background-color: var(--ledger-paper-2);
+	background-image: var(--hotel-woven-pattern);
+	background-repeat: repeat;
+	background-size: 20px 20px;
+}
+@media (min-width: 640px) {
+	.storefront-hall-card-photo {
+		width: 21rem;
+		aspect-ratio: auto;
+	}
+}
+.storefront-hall-card-photo img {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+.storefront-hall-card-body {
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+	justify-content: space-between;
+	padding: 1.25rem;
+	border-bottom: 1px solid var(--ledger-rule);
+}
+/* Photo + summary sit in their own row wrapper — `display: flex` lives here,
+   not on `.storefront-hall-card` itself, so the Event Details zone (a sibling
+   of this wrapper, not a child of it) still stacks full-width below instead of
+   being pulled into the same row and squeezed into a narrow column. */
+@media (min-width: 640px) {
+	.storefront-hall-card-top {
+		display: flex;
+	}
+	.storefront-hall-card-body {
+		flex: 1 1 auto;
+		flex-direction: row;
+		align-items: center;
+		border-bottom: none;
+	}
+}
+.storefront-hall-card-price {
+	flex-shrink: 0;
+	text-align: right;
+}
+/* Included-services chip row: one generic icon per item — `includedServices` is
+   hotel-authored free text, so there's no reliable way to pick a specific icon
+   per phrase the way the amenity catalogue can. */
+.storefront-hall-facts {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.375rem 1rem;
+	margin-top: 0.625rem;
+}
+.storefront-hall-fact {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.375rem;
+	font-size: 0.8125rem;
+	color: var(--ledger-ink);
+}
+.storefront-hall-fact :global(svg) {
+	width: 15px;
+	height: 15px;
+	color: var(--hotel-accent-deep);
+	flex-shrink: 0;
+}
+
+/* One continuous zone for Event Details + the quote/CTA area — a shade darker
+   than the white summary card above it, not a stack of separately bordered
+   boxes floating on white. Quotation Summary and Note (below) are the boxes
+   that sit *on* this zone, matching the reference mockup's two-tone card. */
+.storefront-hall-form-zone {
+	padding: 1.25rem;
+	background: var(--ledger-paper-2);
+}
+.storefront-hall-panel-head {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	font-family: 'Inter Variable', ui-sans-serif, sans-serif;
+	font-weight: 600;
+	font-size: 0.9375rem;
+	color: var(--ledger-ink);
+}
+.storefront-hall-panel-head :global(svg) {
+	width: 17px;
+	height: 17px;
+	color: var(--hotel-accent-deep);
+}
+.storefront-hall-details-grid {
+	display: grid;
+	grid-template-columns: repeat(2, 1fr);
+	gap: 1rem;
+	margin-top: 1rem;
+}
+@media (min-width: 640px) {
+	.storefront-hall-details-grid {
+		grid-template-columns: repeat(5, 1fr);
+	}
+}
+/* Boxed fields, not this world's usual underline style — a deliberate, scoped
+   exception for this one form (per the reference mockup), the same way the
+   Confirmation Ticket is already an isolated exception to the Flat Ledger Rule.
+   The actual alignment fix is the shared height/line-height/box-sizing: two
+   shadcn `Input`s of different native types (date/time/number) plus a plain
+   `<select>` all get one recipe, so they sit flush on one baseline regardless
+   of each control's own native rendering. */
+.storefront-hall-field {
+	height: 2.25rem;
+	box-sizing: border-box;
+	line-height: 1.25rem;
+	font-size: 0.875rem;
+	width: 100%;
+	padding: 0 0.625rem;
+	border: 1px solid var(--ledger-rule);
+	border-radius: 6px;
+	background: var(--ledger-paper);
+	color: var(--ledger-ink);
+}
+.storefront-hall-field:focus-visible,
+.storefront-hall-field:focus {
+	outline: none;
+	border-color: var(--hotel-accent);
+}
+
+/* Status area under Event Details — loading/error/quote-pending text, or once a
+   quote lands, the Quotation Summary + Note row and the CTA. Stays inside the
+   same gray zone; no extra padding needed beyond the zone's own. */
+.storefront-hall-status {
+	margin-top: 1.25rem;
+}
+.storefront-hall-summary-row {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: 1.25rem;
+}
+@media (min-width: 640px) {
+	.storefront-hall-summary-row {
+		grid-template-columns: 1.2fr 1fr;
+		align-items: start;
+	}
+}
+.storefront-hall-panel {
+	padding: 1.25rem;
+	border: 1px solid var(--ledger-rule);
+	border-radius: 8px;
+	background: var(--ledger-paper);
+}
+.storefront-hall-quote {
+	margin-top: 0.875rem;
+}
+.storefront-hall-quote-row {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	padding: 0.25rem 0;
+	font-size: 0.8125rem;
+	color: var(--ledger-ink-muted);
+}
+.storefront-hall-quote-row.is-total {
+	margin-top: 0.25rem;
+	padding-top: 0.5rem;
+	border-top: 1px solid var(--ledger-rule);
+	font-weight: 600;
+	color: var(--ledger-ink);
+	font-size: 0.875rem;
+}
+.storefront-hall-note {
+	display: flex;
+	gap: 0.625rem;
+	padding: 1rem;
+	border: 1px solid var(--ledger-rule);
+	border-radius: 8px;
+	background: var(--ledger-paper);
+	font-size: 0.8125rem;
+	color: var(--ledger-ink-muted);
+}
+.storefront-hall-note :global(svg) {
+	width: 18px;
+	height: 18px;
+	flex-shrink: 0;
+	color: var(--hotel-accent-deep);
+}
+.storefront-hall-note-head {
+	display: block;
+	font-weight: 600;
+	color: var(--ledger-ink);
+	margin-bottom: 0.125rem;
+}
+.storefront-hall-cta {
+	display: flex;
+	width: 100%;
+	margin-top: 1.25rem;
+	justify-content: center;
+}
+
+/* Floating invoice: a ledger stub pinned to the corner, not a generic cart
+   widget — flat by default (per the Flat Ledger Rule), a woven tab standing
+   in for the shadow most floating-cart patterns reach for. */
+.storefront-invoice {
+	position: fixed;
+	right: 1.25rem;
+	bottom: 1.25rem;
+	z-index: 40;
+}
+.storefront-invoice-pill {
+	display: flex;
+	align-items: center;
+	gap: 0.625rem;
+	background: var(--ledger-paper);
+	border: 1px solid var(--ledger-rule);
+	border-radius: 999px;
+	padding: 0.625rem 1.125rem 0.625rem 0.625rem;
+	color: var(--ledger-ink);
+	font-weight: 600;
+	font-size: 0.875rem;
+}
+.storefront-invoice-count {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 1.75rem;
+	height: 1.75rem;
+	border-radius: 999px;
+	background-color: var(--hotel-accent);
+	background-image: var(--hotel-woven-pattern);
+	background-repeat: repeat;
+	background-size: 14px 14px;
+	color: var(--ledger-paper);
+	font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+	font-size: 0.8125rem;
+	padding: 0 0.5rem;
+}
+.storefront-invoice-panel {
+	width: min(22rem, calc(100vw - 2.5rem));
+	max-height: min(28rem, calc(100vh - 2.5rem));
+	display: flex;
+	flex-direction: column;
+	background: var(--ledger-paper);
+	border: 1px solid var(--ledger-rule);
+	border-radius: 10px;
+	overflow: hidden;
+}
+.storefront-invoice-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0.875rem 1rem;
+	border-bottom: 1px solid var(--ledger-rule);
+	background-image: var(--hotel-woven-pattern);
+	background-repeat: repeat;
+	background-size: 20px 20px;
+	background-color: var(--ledger-paper-2);
+}
+.storefront-invoice-close {
+	color: var(--ledger-ink-muted);
+	font-size: 0.75rem;
+}
+.storefront-invoice-close:hover {
+	color: var(--ledger-ink);
+}
+.storefront-invoice-items {
+	overflow-y: auto;
+	padding: 0.25rem 1rem;
+}
+.storefront-invoice-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	padding: 0.75rem 0;
+	border-bottom: 1px solid var(--ledger-rule);
+}
+.storefront-invoice-item:last-child {
+	border-bottom: none;
+}
+.storefront-invoice-remove {
+	color: var(--ledger-ink-muted);
+	font-size: 0.75rem;
+	flex-shrink: 0;
+}
+.storefront-invoice-remove:hover {
+	color: var(--ledger-danger, #b91c1c);
+}
+.storefront-invoice-total {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0.875rem 1rem;
+	border-top: 1px solid var(--ledger-rule);
+	font-weight: 600;
+	color: var(--ledger-ink);
+}
+.storefront-invoice-cta {
+	display: flex;
+	justify-content: center;
+	margin: 0 1rem 1rem;
+	border-radius: 4px;
+}
+
+/* Booking Summary sidebar: the wizard-chrome counterpart to the Floating Invoice —
+   a static panel (not fixed/floating) for steps 2-4a, where the freed-up space from
+   replacing the vertical step-rail with a horizontal one now lives. Flat by default,
+   per the Flat Ledger Rule. */
+.storefront-summary-sidebar {
+	background: var(--ledger-paper);
+	border: 1px solid var(--ledger-rule);
+	border-radius: 10px;
+	padding: 1.25rem;
+}
+.storefront-summary-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 0.375rem 0.75rem;
+	padding: 0.625rem 0;
+	border-bottom: 1px solid var(--ledger-rule);
+}
+.storefront-summary-edit {
+	flex: 0 0 auto;
+	font-size: 0.75rem;
+	color: var(--hotel-accent-deep);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+.storefront-summary-items {
+	margin-top: 0.5rem;
+}
+.storefront-summary-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	padding: 0.75rem 0;
+	border-bottom: 1px solid var(--ledger-rule);
+}
+.storefront-summary-remove {
+	color: var(--ledger-ink-muted);
+	font-size: 0.75rem;
+	flex-shrink: 0;
+}
+.storefront-summary-remove:hover {
+	color: var(--ledger-danger, #b91c1c);
+}
+.storefront-summary-total {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0.875rem 0;
+	border-top: 1px solid var(--ledger-rule);
+	font-weight: 600;
+	color: var(--ledger-ink);
+}
+.storefront-summary-cta {
+	display: flex;
+	justify-content: center;
+	margin-top: 0.75rem;
+	border-radius: 4px;
+}
+.storefront-summary-empty {
+	margin-top: 0.75rem;
+	font-size: 0.8125rem;
+	color: var(--ledger-ink-muted);
+}
+
+/* Reviews: real, moderated guest content only — plain ruled cards, no
+   fabricated aggregate score sitting above them. */
+.storefront-reviews-grid {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: 1.5rem;
+	margin-top: 1.75rem;
+}
+@media (min-width: 640px) {
+	.storefront-reviews-grid {
+		grid-template-columns: repeat(2, 1fr);
+	}
+}
+.storefront-review {
+	border-top: 1px solid var(--ledger-rule);
+	padding-top: 1rem;
+}
+.storefront-review-stars {
+	display: flex;
+	gap: 0.125rem;
+}
+
+/* "View full details" — a quiet text affordance under a room row's glance line,
+   not a second button competing with "Add to invoice"/"Check dates". Sits inside
+   the dated row's <summary>, so its click handler stops propagation to avoid
+   toggling the native <details> disclosure. */
+.storefront-view-details-btn {
+	display: inline-flex;
+	align-items: center;
+	margin-top: 0.625rem;
+	color: var(--hotel-accent-deep);
+	font-size: 0.8125rem;
+	font-weight: 600;
+	text-decoration: none;
+	border-bottom: 1px solid transparent;
+}
+.storefront-view-details-btn:hover {
+	border-bottom-color: var(--hotel-accent-deep);
+}
+
+/* Wizard-step "back to previous step" link — sits above the step's own <h1>, quiet
+   ink-muted text rather than a button, since it's an escape hatch, not the primary
+   action on the page. */
+.storefront-step-back {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25rem;
+	color: var(--ledger-ink-muted);
+	font-size: 0.8125rem;
+	font-weight: 500;
+	text-decoration: none;
+}
+.storefront-step-back:hover {
+	color: var(--hotel-accent-deep);
+}
+
+/* Room Details dialog: a restyled shadcn/bits-ui Dialog (per DESIGN.md's "reuse
+   shadcn-svelte primitives" rule), portalled in place (`portalProps.disabled`) so
+   it stays a DOM descendant of `.woven-ledger` and inherits its tokens (including
+   the body font, set once on `.woven-ledger` itself), stripped of its default
+   shadow/ring per the Flat Ledger Rule — same restyle pattern as the Rooms &
+   Guests popover. Structured as a real header/body/footer frame (not one long
+   scroll) so the title and the primary action stay reachable at any scroll
+   position — the thing that read as "flat" was the missing frame, not the tokens. */
+.storefront-room-dialog-head {
+	flex: 0 0 auto;
+	padding: 1.5rem 1.5rem 1.125rem;
+	border-bottom: 1px solid var(--ledger-rule);
+}
+.storefront-room-dialog-price {
+	margin-top: 0.375rem;
+	display: flex;
+	align-items: baseline;
+	gap: 0.375rem;
+	color: var(--hotel-accent-deep);
+}
+.storefront-room-dialog-body {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 1.5rem;
+	display: flex;
+	flex-direction: column;
+	gap: 1.5rem;
+}
+
+/* Gallery: one large hero frame plus a thumbnail strip, not a uniform grid —
+   the same "one photo leads" idiom as the storefront hero collage, scaled
+   down to dialog width. */
+.storefront-room-dialog-gallery {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+.storefront-room-dialog-photo-main {
+	position: relative;
+	aspect-ratio: 16 / 9;
+	width: 100%;
+	overflow: hidden;
+	border-radius: 6px;
+	background-color: var(--ledger-paper-2);
+	background-image: var(--hotel-woven-pattern);
+	background-repeat: repeat;
+	background-size: 20px 20px;
+	cursor: zoom-in;
+	padding: 0;
+	border: none;
+	display: block;
+}
+.storefront-room-dialog-photo-main img {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+.storefront-room-dialog-photo-strip {
+	display: flex;
+	gap: 0.5rem;
+	overflow-x: auto;
+}
+.storefront-room-dialog-photo-thumb {
+	position: relative;
+	flex: 0 0 5.5rem;
+	aspect-ratio: 1 / 1;
+	overflow: hidden;
+	border-radius: 4px;
+	background-color: var(--ledger-paper-2);
+	background-image: var(--hotel-woven-pattern);
+	background-repeat: repeat;
+	background-size: 16px 16px;
+	cursor: zoom-in;
+	padding: 0;
+	border: none;
+	display: block;
+}
+.storefront-room-dialog-photo-thumb img {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.storefront-room-dialog-desc {
+	font-size: 0.875rem;
+	line-height: 1.6;
+	color: var(--ledger-ink-muted);
+}
+
+/* Spec chips: a pill per fact, not a bare icon+word row — reads as a proper
+   spec sheet rather than a flat list, and doubles as visual texture between
+   the gallery and the ruled amenity lists below. */
+.storefront-room-dialog-specs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+}
+.storefront-room-dialog-spec-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.375rem;
+	padding: 0.375rem 0.75rem;
+	border-radius: 999px;
+	background: var(--ledger-paper-2);
+	border: 1px solid var(--ledger-rule);
+	font-size: 0.75rem;
+	color: var(--ledger-ink);
+}
+.storefront-room-dialog-spec-chip :global(svg) {
+	width: 14px;
+	height: 14px;
+	color: var(--hotel-accent-deep);
+	flex-shrink: 0;
+}
+.storefront-room-dialog-note {
+	margin-top: -0.75rem;
+	font-size: 0.75rem;
+	font-style: italic;
+	color: var(--ledger-ink-muted);
+}
+.storefront-room-dialog-amenities {
+	border-top: 1px solid var(--ledger-rule);
+	padding-top: 1.25rem;
+}
+.storefront-room-dialog-rates {
+	border-top: 1px solid var(--ledger-rule);
+	padding-top: 1.25rem;
+}
+
+/* Room detail page: the standalone route superseding the Room Details dialog (Flat
+   Ledger Rule now has zero modal exceptions left in the guest flow). Reuses the
+   dialog's own gallery/spec-chip/amenity classes verbatim — only genuinely new
+   layout (a full page instead of a framed panel) gets its own rules here. */
+.storefront-room-page {
+	background: var(--ledger-paper);
+}
+.storefront-room-page-policies {
+	border-top: 1px solid var(--ledger-rule);
+	padding-top: 1.25rem;
+}
+
+/* Contact page: plain ruled rows (icon + fact), same register as the amenity list — a
+   phone/email/address is a fact, not prose. The map is the one photo-less image-like
+   surface in this world with no woven-pattern placeholder state, since it either loads
+   or the block simply doesn't render (no address set). */
+.storefront-contact-details {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+}
+.storefront-contact-row {
+	display: flex;
+	align-items: center;
+	gap: 0.625rem;
+	padding: 0.75rem 0;
+	border-bottom: 1px solid var(--ledger-rule);
+	font-size: 0.9375rem;
+	color: var(--ledger-ink);
+}
+.storefront-contact-row :global(svg) {
+	width: 18px;
+	height: 18px;
+	color: var(--hotel-accent-deep);
+	flex-shrink: 0;
+}
+.storefront-contact-row a {
+	color: var(--ledger-ink);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	text-decoration-color: var(--ledger-rule);
+}
+.storefront-contact-row a:hover {
+	text-decoration-color: var(--hotel-accent-deep);
+}
+.storefront-contact-map {
+	border: 1px solid var(--ledger-rule);
+	border-radius: 6px;
+	overflow: hidden;
+	aspect-ratio: 16 / 9;
+}
+.storefront-contact-map iframe {
+	width: 100%;
+	height: 100%;
+	border: 0;
+	display: block;
+}
+
+/* Footer: pinned, per the user's explicit ask for a "Book now" affordance —
+   a running price on the left (the same from-price the row itself showed),
+   the primary action on the right, both always reachable regardless of how
+   long the body scrolls. */
+.storefront-room-dialog-footer {
+	flex: 0 0 auto;
+	flex-direction: row;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	padding: 1.125rem 1.5rem;
+	border-top: 1px solid var(--ledger-rule);
+	background: var(--ledger-paper-2);
+}
+.storefront-room-dialog-footer-price {
+	color: var(--ledger-ink);
+}

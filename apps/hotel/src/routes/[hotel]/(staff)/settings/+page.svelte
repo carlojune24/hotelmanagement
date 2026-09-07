@@ -3,6 +3,11 @@
 	import BedIcon from '@lucide/svelte/icons/bed';
 	import WalletIcon from '@lucide/svelte/icons/wallet';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
+	import PaletteIcon from '@lucide/svelte/icons/palette';
+	import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
+	import UtensilsIcon from '@lucide/svelte/icons/utensils';
+	import ClockIcon from '@lucide/svelte/icons/clock';
+	import GemIcon from '@lucide/svelte/icons/gem';
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 
 	const base = $derived(`/${page.params.hotel}`);
@@ -25,6 +30,36 @@
 			icon: SparklesIcon,
 			label: 'Amenities',
 			desc: 'The master list of features shown on your hotel page and room listings.'
+		},
+		{
+			href: 'branding',
+			icon: PaletteIcon,
+			label: 'Branding',
+			desc: 'Logo, accent color, hero image, and tagline for your public booking page.'
+		},
+		{
+			href: 'function-halls',
+			icon: PartyPopperIcon,
+			label: 'Function hall',
+			desc: 'The event space you rent by the hour, its pricing, and included services.'
+		},
+		{
+			href: 'dining',
+			icon: UtensilsIcon,
+			label: 'Dining',
+			desc: 'Restaurants, bars, and menu photos shown on your public "Dining" page.'
+		},
+		{
+			href: 'check-in-out',
+			icon: ClockIcon,
+			label: 'Check-in & check-out',
+			desc: 'Standard times and extension fees your front desk works from.'
+		},
+		{
+			href: 'amenity-items',
+			icon: GemIcon,
+			label: 'Sellable items',
+			desc: 'Priced extras front desk can charge to a guest’s folio — minibar, spa, damages.'
 		}
 	];
 </script>

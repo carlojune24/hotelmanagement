@@ -457,18 +457,46 @@
 				<h3 class="flex items-center gap-2 text-sm font-semibold text-ink">
 					<CircleDotIcon class="size-4 text-brand" /> Inventory & Layout
 				</h3>
-				<div class="mt-3 space-y-2">
-					<label class="flex items-center gap-2 text-sm text-ink">
-						<input type="checkbox" name="isActive" checked={r.isActive} class="size-4" />
-						Active — part of bookable inventory
-					</label>
-					<label class="flex items-center gap-2 text-sm text-ink">
-						<input type="checkbox" name="isConnecting" checked={r.isConnecting} class="size-4" />
-						Has a connecting door to an adjacent room
-					</label>
-					<p class="text-xs text-ink-muted">
-						Deactivate to pull a room from inventory without deleting its history.
-					</p>
+				<p class="mt-1 text-xs text-ink-muted">
+					Whether this room counts toward bookable inventory, and how it's laid out relative to
+					other rooms.
+				</p>
+				<div class="mt-3 space-y-3">
+					<div>
+						<label class="flex items-center gap-2 text-sm text-ink">
+							<input type="checkbox" name="isActive" checked={r.isActive} class="size-4" />
+							Active — part of bookable inventory
+						</label>
+						<p class="mt-1 pl-6 text-xs text-ink-muted">
+							Deactivate to pull this room out of service long-term (renovation, decommissioned,
+							etc.) without deleting its booking history. This works alongside, not instead of,
+							the <span class="font-medium">Operational Status</span> above — a room only shows up
+							in guest availability searches when it's both <span class="font-medium">Active</span>
+							and <span class="font-medium">Available</span>. Use Operational Status for short-term,
+							day-to-day states (a maintenance issue, temporarily out of order); use Active for
+							longer-term "this room isn't part of inventory right now."
+						</p>
+					</div>
+					<div>
+						<label class="flex items-center gap-2 text-sm text-ink">
+							<input type="checkbox" name="isConnecting" checked={r.isConnecting} class="size-4" />
+							Has a connecting door to an adjacent room
+						</label>
+						<p class="mt-1 pl-6 text-xs text-ink-muted">
+							Informational only — flags this as a physically adjoining room so front desk can
+							offer it alongside its pair to families or groups who want to book two connecting
+							rooms. It doesn't link the two rooms in the system or affect search/pricing; front
+							desk still books each room separately and pairs them manually.
+						</p>
+					</div>
+					<div>
+						<Label for="sortOrder">Sort order</Label>
+						<Input id="sortOrder" name="sortOrder" type="number" min="0" value={r.sortOrder} class="mt-1" />
+						<p class="mt-1 text-xs text-ink-muted">
+							Lower numbers list first — within the same floor on the front desk's room grid, and
+							in this settings list. Rooms with the same sort order fall back to room number.
+						</p>
+					</div>
 				</div>
 			</div>
 		</Tabs.Content>

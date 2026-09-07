@@ -22,6 +22,7 @@
 	import BuildingIcon from '@lucide/svelte/icons/building-2';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MoonIcon from '@lucide/svelte/icons/moon';
+	import StarIcon from '@lucide/svelte/icons/star';
 
 	let { data, children }: { data: LayoutData; children: import('svelte').Snippet } = $props();
 
@@ -67,6 +68,7 @@
 				show: can('housekeeping:read')
 			},
 			{ seg: 'amenities', label: 'Amenities', icon: GemIcon, show: can('booking:read') },
+			{ seg: 'reviews', label: 'Reviews', icon: StarIcon, show: can('review:read') },
 			{ seg: 'finance', label: 'Finance', icon: WalletIcon, show: can('finance:read') },
 			{ seg: 'hr', label: 'HR', icon: UsersIcon, show: can('hr:read') },
 			{ seg: 'payroll', label: 'Payroll', icon: BanknoteIcon, show: can('payroll:read') },

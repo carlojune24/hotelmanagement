@@ -18,6 +18,9 @@ declare global {
 			hotel: HotelContext | null;
 			/** The signed-in user's role at `locals.hotel`, else null. */
 			role: MembershipRole | null;
+			/** True when this request arrived via `locals.hotel.customDomain` rather than the
+			 *  platform's own `/{slug}/…` path — set by `hooks.server.ts` after tenant resolution. */
+			isCustomDomain: boolean;
 		}
 
 		interface PageData {
