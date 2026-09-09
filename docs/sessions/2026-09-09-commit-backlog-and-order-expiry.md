@@ -92,15 +92,53 @@ add the `email_log` table now.
   idempotency via a throwaway vitest. Rendered previews sent to the user.
   Committed `c101ee0`; migration `0023` applied locally. Nothing pushed.
 
-### Not done / follow-ups
-- Real cross-client render QA (Outlook/Gmail/Apple Mail — built to best practice,
-  not yet tested for real).
-- Staff email-log viewer / resend button.
-- Cancellation + payment-failed guest emails.
+### Follow-ups (email)
+- Real cross-client render QA (Outlook/Gmail/Apple Mail).
 - Attaching the BIR Invoice/OR PDF (BIR module Step 4).
+- Then: the **Mailgun two-way conversation** feature (§4).
+
+## 4. Staff email views + Mailgun conversation plan
+
+- **`(staff)/emails`** — dedicated hotel-wide email log (`listEmailLog`): status,
+  guest, email type + subject, recipient, time, error; each row deep-links to the
+  booking and has a **Resend** action. Own sidebar nav item. `d930d83` / `38ccd60`.
+- **Reservation-detail card** — same, per order, kept as an in-context shorthand
+  (user asked to keep both).
+- **Planned: full two-way email conversation via Mailgun** — outbound on Mailgun +
+  an inbound Route → webhook, replies threaded into a `guest_messages` store, staff
+  transcript + reply composer, `(staff)/emails` grown into an inbox. Layered A→D in
+  `docs/TODO.md`; phased plan + a `project` memory updated. Cancellation email
+  becomes a `guest_messages` type once that lands. `4542770`.
+- Currently still on **Gmail SMTP** (`.env`); `SMTP_FROM` should be the gmail
+  address (Gmail rewrites an arbitrary From).
+
+## 5. Finance dashboard — date range + daily net-cash chart
+
+User was confused by the dashboard (mixed "cash on hand" position with "cash in
+today" / "revenue MTD" flow, fixed periods, no range).
+
+- **Date-range control** — Today / Yesterday / This week / This month / Last month
+  / Custom, URL-backed (`?from=&to=`), default **Today**. `lib/finance-range.ts`
+  (pure preset/label/sanitize, 10 tests — hit `en-GB`/`en-PH` "Sept" vs "Sep"
+  ICU inconsistency, switched to a fixed month array; `sanitizeRange` now
+  validates real calendar dates, not just the regex shape).
+- **Two labelled zones:** "Balances · as of now" (cash on hand + per-account list
+  + a plain "money you hold, not income" line; Owed to you / AR) and
+  "Activity · <range>" (Cash received / paid out / **Net cash movement** / Revenue
+  / Expenses, each with a sub-label).
+- **Daily net-cash bar chart** (`lib/components/finance/net-cash-chart.svelte`) —
+  ran the `dataviz` skill; diverging around a zero baseline (up `--ok` / down
+  `--danger`, position is the CVD-safe encoding), per-day hover tooltip, inline
+  SVG, no lib, dark-mode via tokens.
+- Range-driven breakdowns: Revenue by source · Where cash went · Payments by
+  method. Added `dailyCashflowReport`; reused the rest of `reports.ts`.
+- Day close + Needs attention kept; day close stays scoped to today.
+- Verified: `pnpm check` clean, 74 tests; report composition reconciles with the
+  demo hotel's real data (cash on hand ₱14,953.12, revenue ₱10,453.12, today net
+  ₱61.12 all match the old tiles). `193ac4f`.
 
 ## Next
 
 Remaining Phase-1 client-flow gaps: **staff cancel / no-show / modify-stay**
-booking mutation, **guest self-service manage-booking**, or the **basic staff
-dashboard**.
+booking mutation (also unblocks the cancellation email), **guest self-service
+manage-booking**, or the **basic staff dashboard**.
