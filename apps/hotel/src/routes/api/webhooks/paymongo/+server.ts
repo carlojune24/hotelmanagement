@@ -16,6 +16,7 @@ import {
 } from '$lib/server/db/schema/index';
 import { recordCashMovement } from '$lib/server/finance/cash';
 import { businessDateFor } from '$lib/server/finance/shared';
+import { sendBookingConfirmation } from '$lib/server/email/send-booking-confirmation';
 
 // PayMongo signs webhooks as `t=<timestamp>,te=<test sig>,li=<live sig>` over
 // the string `${t}.${rawBody}`, HMAC-SHA256 hex-encoded with the endpoint's secret.
@@ -64,14 +65,16 @@ export async function POST({ request }) {
 				break;
 			}
 
-			await db.transaction(async (tx) => {
+			// Whether *this* delivery is the one that flipped the order to confirmed —
+			// gates the one-time guest confirmation email sent after the tx commits.
+			const confirmedNow = await db.transaction(async (tx) => {
 				// Idempotency: a retried delivery of the same event must not double-write.
 				const existing = await tx
 					.select({ id: payments.id })
 					.from(payments)
 					.where(eq(payments.paymongoEventId, eventId))
 					.then((r) => r.at(0));
-				if (existing) return;
+				if (existing) return false;
 
 				const order = await tx
 					.select()
@@ -80,7 +83,7 @@ export async function POST({ request }) {
 					.then((r) => r.at(0));
 				if (!order) {
 					console.error('paymongo webhook: order not found', orderId);
-					return;
+					return false;
 				}
 
 				const [paymentRow] = await tx
@@ -164,12 +167,12 @@ export async function POST({ request }) {
 						order.id,
 						paymentRow!.id
 					);
-					return;
+					return false;
 				}
 
 				// Only advance an order that's still awaiting payment — never clobber a
 				// further-advanced status.
-				if (order.status !== 'pending_payment') return;
+				if (order.status !== 'pending_payment') return false;
 
 				await tx
 					.update(orders)
@@ -220,7 +223,18 @@ export async function POST({ request }) {
 						note: 'PayMongo checkout session paid'
 					});
 				}
+
+				return true;
 			});
+
+			// Guest confirmation email — after the tx commits, only on the delivery
+			// that actually confirmed the order. Best-effort: a mail failure is logged
+			// (and to `email_log`), never surfaced to PayMongo.
+			if (confirmedNow) {
+				await sendBookingConfirmation(orderId).catch((e) =>
+					console.error('paymongo webhook: confirmation email failed', orderId, e)
+				);
+			}
 			break;
 		}
 		case 'checkout_session.payment.failed':
