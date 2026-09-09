@@ -22,7 +22,9 @@
 		if (form && 'error' in form && form.error) toast.error(form.error);
 	});
 
-	let panel = $state<null | 'transfer' | 'deposit' | 'manual'>(null);
+	let panel = $state<null | 'transfer' | 'deposit' | 'manual' | 'ownerdraw'>(null);
+	let drawAccountId = $state('');
+	const drawAccount = $derived(data.activeAccounts.find((a) => a.id === drawAccountId));
 
 	const kindLabel: Record<string, string> = {
 		cash_drawer: 'Drawer',
@@ -64,9 +66,10 @@
 	<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
 		<h1 class="text-xl font-semibold tracking-tight text-ink">Cash accounts &amp; movements</h1>
 		{#if data.finance.canWrite}
-			<div class="flex gap-2">
+			<div class="flex flex-wrap gap-2">
 				<Button size="sm" variant="outline" onclick={() => (panel = panel === 'transfer' ? null : 'transfer')}>Transfer</Button>
 				<Button size="sm" variant="outline" onclick={() => (panel = panel === 'deposit' ? null : 'deposit')}>Bank deposit</Button>
+				<Button size="sm" variant="outline" onclick={() => (panel = panel === 'ownerdraw' ? null : 'ownerdraw')}>Owner draw</Button>
 				<Button size="sm" variant="outline" onclick={() => (panel = panel === 'manual' ? null : 'manual')}>Manual entry</Button>
 			</div>
 		{/if}
@@ -153,6 +156,100 @@
 		</form>
 	{/if}
 
+	{#if panel === 'ownerdraw'}
+		<form
+			method="POST"
+			action="?/ownerDraw"
+			use:enhance
+			class="mb-6 rounded-xl border border-border p-4"
+		>
+			<input type="hidden" name="businessDate" value={data.today} />
+			<p class="mb-3 text-sm text-ink-muted">
+				Cash the owner takes out of the business. Records a <em>cash out</em> against the account
+				(category <span class="text-ink">owner draw</span>) — it lowers Cash on hand, is not an
+				expense, and shows in the ledger and the day's cash-out.
+			</p>
+			<div class="flex flex-wrap items-end gap-3">
+				<div>
+					<Label class="text-xs">From account</Label>
+					<select
+						name="cashAccountId"
+						bind:value={drawAccountId}
+						required
+						class="mt-1 h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+					>
+						<option value="" disabled selected>Choose…</option>
+						{#each data.activeAccounts as a (a.id)}
+							<option value={a.id}>{a.name} — {peso(a.currentBalanceCentavos)}</option>
+						{/each}
+					</select>
+				</div>
+				<div>
+					<Label class="text-xs">Amount (₱)</Label>
+					<Input name="amount" type="number" min="0.01" step="0.01" required class="mt-1 w-36" />
+				</div>
+				{#if drawAccount}
+					<label class="flex items-center gap-1.5 pb-2 text-xs text-ink-muted">
+						<input
+							type="checkbox"
+							class="size-3.5"
+							onchange={(e) => {
+								const amt = e.currentTarget.closest('form')?.querySelector<HTMLInputElement>('[name=amount]');
+								if (amt) amt.value = e.currentTarget.checked ? (drawAccount!.currentBalanceCentavos / 100).toFixed(2) : '';
+							}}
+						/>
+						Withdraw the full {peso(drawAccount.currentBalanceCentavos)}
+					</label>
+				{/if}
+				<div class="flex-1"><Input name="memo" placeholder="Memo (optional)" class="mt-1" /></div>
+				<Button type="submit" size="sm">Record withdrawal</Button>
+			</div>
+		</form>
+	{/if}
+
+	<!-- Position / reconciliation -->
+	<div class="mb-4 overflow-x-auto rounded-xl border border-border">
+		<div class="border-b border-border px-4 py-2.5 text-sm font-semibold text-ink">
+			Reconciliation {data.rangeActive ? '· selected range' : '· all time'}
+		</div>
+		<table class="w-full text-sm">
+			<thead class="border-b border-border bg-surface-2 text-left text-xs text-ink-muted">
+				<tr>
+					<th class="px-4 py-2">Account</th>
+					<th class="px-4 py-2 text-right">Opening</th>
+					<th class="px-4 py-2 text-right">In</th>
+					<th class="px-4 py-2 text-right">Out</th>
+					<th class="px-4 py-2 text-right">{data.rangeActive ? 'Closing' : 'Balance now'}</th>
+				</tr>
+			</thead>
+			<tbody>
+				{#each data.position as p (p.accountId)}
+					<tr class="border-b border-border/60 last:border-0">
+						<td class="px-4 py-2 text-ink">{p.name}</td>
+						<td class="px-4 py-2 text-right tabular-nums text-ink-muted">{peso(p.openingCentavos)}</td>
+						<td class="px-4 py-2 text-right tabular-nums text-ok">{p.inCentavos ? peso(p.inCentavos) : '—'}</td>
+						<td class="px-4 py-2 text-right tabular-nums text-danger">{p.outCentavos ? peso(p.outCentavos) : '—'}</td>
+						<td class="px-4 py-2 text-right font-medium tabular-nums text-ink">{peso(p.closingCentavos)}</td>
+					</tr>
+				{/each}
+				<tr class="border-t border-border font-semibold">
+					<td class="px-4 py-2 text-ink">Total</td>
+					<td class="px-4 py-2 text-right tabular-nums text-ink-muted">{peso(data.position.reduce((s, p) => s + p.openingCentavos, 0))}</td>
+					<td class="px-4 py-2 text-right tabular-nums">{peso(data.position.reduce((s, p) => s + p.inCentavos, 0))}</td>
+					<td class="px-4 py-2 text-right tabular-nums">{peso(data.position.reduce((s, p) => s + p.outCentavos, 0))}</td>
+					<td class="px-4 py-2 text-right tabular-nums text-ink">{peso(data.position.reduce((s, p) => s + p.closingCentavos, 0))}</td>
+				</tr>
+			</tbody>
+		</table>
+		{#if !data.rangeActive}
+			<p class="border-t border-border px-4 py-2 text-xs text-ink-muted">
+				“Opening” is each account’s starting float, set when it was created (no ledger entry) —
+				this is the gap between the movements list and Cash on hand. Total balance here matches
+				the dashboard’s Cash on hand.
+			</p>
+		{/if}
+	</div>
+
 	<!-- Date range presets (matches the Finance dashboard) -->
 	<div class="mb-2 flex flex-wrap gap-1">
 		<Button
@@ -217,7 +314,13 @@
 			</Table.Header>
 			<Table.Body>
 				{#each data.movements as m (m.id)}
-					<Table.Row class={m.voidedAt ? 'opacity-40' : ''}>
+					<Table.Row
+						class={m.voidedAt
+							? 'opacity-40'
+							: m.sourceType === 'opening'
+								? 'bg-surface-2/40 italic text-ink-muted'
+								: ''}
+					>
 						<Table.Cell class="whitespace-nowrap text-ink-muted">{m.businessDate}</Table.Cell>
 						<Table.Cell class="text-ink">{m.accountName}</Table.Cell>
 						<Table.Cell class="text-ink-muted">{catLabel(m.category)}</Table.Cell>
