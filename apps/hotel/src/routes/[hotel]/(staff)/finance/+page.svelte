@@ -125,7 +125,7 @@
 	<h2 class="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">
 		Balances · as of now
 	</h2>
-	<div class="mb-8">
+	<div class="mb-8 grid gap-4 lg:grid-cols-[1.6fr_1fr] lg:items-start">
 		<section class="rounded-xl border border-border">
 			<div class="flex items-center justify-between border-b border-border px-4 py-3">
 				<div>
@@ -160,6 +160,59 @@
 				{/each}
 			</div>
 		</section>
+
+		<div class="flex flex-col gap-4">
+			<section class="rounded-xl border border-border p-4">
+				<div class="text-xs text-ink-muted">Owed to you</div>
+				<div class="mt-0.5 text-2xl font-semibold text-ink tabular-nums">
+					{peso(data.arOutstandingCentavos)}
+				</div>
+				<div class="mt-0.5 text-xs text-ink-muted">
+					Unpaid city-ledger balances across {data.arCount} account{data.arCount === 1 ? '' : 's'}.
+				</div>
+				<a
+					href="{base}/receivables"
+					class="mt-3 inline-block text-xs text-ink-muted underline underline-offset-2"
+				>
+					Open receivables →
+				</a>
+			</section>
+
+			<section class="rounded-xl border border-brand/40 bg-brand/[0.04]">
+				<div class="border-b border-brand/25 px-4 py-3">
+					<h2 class="text-sm font-semibold text-ink">Day close · {data.today}</h2>
+				</div>
+				<div class="px-4 py-3 text-sm">
+					{#if data.dayClose.closed}
+						<p class="mb-2 text-ink">
+							<Badge variant="outline" class="border-transparent bg-ok/15 text-ok">Closed</Badge>
+							Net cash {peso(data.todayNetCentavos)}.
+						</p>
+						{#if data.finance.canAdmin}
+							<form method="POST" action="?/dayReopen" use:enhance>
+								<input type="hidden" name="businessDate" value={data.today} />
+								<Button type="submit" size="sm" variant="outline">Reopen day</Button>
+							</form>
+						{/if}
+					{:else}
+						<p class="mb-2 text-ink-muted">
+							Open. Net cash so far {peso(data.todayNetCentavos)}
+							{#if data.openShifts.length > 0}· {data.openShifts.length} shift(s) still open{/if}.
+						</p>
+						{#if data.finance.canDayClose}
+							<form method="POST" action="?/dayClose" use:enhance>
+								<input type="hidden" name="businessDate" value={data.today} />
+								<Button type="submit" size="sm" disabled={data.openShifts.length > 0}>
+									Run day close
+								</Button>
+							</form>
+						{:else}
+							<p class="text-xs text-ink-muted">You don't have permission to close the day.</p>
+						{/if}
+					{/if}
+				</div>
+			</section>
+		</div>
 	</div>
 
 	<!-- ══ Activity — selected range ══ -->
@@ -271,8 +324,8 @@
 		</section>
 	</div>
 
-	<!-- ══ Attention + day close ══ -->
-	<div class="grid gap-4 lg:grid-cols-2">
+	<!-- ══ Needs attention ══ -->
+	<div>
 		<section class="rounded-xl border border-border">
 			<div class="border-b border-border px-4 py-3">
 				<h2 class="text-sm font-semibold text-ink">Needs attention</h2>
@@ -298,58 +351,6 @@
 				>
 					<span class="text-ink-muted">Open cashier shifts</span>
 					<span class="text-ink">{data.openShifts.length}</span>
-				</a>
-			</div>
-		</section>
-
-		<section class="rounded-xl border border-brand/40 bg-brand/[0.04]">
-			<div class="border-b border-brand/25 px-4 py-3">
-				<h2 class="text-sm font-semibold text-ink">Day close · {data.today}</h2>
-			</div>
-			<div class="px-4 py-3 text-sm">
-				{#if data.dayClose.closed}
-					<p class="mb-2 text-ink">
-						<Badge variant="outline" class="border-transparent bg-ok/15 text-ok">Closed</Badge>
-						Net cash {peso(data.todayNetCentavos)}.
-					</p>
-					{#if data.finance.canAdmin}
-						<form method="POST" action="?/dayReopen" use:enhance>
-							<input type="hidden" name="businessDate" value={data.today} />
-							<Button type="submit" size="sm" variant="outline">Reopen day</Button>
-						</form>
-					{/if}
-				{:else}
-					<p class="mb-2 text-ink-muted">
-						Open. Net cash so far {peso(data.todayNetCentavos)}
-						{#if data.openShifts.length > 0}· {data.openShifts.length} shift(s) still open{/if}.
-					</p>
-					{#if data.finance.canDayClose}
-						<form method="POST" action="?/dayClose" use:enhance>
-							<input type="hidden" name="businessDate" value={data.today} />
-							<Button type="submit" size="sm" disabled={data.openShifts.length > 0}>
-								Run day close
-							</Button>
-						</form>
-					{:else}
-						<p class="text-xs text-ink-muted">You don't have permission to close the day.</p>
-					{/if}
-				{/if}
-			</div>
-			<div class="flex items-center justify-between border-t border-brand/25 px-4 py-2.5">
-				<div>
-					<div class="text-xs text-ink-muted">Still owed to you (city ledger)</div>
-					<div class="text-lg font-semibold text-ink tabular-nums">
-						{peso(data.arOutstandingCentavos)}
-						<span class="text-xs font-normal text-ink-muted">
-							· {data.arCount} account{data.arCount === 1 ? '' : 's'}
-						</span>
-					</div>
-				</div>
-				<a
-					href="{base}/receivables"
-					class="shrink-0 text-xs text-ink-muted underline underline-offset-2"
-				>
-					Open receivables →
 				</a>
 			</div>
 		</section>
