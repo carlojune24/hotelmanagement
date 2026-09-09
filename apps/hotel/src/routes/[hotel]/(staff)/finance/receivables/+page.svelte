@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
@@ -109,8 +110,16 @@
 						<Table.Cell class="text-right tabular-nums font-medium text-ink">{peso(r.outstandingCentavos)}</Table.Cell>
 						<Table.Cell><Badge variant="outline" class={statusClass[r.status]}>{r.status.replace('_', ' ')}</Badge></Table.Cell>
 						<Table.Cell class="text-right whitespace-nowrap">
+							<a
+								href="/{page.params.hotel}/print/statement/{r.id}"
+								target="_blank"
+								rel="noopener"
+								class="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
+							>
+								Statement
+							</a>
 							{#if (r.status === 'open' || r.status === 'partial') && data.finance.canReceivable}
-								<button type="button" onclick={() => (settlingId = settlingId === r.id ? null : r.id)} class="text-xs text-ok underline underline-offset-2">Collect</button>
+								<button type="button" onclick={() => (settlingId = settlingId === r.id ? null : r.id)} class="ml-2 text-xs text-ok underline underline-offset-2">Collect</button>
 								{#if data.finance.canAdmin}
 									<form method="POST" action="?/writeOff" use:enhance class="inline">
 										<input type="hidden" name="id" value={r.id} />

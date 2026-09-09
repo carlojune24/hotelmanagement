@@ -1,12 +1,20 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/index';
-import { hotels, payments, receivables, type Receivable } from '../db/schema/index';
+import {
+	cashAccounts,
+	cashMovements,
+	hotels,
+	payments,
+	receivables,
+	type Receivable
+} from '../db/schema/index';
 import { writeAudit } from '../audit';
 import type { SessionUser } from '../auth/session';
 import { ensureFolio, getFolioDetail, getOrderIdForTarget, type FolioTarget } from '../folio';
 import { FinanceError, businessDateFor, pesos, type Tx } from './shared';
 import { recordCashMovement } from './cash';
 import { getFinanceSettings } from './settings';
+import { getBirSettings } from './documents';
 import { getDefaultOpenShift } from './shifts';
 import type { PaymentMethod } from './payments';
 
@@ -223,6 +231,206 @@ export async function listReceivables(
 		.from(receivables)
 		.where(and(...conds))
 		.orderBy(desc(receivables.openedAt));
+}
+
+// ---------------------------------------------------------------------------
+// Statement of Account — a non-accountable billing document for one receivable
+// ---------------------------------------------------------------------------
+
+export interface StatementLine {
+	description: string;
+	quantity: number;
+	totalCentavos: number;
+}
+export interface StatementPayment {
+	date: string;
+	amountCentavos: number;
+	memo: string | null;
+}
+export interface StatementOfAccount {
+	hotel: {
+		name: string;
+		legalName: string | null;
+		address: string | null;
+		tin: string | null;
+		isVatRegistered: boolean;
+		footerNote: string | null;
+	};
+	receivable: {
+		id: string;
+		billToName: string;
+		billToCompany: string | null;
+		referenceNo: string | null;
+		notes: string | null;
+		status: Receivable['status'];
+		openedOn: string; // ISO date
+		originalCentavos: number;
+		outstandingCentavos: number;
+	};
+	lines: StatementLine[];
+	/** Sum of the (non-voided) folio charge lines above. */
+	chargesTotalCentavos: number;
+	/** Charges already settled at or before check-out, before the balance was
+	 *  carried to this account (`chargesTotal − originalAmount`). */
+	preSettledCentavos: number;
+	/** Real collections against the receivable (not the house_use squaring). */
+	payments: StatementPayment[];
+	paymentsTotalCentavos: number;
+	daysOutstanding: number;
+	statementDate: string; // ISO date
+	remittance: { accountName: string; institution: string | null; accountRef: string | null } | null;
+}
+
+/**
+ * Assembles a Statement of Account for one city-ledger receivable — the
+ * follow-up billing document sent to the company. Regenerable any time; it
+ * reflects the current outstanding balance and age. Charge lines come from the
+ * underlying folio; "payments received" are the real `settleReceivable`
+ * collections, never the `house_use` entry that squared the folio at checkout.
+ */
+export async function getStatementOfAccount(
+	hotelId: string,
+	receivableId: string
+): Promise<StatementOfAccount | null> {
+	const [r] = await db
+		.select()
+		.from(receivables)
+		.where(and(eq(receivables.id, receivableId), eq(receivables.hotelId, hotelId)))
+		.limit(1);
+	if (!r) return null;
+
+	const [hotel] = await db
+		.select({
+			name: hotels.name,
+			legalName: hotels.legalName,
+			addressLine: hotels.addressLine,
+			city: hotels.city,
+			timezone: hotels.timezone
+		})
+		.from(hotels)
+		.where(eq(hotels.id, hotelId))
+		.limit(1);
+	if (!hotel) return null;
+
+	const [bir, settings] = await Promise.all([getBirSettings(hotelId), getFinanceSettings(hotelId)]);
+
+	const target: FolioTarget | null = r.bookingId
+		? { kind: 'room', bookingId: r.bookingId }
+		: r.hallBookingId
+			? { kind: 'hall', hallBookingId: r.hallBookingId }
+			: null;
+
+	let lines: StatementLine[] = [];
+	if (target) {
+		try {
+			const folio = await getFolioDetail(hotelId, target);
+			lines = folio.charges
+				.filter((c) => !c.voidedAt)
+				.map((c) => ({
+					description: c.description,
+					quantity: c.quantity,
+					totalCentavos: c.totalCentavos
+				}));
+		} catch {
+			lines = [];
+		}
+	}
+	// Fall back to a single lump-sum line if the folio yielded nothing.
+	if (lines.length === 0) {
+		lines = [
+			{
+				description: 'Outstanding balance carried to city ledger',
+				quantity: 1,
+				totalCentavos: r.originalAmountCentavos
+			}
+		];
+	}
+	const chargesTotalCentavos = lines.reduce((sum, l) => sum + l.totalCentavos, 0);
+	// Part of the folio was already paid before the balance moved to this account.
+	const preSettledCentavos = Math.max(0, chargesTotalCentavos - r.originalAmountCentavos);
+
+	const collectionRows = await db
+		.select({
+			businessDate: cashMovements.businessDate,
+			amountCentavos: cashMovements.amountCentavos,
+			memo: cashMovements.memo
+		})
+		.from(cashMovements)
+		.where(
+			and(
+				eq(cashMovements.hotelId, hotelId),
+				eq(cashMovements.sourceType, 'receivable_settlement'),
+				eq(cashMovements.sourceId, r.id),
+				isNull(cashMovements.voidedAt)
+			)
+		)
+		.orderBy(asc(cashMovements.businessDate));
+	const statementPayments: StatementPayment[] = collectionRows.map((c) => ({
+		date: c.businessDate,
+		amountCentavos: c.amountCentavos,
+		memo: c.memo
+	}));
+	const paymentsTotalCentavos = statementPayments.reduce((s, p) => s + p.amountCentavos, 0);
+
+	const statementDate = businessDateFor(hotel.timezone);
+	const openedOn = new Date(r.openedAt).toISOString().slice(0, 10);
+	const daysOutstanding = Math.max(
+		0,
+		Math.floor(
+			(new Date(`${statementDate}T00:00:00Z`).getTime() - new Date(`${openedOn}T00:00:00Z`).getTime()) /
+				86_400_000
+		)
+	);
+
+	let remittance: StatementOfAccount['remittance'] = null;
+	if (settings.defaultBankAccountId) {
+		const [bank] = await db
+			.select({
+				name: cashAccounts.name,
+				institution: cashAccounts.institution,
+				accountRef: cashAccounts.accountRef
+			})
+			.from(cashAccounts)
+			.where(eq(cashAccounts.id, settings.defaultBankAccountId))
+			.limit(1);
+		if (bank)
+			remittance = {
+				accountName: bank.name,
+				institution: bank.institution,
+				accountRef: bank.accountRef
+			};
+	}
+
+	return {
+		hotel: {
+			name: hotel.name,
+			legalName: hotel.legalName,
+			address:
+				bir?.registeredAddress || [hotel.addressLine, hotel.city].filter(Boolean).join(', ') || null,
+			tin: bir?.tin ?? null,
+			isVatRegistered: bir?.isVatRegistered ?? false,
+			footerNote: bir?.footerNote ?? null
+		},
+		receivable: {
+			id: r.id,
+			billToName: r.billToName,
+			billToCompany: r.billToCompany,
+			referenceNo: r.referenceNo,
+			notes: r.notes,
+			status: r.status,
+			openedOn,
+			originalCentavos: r.originalAmountCentavos,
+			outstandingCentavos: r.outstandingCentavos
+		},
+		lines,
+		chargesTotalCentavos,
+		preSettledCentavos,
+		payments: statementPayments,
+		paymentsTotalCentavos,
+		daysOutstanding,
+		statementDate,
+		remittance
+	};
 }
 
 export interface ArAgingBucket {

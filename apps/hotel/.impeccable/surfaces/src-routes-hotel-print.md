@@ -8,11 +8,26 @@ related_targets: []
 # Surface: Printed accountable-form documents (`src/routes/[hotel]/print`)
 
 **Scope:** the printable / PDF documents the hotel issues from a folio — Invoice,
-Official Receipt, X-reading, Z-reading, and the OR-liquidation register. One shared
+Official Receipt, X-reading, Z-reading, the OR-liquidation register, and the
+**Statement of Account** (city-ledger follow-up billing, `2026-09-09`). One shared
 template family, rendered identically for a guest (order `access_token`) and for
 staff (`folio:read` / finance caps), and to PDF via Playwright `chromium.pdf`.
 The `/{slug}/finance/bir` management screens are **not** this surface — they inherit
 the existing staff shadcn/oklch shell and need no new design.
+
+**Statement of Account variant** (`src/lib/components/print/statement-of-account.svelte`,
+route `/{slug}/print/statement/[receivableId]`, `finance:read`; opened from a
+"Statement" link on the `/{slug}/finance/receivables` City-ledger row). Same A4
+shell, 3px double-rule frame, Inter + JetBrains Mono two-register split, ruled
+filler, mm/pt geometry. **One deliberate deviation:** it is *not* a serial-numbered
+accountable form, so its doctype word ("STATEMENT OF ACCOUNT") is set in ink, not
+`--af-red` — the Ink-and-One-Red Rule reserves red for accountable-form serials.
+Totals ladder reconciles Charges → less settled-at-checkout → balance carried to
+the account → less payments received → **Amount due**. Footer always carries the
+"statement, not an Official Receipt / OR issued on payment / not a BIR-registered
+document" lines (a statement is non-accountable regardless of the hotel's BIR
+config). Data from `getStatementOfAccount(hotelId, receivableId)` in
+`lib/server/finance/receivables.ts`.
 
 **Visitor mode:** Read (understand a financial record) under hard Operate constraints
 (staff task; deterministic PDF; byte-identical guest vs staff output).
