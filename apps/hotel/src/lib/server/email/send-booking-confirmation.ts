@@ -18,14 +18,16 @@ import { alreadySent, sendMail, type SendMailResult } from './send';
 
 /**
  * Gathers an order's data and sends the guest their booking-confirmation email.
- * Idempotent (skips if a `sent` row is already logged for the order) and never
- * throws — the caller (the PayMongo webhook) treats it as best-effort.
+ * Idempotent by default (skips if a `sent` row is already logged for the order)
+ * and never throws — the PayMongo webhook treats it as best-effort. Pass
+ * `{ force: true }` for a deliberate staff resend, which bypasses that guard.
  */
 export async function sendBookingConfirmation(
-	orderId: string
+	orderId: string,
+	opts: { force?: boolean } = {}
 ): Promise<SendMailResult & { skipped?: string }> {
 	try {
-		if (await alreadySent(orderId, 'booking_confirmation')) {
+		if (!opts.force && (await alreadySent(orderId, 'booking_confirmation'))) {
 			return { ok: true, skipped: 'already-sent' };
 		}
 

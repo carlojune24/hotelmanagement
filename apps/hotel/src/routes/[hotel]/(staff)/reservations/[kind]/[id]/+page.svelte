@@ -15,6 +15,10 @@
 	const base = $derived(`/${page.params.hotel}`);
 	const peso = (centavos: number) => `₱${(centavos / 100).toFixed(2)}`;
 	const statusLabel = (s: string) => s.replace(/_/g, ' ');
+	const fmtDateTime = (v: string | Date) =>
+		new Date(v).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
+	let resending = $state(false);
 
 	$effect(() => {
 		if (form?.error) toast.error(form.error);
@@ -33,6 +37,12 @@
 
 	function paymentStatusClass(status: string): string {
 		if (status === 'paid') return 'border-transparent bg-ok/15 text-ok';
+		if (status === 'failed') return 'border-transparent bg-danger/15 text-danger';
+		return 'border-border bg-surface-2 text-ink-muted';
+	}
+
+	function emailStatusClass(status: string): string {
+		if (status === 'sent') return 'border-transparent bg-ok/15 text-ok';
 		if (status === 'failed') return 'border-transparent bg-danger/15 text-danger';
 		return 'border-border bg-surface-2 text-ink-muted';
 	}
@@ -244,6 +254,55 @@
 							{/if}
 						</div>
 						<span class="text-ink">{peso(p.amountCentavos)}</span>
+					</div>
+				{/each}
+			</div>
+		{/if}
+	</div>
+
+	<!-- Confirmation email -->
+	<div class="mt-4 rounded-xl border border-border p-4">
+		<div class="mb-2 flex items-center justify-between gap-3">
+			<h2 class="text-sm font-semibold text-ink">Confirmation email</h2>
+			{#if data.detail.order.status === 'confirmed'}
+				<form
+					method="POST"
+					action="?/resendConfirmation"
+					use:enhance={() => {
+						resending = true;
+						return async ({ update }) => {
+							await update();
+							resending = false;
+						};
+					}}
+				>
+					<Button type="submit" variant="outline" size="sm" disabled={resending}>
+						{resending
+							? 'Sending…'
+							: data.detail.confirmationEmails.length > 0
+								? 'Resend'
+								: 'Send now'}
+					</Button>
+				</form>
+			{/if}
+		</div>
+
+		{#if data.detail.confirmationEmails.length === 0}
+			<p class="text-sm text-ink-muted">
+				Not sent yet — it goes out automatically once payment is confirmed.
+			</p>
+		{:else}
+			<div class="space-y-2.5">
+				{#each data.detail.confirmationEmails as m (m.id)}
+					<div class="flex items-start justify-between gap-3 text-sm">
+						<div class="min-w-0">
+							<Badge variant="outline" class={emailStatusClass(m.status)}>{m.status}</Badge>
+							<span class="ml-2 break-all text-ink">{m.toAddress}</span>
+							{#if m.status === 'failed' && m.error}
+								<div class="mt-0.5 text-xs text-danger">{m.error}</div>
+							{/if}
+						</div>
+						<span class="shrink-0 text-xs text-ink-muted">{fmtDateTime(m.createdAt)}</span>
 					</div>
 				{/each}
 			</div>

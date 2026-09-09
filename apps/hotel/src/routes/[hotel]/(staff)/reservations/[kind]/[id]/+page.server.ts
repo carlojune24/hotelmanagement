@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireCap } from '$lib/server/auth/rbac';
 import { getHallBookingDetail, getRoomBookingDetail } from '$lib/server/reservations';
 import { CheckInError, checkInBooking, listEligibleRooms } from '$lib/server/front-desk';
+import { sendBookingConfirmation } from '$lib/server/email/send-booking-confirmation';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, params }) => {
@@ -49,5 +50,26 @@ export const actions: Actions = {
 			if (e instanceof CheckInError) return fail(400, { error: e.message });
 			throw e;
 		}
+	},
+
+	resendConfirmation: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		const hotelId = event.locals.hotel!.id;
+
+		const detail =
+			event.params.kind === 'room'
+				? await getRoomBookingDetail(hotelId, event.params.id)
+				: await getHallBookingDetail(hotelId, event.params.id);
+		if (!detail) return fail(404, { error: 'Booking not found.' });
+
+		if (detail.order.status !== 'confirmed') {
+			return fail(400, { error: 'Only a confirmed booking has a confirmation to send.' });
+		}
+
+		const res = await sendBookingConfirmation(detail.order.id, { force: true });
+		if (!res.ok) {
+			return fail(502, { error: `Could not send: ${res.error ?? 'unknown error'}` });
+		}
+		return { ok: `Confirmation email sent to ${detail.guest.email}.` };
 	}
 };

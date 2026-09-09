@@ -54,6 +54,15 @@ check-in/check-out manifest pair is stacked, not arrow-paired, for legibility at
 600px. `--ledger-ink-muted` nudged to `#6b6155` and the default body ground set to
 a warm `#f4f1ea` so the mail keeps the world's warm register and clears 4.5:1.
 
+**Staff view (shipped 2026-09-09):** the reservation detail page
+(`(staff)/reservations/[kind]/[id]`) gains a "Confirmation email" card — the
+`email_log` rows for the order (status badge, recipient, timestamp, error text)
+and a **Resend / Send now** action (`?/resendConfirmation`, `booking:write`,
+`sendBookingConfirmation(orderId, { force: true })`). Pure staff shadcn/oklch
+operate-mode, matching the page's existing `rounded-xl border p-4` card idiom and
+the payment-status badge vocabulary — no new visual world.
+
 **Out of scope:** the confirmation *page* itself (already built); SMS (post-MVP);
-attaching the BIR Invoice/OR PDF (BIR module Step 4); a staff-facing email log
-viewer / resend button (the `email_log` table is the hook for it).
+attaching the BIR Invoice/OR PDF (BIR module Step 4); a hotel-wide email-log
+page (only the per-reservation view exists); cancellation / payment-failed guest
+emails.

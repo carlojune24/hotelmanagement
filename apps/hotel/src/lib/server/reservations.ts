@@ -4,6 +4,7 @@ import {
 	bookings,
 	bookingRooms,
 	bookingStatusHistory,
+	emailLog,
 	hallBookings,
 	hallBookingStatusHistory,
 	orders,
@@ -15,6 +16,15 @@ import {
 	rooms,
 	roomAssignments
 } from './db/schema/index';
+
+/** Confirmation-email attempts for an order, newest first. */
+function orderEmails(orderId: string) {
+	return db
+		.select()
+		.from(emailLog)
+		.where(and(eq(emailLog.orderId, orderId), eq(emailLog.type, 'booking_confirmation')))
+		.orderBy(desc(emailLog.createdAt));
+}
 
 export type ReservationKind = 'room' | 'hall';
 
@@ -142,7 +152,7 @@ export async function getRoomBookingDetail(hotelId: string, bookingId: string) {
 		.limit(1);
 	if (!row) return null;
 
-	const [history, paymentRows, assignedRooms] = await Promise.all([
+	const [history, paymentRows, assignedRooms, confirmationEmails] = await Promise.all([
 		db
 			.select()
 			.from(bookingStatusHistory)
@@ -157,10 +167,11 @@ export async function getRoomBookingDetail(hotelId: string, bookingId: string) {
 			.select({ roomNumber: rooms.roomNumber })
 			.from(roomAssignments)
 			.innerJoin(rooms, eq(rooms.id, roomAssignments.roomId))
-			.where(eq(roomAssignments.bookingRoomId, row.bookingRoom.id))
+			.where(eq(roomAssignments.bookingRoomId, row.bookingRoom.id)),
+		orderEmails(row.order.id)
 	]);
 
-	return { ...row, history, payments: paymentRows, assignedRooms };
+	return { ...row, history, payments: paymentRows, assignedRooms, confirmationEmails };
 }
 
 export async function getHallBookingDetail(hotelId: string, hallBookingId: string) {
@@ -179,7 +190,7 @@ export async function getHallBookingDetail(hotelId: string, hallBookingId: strin
 		.limit(1);
 	if (!row) return null;
 
-	const [history, paymentRows] = await Promise.all([
+	const [history, paymentRows, confirmationEmails] = await Promise.all([
 		db
 			.select()
 			.from(hallBookingStatusHistory)
@@ -189,8 +200,9 @@ export async function getHallBookingDetail(hotelId: string, hallBookingId: strin
 			.select()
 			.from(payments)
 			.where(eq(payments.orderId, row.order.id))
-			.orderBy(desc(payments.createdAt))
+			.orderBy(desc(payments.createdAt)),
+		orderEmails(row.order.id)
 	]);
 
-	return { ...row, history, payments: paymentRows };
+	return { ...row, history, payments: paymentRows, confirmationEmails };
 }
