@@ -5,6 +5,7 @@ import { listFunctionHalls } from '$lib/server/hall-availability';
 import { listApprovedReviews } from '$lib/server/reviews';
 import { listDiningItems, parseDiningConfig } from '$lib/server/dining';
 import { listHotelAmenities } from '$lib/server/availability';
+import { expirePendingOrders } from '$lib/server/orders';
 import type { LayoutServerLoad } from './$types';
 
 /** Shared across every page under book/ — the storefront nav (now a shared component reused
@@ -18,6 +19,13 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 	const accent = branding.accentColor ?? DEFAULT_ACCENT_COLOR;
 	const paper = branding.paperColor ?? DEFAULT_PAPER_COLOR;
 	const hotelId = locals.hotel.id;
+
+	// Opportunistic release of expired unpaid holds so availability shown below is
+	// current. Fire-and-forget — never let a sweep failure or its latency touch the
+	// storefront render.
+	void expirePendingOrders({ hotelId }).catch((e) =>
+		console.error('book layout: expirePendingOrders failed', e)
+	);
 
 	const [functionHalls, reviews, diningItems, hotelAmenities] = await Promise.all([
 		listFunctionHalls(hotelId),

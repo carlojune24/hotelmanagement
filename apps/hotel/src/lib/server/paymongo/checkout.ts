@@ -70,3 +70,13 @@ export async function createCheckoutSession(params: {
 
 	return { checkoutSessionId: res.data.id, checkoutUrl: res.data.attributes.checkout_url };
 }
+
+/**
+ * Expires a hosted Checkout Session so its `checkout_url` can no longer be paid.
+ * Used when an unpaid order's inventory hold lapses (see
+ * `lib/server/orders.ts`'s `expirePendingOrders`). PayMongo returns 4xx if the
+ * session is already paid or expired — callers treat any failure as non-fatal.
+ */
+export async function expireCheckoutSession(checkoutSessionId: string): Promise<void> {
+	await paymongoRequest(`/checkout_sessions/${checkoutSessionId}/expire`, { method: 'POST' });
+}

@@ -68,6 +68,8 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		redirect(303, `../confirmation/${order.id}?t=${order.accessToken}`);
 	}
 
+	const expired = order.status === 'cancelled';
+
 	const [guest] = await db.select().from(guests).where(eq(guests.id, order.guestId));
 	const { roomLines, hallLines } = await loadOrderLines(order.id);
 
@@ -83,6 +85,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		guest: { fullName: guest!.fullName, email: guest!.email },
 		roomLines,
 		hallLines,
+		expired,
 		cancelled: url.searchParams.get('cancelled') === '1'
 	};
 };

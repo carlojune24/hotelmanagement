@@ -23,7 +23,14 @@
 		{itemCount} item{itemCount === 1 ? '' : 's'} · {data.guest.fullName}
 	</p>
 
-	{#if data.cancelled}
+	{#if data.expired}
+		<p
+			class="mt-4 rounded-md border border-[var(--ledger-rule)] bg-[var(--ledger-paper-2)] px-4 py-3 text-sm"
+		>
+			This booking has expired — payment wasn't completed in time and the rooms have been
+			released. Please <a class="underline" href="/{page.params.hotel}/book">start a new search</a>.
+		</p>
+	{:else if data.cancelled}
 		<p
 			class="mt-4 rounded-md border border-[var(--ledger-rule)] bg-[var(--ledger-paper-2)] px-4 py-3 text-sm"
 		>
@@ -93,28 +100,30 @@
 		</Table.Root>
 	</div>
 
-	<p class="mt-4 text-xs text-[var(--ledger-ink-muted)]">
-		You'll be redirected to PayMongo to complete payment securely, then brought back here.
-	</p>
+	{#if !data.expired}
+		<p class="mt-4 text-xs text-[var(--ledger-ink-muted)]">
+			You'll be redirected to PayMongo to complete payment securely, then brought back here.
+		</p>
 
-	{#if form?.error}
-		<p class="mt-4 text-sm" style="color: var(--ledger-danger, #b91c1c);">{form.error}</p>
+		{#if form?.error}
+			<p class="mt-4 text-sm" style="color: var(--ledger-danger, #b91c1c);">{form.error}</p>
+		{/if}
+
+		<form
+			method="POST"
+			action="?/pay&t={page.url.searchParams.get('t')}"
+			use:enhance={() => {
+				submitting = true;
+				return async ({ update }) => {
+					await update();
+					submitting = false;
+				};
+			}}
+			class="mt-6"
+		>
+			<Button type="submit" class="ledger-btn-primary" disabled={submitting}>
+				{submitting ? 'Redirecting…' : `Pay ${peso(data.order.totalCentavos)} with PayMongo`}
+			</Button>
+		</form>
 	{/if}
-
-	<form
-		method="POST"
-		action="?/pay&t={page.url.searchParams.get('t')}"
-		use:enhance={() => {
-			submitting = true;
-			return async ({ update }) => {
-				await update();
-				submitting = false;
-			};
-		}}
-		class="mt-6"
-	>
-		<Button type="submit" class="ledger-btn-primary" disabled={submitting}>
-			{submitting ? 'Redirecting…' : `Pay ${peso(data.order.totalCentavos)} with PayMongo`}
-		</Button>
-	</form>
 </div>

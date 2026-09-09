@@ -148,6 +148,25 @@ export async function POST({ request }) {
 					}
 				}
 
+				// A payment that lands after the order's hold already lapsed (see
+				// `lib/server/orders.ts`'s `expirePendingOrders`): the room may have been
+				// released or re-sold. The payment + cash movement above are kept so money
+				// is never dropped — flag it for a staff refund and do not re-confirm.
+				if (order.status === 'cancelled') {
+					await tx.insert(orderStatusHistory).values({
+						orderId: order.id,
+						fromStatus: 'cancelled',
+						toStatus: 'cancelled',
+						note: 'Payment received on a cancelled order — refund required'
+					});
+					console.error(
+						'paymongo webhook: payment on cancelled order — needs refund',
+						order.id,
+						paymentRow!.id
+					);
+					return;
+				}
+
 				// Only advance an order that's still awaiting payment — never clobber a
 				// further-advanced status.
 				if (order.status !== 'pending_payment') return;
@@ -201,6 +220,59 @@ export async function POST({ request }) {
 						note: 'PayMongo checkout session paid'
 					});
 				}
+			});
+			break;
+		}
+		case 'checkout_session.payment.failed':
+		case 'payment.failed': {
+			// A declined attempt does NOT kill the checkout — the guest can retry the
+			// same session — so the order/inventory is left untouched; the abandoned-
+			// hold sweep (`expirePendingOrders`) is what eventually releases it. We only
+			// record the failed attempt for staff visibility, when it carries our
+			// checkout-session metadata (a bare `payment.failed` may not).
+			const checkoutSession = event?.data?.attributes?.data;
+			const orderId = checkoutSession?.attributes?.metadata?.orderId as string | undefined;
+			const payment = checkoutSession?.attributes?.payments?.[0] ?? checkoutSession;
+			const paymentId = payment?.id as string | undefined;
+			const amountCentavos = payment?.attributes?.amount as number | undefined;
+			const currency = (payment?.attributes?.currency as string | undefined) ?? 'PHP';
+
+			if (!orderId || !eventId || amountCentavos == null) {
+				console.warn('paymongo webhook: failed payment without linkable order', eventId, type);
+				break;
+			}
+
+			await db.transaction(async (tx) => {
+				const existing = await tx
+					.select({ id: payments.id })
+					.from(payments)
+					.where(eq(payments.paymongoEventId, eventId))
+					.then((r) => r.at(0));
+				if (existing) return;
+
+				const order = await tx
+					.select({ id: orders.id })
+					.from(orders)
+					.where(eq(orders.id, orderId))
+					.then((r) => r.at(0));
+				if (!order) {
+					console.error('paymongo webhook: failed-payment order not found', orderId);
+					return;
+				}
+
+				await tx.insert(payments).values({
+					orderId: order.id,
+					provider: 'paymongo',
+					method: 'paymongo',
+					purpose: 'settlement',
+					paymongoCheckoutSessionId: checkoutSession?.id,
+					paymongoPaymentId: paymentId,
+					paymongoEventId: eventId,
+					status: 'failed',
+					amountCentavos,
+					currency,
+					rawPayload: event
+				});
 			});
 			break;
 		}

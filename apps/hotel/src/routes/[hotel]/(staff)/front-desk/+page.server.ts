@@ -34,6 +34,7 @@ import { getFinanceSettings } from '$lib/server/finance/settings';
 import { getDefaultOpenShift } from '$lib/server/finance/shifts';
 import { openShift as openShiftFn } from '$lib/server/finance/shifts';
 import { MAX_ROOMS_PER_LINE } from '$lib/pricing-utils';
+import { expirePendingOrders } from '$lib/server/orders';
 import type { Actions, PageServerLoad } from './$types';
 
 const PAYMENT_METHODS = ['cash', 'card', 'gcash', 'maya', 'bank_transfer', 'cheque'] as const;
@@ -41,6 +42,10 @@ const PAYMENT_METHODS = ['cash', 'card', 'gcash', 'maya', 'bank_transfer', 'cheq
 export const load: PageServerLoad = async ({ locals }) => {
 	requireCap(locals.user, locals.role, 'booking:read');
 	const hotel = locals.hotel!;
+	// Release expired unpaid online holds before the room grid is read.
+	void expirePendingOrders({ hotelId: hotel.id }).catch((e) =>
+		console.error('front-desk: expirePendingOrders failed', e)
+	);
 	const businessDate = todayInTimezone(hotel.timezone);
 	const [grid, hallGrid, amenityItemOptions, financeSettings, openShift, drawers] =
 		await Promise.all([
