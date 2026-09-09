@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, isNull } from 'drizzle-orm';
 import { db } from './db/index';
 import {
 	amenityItems,
@@ -22,15 +22,22 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export class FolioError extends Error {}
 
 /** A folio always belongs to exactly one of these — see `folios_exactly_one_target` in the schema. */
-export type FolioTarget = { kind: 'room'; bookingId: string } | { kind: 'hall'; hallBookingId: string };
+export type FolioTarget =
+	{ kind: 'room'; bookingId: string } | { kind: 'hall'; hallBookingId: string };
 
 function folioWhereFor(target: FolioTarget) {
-	return target.kind === 'room' ? eq(folios.bookingId, target.bookingId) : eq(folios.hallBookingId, target.hallBookingId);
+	return target.kind === 'room'
+		? eq(folios.bookingId, target.bookingId)
+		: eq(folios.hallBookingId, target.hallBookingId);
 }
 
-async function getOrderIdForTarget(target: FolioTarget): Promise<string | null> {
+export async function getOrderIdForTarget(target: FolioTarget): Promise<string | null> {
 	if (target.kind === 'room') {
-		const [row] = await db.select({ orderId: bookings.orderId }).from(bookings).where(eq(bookings.id, target.bookingId)).limit(1);
+		const [row] = await db
+			.select({ orderId: bookings.orderId })
+			.from(bookings)
+			.where(eq(bookings.id, target.bookingId))
+			.limit(1);
 		return row?.orderId ?? null;
 	}
 	const [row] = await db
@@ -48,15 +55,23 @@ async function getOrderIdForTarget(target: FolioTarget): Promise<string | null> 
  * — so the folio's math starts exactly balanced and only owes anything once a new charge is
  * added without a matching new payment. Idempotent: safe to call on every read.
  */
-async function ensureFolio(tx: Tx, hotelId: string, target: FolioTarget): Promise<string> {
-	const [existing] = await tx.select({ id: folios.id }).from(folios).where(folioWhereFor(target)).limit(1);
+export async function ensureFolio(tx: Tx, hotelId: string, target: FolioTarget): Promise<string> {
+	const [existing] = await tx
+		.select({ id: folios.id })
+		.from(folios)
+		.where(folioWhereFor(target))
+		.limit(1);
 	if (existing) return existing.id;
 
 	let seedDescription: string;
 	let seedTotalCentavos: number;
 
 	if (target.kind === 'room') {
-		const [booking] = await tx.select().from(bookings).where(eq(bookings.id, target.bookingId)).limit(1);
+		const [booking] = await tx
+			.select()
+			.from(bookings)
+			.where(eq(bookings.id, target.bookingId))
+			.limit(1);
 		if (!booking || booking.hotelId !== hotelId) throw new FolioError('Booking not found.');
 		seedDescription = `Room stay (${booking.checkIn} – ${booking.checkOut})`;
 		seedTotalCentavos = booking.totalCentavos;
@@ -130,16 +145,22 @@ export async function getFolioDetail(hotelId: string, target: FolioTarget): Prom
 		.orderBy(asc(folioCharges.createdAt));
 
 	const orderId = await getOrderIdForTarget(target);
+	// Non-voided paid payments only. A `refund`-purpose row carries a negative
+	// `amountCentavos`, so it correctly reduces the paid total (raising the balance).
 	const paymentRows = orderId
 		? await db
 				.select({ amountCentavos: payments.amountCentavos })
 				.from(payments)
-				.where(and(eq(payments.orderId, orderId), eq(payments.status, 'paid')))
+				.where(
+					and(eq(payments.orderId, orderId), eq(payments.status, 'paid'), isNull(payments.voidedAt))
+				)
 		: [];
 
 	// Voided lines stay in the ledger for the audit trail (see the schema's own doc comment)
 	// but never count toward what's actually owed.
-	const chargesTotalCentavos = chargeRows.filter((c) => !c.voidedAt).reduce((sum, c) => sum + c.totalCentavos, 0);
+	const chargesTotalCentavos = chargeRows
+		.filter((c) => !c.voidedAt)
+		.reduce((sum, c) => sum + c.totalCentavos, 0);
 	const paidTotalCentavos = paymentRows.reduce((sum, p) => sum + p.amountCentavos, 0);
 
 	return {
@@ -166,15 +187,27 @@ export async function getFolioDetail(hotelId: string, target: FolioTarget): Prom
 async function insertCharge(
 	hotelId: string,
 	target: FolioTarget,
-	input: { description: string; quantity: number; unitPriceCentavos: number; taxable: boolean; amenityItemId?: string },
+	input: {
+		description: string;
+		quantity: number;
+		unitPriceCentavos: number;
+		taxable: boolean;
+		amenityItemId?: string;
+	},
 	actor: SessionUser | null
 ): Promise<void> {
 	await db.transaction(async (tx) => {
 		const folioId = await ensureFolio(tx, hotelId, target);
-		const [hotel] = await tx.select({ vatRateBps: hotels.vatRateBps }).from(hotels).where(eq(hotels.id, hotelId)).limit(1);
+		const [hotel] = await tx
+			.select({ vatRateBps: hotels.vatRateBps })
+			.from(hotels)
+			.where(eq(hotels.id, hotelId))
+			.limit(1);
 
 		const subtotalCentavos = input.quantity * input.unitPriceCentavos;
-		const taxCentavos = input.taxable ? Math.round((subtotalCentavos * (hotel?.vatRateBps ?? 0)) / 10000) : 0;
+		const taxCentavos = input.taxable
+			? Math.round((subtotalCentavos * (hotel?.vatRateBps ?? 0)) / 10000)
+			: 0;
 
 		await tx.insert(folioCharges).values({
 			folioId,
@@ -200,14 +233,26 @@ export async function addAmenityItemCharge(
 	const [item] = await db
 		.select()
 		.from(amenityItems)
-		.where(and(eq(amenityItems.id, amenityItemId), eq(amenityItems.hotelId, hotelId), eq(amenityItems.isActive, true)))
+		.where(
+			and(
+				eq(amenityItems.id, amenityItemId),
+				eq(amenityItems.hotelId, hotelId),
+				eq(amenityItems.isActive, true)
+			)
+		)
 		.limit(1);
 	if (!item) throw new FolioError('That item is no longer available.');
 
 	await insertCharge(
 		hotelId,
 		target,
-		{ description: item.name, quantity, unitPriceCentavos: item.priceCentavos, taxable: item.taxable, amenityItemId: item.id },
+		{
+			description: item.name,
+			quantity,
+			unitPriceCentavos: item.priceCentavos,
+			taxable: item.taxable,
+			amenityItemId: item.id
+		},
 		actor
 	);
 
@@ -242,14 +287,25 @@ export async function addExtensionFeeCharge(
 		.limit(1);
 	if (!hotel) throw new FolioError('Hotel not found.');
 
-	const perHour = kind === 'late_checkout' ? hotel.lateCheckoutFeePerHourCentavos : hotel.earlyCheckInFeePerHourCentavos;
-	if (perHour <= 0) throw new FolioError('No rate is configured for this fee — set it in Check-in & check-out settings.');
+	const perHour =
+		kind === 'late_checkout'
+			? hotel.lateCheckoutFeePerHourCentavos
+			: hotel.earlyCheckInFeePerHourCentavos;
+	if (perHour <= 0)
+		throw new FolioError(
+			'No rate is configured for this fee — set it in Check-in & check-out settings.'
+		);
 	const label = kind === 'late_checkout' ? 'Late checkout fee' : 'Early check-in fee';
 
 	await insertCharge(
 		hotelId,
 		{ kind: 'room', bookingId },
-		{ description: `${label} (${hours}h)`, quantity: hours, unitPriceCentavos: perHour, taxable: false },
+		{
+			description: `${label} (${hours}h)`,
+			quantity: hours,
+			unitPriceCentavos: perHour,
+			taxable: false
+		},
 		actor
 	);
 
@@ -279,7 +335,11 @@ export async function voidFolioCharge(
 	actor: SessionUser | null
 ): Promise<void> {
 	await db.transaction(async (tx) => {
-		const [folio] = await tx.select({ id: folios.id }).from(folios).where(and(folioWhereFor(target), eq(folios.hotelId, hotelId))).limit(1);
+		const [folio] = await tx
+			.select({ id: folios.id })
+			.from(folios)
+			.where(and(folioWhereFor(target), eq(folios.hotelId, hotelId)))
+			.limit(1);
 		if (!folio) throw new FolioError('Folio not found.');
 
 		const [charge] = await tx
@@ -288,12 +348,17 @@ export async function voidFolioCharge(
 			.where(and(eq(folioCharges.id, chargeId), eq(folioCharges.folioId, folio.id)))
 			.limit(1);
 		if (!charge) throw new FolioError('Charge not found.');
-		if (charge.isBaseCharge) throw new FolioError('The room/hall stay charge itself can\'t be voided.');
+		if (charge.isBaseCharge)
+			throw new FolioError("The room/hall stay charge itself can't be voided.");
 		if (charge.voidedAt) throw new FolioError('That charge is already voided.');
 
 		await tx
 			.update(folioCharges)
-			.set({ voidedAt: new Date(), voidedByUserId: actor?.id ?? null, voidReason: reason?.trim() || null })
+			.set({
+				voidedAt: new Date(),
+				voidedByUserId: actor?.id ?? null,
+				voidReason: reason?.trim() || null
+			})
 			.where(eq(folioCharges.id, chargeId));
 	});
 
@@ -307,35 +372,17 @@ export async function voidFolioCharge(
 	});
 }
 
-/** Pays off the current outstanding balance in cash, on the spot — the front desk's only settlement path today. */
-export async function settleFolioBalance(hotelId: string, target: FolioTarget, actor: SessionUser | null): Promise<void> {
-	const detail = await getFolioDetail(hotelId, target);
-	if (detail.balanceCentavos <= 0) throw new FolioError('There is no outstanding balance to settle.');
-
-	const orderId = await getOrderIdForTarget(target);
-	if (!orderId) throw new FolioError('Booking not found.');
-
-	await db.insert(payments).values({
-		orderId,
-		provider: 'cash',
-		status: 'paid',
-		amountCentavos: detail.balanceCentavos,
-		paidAt: new Date()
-	});
-
-	await writeAudit({
-		hotelId,
-		actor,
-		action: 'folio.settle_balance',
-		entityType: target.kind === 'room' ? 'booking' : 'hall_booking',
-		entityId: target.kind === 'room' ? target.bookingId : target.hallBookingId,
-		after: { amountCentavos: detail.balanceCentavos }
-	});
-}
+// `settleFolioBalance` was removed — payments now go through
+// `lib/server/finance/payments.ts`'s `recordPayment` (method, tendered/change,
+// partial amounts) which also writes the matching `cash_movements` row.
 
 /** Marks a room booking's folio closed once it actually checks out — a historical marker, not a balance gate itself. */
 export async function closeFolio(hotelId: string, bookingId: string): Promise<void> {
-	const [folio] = await db.select({ id: folios.id }).from(folios).where(eq(folios.bookingId, bookingId)).limit(1);
+	const [folio] = await db
+		.select({ id: folios.id })
+		.from(folios)
+		.where(eq(folios.bookingId, bookingId))
+		.limit(1);
 	if (!folio) return;
 	await db
 		.update(folios)

@@ -18,6 +18,9 @@
 	import BanknoteIcon from '@lucide/svelte/icons/banknote';
 	import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
+	import PaymentFields from '$lib/components/staff/payment-fields.svelte';
+	import WalkinPaymentFields from '$lib/components/staff/walkin-payment-fields.svelte';
+	import ClockIcon from '@lucide/svelte/icons/clock';
 	import type { ActionData, PageData } from './$types';
 	import type { HallGridCell, RoomGridCell } from '$lib/server/front-desk';
 	import type { HallPriceBreakdown } from '$lib/server/pricing';
@@ -26,9 +29,12 @@
 
 	const base = $derived(`/${page.params.hotel}`);
 	const peso = (centavos: number) => `₱${(centavos / 100).toFixed(2)}`;
+	const canChargeCityLedger = $derived(data.role === 'hotel_admin');
 
 	const formOk = $derived(form && 'ok' in form ? form.ok : undefined);
 	const formError = $derived(form && 'error' in form ? form.error : undefined);
+	const formPaymentOk = $derived(form && 'paymentOk' in form ? form.paymentOk : undefined);
+	const formShiftError = $derived(form && 'shiftError' in form ? form.shiftError : undefined);
 	const formWalkInError = $derived(form && 'walkInError' in form ? form.walkInError : undefined);
 	const formWalkInSearch = $derived(form && 'walkInSearch' in form ? form.walkInSearch : undefined);
 	const formAvailableRoomTypes = $derived(
@@ -37,14 +43,26 @@
 	const formRoomDetail = $derived(form && 'roomDetail' in form ? form.roomDetail : undefined);
 	const formFolio = $derived(form && 'folio' in form ? form.folio : undefined);
 	const formFolioError = $derived(form && 'folioError' in form ? form.folioError : undefined);
-	const formHallBookingDetail = $derived(form && 'hallBookingDetail' in form ? form.hallBookingDetail : undefined);
+	const formHallBookingDetail = $derived(
+		form && 'hallBookingDetail' in form ? form.hallBookingDetail : undefined
+	);
 	const formHallFolio = $derived(form && 'hallFolio' in form ? form.hallFolio : undefined);
-	const formHallWalkInError = $derived(form && 'hallWalkInError' in form ? form.hallWalkInError : undefined);
+	const formHallWalkInError = $derived(
+		form && 'hallWalkInError' in form ? form.hallWalkInError : undefined
+	);
 	const formHallWalkInOk = $derived(form && 'hallWalkInOk' in form ? form.hallWalkInOk : undefined);
 
 	$effect(() => {
 		if (formOk) toast.success(formOk);
 		if (formError) toast.error(formError);
+		if (formPaymentOk) {
+			toast.success(formPaymentOk);
+			roomPayOpen = false;
+			roomRefundOpen = false;
+			hallPayOpen = false;
+			hallRefundOpen = false;
+		}
+		if (formShiftError) toast.error(formShiftError);
 		if (formWalkInError) toast.error(formWalkInError);
 		if (formFolioError) toast.error(formFolioError);
 		if (formHallWalkInError) toast.error(formHallWalkInError);
@@ -59,6 +77,15 @@
 		if (formRoomDetail) detailDialogOpen = true;
 	});
 
+	// Folio payment / refund panels (room + hall dialogs), and the checkout city-ledger form.
+	let roomPayOpen = $state(false);
+	let roomRefundOpen = $state(false);
+	let hallPayOpen = $state(false);
+	let hallRefundOpen = $state(false);
+	let checkoutCityLedger = $state(false);
+	let shiftFloat = $state('');
+	let shiftDrawer = $state('');
+
 	let hallDetailDialogOpen = $state(false);
 	$effect(() => {
 		if (formHallBookingDetail) hallDetailDialogOpen = true;
@@ -71,6 +98,15 @@
 	let railTab = $state<'arrivals' | 'departures'>('arrivals');
 
 	const roomTypeNames = $derived([...new Set(data.cells.map((c) => c.roomTypeName))].sort());
+
+	const walkInSelectedTotal = $derived.by(() => {
+		if (!walkInSelection || !formAvailableRoomTypes) return null;
+		const [rtId, planId] = walkInSelection.split('|');
+		const rt = formAvailableRoomTypes.find((r) => r.id === rtId);
+		const plan = rt?.ratePlans.find((p) => p.id === planId);
+		const per = plan?.price.totalCentavos ?? null;
+		return per == null ? null : per * (formWalkInSearch?.roomCount ?? 1);
+	});
 
 	const filteredCells = $derived(
 		data.cells.filter((c) => {
@@ -244,11 +280,83 @@
 	}
 
 	function statusPillClassGeneric(status: string): string {
-		if (status === 'confirmed' || status === 'completed') return 'border-transparent bg-ok/15 text-ok';
+		if (status === 'confirmed' || status === 'completed')
+			return 'border-transparent bg-ok/15 text-ok';
 		if (status === 'cancelled') return 'border-transparent bg-danger/15 text-danger';
 		return 'border-border bg-surface-2 text-ink-muted';
 	}
+
+	const methodLabels: Record<string, string> = {
+		cash: 'Cash',
+		card: 'Card',
+		gcash: 'GCash',
+		maya: 'Maya',
+		bank_transfer: 'Bank transfer',
+		cheque: 'Cheque',
+		paymongo: 'Online',
+		house_use: 'City ledger'
+	};
 </script>
+
+{#snippet paymentRow(p: any, kind: 'room' | 'hall', id: string)}
+	<div class="flex items-start justify-between gap-2 text-sm {p.voidedAt ? 'opacity-50' : ''}">
+		<div class="min-w-0">
+			<div class="flex flex-wrap items-center gap-1.5">
+				<span class="font-medium text-ink {p.voidedAt ? 'line-through' : ''}">
+					{methodLabels[p.method] ?? p.method}
+				</span>
+				{#if p.purpose === 'deposit'}<Badge
+						variant="outline"
+						class="border-border bg-surface-2 text-ink-muted">deposit</Badge
+					>{/if}
+				{#if p.purpose === 'refund'}<Badge
+						variant="outline"
+						class="border-transparent bg-danger/15 text-danger">refund</Badge
+					>{/if}
+				{#if p.voidedAt}<span class="text-xs text-danger"
+						>voided{#if p.voidReason}
+							— {p.voidReason}{/if}</span
+					>{/if}
+			</div>
+			<div class="text-xs text-ink-muted">
+				{#if p.referenceNo}Ref {p.referenceNo}{/if}
+				{#if p.tenderedCentavos != null && p.method === 'cash'}
+					{p.referenceNo ? ' · ' : ''}tendered {peso(p.tenderedCentavos)}, change {peso(
+						p.changeCentavos
+					)}
+				{/if}
+			</div>
+			<div class="mt-0.5 flex gap-3">
+				{#if !p.voidedAt && p.amountCentavos > 0}
+					<a
+						href="{base}/print/receipt/{p.id}"
+						target="_blank"
+						class="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
+					>
+						Receipt
+					</a>
+				{/if}
+				{#if !p.voidedAt && p.status === 'paid' && p.provider !== 'paymongo' && p.method !== 'house_use'}
+					<form method="POST" action="?/voidPayment" use:enhance>
+						<input type="hidden" name="kind" value={kind} />
+						<input type="hidden" name="id" value={id} />
+						<input type="hidden" name="paymentId" value={p.id} />
+						<input type="hidden" name="reason" value="Voided at front desk" />
+						<button
+							type="submit"
+							class="text-xs text-ink-muted underline underline-offset-2 hover:text-danger"
+						>
+							Void payment
+						</button>
+					</form>
+				{/if}
+			</div>
+		</div>
+		<span class="shrink-0 text-ink {p.voidedAt ? 'line-through' : ''}">
+			{p.amountCentavos < 0 ? '−' : ''}{peso(Math.abs(p.amountCentavos))}
+		</span>
+	</div>
+{/snippet}
 
 <div class="flex h-[calc(100dvh-1px)] flex-col">
 	<div class="flex items-center justify-between gap-4 border-b border-border px-6 py-3.5">
@@ -256,15 +364,68 @@
 			<h1 class="text-base font-semibold tracking-tight text-ink">Front desk</h1>
 			<p class="text-xs text-ink-muted">{data.businessDate}</p>
 		</div>
-		<Button onclick={() => openWalkIn()}>
-			<UserPlusIcon />
-			Walk-in
-		</Button>
+		<div class="flex items-center gap-3">
+			{#if data.cashier.openShift}
+				<a
+					href="{base}/finance/shifts"
+					class="flex items-center gap-1.5 rounded-md border border-ok/40 bg-ok/10 px-2.5 py-1.5 text-xs font-medium text-ok"
+				>
+					<BanknoteIcon class="size-3.5" />
+					Shift open · float {peso(data.cashier.openShift.openingFloatCentavos)}
+				</a>
+			{:else if data.cashier.hasDrawerAccount}
+				<form method="POST" action="?/openShift" use:enhance class="flex items-center gap-1.5">
+					{#if data.cashier.drawers.length > 1}
+						<select
+							name="cashAccountId"
+							bind:value={shiftDrawer}
+							class="rounded-md border border-input bg-transparent px-2 py-1.5 text-xs"
+						>
+							<option value="" disabled selected>Drawer…</option>
+							{#each data.cashier.drawers as d (d.id)}
+								<option value={d.id}>{d.name}</option>
+							{/each}
+						</select>
+					{:else if data.cashier.drawers[0]}
+						<input type="hidden" name="cashAccountId" value={data.cashier.drawers[0].id} />
+					{/if}
+					<input
+						name="openingFloat"
+						type="number"
+						min="0"
+						step="0.01"
+						bind:value={shiftFloat}
+						placeholder="Float ₱"
+						class="w-24 rounded-md border border-input bg-transparent px-2 py-1.5 text-xs"
+						required
+					/>
+					<Button type="submit" size="sm" variant="outline">
+						<ClockIcon class="size-3.5" />
+						Open shift
+					</Button>
+				</form>
+			{:else}
+				<a
+					href="{base}/finance/settings"
+					class="text-xs text-ink-muted underline underline-offset-2"
+				>
+					Set up a cash drawer →
+				</a>
+			{/if}
+			<Button onclick={() => openWalkIn()}>
+				<UserPlusIcon />
+				Walk-in
+			</Button>
+		</div>
 	</div>
 
-	<div class="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface-2 px-6 py-2.5">
+	<div
+		class="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface-2 px-6 py-2.5"
+	>
 		<div class="flex flex-wrap items-center gap-4 text-xs text-ink-muted">
-			<div class="flex items-center gap-1.5"><span class="size-3 rounded border border-border"></span>Vacant</div>
+			<div class="flex items-center gap-1.5">
+				<span class="size-3 rounded border border-border"></span>Vacant
+			</div>
 			<div class="flex items-center gap-1.5">
 				<span class="size-3 rounded border border-ok/40 bg-ok/15"></span>Occupied
 			</div>
@@ -307,8 +468,12 @@
 				{#each floorGroups as [floor, cells] (floor)}
 					<div class="mb-7 last:mb-0">
 						<div class="mb-2 flex items-baseline gap-2">
-							<h2 class="text-xs font-bold tracking-wide text-ink-muted uppercase">Floor {floor}</h2>
-							<span class="text-xs text-ink-muted">{cells.length} room{cells.length === 1 ? '' : 's'}</span>
+							<h2 class="text-xs font-bold tracking-wide text-ink-muted uppercase">
+								Floor {floor}
+							</h2>
+							<span class="text-xs text-ink-muted"
+								>{cells.length} room{cells.length === 1 ? '' : 's'}</span
+							>
 						</div>
 						<div class="grid grid-cols-[repeat(auto-fill,minmax(108px,1fr))] gap-2.5">
 							{#each cells as c (c.roomId)}
@@ -335,7 +500,9 @@
 
 			{#if data.hallGrid.length > 0}
 				<div class="mt-8 border-t border-border pt-6">
-					<h2 class="mb-3 text-xs font-bold tracking-wide text-ink-muted uppercase">Function halls</h2>
+					<h2 class="mb-3 text-xs font-bold tracking-wide text-ink-muted uppercase">
+						Function halls
+					</h2>
 					<div class="space-y-3">
 						{#each data.hallGrid as hall (hall.functionHallId)}
 							<div class="rounded-lg border border-border p-4">
@@ -359,11 +526,12 @@
 										{#each hall.events as e (e.hallBookingId)}
 											<div class="flex items-center justify-between gap-3 px-3 py-2.5">
 												<div>
-													<div class="text-sm font-medium text-ink">{e.guestName} · {e.eventType}</div>
+													<div class="text-sm font-medium text-ink">
+														{e.guestName} · {e.eventType}
+													</div>
 													<div class="text-xs text-ink-muted">
-														{e.startTime.slice(0, 5)}–{e.endTime.slice(0, 5)} · {e.guestCount} guests · {channelLabel(
-															e.channel
-														)} · {peso(e.totalCentavos)}
+														{e.startTime.slice(0, 5)}–{e.endTime.slice(0, 5)} · {e.guestCount} guests
+														· {channelLabel(e.channel)} · {peso(e.totalCentavos)}
 													</div>
 												</div>
 												<div class="flex items-center gap-2">
@@ -373,7 +541,9 @@
 													{#if e.status === 'confirmed'}
 														<form method="POST" action="?/completeHall" use:enhance>
 															<input type="hidden" name="hallBookingId" value={e.hallBookingId} />
-															<Button type="submit" size="sm" variant="outline">Mark completed</Button>
+															<Button type="submit" size="sm" variant="outline"
+																>Mark completed</Button
+															>
 														</form>
 													{/if}
 													<form method="POST" action="?/hallDetail" use:enhance>
@@ -427,30 +597,38 @@
 						{@const o = selectedRoom.occupant}
 						<dl class="mb-4 space-y-2 text-sm">
 							<div class="flex justify-between gap-3 border-b border-border pb-2">
-								<dt class="text-ink-muted">Guest</dt><dd class="text-right font-medium text-ink">{o.guestName}</dd>
+								<dt class="text-ink-muted">Guest</dt>
+								<dd class="text-right font-medium text-ink">{o.guestName}</dd>
 							</div>
 							<div class="flex justify-between gap-3 border-b border-border pb-2">
-								<dt class="text-ink-muted">Email</dt><dd class="text-right text-ink">{o.guestEmail}</dd>
+								<dt class="text-ink-muted">Email</dt>
+								<dd class="text-right text-ink">{o.guestEmail}</dd>
 							</div>
 							{#if o.guestPhone}
 								<div class="flex justify-between gap-3 border-b border-border pb-2">
-									<dt class="text-ink-muted">Phone</dt><dd class="text-right text-ink">{o.guestPhone}</dd>
+									<dt class="text-ink-muted">Phone</dt>
+									<dd class="text-right text-ink">{o.guestPhone}</dd>
 								</div>
 							{/if}
 							<div class="flex justify-between gap-3 border-b border-border pb-2">
-								<dt class="text-ink-muted">Check-in</dt><dd class="text-right text-ink">{o.checkIn}</dd>
+								<dt class="text-ink-muted">Check-in</dt>
+								<dd class="text-right text-ink">{o.checkIn}</dd>
 							</div>
 							<div class="flex justify-between gap-3 border-b border-border pb-2">
-								<dt class="text-ink-muted">Check-out</dt><dd class="text-right text-ink">{o.checkOut}</dd>
+								<dt class="text-ink-muted">Check-out</dt>
+								<dd class="text-right text-ink">{o.checkOut}</dd>
 							</div>
 							<div class="flex justify-between gap-3 border-b border-border pb-2">
-								<dt class="text-ink-muted">Occupancy</dt><dd class="text-right text-ink">{o.occupancy} guests</dd>
+								<dt class="text-ink-muted">Occupancy</dt>
+								<dd class="text-right text-ink">{o.occupancy} guests</dd>
 							</div>
 							<div class="flex justify-between gap-3 border-b border-border pb-2">
-								<dt class="text-ink-muted">Rate plan</dt><dd class="text-right text-ink">{o.ratePlanName}</dd>
+								<dt class="text-ink-muted">Rate plan</dt>
+								<dd class="text-right text-ink">{o.ratePlanName}</dd>
 							</div>
 							<div class="flex justify-between gap-3 border-b border-border pb-2">
-								<dt class="text-ink-muted">Total</dt><dd class="text-right font-semibold text-ink">{peso(o.totalCentavos)}</dd>
+								<dt class="text-ink-muted">Total</dt>
+								<dd class="text-right font-semibold text-ink">{peso(o.totalCentavos)}</dd>
 							</div>
 						</dl>
 						{#if o.specialRequests}
@@ -462,7 +640,8 @@
 						{#if selectedRoom.status === 'departing' && data.lateCheckoutFeePerHourCentavos > 0}
 							<p class="mb-3 rounded-md bg-surface-2 px-3 py-2 text-xs text-ink-muted">
 								Wants to keep the room past {data.checkOutTime.slice(0, 5)}? Late checkout fee:
-								<strong class="text-ink">{peso(data.lateCheckoutFeePerHourCentavos)}/hour</strong> — add it to the folio in Full details before checking out.
+								<strong class="text-ink">{peso(data.lateCheckoutFeePerHourCentavos)}/hour</strong> — add
+								it to the folio in Full details before checking out.
 							</p>
 						{/if}
 						<div class="flex gap-2">
@@ -481,8 +660,8 @@
 						</div>
 					{:else if selectedRoom.status === 'reserved'}
 						<div class="mb-3 text-xs font-bold tracking-wide text-ink-muted uppercase">
-							Expected today · {selectedRoom.expectedArrivals.length} arrival{selectedRoom.expectedArrivals
-								.length > 1
+							Expected today · {selectedRoom.expectedArrivals.length} arrival{selectedRoom
+								.expectedArrivals.length > 1
 								? 's'
 								: ''}
 						</div>
@@ -502,15 +681,17 @@
 						<p class="mb-3 text-xs text-ink-muted">
 							This room is vacant right now — {selectedRoom.expectedArrivals.length > 1
 								? 'these are'
-								: 'this is'} confirmed {selectedRoom.roomTypeName} booking{selectedRoom.expectedArrivals
-								.length > 1
+								: 'this is'} confirmed {selectedRoom.roomTypeName} booking{selectedRoom
+								.expectedArrivals.length > 1
 								? 's'
-								: ''} arriving today, not yet assigned to a specific room. Assign one at check-in from the booking's own page.
+								: ''} arriving today, not yet assigned to a specific room. Assign one at check-in from
+							the booking's own page.
 						</p>
 						{#if data.earlyCheckInFeePerHourCentavos > 0}
 							<p class="mb-4 rounded-md bg-surface-2 px-3 py-2 text-xs text-ink-muted">
 								Wants to move in before {data.checkInTime.slice(0, 5)}? Early check-in fee:
-								<strong class="text-ink">{peso(data.earlyCheckInFeePerHourCentavos)}/hour</strong> — add it to the folio in Full details once they've checked in.
+								<strong class="text-ink">{peso(data.earlyCheckInFeePerHourCentavos)}/hour</strong> — add
+								it to the folio in Full details once they've checked in.
 							</p>
 						{/if}
 						<Button variant="outline" class="w-full" href="{base}/reservations">
@@ -556,7 +737,9 @@
 									<div class="flex items-center justify-between py-2.5">
 										<div>
 											<div class="text-sm font-medium text-ink">{a.guestName}</div>
-											<div class="text-xs text-ink-muted">{a.roomTypeName} · {channelLabel(a.channel)}</div>
+											<div class="text-xs text-ink-muted">
+												{a.roomTypeName} · {channelLabel(a.channel)}
+											</div>
 										</div>
 										<Badge variant="outline" class="border-transparent bg-ok/15 text-ok">
 											from {data.checkInTime.slice(0, 5)}
@@ -611,19 +794,43 @@
 				<div class="grid grid-cols-2 gap-3">
 					<div>
 						<Label for="wiCheckIn">Check-in</Label>
-						<Input id="wiCheckIn" type="date" name="checkIn" value={formWalkInSearch?.checkIn ?? data.businessDate} />
+						<Input
+							id="wiCheckIn"
+							type="date"
+							name="checkIn"
+							value={formWalkInSearch?.checkIn ?? data.businessDate}
+						/>
 					</div>
 					<div>
 						<Label for="wiCheckOut">Check-out</Label>
-						<Input id="wiCheckOut" type="date" name="checkOut" value={formWalkInSearch?.checkOut ?? todayPlus(1)} />
+						<Input
+							id="wiCheckOut"
+							type="date"
+							name="checkOut"
+							value={formWalkInSearch?.checkOut ?? todayPlus(1)}
+						/>
 					</div>
 					<div>
 						<Label for="wiOccupancy">Guests</Label>
-						<Input id="wiOccupancy" type="number" min="1" max="20" name="occupancy" value={formWalkInSearch?.occupancy ?? 1} />
+						<Input
+							id="wiOccupancy"
+							type="number"
+							min="1"
+							max="20"
+							name="occupancy"
+							value={formWalkInSearch?.occupancy ?? 1}
+						/>
 					</div>
 					<div>
 						<Label for="wiRoomCount">Rooms</Label>
-						<Input id="wiRoomCount" type="number" min="1" max="8" name="roomCount" value={formWalkInSearch?.roomCount ?? 1} />
+						<Input
+							id="wiRoomCount"
+							type="number"
+							min="1"
+							max="8"
+							name="roomCount"
+							value={formWalkInSearch?.roomCount ?? 1}
+						/>
 					</div>
 				</div>
 				<Button type="submit" variant="outline" class="w-full">Check availability</Button>
@@ -637,12 +844,22 @@
 						{#each formAvailableRoomTypes as rt (rt.id)}
 							{#each rt.ratePlans as plan (plan.id)}
 								{@const value = `${rt.id}|${plan.id}`}
-								<label class="flex cursor-pointer items-center justify-between gap-3 px-3 py-2.5 hover:bg-surface-2">
+								<label
+									class="flex cursor-pointer items-center justify-between gap-3 px-3 py-2.5 hover:bg-surface-2"
+								>
 									<div class="flex items-center gap-2">
-										<input type="radio" name="selectionRadio" {value} bind:group={walkInSelection} class="size-4" />
+										<input
+											type="radio"
+											name="selectionRadio"
+											{value}
+											bind:group={walkInSelection}
+											class="size-4"
+										/>
 										<div>
 											<div class="text-sm font-medium text-ink">{rt.name}</div>
-											<div class="text-xs text-ink-muted">{plan.name} · {rt.availableRooms} free</div>
+											<div class="text-xs text-ink-muted">
+												{plan.name} · {rt.availableRooms} free
+											</div>
 										</div>
 									</div>
 									<div class="text-sm font-medium text-ink">{peso(plan.price.totalCentavos)}</div>
@@ -655,7 +872,12 @@
 
 			{#if walkInSelection && formWalkInSearch}
 				{@const [roomTypeId, ratePlanId] = walkInSelection.split('|')}
-				<form method="POST" action="?/walkInCreate" use:enhance class="mt-4 space-y-3 border-t border-border pt-4">
+				<form
+					method="POST"
+					action="?/walkInCreate"
+					use:enhance
+					class="mt-4 space-y-3 border-t border-border pt-4"
+				>
 					<input type="hidden" name="checkIn" value={formWalkInSearch.checkIn} />
 					<input type="hidden" name="checkOut" value={formWalkInSearch.checkOut} />
 					<input type="hidden" name="occupancy" value={formWalkInSearch.occupancy} />
@@ -686,7 +908,8 @@
 							class="w-full min-w-0 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
 						></textarea>
 					</div>
-					<Button type="submit" class="w-full">Create booking</Button>
+					<WalkinPaymentFields totalCentavos={walkInSelectedTotal} cashier={data.cashier} />
+					<Button type="submit" class="w-full">Create &amp; settle booking</Button>
 				</form>
 			{/if}
 		</div>
@@ -697,7 +920,10 @@
 	<Dialog.Content class="max-h-[85vh] overflow-y-auto sm:max-w-lg">
 		{#if formRoomDetail}
 			<Dialog.Header>
-				<Dialog.Title>Room {formRoomDetail.assignedRooms?.[0]?.roomNumber ?? ''} — {formRoomDetail.guest.fullName}</Dialog.Title>
+				<Dialog.Title
+					>Room {formRoomDetail.assignedRooms?.[0]?.roomNumber ?? ''} — {formRoomDetail.guest
+						.fullName}</Dialog.Title
+				>
 				<Dialog.Description>{formRoomDetail.roomType.name}</Dialog.Description>
 			</Dialog.Header>
 
@@ -760,7 +986,9 @@
 									? 'border-transparent bg-danger/15 text-danger'
 									: 'border-transparent bg-ok/15 text-ok'}
 							>
-								{formFolio.balanceCentavos > 0 ? `Balance due ${peso(formFolio.balanceCentavos)}` : 'Settled'}
+								{formFolio.balanceCentavos > 0
+									? `Balance due ${peso(formFolio.balanceCentavos)}`
+									: 'Settled'}
 							</Badge>
 						{/if}
 					</div>
@@ -772,10 +1000,15 @@
 									<Table.Row class={c.voidedAt ? 'opacity-50' : ''}>
 										<Table.Cell class="text-ink-muted">
 											<span class={c.voidedAt ? 'line-through' : ''}>
-												{c.description}{#if c.quantity > 1}<span class="text-xs"> × {c.quantity}</span>{/if}
+												{c.description}{#if c.quantity > 1}<span class="text-xs">
+														× {c.quantity}</span
+													>{/if}
 											</span>
 											{#if c.voidedAt}
-												<span class="ml-1.5 text-xs text-danger">Voided{#if c.voidReason} — {c.voidReason}{/if}</span>
+												<span class="ml-1.5 text-xs text-danger"
+													>Voided{#if c.voidReason}
+														— {c.voidReason}{/if}</span
+												>
 											{/if}
 										</Table.Cell>
 										<Table.Cell class="text-right text-ink">
@@ -799,30 +1032,140 @@
 								{/each}
 								<Table.Row>
 									<Table.Cell class="text-ink-muted">Paid</Table.Cell>
-									<Table.Cell class="text-right text-ink">−{peso(formFolio.paidTotalCentavos)}</Table.Cell>
+									<Table.Cell class="text-right text-ink"
+										>−{peso(formFolio.paidTotalCentavos)}</Table.Cell
+									>
 									<Table.Cell></Table.Cell>
 								</Table.Row>
 								<Table.Row>
 									<Table.Cell class="font-semibold text-ink">Balance</Table.Cell>
-									<Table.Cell class="text-right font-semibold text-ink">{peso(formFolio.balanceCentavos)}</Table.Cell>
+									<Table.Cell class="text-right font-semibold text-ink"
+										>{peso(formFolio.balanceCentavos)}</Table.Cell
+									>
 									<Table.Cell></Table.Cell>
 								</Table.Row>
 							</Table.Body>
 						</Table.Root>
 
 						{#if formFolio.balanceCentavos > 0}
-							<form method="POST" action="?/settleFolio" use:enhance class="mt-3">
-								<input type="hidden" name="bookingId" value={formRoomDetail.booking.id} />
-								<Button type="submit" size="sm" class="w-full">
-									Settle balance ({peso(formFolio.balanceCentavos)})
-								</Button>
-							</form>
+							<div class="mt-3">
+								{#if roomPayOpen}
+									<PaymentFields
+										action="?/recordPayment"
+										kind="room"
+										id={formRoomDetail.booking.id}
+										balanceCentavos={formFolio.balanceCentavos}
+										cashier={data.cashier}
+										onDone={() => (roomPayOpen = false)}
+									/>
+									<button
+										type="button"
+										onclick={() => (roomPayOpen = false)}
+										class="mt-1 text-xs text-ink-muted underline underline-offset-2"
+									>
+										Cancel
+									</button>
+								{:else}
+									<Button size="sm" class="w-full" onclick={() => (roomPayOpen = true)}>
+										Take payment ({peso(formFolio.balanceCentavos)} due)
+									</Button>
+								{/if}
+							</div>
+						{:else if formFolio.balanceCentavos < 0}
+							<div class="mt-3">
+								{#if roomRefundOpen}
+									<PaymentFields
+										action="?/refundPayment"
+										kind="room"
+										id={formRoomDetail.booking.id}
+										balanceCentavos={-formFolio.balanceCentavos}
+										cashier={data.cashier}
+										mode="refund"
+										onDone={() => (roomRefundOpen = false)}
+									/>
+									<button
+										type="button"
+										onclick={() => (roomRefundOpen = false)}
+										class="mt-1 text-xs text-ink-muted underline underline-offset-2"
+									>
+										Cancel
+									</button>
+								{:else}
+									<Button
+										size="sm"
+										variant="outline"
+										class="w-full"
+										onclick={() => (roomRefundOpen = true)}
+									>
+										Refund credit ({peso(-formFolio.balanceCentavos)})
+									</Button>
+								{/if}
+							</div>
+						{/if}
+
+						{#if formFolio.balanceCentavos > 0 && canChargeCityLedger && formRoomDetail.booking.status === 'checked_in'}
+							<div class="mt-3 rounded-lg border border-dashed border-border p-3">
+								{#if checkoutCityLedger}
+									<form method="POST" action="?/checkOut" use:enhance class="space-y-2">
+										<input type="hidden" name="bookingId" value={formRoomDetail.booking.id} />
+										<input type="hidden" name="cityLedger" value="1" />
+										<p class="text-xs text-ink-muted">
+											Move the {peso(formFolio.balanceCentavos)} balance to the Finance city ledger and
+											check the guest out.
+										</p>
+										<Input
+											name="billToName"
+											placeholder="Bill to (name)"
+											required
+											class="h-8 text-sm"
+										/>
+										<Input
+											name="billToCompany"
+											placeholder="Company (optional)"
+											class="h-8 text-sm"
+										/>
+										<Input
+											name="billReference"
+											placeholder="PO / reference (optional)"
+											class="h-8 text-sm"
+										/>
+										<Input name="billNotes" placeholder="Note (optional)" class="h-8 text-sm" />
+										<div class="flex gap-2">
+											<Button type="submit" size="sm" variant="outline" class="flex-1"
+												>Charge & check out</Button
+											>
+											<button
+												type="button"
+												onclick={() => (checkoutCityLedger = false)}
+												class="text-xs text-ink-muted underline underline-offset-2"
+											>
+												Cancel
+											</button>
+										</div>
+									</form>
+								{:else}
+									<button
+										type="button"
+										onclick={() => (checkoutCityLedger = true)}
+										class="text-xs font-medium text-ink-muted underline underline-offset-2 hover:text-ink"
+									>
+										Check out with balance → charge to city ledger
+									</button>
+								{/if}
+							</div>
 						{/if}
 
 						<div class="mt-4 border-t border-border pt-3">
-							<h4 class="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">Add a charge</h4>
+							<h4 class="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">
+								Add a charge
+							</h4>
 							{#if data.amenityItemOptions.length > 0}
-								<form method="POST" action="?/addItemCharge" use:enhance class="flex items-end gap-2">
+								<form
+									method="POST"
+									action="?/addItemCharge"
+									use:enhance
+									class="flex items-end gap-2"
+								>
 									<input type="hidden" name="bookingId" value={formRoomDetail.booking.id} />
 									<select
 										name="amenityItemId"
@@ -849,19 +1192,44 @@
 							{#if data.lateCheckoutFeePerHourCentavos > 0 || data.earlyCheckInFeePerHourCentavos > 0}
 								<div class="mt-3 flex flex-wrap gap-2">
 									{#if data.lateCheckoutFeePerHourCentavos > 0}
-										<form method="POST" action="?/addExtensionCharge" use:enhance class="flex items-center gap-1.5">
+										<form
+											method="POST"
+											action="?/addExtensionCharge"
+											use:enhance
+											class="flex items-center gap-1.5"
+										>
 											<input type="hidden" name="bookingId" value={formRoomDetail.booking.id} />
 											<input type="hidden" name="kind" value="late_checkout" />
-											<Input name="hours" type="number" min="0.5" step="0.5" value="1" class="w-16" />
+											<Input
+												name="hours"
+												type="number"
+												min="0.5"
+												step="0.5"
+												value="1"
+												class="w-16"
+											/>
 											<Button type="submit" size="sm" variant="outline">+ Late checkout fee</Button>
 										</form>
 									{/if}
 									{#if data.earlyCheckInFeePerHourCentavos > 0}
-										<form method="POST" action="?/addExtensionCharge" use:enhance class="flex items-center gap-1.5">
+										<form
+											method="POST"
+											action="?/addExtensionCharge"
+											use:enhance
+											class="flex items-center gap-1.5"
+										>
 											<input type="hidden" name="bookingId" value={formRoomDetail.booking.id} />
 											<input type="hidden" name="kind" value="early_check_in" />
-											<Input name="hours" type="number" min="0.5" step="0.5" value="1" class="w-16" />
-											<Button type="submit" size="sm" variant="outline">+ Early check-in fee</Button>
+											<Input
+												name="hours"
+												type="number"
+												min="0.5"
+												step="0.5"
+												value="1"
+												class="w-16"
+											/>
+											<Button type="submit" size="sm" variant="outline">+ Early check-in fee</Button
+											>
 										</form>
 									{/if}
 								</div>
@@ -877,13 +1245,7 @@
 					{:else}
 						<div class="space-y-2">
 							{#each formRoomDetail.payments as p (p.id)}
-								<div class="flex items-center justify-between text-sm">
-									<div>
-										<Badge variant="outline" class={paymentStatusClass(p.status)}>{p.status}</Badge>
-										<span class="ml-2 text-ink-muted">{p.provider}</span>
-									</div>
-									<span class="text-ink">{peso(p.amountCentavos)}</span>
-								</div>
+								{@render paymentRow(p, 'room', formRoomDetail.booking.id)}
 							{/each}
 						</div>
 					{/if}
@@ -897,7 +1259,9 @@
 						<div class="space-y-2">
 							{#each formRoomDetail.history as h (h.id)}
 								<div class="text-sm">
-									<span class="text-ink-muted">{h.fromStatus ? humanize(h.fromStatus) : 'created'} →</span>
+									<span class="text-ink-muted"
+										>{h.fromStatus ? humanize(h.fromStatus) : 'created'} →</span
+									>
 									<span class="text-ink">{humanize(h.toStatus)}</span>
 									{#if h.note}<span class="text-ink-muted"> — {h.note}</span>{/if}
 								</div>
@@ -914,7 +1278,9 @@
 	<Dialog.Content class="max-h-[85vh] overflow-y-auto sm:max-w-lg">
 		{#if formHallBookingDetail}
 			<Dialog.Header>
-				<Dialog.Title>{formHallBookingDetail.hall.name} — {formHallBookingDetail.guest.fullName}</Dialog.Title>
+				<Dialog.Title
+					>{formHallBookingDetail.hall.name} — {formHallBookingDetail.guest.fullName}</Dialog.Title
+				>
 				<Dialog.Description>{formHallBookingDetail.hallBooking.eventType}</Dialog.Description>
 			</Dialog.Header>
 
@@ -943,7 +1309,8 @@
 						<div>
 							<div class="text-xs text-ink-muted">Time</div>
 							<div class="text-ink">
-								{formHallBookingDetail.hallBooking.startTime}–{formHallBookingDetail.hallBooking.endTime}
+								{formHallBookingDetail.hallBooking.startTime}–{formHallBookingDetail.hallBooking
+									.endTime}
 							</div>
 						</div>
 						<div>
@@ -963,7 +1330,9 @@
 									? 'border-transparent bg-danger/15 text-danger'
 									: 'border-transparent bg-ok/15 text-ok'}
 							>
-								{formHallFolio.balanceCentavos > 0 ? `Balance due ${peso(formHallFolio.balanceCentavos)}` : 'Settled'}
+								{formHallFolio.balanceCentavos > 0
+									? `Balance due ${peso(formHallFolio.balanceCentavos)}`
+									: 'Settled'}
 							</Badge>
 						{/if}
 					</div>
@@ -975,10 +1344,15 @@
 									<Table.Row class={c.voidedAt ? 'opacity-50' : ''}>
 										<Table.Cell class="text-ink-muted">
 											<span class={c.voidedAt ? 'line-through' : ''}>
-												{c.description}{#if c.quantity > 1}<span class="text-xs"> × {c.quantity}</span>{/if}
+												{c.description}{#if c.quantity > 1}<span class="text-xs">
+														× {c.quantity}</span
+													>{/if}
 											</span>
 											{#if c.voidedAt}
-												<span class="ml-1.5 text-xs text-danger">Voided{#if c.voidReason} — {c.voidReason}{/if}</span>
+												<span class="ml-1.5 text-xs text-danger"
+													>Voided{#if c.voidReason}
+														— {c.voidReason}{/if}</span
+												>
 											{/if}
 										</Table.Cell>
 										<Table.Cell class="text-right text-ink">
@@ -987,7 +1361,11 @@
 										<Table.Cell class="w-8 text-right">
 											{#if !c.isBaseCharge && !c.voidedAt}
 												<form method="POST" action="?/voidHallCharge" use:enhance>
-													<input type="hidden" name="hallBookingId" value={formHallBookingDetail.hallBooking.id} />
+													<input
+														type="hidden"
+														name="hallBookingId"
+														value={formHallBookingDetail.hallBooking.id}
+													/>
 													<input type="hidden" name="chargeId" value={c.id} />
 													<button
 														type="submit"
@@ -1002,31 +1380,93 @@
 								{/each}
 								<Table.Row>
 									<Table.Cell class="text-ink-muted">Paid</Table.Cell>
-									<Table.Cell class="text-right text-ink">−{peso(formHallFolio.paidTotalCentavos)}</Table.Cell>
+									<Table.Cell class="text-right text-ink"
+										>−{peso(formHallFolio.paidTotalCentavos)}</Table.Cell
+									>
 									<Table.Cell></Table.Cell>
 								</Table.Row>
 								<Table.Row>
 									<Table.Cell class="font-semibold text-ink">Balance</Table.Cell>
-									<Table.Cell class="text-right font-semibold text-ink">{peso(formHallFolio.balanceCentavos)}</Table.Cell>
+									<Table.Cell class="text-right font-semibold text-ink"
+										>{peso(formHallFolio.balanceCentavos)}</Table.Cell
+									>
 									<Table.Cell></Table.Cell>
 								</Table.Row>
 							</Table.Body>
 						</Table.Root>
 
 						{#if formHallFolio.balanceCentavos > 0}
-							<form method="POST" action="?/settleHallFolio" use:enhance class="mt-3">
-								<input type="hidden" name="hallBookingId" value={formHallBookingDetail.hallBooking.id} />
-								<Button type="submit" size="sm" class="w-full">
-									Settle balance ({peso(formHallFolio.balanceCentavos)})
-								</Button>
-							</form>
+							<div class="mt-3">
+								{#if hallPayOpen}
+									<PaymentFields
+										action="?/recordPayment"
+										kind="hall"
+										id={formHallBookingDetail.hallBooking.id}
+										balanceCentavos={formHallFolio.balanceCentavos}
+										cashier={data.cashier}
+										onDone={() => (hallPayOpen = false)}
+									/>
+									<button
+										type="button"
+										onclick={() => (hallPayOpen = false)}
+										class="mt-1 text-xs text-ink-muted underline underline-offset-2"
+									>
+										Cancel
+									</button>
+								{:else}
+									<Button size="sm" class="w-full" onclick={() => (hallPayOpen = true)}>
+										Take payment ({peso(formHallFolio.balanceCentavos)} due)
+									</Button>
+								{/if}
+							</div>
+						{:else if formHallFolio.balanceCentavos < 0}
+							<div class="mt-3">
+								{#if hallRefundOpen}
+									<PaymentFields
+										action="?/refundPayment"
+										kind="hall"
+										id={formHallBookingDetail.hallBooking.id}
+										balanceCentavos={-formHallFolio.balanceCentavos}
+										cashier={data.cashier}
+										mode="refund"
+										onDone={() => (hallRefundOpen = false)}
+									/>
+									<button
+										type="button"
+										onclick={() => (hallRefundOpen = false)}
+										class="mt-1 text-xs text-ink-muted underline underline-offset-2"
+									>
+										Cancel
+									</button>
+								{:else}
+									<Button
+										size="sm"
+										variant="outline"
+										class="w-full"
+										onclick={() => (hallRefundOpen = true)}
+									>
+										Refund credit ({peso(-formHallFolio.balanceCentavos)})
+									</Button>
+								{/if}
+							</div>
 						{/if}
 
 						<div class="mt-4 border-t border-border pt-3">
-							<h4 class="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">Add a charge</h4>
+							<h4 class="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">
+								Add a charge
+							</h4>
 							{#if data.amenityItemOptions.length > 0}
-								<form method="POST" action="?/addHallItemCharge" use:enhance class="flex items-end gap-2">
-									<input type="hidden" name="hallBookingId" value={formHallBookingDetail.hallBooking.id} />
+								<form
+									method="POST"
+									action="?/addHallItemCharge"
+									use:enhance
+									class="flex items-end gap-2"
+								>
+									<input
+										type="hidden"
+										name="hallBookingId"
+										value={formHallBookingDetail.hallBooking.id}
+									/>
 									<select
 										name="amenityItemId"
 										required
@@ -1059,13 +1499,7 @@
 					{:else}
 						<div class="space-y-2">
 							{#each formHallBookingDetail.payments as p (p.id)}
-								<div class="flex items-center justify-between text-sm">
-									<div>
-										<Badge variant="outline" class={paymentStatusClass(p.status)}>{p.status}</Badge>
-										<span class="ml-2 text-ink-muted">{p.provider}</span>
-									</div>
-									<span class="text-ink">{peso(p.amountCentavos)}</span>
-								</div>
+								{@render paymentRow(p, 'hall', formHallBookingDetail.hallBooking.id)}
 							{/each}
 						</div>
 					{/if}
@@ -1097,7 +1531,13 @@
 					</div>
 					<div>
 						<Label for="heEventType">Event type</Label>
-						<Input id="heEventType" name="eventType" placeholder="Birthday" required maxlength={80} />
+						<Input
+							id="heEventType"
+							name="eventType"
+							placeholder="Birthday"
+							required
+							maxlength={80}
+						/>
 					</div>
 				</div>
 				<div class="grid grid-cols-2 gap-3">
@@ -1194,8 +1634,12 @@
 						class="w-full min-w-0 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
 					></textarea>
 				</div>
+				<WalkinPaymentFields
+					totalCentavos={hallQuote?.totalCentavos ?? null}
+					cashier={data.cashier}
+				/>
 				<Button type="submit" class="w-full" disabled={!hallQuote || hallQuoteLoading}>
-					Create booking
+					Create &amp; settle booking
 				</Button>
 			</form>
 		</div>

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import { hotels } from '$lib/server/db/schema/index';
 import { seedHotelAmenities } from '$lib/server/amenities/catalog';
+import { seedFinanceDefaults } from '$lib/server/finance/seed-defaults';
 import { writeAudit } from '$lib/server/audit';
 import { mintRef } from '$lib/server/ids';
 import { slugError } from '$lib/server/tenant';
@@ -51,8 +52,9 @@ export const actions: Actions = {
 			throw e;
 		}
 
-		// Give the new hotel the standard amenity catalogue to start from.
+		// Give the new hotel the standard amenity catalogue + a working Finance setup.
 		await seedHotelAmenities(db, newId);
+		await seedFinanceDefaults(db, newId);
 
 		await writeAudit({
 			actor: event.locals.user,

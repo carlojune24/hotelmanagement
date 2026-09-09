@@ -15,6 +15,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { createdAt, pk, updatedAt } from './_shared';
 import { hotels } from './hotels';
+import { users } from './auth';
 import { ratePlans, roomTypes } from './inventory';
 import { functionHalls } from './function-halls';
 import { orders } from './orders';
@@ -196,6 +197,33 @@ export const hallBookingStatusHistory = pgTable(
 
 export const paymentStatus = pgEnum('payment_status', ['pending', 'paid', 'failed']);
 
+/**
+ * How money actually changed hands at the desk (or online). `paymongo` = the
+ * guest-facing hosted checkout; everything else is entered by a cashier. Defined
+ * here rather than in `finance.ts` so `payments` can use it without a schema
+ * import cycle (`finance.ts` → `bookings.ts`, never the reverse).
+ */
+export const paymentMethod = pgEnum('payment_method', [
+	'cash',
+	'card',
+	'gcash',
+	'maya',
+	'bank_transfer',
+	'cheque',
+	'paymongo',
+	'house_use'
+]);
+
+/** What a payment is *for* on the folio — a pre-arrival deposit, a partial/full settlement,
+ *  or a money-out refund line (`amountCentavos` is still stored positive; `status`/reporting
+ *  treat `refund` as an outflow). */
+export const paymentPurpose = pgEnum('payment_purpose', [
+	'deposit',
+	'settlement',
+	'balance',
+	'refund'
+]);
+
 export const payments = pgTable(
 	'payments',
 	{
@@ -214,11 +242,40 @@ export const payments = pgTable(
 		/** Raw PayMongo event payload, kept for audit/debugging. */
 		rawPayload: jsonb('raw_payload'),
 		paidAt: timestamp('paid_at', { withTimezone: true }),
-		createdAt: createdAt()
+		createdAt: createdAt(),
+
+		// --- Cashier / finance fields (added with the front-desk cashier + Finance module) ---
+		/** Richer than `provider`: the actual tender. Backfilled from `provider` for old rows. */
+		method: paymentMethod('method').notNull().default('cash'),
+		purpose: paymentPurpose('purpose').notNull().default('settlement'),
+		/** The folio this payment was taken against. Plain uuid (no FK) to avoid a
+		 *  `bookings.ts` ↔ `folio.ts` schema import cycle — integrity is enforced in
+		 *  `lib/server/finance/payments.ts`. */
+		folioId: uuid('folio_id'),
+		/** Cash account that received the money (`cash_accounts.id`). Plain uuid — see `folioId`. */
+		cashAccountId: uuid('cash_account_id'),
+		/** Cashier shift it was rung on (`cashier_shifts.id`), when there was one. Plain uuid — see `folioId`. */
+		shiftId: uuid('shift_id'),
+		/** Cash only: what the guest handed over; `changeCentavos = tenderedCentavos - amountCentavos`. */
+		tenderedCentavos: bigint('tendered_centavos', { mode: 'number' }),
+		changeCentavos: bigint('change_centavos', { mode: 'number' }).notNull().default(0),
+		/** Card approval code / e-wallet reference / cheque number. */
+		referenceNo: text('reference_no'),
+		bankName: text('bank_name'),
+		chequeDate: date('cheque_date', { mode: 'string' }),
+		recordedByUserId: uuid('recorded_by_user_id').references(() => users.id, {
+			onDelete: 'set null'
+		}),
+		/** Soft-void, mirrors `folio_charges` — excluded from balances/reports but kept for audit. */
+		voidedAt: timestamp('voided_at', { withTimezone: true }),
+		voidedByUserId: uuid('voided_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		voidReason: text('void_reason')
 	},
 	(t) => [
 		index('payments_order_idx').on(t.orderId),
-		uniqueIndex('payments_paymongo_event_idx').on(t.paymongoEventId)
+		uniqueIndex('payments_paymongo_event_idx').on(t.paymongoEventId),
+		index('payments_folio_idx').on(t.folioId),
+		index('payments_shift_idx').on(t.shiftId)
 	]
 );
 

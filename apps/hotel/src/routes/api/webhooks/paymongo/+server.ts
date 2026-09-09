@@ -6,12 +6,16 @@ import { db } from '$lib/server/db/index';
 import {
 	bookings,
 	bookingStatusHistory,
+	financeSettings,
 	hallBookings,
 	hallBookingStatusHistory,
+	hotels,
 	orders,
 	orderStatusHistory,
 	payments
 } from '$lib/server/db/schema/index';
+import { recordCashMovement } from '$lib/server/finance/cash';
+import { businessDateFor } from '$lib/server/finance/shared';
 
 // PayMongo signs webhooks as `t=<timestamp>,te=<test sig>,li=<live sig>` over
 // the string `${t}.${rawBody}`, HMAC-SHA256 hex-encoded with the endpoint's secret.
@@ -79,18 +83,70 @@ export async function POST({ request }) {
 					return;
 				}
 
-				await tx.insert(payments).values({
-					orderId: order.id,
-					provider: 'paymongo',
-					paymongoCheckoutSessionId: checkoutSession?.id ?? order.paymongoCheckoutSessionId,
-					paymongoPaymentId: paymentId,
-					paymongoEventId: eventId,
-					status: 'paid',
-					amountCentavos,
-					currency,
-					rawPayload: event,
-					paidAt: new Date()
-				});
+				const [paymentRow] = await tx
+					.insert(payments)
+					.values({
+						orderId: order.id,
+						provider: 'paymongo',
+						method: 'paymongo',
+						purpose: 'settlement',
+						paymongoCheckoutSessionId: checkoutSession?.id ?? order.paymongoCheckoutSessionId,
+						paymongoPaymentId: paymentId,
+						paymongoEventId: eventId,
+						status: 'paid',
+						amountCentavos,
+						currency,
+						rawPayload: event,
+						paidAt: new Date()
+					})
+					.returning({ id: payments.id });
+
+				// Post the receipt to Finance's Undeposited Funds account so it shows in
+				// cash-in / revenue reports; a later PayMongo payout is recorded as a
+				// transfer out of Undeposited into the bank.
+				const [settings] = await tx
+					.select({
+						autoPost: financeSettings.autoPostOnlinePayments,
+						undepositedAccountId: financeSettings.undepositedAccountId
+					})
+					.from(financeSettings)
+					.where(eq(financeSettings.hotelId, order.hotelId))
+					.limit(1);
+				if (settings?.autoPost && settings.undepositedAccountId) {
+					const [hotelRow] = await tx
+						.select({ timezone: hotels.timezone })
+						.from(hotels)
+						.where(eq(hotels.id, order.hotelId))
+						.limit(1);
+					const hasHall = await tx
+						.select({ id: hallBookings.id })
+						.from(hallBookings)
+						.where(eq(hallBookings.orderId, order.id))
+						.limit(1)
+						.then((r) => r.length > 0);
+					try {
+						await recordCashMovement(
+							{
+								hotelId: order.hotelId,
+								businessDate: businessDateFor(hotelRow?.timezone ?? 'Asia/Manila'),
+								direction: 'in',
+								category: hasHall ? 'hall_revenue' : 'room_revenue',
+								cashAccountId: settings.undepositedAccountId,
+								amountCentavos,
+								counterpartyType: 'guest',
+								sourceType: 'payment',
+								sourceId: paymentRow!.id,
+								paymentId: paymentRow!.id,
+								memo: 'Online payment (PayMongo)'
+							},
+							tx
+						);
+					} catch (e) {
+						// Never fail a real payment over a bookkeeping post (e.g. a closed day) —
+						// log it for manual reconciliation instead.
+						console.error('paymongo webhook: could not post cash movement', order.id, e);
+					}
+				}
 
 				// Only advance an order that's still awaiting payment — never clobber a
 				// further-advanced status.
@@ -130,7 +186,9 @@ export async function POST({ request }) {
 				const pendingHalls = await tx
 					.select()
 					.from(hallBookings)
-					.where(and(eq(hallBookings.orderId, order.id), eq(hallBookings.status, 'pending_payment')));
+					.where(
+						and(eq(hallBookings.orderId, order.id), eq(hallBookings.status, 'pending_payment'))
+					);
 				for (const h of pendingHalls) {
 					await tx
 						.update(hallBookings)

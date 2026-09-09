@@ -20,6 +20,9 @@ import {
 import { ACTIVE_BOOKING_STATUSES, getAvailableRoomType } from './availability';
 import { checkHallAvailability } from './hall-availability';
 import { FolioError, closeFolio, getFolioDetail } from './folio';
+import { recordWalkInPayment, resolvePaymentAccount, type PaymentMethod } from './finance/payments';
+import { openReceivable } from './finance/receivables';
+import { getBirSettings, issueInvoice } from './finance/documents';
 import { priceEventHall } from './pricing';
 import { scaleRoomPrice } from '$lib/pricing-utils';
 import { writeAudit } from './audit';
@@ -38,7 +41,12 @@ export class CheckInError extends Error {}
  * an overlapping range. Same half-open-interval overlap test `searchAvailability` uses
  * for room-type counts, just scoped to one physical room.
  */
-export async function listEligibleRooms(hotelId: string, roomTypeId: string, checkIn: string, checkOut: string) {
+export async function listEligibleRooms(
+	hotelId: string,
+	roomTypeId: string,
+	checkIn: string,
+	checkOut: string
+) {
 	const candidates = await db
 		.select({ id: rooms.id, roomNumber: rooms.roomNumber, floor: rooms.floor })
 		.from(rooms)
@@ -88,14 +96,12 @@ export async function checkInBooking(
 
 	await db.transaction(async (tx) => {
 		for (const roomId of [...uniqueRoomIds].sort()) {
-			await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${hotelId}), hashtext(${'room:' + roomId}))`);
+			await tx.execute(
+				sql`select pg_advisory_xact_lock(hashtext(${hotelId}), hashtext(${'room:' + roomId}))`
+			);
 		}
 
-		const [booking] = await tx
-			.select()
-			.from(bookings)
-			.where(eq(bookings.id, bookingId))
-			.limit(1);
+		const [booking] = await tx.select().from(bookings).where(eq(bookings.id, bookingId)).limit(1);
 		if (!booking || booking.hotelId !== hotelId) throw new CheckInError('Booking not found.');
 		if (booking.status !== 'confirmed') {
 			throw new CheckInError('Only a confirmed booking can be checked in.');
@@ -159,7 +165,10 @@ export async function checkInBooking(
 			}))
 		);
 
-		await tx.update(bookings).set({ status: 'checked_in', updatedAt: new Date() }).where(eq(bookings.id, bookingId));
+		await tx
+			.update(bookings)
+			.set({ status: 'checked_in', updatedAt: new Date() })
+			.where(eq(bookings.id, bookingId));
 
 		await tx.insert(bookingStatusHistory).values({
 			bookingId,
@@ -239,7 +248,11 @@ export interface RoomGridCell {
 export async function getRoomStatusGrid(
 	hotelId: string,
 	businessDate: string
-): Promise<{ cells: RoomGridCell[]; arrivals: RoomGridArrival[]; departures: RoomGridDeparture[] }> {
+): Promise<{
+	cells: RoomGridCell[];
+	arrivals: RoomGridArrival[];
+	departures: RoomGridDeparture[];
+}> {
 	const roomRows = await db
 		.select({
 			roomId: rooms.id,
@@ -310,7 +323,9 @@ export async function getRoomStatusGrid(
 		);
 	const unassignedArrivals = arrivalRows.filter((r) => r.assignmentId == null);
 
-	const orderIds = [...new Set([...occupantRows.map((r) => r.orderId), ...unassignedArrivals.map((r) => r.orderId)])];
+	const orderIds = [
+		...new Set([...occupantRows.map((r) => r.orderId), ...unassignedArrivals.map((r) => r.orderId)])
+	];
 	const channelByOrder = new Map<string, string>();
 	if (orderIds.length > 0) {
 		const paymentRows = await db
@@ -403,8 +418,17 @@ export class WalkInError extends Error {}
  * lock/verify/insert shape rather than reusing it directly, since a walk-in
  * skips the pending-payment step and cart entirely.
  */
+export interface WalkInPaymentInput {
+	method: PaymentMethod;
+	tenderedCentavos?: number | null;
+	referenceNo?: string | null;
+	bankName?: string | null;
+	chequeDate?: string | null;
+}
+
 export async function createWalkInBooking(params: {
 	hotelId: string;
+	businessDate: string;
 	guest: { fullName: string; email: string; phone: string | null; specialRequests: string | null };
 	roomTypeId: string;
 	ratePlanId: string;
@@ -412,14 +436,33 @@ export async function createWalkInBooking(params: {
 	checkOut: string;
 	occupancy: number;
 	roomCount: number;
+	/** How the full total is settled at the desk. Defaults to cash. */
+	payment?: WalkInPaymentInput;
 	actor: SessionUser | null;
 }): Promise<{ bookingId: string }> {
-	const { hotelId, guest, roomTypeId, ratePlanId, checkIn, checkOut, occupancy, roomCount, actor } =
-		params;
+	const {
+		hotelId,
+		businessDate,
+		guest,
+		roomTypeId,
+		ratePlanId,
+		checkIn,
+		checkOut,
+		occupancy,
+		roomCount,
+		actor
+	} = params;
+	const payment: WalkInPaymentInput = params.payment ?? { method: 'cash' };
 	if (checkIn >= checkOut) throw new WalkInError('Check-out must be after check-in.');
 
+	// Resolve the receiving account (and open shift for cash) before the tx —
+	// `resolvePaymentAccount` throws a FinanceError the action turns into `walkInError`.
+	const { cashAccountId, shiftId } = await resolvePaymentAccount(hotelId, payment.method);
+
 	const bookingId = await db.transaction(async (tx) => {
-		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${hotelId}), hashtext(${'room:' + roomTypeId}))`);
+		await tx.execute(
+			sql`select pg_advisory_xact_lock(hashtext(${hotelId}), hashtext(${'room:' + roomTypeId}))`
+		);
 
 		const available = await getAvailableRoomType({
 			hotelId,
@@ -468,14 +511,6 @@ export async function createWalkInBooking(params: {
 			note: 'Walk-in — settled at front desk'
 		});
 
-		await tx.insert(payments).values({
-			orderId: order!.id,
-			provider: 'cash',
-			status: 'paid',
-			amountCentavos: price.totalCentavos,
-			paidAt: new Date()
-		});
-
 		const [booking] = await tx
 			.insert(bookings)
 			.values({
@@ -506,6 +541,24 @@ export async function createWalkInBooking(params: {
 			note: 'Walk-in booking'
 		});
 
+		// Full settlement + its cash-ledger movement, in the same transaction.
+		await recordWalkInPayment(tx, {
+			hotelId,
+			orderId: order!.id,
+			target: { kind: 'room', bookingId: booking!.id },
+			method: payment.method,
+			amountCentavos: price.totalCentavos,
+			tenderedCentavos: payment.tenderedCentavos ?? null,
+			referenceNo: payment.referenceNo ?? null,
+			bankName: payment.bankName ?? null,
+			chequeDate: payment.chequeDate ?? null,
+			cashAccountId,
+			shiftId,
+			businessDate,
+			guestName: guest.fullName.trim(),
+			actor
+		});
+
 		return booking!.id;
 	});
 
@@ -523,14 +576,28 @@ export async function createWalkInBooking(params: {
 
 export class CheckOutError extends Error {}
 
+/**
+ * Charge-to-company details for a checkout that leaves a balance. Only a
+ * `hotel_admin` may pass this (enforced in the route action); it moves the
+ * outstanding balance into the Finance city ledger instead of blocking checkout.
+ */
+export interface CityLedgerHandoff {
+	billToName: string;
+	billToCompany?: string | null;
+	referenceNo?: string | null;
+	notes?: string | null;
+}
+
 /** Flips a checked-in booking to `checked_out` — refuses while the booking's folio (see
- *  `lib/server/folio.ts`) still carries an outstanding balance. No invoice/OR generation yet
- *  (see docs/TODO.md). */
+ *  `lib/server/folio.ts`) still carries an outstanding balance, unless `cityLedger` is
+ *  given, in which case the balance is moved to Accounts Receivable and checkout proceeds.
+ *  No invoice/OR generation yet (see docs/TODO.md). */
 export async function checkOutBooking(
 	hotelId: string,
 	bookingId: string,
 	businessDate: string,
-	actor: SessionUser | null
+	actor: SessionUser | null,
+	cityLedger?: CityLedgerHandoff
 ): Promise<void> {
 	let folio;
 	try {
@@ -540,9 +607,26 @@ export async function checkOutBooking(
 		throw e;
 	}
 	if (folio.balanceCentavos > 0) {
-		throw new CheckOutError(
-			`Settle the outstanding balance of ₱${(folio.balanceCentavos / 100).toFixed(2)} before checking out.`
-		);
+		if (!cityLedger) {
+			throw new CheckOutError(
+				`Settle the outstanding balance of ₱${(folio.balanceCentavos / 100).toFixed(2)} before checking out.`
+			);
+		}
+		try {
+			await openReceivable({
+				hotelId,
+				target: { kind: 'room', bookingId },
+				billToName: cityLedger.billToName,
+				billToCompany: cityLedger.billToCompany ?? null,
+				referenceNo: cityLedger.referenceNo ?? null,
+				notes: cityLedger.notes ?? null,
+				actor
+			});
+		} catch (e) {
+			throw new CheckOutError(
+				e instanceof Error ? e.message : 'Could not move the balance to the city ledger.'
+			);
+		}
 	}
 
 	await db.transaction(async (tx) => {
@@ -574,7 +658,12 @@ export async function checkOutBooking(
 				await tx
 					.update(roomAssignments)
 					.set({ checkOut: businessDate })
-					.where(and(eq(roomAssignments.bookingRoomId, bookingRoom.id), gt(roomAssignments.checkOut, businessDate)));
+					.where(
+						and(
+							eq(roomAssignments.bookingRoomId, bookingRoom.id),
+							gt(roomAssignments.checkOut, businessDate)
+						)
+					);
 			}
 		}
 
@@ -595,6 +684,18 @@ export async function checkOutBooking(
 	});
 
 	await closeFolio(hotelId, bookingId);
+
+	// Issue the guest's Invoice on check-out. Non-fatal: a missing/exhausted BIR
+	// series is logged for staff to resolve in Finance → BIR; the Invoice issues
+	// on first print otherwise.
+	const bir = await getBirSettings(hotelId).catch(() => null);
+	if (bir?.autoIssueInvoiceOnCheckout) {
+		try {
+			await issueInvoice(hotelId, { kind: 'room', bookingId }, actor);
+		} catch (e) {
+			console.warn('checkOutBooking: could not issue invoice', bookingId, e);
+		}
+	}
 }
 
 export interface HallGridEvent {
@@ -625,7 +726,10 @@ export interface HallGridCell {
  * *is* the bookable unit) or a check-in step, so there's no "reserved" vs.
  * "occupied" split here — just today's event list per hall.
  */
-export async function getHallStatusBoard(hotelId: string, businessDate: string): Promise<HallGridCell[]> {
+export async function getHallStatusBoard(
+	hotelId: string,
+	businessDate: string
+): Promise<HallGridCell[]> {
 	const hallRows = await db
 		.select({
 			id: functionHalls.id,
@@ -690,7 +794,8 @@ export async function getHallStatusBoard(hotelId: string, businessDate: string):
 		});
 		eventsByHall.set(r.functionHallId, list);
 	}
-	for (const list of eventsByHall.values()) list.sort((a, b) => a.startTime.localeCompare(b.startTime));
+	for (const list of eventsByHall.values())
+		list.sort((a, b) => a.startTime.localeCompare(b.startTime));
 
 	return hallRows.map((h) => ({
 		functionHallId: h.id,
@@ -706,6 +811,7 @@ export class HallWalkInError extends Error {}
 /** Same posture as `createWalkInBooking`, for a function hall — settled in cash on the spot, confirmed immediately. */
 export async function createWalkInHallBooking(params: {
 	hotelId: string;
+	businessDate: string;
 	guest: { fullName: string; email: string; phone: string | null; specialRequests: string | null };
 	functionHallId: string;
 	eventDate: string;
@@ -713,16 +819,37 @@ export async function createWalkInHallBooking(params: {
 	endTime: string;
 	eventType: string;
 	guestCount: number;
+	payment?: WalkInPaymentInput;
 	actor: SessionUser | null;
 }): Promise<{ hallBookingId: string }> {
-	const { hotelId, guest, functionHallId, eventDate, startTime, endTime, eventType, guestCount, actor } = params;
+	const {
+		hotelId,
+		businessDate,
+		guest,
+		functionHallId,
+		eventDate,
+		startTime,
+		endTime,
+		eventType,
+		guestCount,
+		actor
+	} = params;
+	const payment: WalkInPaymentInput = params.payment ?? { method: 'cash' };
+
+	const { cashAccountId, shiftId } = await resolvePaymentAccount(hotelId, payment.method);
 
 	const hallBookingId = await db.transaction(async (tx) => {
 		await tx.execute(
 			sql`select pg_advisory_xact_lock(hashtext(${hotelId}), hashtext(${'hall:' + functionHallId + ':' + eventDate}))`
 		);
 
-		const available = await checkHallAvailability({ hotelId, functionHallId, eventDate, startTime, endTime });
+		const available = await checkHallAvailability({
+			hotelId,
+			functionHallId,
+			eventDate,
+			startTime,
+			endTime
+		});
 		if (!available) throw new HallWalkInError('That function hall slot is no longer available.');
 
 		const price = await priceEventHall({ hotelId, functionHallId, startTime, endTime });
@@ -760,14 +887,6 @@ export async function createWalkInHallBooking(params: {
 			note: 'Walk-in — settled at front desk'
 		});
 
-		await tx.insert(payments).values({
-			orderId: order!.id,
-			provider: 'cash',
-			status: 'paid',
-			amountCentavos: price.totalCentavos,
-			paidAt: new Date()
-		});
-
 		const [hallBooking] = await tx
 			.insert(hallBookings)
 			.values({
@@ -791,6 +910,23 @@ export async function createWalkInHallBooking(params: {
 			fromStatus: null,
 			toStatus: 'confirmed',
 			note: 'Walk-in booking'
+		});
+
+		await recordWalkInPayment(tx, {
+			hotelId,
+			orderId: order!.id,
+			target: { kind: 'hall', hallBookingId: hallBooking!.id },
+			method: payment.method,
+			amountCentavos: price.totalCentavos,
+			tenderedCentavos: payment.tenderedCentavos ?? null,
+			referenceNo: payment.referenceNo ?? null,
+			bankName: payment.bankName ?? null,
+			chequeDate: payment.chequeDate ?? null,
+			cashAccountId,
+			shiftId,
+			businessDate,
+			guestName: guest.fullName.trim(),
+			actor
 		});
 
 		return hallBooking!.id;
@@ -828,7 +964,10 @@ export async function completeHallBooking(
 			throw new HallCompleteError('Only a confirmed event can be marked completed.');
 		}
 
-		await tx.update(hallBookings).set({ status: 'completed' }).where(eq(hallBookings.id, hallBookingId));
+		await tx
+			.update(hallBookings)
+			.set({ status: 'completed' })
+			.where(eq(hallBookings.id, hallBookingId));
 
 		await tx.insert(hallBookingStatusHistory).values({
 			hallBookingId,

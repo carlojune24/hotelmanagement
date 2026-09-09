@@ -5,6 +5,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { ulid } from 'ulid';
 import { seedHotelAmenities } from '../amenities/catalog';
+import { seedFinanceDefaults } from '../finance/seed-defaults';
 import * as schema from './schema/index';
 
 const url = process.env.DATABASE_URL;
@@ -218,6 +219,26 @@ async function seedInventory(hotelId: string) {
 	});
 }
 
+/**
+ * Idempotent Finance setup for the seed hotel: the shared `seedFinanceDefaults`
+ * (cash accounts + settings + expense categories) plus a couple of demo vendors.
+ * Skipped once vendors exist.
+ */
+async function seedFinance(hotelId: string) {
+	await seedFinanceDefaults(db, hotelId);
+	const existing = await db
+		.select({ id: schema.vendors.id })
+		.from(schema.vendors)
+		.where(eq(schema.vendors.hotelId, hotelId))
+		.limit(1);
+	if (existing.length > 0) return;
+	await db.insert(schema.vendors).values([
+		{ hotelId, name: 'Meralco', tin: '000-123-456-000' },
+		{ hotelId, name: 'Local Water District' },
+		{ hotelId, name: 'CleanPro Supplies Trading', tin: '111-222-333-000' }
+	]);
+}
+
 /** Idempotent property-wide amenity picks for the seed hotel's storefront "About" section. */
 async function seedHotelAmenityLinks(hotelId: string) {
 	const existing = await db
@@ -245,9 +266,7 @@ async function seedHotelAmenityLinks(hotelId: string) {
 	const links = picks
 		.map((p, i) => {
 			const amenityId = bySlug.get(p.slug);
-			return amenityId
-				? { hotelId, amenityId, note: p.note, sortOrder: i }
-				: null;
+			return amenityId ? { hotelId, amenityId, note: p.note, sortOrder: i } : null;
 		})
 		.filter((v): v is NonNullable<typeof v> => v !== null);
 	if (links.length > 0) await db.insert(schema.hotelAmenities).values(links);
@@ -308,6 +327,7 @@ async function main() {
 	await seedHotelAmenities(db, hotel.id);
 	await seedHotelAmenityLinks(hotel.id);
 	await seedInventory(hotel.id);
+	await seedFinance(hotel.id);
 
 	console.log('Seed complete:');
 	console.log(`  Platform admin : ${ADMIN_EMAIL} / ${ADMIN_PW}  -> /admin`);

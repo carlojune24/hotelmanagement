@@ -15,3 +15,5 @@ export * from './bookings';
 export * from './room-assignments';
 export * from './reviews';
 export * from './folio';
+export * from './finance';
+export * from './documents';

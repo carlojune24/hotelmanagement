@@ -3,10 +3,8 @@
 	import type { Map as LeafletMap, Marker } from 'leaflet';
 	import 'leaflet/dist/leaflet.css';
 
-	let {
-		lat = $bindable(null),
-		lng = $bindable(null)
-	}: { lat: number | null; lng: number | null } = $props();
+	let { lat = $bindable(null), lng = $bindable(null) }: { lat: number | null; lng: number | null } =
+		$props();
 
 	// Davao City, PH — this project's own reference property is there; a reasonable
 	// default center for a hotel that hasn't dropped a pin yet.

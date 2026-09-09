@@ -214,3 +214,182 @@ Two distinct headers, never both on screen at once. On the five wizard steps (`d
 - **Don't** render the accent as a flat color-block hero (that's the OTA-generic rut this world exists to refuse) — large regions get the woven pattern, not a solid fill.
 - **Don't** add shadows anywhere except the confirmation ticket.
 - **Don't** invent fake review scores, guest counts, or star ratings — PRODUCT.md confirms there's no real review data to show.
+
+<!-- ===================================================================== -->
+
+<!-- AS-BUILT: the print-document component and its route shell are implemented under
+     src/lib/components/print/accountable-form.svelte and src/routes/[hotel]/print/ per this
+     section. Tokens below are prose-normative — a single DESIGN.md carries one machine-readable
+     frontmatter block, held by the Woven Ledger world above; every value here is copied from
+     the shipped scoped CSS. This world is deliberately separate from both the Woven Ledger
+     guest world above and the staff app's shadcn/oklch operate shell. -->
+
+# Design System: MM Hotel — Accountable Forms (print)
+
+**Scope: the printable / PDF documents a hotel issues from a folio** — `src/routes/[hotel]/print/**` and the shared `accountable-form.svelte` component. Currently Invoice and Official Receipt (incl. a Refund variant); later X-reading, Z-reading, and the OR-liquidation register as per-type variations of the same A4 shell. Rendered byte-identically for a guest (order `access_token`) and for staff, and to PDF. It does **not** style the `/{hotel}/finance/**` management screens — those keep the staff shadcn/oklch shell. A guest booking route never inherits this world; this world never inherits either of the other two.
+
+## Overview
+
+**Creative North Star: "The BIR-Registered Accountable Form"**
+
+The document is authoritative because it is spare, ruled and serial-numbered — a Philippine Bureau of Internal Revenue accountable form — not because it is branded. It rejects the category default of a "nice branded PDF receipt": no logo watermark, no accent panel, no gradient, no "Thank you for your stay" hero. What signals officialdom is the fine double-rule frame around the whole page, the brick-red document-type word and serial number top-right, and an otherwise uninterrupted ink-on-white ruled page whose empty space is filled with pre-printed ruling rather than left blank.
+
+Two type registers only, and they never trade jobs: Inter carries every label, name and sentence; JetBrains Mono carries every figure — amount, serial, date, TIN, reference — with tabular figures, right-aligned in columns so a reader can add them up by eye. The layout is measured in millimetres and points because the artifact is a sheet of A4 paper, not a viewport; it is fixed at 210mm wide and does not respond.
+
+The page must survive the print path: `print-color-adjust: exact` keeps the red and the rules, `break-inside: avoid` keeps every bill fact whole across a page break, and the statutory footer is config-driven — the full permit / accredited-printer / serial-range / five-year-validity block when the hotel's BIR identity is set, a single honest "computer-generated, not a BIR-registered document" line until then.
+
+**Key characteristics:**
+- Ink on pure white, with exactly one non-ink colour (brick red) on exactly two elements.
+- 3px double-rule outer frame around the entire page, inside a ~10mm margin.
+- Inter for structure, JetBrains Mono for every figure — a hard two-register split.
+- Ruled filler rows extend a sparse document down to the totals so it reads as pre-printed stationery.
+- Geometry in mm / pt; fixed 210mm width; not responsive by design.
+- No serif display face, no shadow, no rounded corner, no tinted fill anywhere.
+- The statutory footer is driven entirely by the hotel's stored BIR config.
+
+## Colors
+
+Ink-on-white, hotel-agnostic and fixed. All values are literal in `accountable-form.svelte`'s scoped CSS as `--af-*` custom properties on `.af-page`; there is no per-hotel palette computation the way the Woven Ledger world has.
+
+### Primary
+- **Accountable-form brick red** (`--af-red`, `#a3272e`): the one non-ink colour. Used on exactly two elements — the document-type word (`.af-doctype`) and the serial number (`.af-serial-no`), both top-right. Appears nowhere else on the page.
+
+### Neutral
+- **Document ink** (`--af-ink`, `#1a1a1a`): all primary text, the double-rule frame, structural 1px dividers (table-header underline, totals-line rule, signature rules, amount-in-words box, foot-grid top), and the default value of `--af-accent`.
+- **Soft ink** (`--af-ink-soft`, `#55524c`): secondary text — field labels, the trade-name and address lines, the `(VAT-exempt)` qualifier, totals row labels, the copy tag when it reads `ORIGINAL`, and the entire legal / disclaimer footer.
+- **Rule** (`--af-rule`, `#b7b2a8`): hairline ruling that is not structural — line-item row separators, the repeating-gradient filler rows, the copy-tag border, the legal-footer top rule, and the on-screen (non-print) page border.
+- **Paper** (`#fff`, pure white): the only ground. No section bands, no zebra rows, no tints.
+
+### Accent (per-hotel, optional, single-use)
+- **Hotel accent rule** (`--af-accent`, defaults to `var(--af-ink)`): passed in via the component's `accent` prop and applied to exactly one element — the 2px `.af-accent-rule` under the letterhead. If no accent is supplied it is ink. A hotel accent never touches anything else on the page.
+
+### Preview-shell chrome (not part of the document)
+- **Preview ground** (`#6b6b6b`, mid-grey) and the toolbar button (`#fff` fill, `#1a1a1a` border, `#f0efec` hover) live in `print/+layout.svelte` and are stripped `@media print`. They frame the document on screen; they are not document tokens and are not a design-system button.
+
+### Named Rules
+**The Ink-and-One-Red Rule.** The page is ink on white. Brick red (`#a3272e`) appears on the document-type word and the serial number and nowhere else — not on totals, not on rules, not on headings. Every other mark is `--af-ink`, `--af-ink-soft`, or `--af-rule`.
+
+**The One-Accent-Rule Rule.** A hotel's brand accent is permitted on a single 2px rule beneath the letterhead and on nothing else. It defaults to ink when unset; a too-light accent simply reads as a faint rule, never as a fill.
+
+## Typography
+
+**Structure / body font:** Inter Variable (`'Inter Variable', 'Inter', system-ui, sans-serif`), self-hosted via `@fontsource-variable/inter`. Base size 10pt, line-height 1.4.
+**Figure font:** JetBrains Mono Variable (`'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace`), self-hosted via `@fontsource-variable/jetbrains-mono`, always with `font-variant-numeric: tabular-nums`. Applied through the `.af-mono` class.
+**Display font:** none. The world deliberately has no serif or display face; the largest type is the letterhead legal name set in Inter.
+
+**Character:** utilitarian and photocopier-proof. Inter is the form's printed labels and the parties' names; JetBrains Mono is the "verify this against your books" voice and appears only in tabular or single-value numeric contexts, right-aligned wherever it sits in a column.
+
+### Hierarchy
+- **Letterhead name** (Inter, 700, 15pt, uppercase, letter-spacing 0.01em): the hotel legal (or trade) name, top-left — the one moment of size on the page.
+- **Document type** (Inter, 700, 13pt, uppercase, letter-spacing 0.08em, `--af-red`): `INVOICE` / `OFFICIAL RECEIPT` / `OFFICIAL RECEIPT (REFUND)`, top-right.
+- **Serial number** (JetBrains Mono, 700, 13pt, `--af-red`): `No. INV-000123`, directly under the document type. Grouped `PREFIX-000000` by `formatSerial` (a hyphen is inserted when the prefix ends alphanumeric; `serialPadWidth` default 6).
+- **Party value** (Inter, 600, 11pt): the bill-to / received-from name.
+- **Body / line item** (Inter, 400, 9.5pt, line-height 1.4): line descriptions; the amount-in-words value is 500 weight.
+- **Label** (Inter, 600, 7.5pt, uppercase, letter-spacing 0.06em, `--af-ink-soft`): every field label — `BILL TO`, `DESCRIPTION`, `AMOUNT IN WORDS`, the table header row, totals labels.
+- **Copy tag** (Inter, 7.5pt, uppercase, letter-spacing 0.14em): `ORIGINAL` (soft ink, rule border) or `REPRINT` (full ink, ink border), boxed under the serial.
+- **Secondary line** (Inter, 8.5–9pt, `--af-ink-soft`): the "operating as" trade name, address, and TIN / VAT-registration line (TIN portion in `.af-mono`).
+- **Legal footer** (Inter, 7.5pt, line-height 1.5, `--af-ink-soft`; `.af-legal-strong` is 700 + full ink): the statutory or disclaimer block.
+- **Figure** (JetBrains Mono, tabular-nums; size tracks context — 9pt in the totals ladder, 9.5pt in line items, 13pt in the serial, 8.5pt in the meta list): every peso amount (`PHP 1,234.00`), quantity, date, business date, TIN, booking / folio / order reference. Right-aligned in every column.
+
+### Named Rules
+**The Two-Register Rule.** If it is a value you would reconcile against a bill or a ledger — money, quantity, date, serial, reference, TIN — it is set in JetBrains Mono with `tabular-nums` and right-aligned in its column. If it is a name, a label, or a sentence, it is Inter. Nothing on the page mixes the two within one data point.
+
+**The No-Display-Face Rule.** There is no serif and no display font. Emphasis comes from weight (700), size (never above 15pt), letter-spacing, and the brick red — never from a second typeface.
+
+## Layout
+
+A single fixed-layout A4 page. `.af-page` is `210mm` wide, `min-height: 297mm`, centred with `margin: 0 auto`, `padding: 10mm` (the on-screen stand-in for the print margin), `background: #fff`. The real print geometry is set by `@page { size: A4; margin: 10mm }`; in `@media print` the `.af-page` drops its own margin/padding and width (`width: auto`) so it does not double the `@page` margin, and `.af-frame` takes `min-height: 265mm` to fill the printable area. On screen (`@media screen`) the page gets `margin: 24px auto` and a 1px `--af-rule` border, sitting on the preview shell's grey ground.
+
+**Frame.** `.af-frame` is `border: 3px double var(--af-ink)`, `padding: 6mm`, `min-height: calc(297mm - 20mm)`, and a vertical flex column so the ruled filler can grow.
+
+**Vertical order (top to bottom):** letterhead + serial header (`.af-head`, flex `space-between`, gap 10mm; serial column `text-align: right`, `min-width: 62mm`) → 2px accent rule (`margin: 4mm 0`) → parties block (`.af-parties`, flex `space-between`, gap 10mm) → line-item table (`.af-lines`, full width, `border-collapse: collapse`) → ruled filler (`.af-lines-fill`, `flex: 1`, `min-height: 12mm`) → foot grid (`.af-foot-grid`, flex, gap 6mm, `border-top: 1px solid var(--af-ink)`) holding the amount-in-words box (`flex: 1`) beside the totals ladder (fixed `78mm` wide) → signature block (`.af-signatures`, flex, gap 14mm, `margin-top: 10mm`) → legal footer (`.af-legal`, `margin-top: 6mm`, `border-top: 1px solid var(--af-rule)`).
+
+**Table.** Header cells: 7.5pt uppercase label, `border-bottom: 1px solid var(--af-ink)`. Body cells: 9.5pt, `border-bottom: 1px solid var(--af-rule)`, `vertical-align: top`, padding `1.6mm 2mm`. The three numeric columns (Qty, Unit price, Amount) are `text-align: right`, `white-space: nowrap`, `.af-mono`.
+
+**Ruled filler.** A `repeating-linear-gradient` of `--af-rule` hairlines at the line-item row pitch (`calc(1.6mm + 9.5pt)`), `flex: 1` so it always stretches the page down to the totals — the mechanism that makes a one-line invoice still read as a pre-printed form.
+
+**Spacing rhythm.** All in mm / pt: section gaps 4–6mm, header/parties inter-column gap 10mm, signature gap 14mm, cell padding 1.6mm × 2mm, totals row padding 0.8mm vertical. There is no px/rem spacing scale — this is a paper document.
+
+**Print survival.** `-webkit-print-color-adjust: exact` + `print-color-adjust: exact` on `.af-page`. `break-inside: avoid` on `.af-foot-grid`, `.af-words`, `.af-signatures`, `.af-legal`, and every `.af-lines tbody tr`. `color-scheme: light` forced on `html` by the print layout.
+
+### Named Rules
+**The Paper-Units Rule.** Page geometry is expressed in millimetres and points, never rem or px. The page is a fixed 210mm sheet; a narrow screen scrolls it horizontally and the PDF is unaffected. Do not make this layout responsive.
+
+**The Pre-Printed Form Rule.** A document never leaves a blank void above its totals. The ruled filler grows to fill whatever space the line items don't, so a sparse receipt reads as stationery, not as a short email.
+
+## Elevation & Depth
+
+Entirely flat. No `box-shadow`, no `filter`, no layering anywhere in the document. Depth and hierarchy come from exactly two devices: the 3px double-rule outer frame, and 1px horizontal rules — `--af-ink` for structural dividers (table header, totals line, signature lines, amount-in-words box, foot-grid top) and `--af-rule` for secondary ruling (row separators, filler, footer rule). The only non-flat thing in the route is the preview shell's grey ground behind the sheet, which is chrome, not the document, and is removed in print.
+
+### Named Rules
+**The Flat Print Rule.** No shadows, no fills, no rounded corners — ever. If a region needs to be set apart, it gets a 1px rule or a 1px box, not a tint or a lift.
+
+## Shapes
+
+Right angles only. No element sets `border-radius`; corners are square throughout. The signature silhouette is the `3px double` outer frame (`border: 3px double var(--af-ink)`) around the entire page. Boxes are drawn with 1px borders: the amount-in-words box (`1px solid var(--af-ink)`) and the copy tag (`1px solid var(--af-rule)`, or `var(--af-ink)` when `REPRINT`). Rules are 1px except the letterhead accent rule, which is 2px. The logo, when present, is constrained to `max-height: 16mm` / `max-width: 55mm`, `object-fit: contain` — never cropped, never a circle.
+
+## Components
+
+### Print shell & toolbar (`print/+layout.svelte`)
+- **Character:** a neutral preview frame that disappears when printed. Not a design-system surface.
+- **Ground:** mid-grey (`#6b6b6b`), `min-height: 100vh`, 40px bottom padding.
+- **Toolbar:** centred, 16px padding, a single "Print / Save as PDF" button — Inter 500 13px, `#fff` fill, `1px solid #1a1a1a` border, no radius, padding `9px 18px`, hover `#f0efec`.
+- **Print:** `@media print` sets the ground to `#fff`, removes padding, and hides the toolbar entirely.
+
+### Letterhead lockup (`.af-letterhead`)
+Top-left. Optional logo image, then the hotel legal name (15pt Inter 700 uppercase); an "operating as {trade name}" line when legal ≠ trade; an address line; and a `.af-mono` line carrying `TIN {tin} · VAT REGISTERED` or `· NON-VAT REGISTERED`.
+
+### Serial block (`.af-serial`)
+Top-right, `text-align: right`, `min-width: 62mm`. Document-type word (brick red) → `No. {formattedNo}` (brick red mono, 13pt) → copy tag → a definition list of `Date issued` (mono datetime), `Business date` (mono), and `Prepared by` (Inter, name) with values right-aligned, `min-width: 34mm`.
+
+### Copy tag (`.af-copy-tag`)
+Inline-block, `1px` border, padding `0.5mm 2mm`, 7.5pt, letter-spacing 0.14em. `ORIGINAL` = `--af-ink-soft` text + `--af-rule` border; `.is-reprint` `REPRINT` = `--af-ink` text + `--af-ink` border. The only state variance in the world.
+
+### Letterhead accent rule (`.af-accent-rule`)
+A single `height: 2px` bar, full width, `background: var(--af-accent)` (ink by default), `margin: 4mm 0`. The one place a hotel's colour is allowed.
+
+### Parties block (`.af-parties`)
+Two columns. Left: `BILL TO` (or `RECEIVED FROM` for a receipt) label + 11pt/600 name + optional address and `.af-mono` TIN sub-lines. Right (`.af-ref`, `text-align: right`, 8.5pt): whichever of Applied-to-invoice, Booking, Dates, Folio, Order references exist, each a label + `.af-mono` value.
+
+### Line-item ledger (`.af-lines`)
+Full-width collapsed table. Columns: Description / Qty / Unit price / Amount. Header row is a 7.5pt uppercase label row with a `1px solid var(--af-ink)` underline. Body rows separated by `1px solid var(--af-rule)`. Numeric columns right-aligned mono, nowrap. An inline `(VAT-exempt)` qualifier (`.af-exempt`, 8pt, soft ink) trails a non-vatable description on a VAT-registered invoice.
+
+### Ruled filler (`.af-lines-fill`)
+`aria-hidden` block of repeating hairline rules at row pitch, `flex: 1`, `min-height: 12mm`. Purely visual — extends the ledger to the totals.
+
+### Amount-in-words box (`.af-words`)
+`flex: 1`, `border: 1px solid var(--af-ink)`, padding `2.5mm 3mm`. `AMOUNT IN WORDS` label + a `.af-mono` 9.5pt/500 value like `FIVE HUNDRED SIXTY PESOS AND 00/100 ONLY`.
+
+### Totals ladder (`.af-totals`)
+Fixed `78mm`, right of the amount-in-words box, 9pt. Each row is a flex `space-between` of a soft-ink `<dt>` and a right-aligned `.af-mono` `<dd>`. `.af-total-line` rows (`Total` / `Amount paid`, and `Balance due`) get `border-top: 1px solid var(--af-ink)` and 700 weight with a full-ink label.
+- **Invoice variant:** VATable sales / VAT-exempt sales / (Zero-rated sales) / VAT (12%) — the VAT block only when the hotel is VAT-registered — then **Total**, Less: payments received, **Balance due**.
+- **Official Receipt variant:** **Amount paid**, Payment method (Inter, not mono), Reference no. (mono, when present), Cash tendered + Change (when a cash tender exists), Balance carried forward (when known).
+
+### Signature block (`.af-signatures`)
+Two equal columns, gap 14mm, `margin-top: 10mm`. Each: a `border-top: 1px solid var(--af-ink)` rule + a 7.5pt label — `Prepared by` / `Authorized representative` for an invoice, `Received payment by` / `Payor / authorized representative` for a receipt.
+
+### Statutory footer (`.af-legal`)
+`margin-top: 6mm`, `border-top: 1px solid var(--af-rule)`, 7.5pt soft ink.
+- **BIR configured** (`snapshot.bir.configured`): permit / ATP no. (+ issue date) and accredited-printer line (+ accreditation no.); an authorized serial-range line when present; `THIS DOCUMENT IS NOT VALID FOR CLAIM OF INPUT TAX.` (`.af-legal-strong`) when non-VAT; a five-year-validity sentence.
+- **Not configured:** a single `.af-legal-strong` line — "Computer-generated {type} for the guest's reference. This is not a BIR-registered document…".
+- An optional hotel `footerNote` is appended in either case.
+
+## Do's and Don'ts
+
+### Do:
+- **Do** keep brick red (`#a3272e`) on exactly the document-type word and the serial number — nowhere else.
+- **Do** set every figure — money, quantity, date, serial, reference, TIN — in JetBrains Mono with `tabular-nums`, right-aligned in its column.
+- **Do** let the ruled filler grow so a one-line document still fills the page as a pre-printed form.
+- **Do** keep the whole page inside the `3px double` `--af-ink` frame, within a ~10mm margin (`@page` for print, `.af-page` padding for screen).
+- **Do** drive the statutory footer entirely from the hotel's stored BIR config — full permit / printer / serial-range / validity block when complete, single "computer-generated, not BIR-registered" line when not.
+- **Do** guard the totals grid, amount-in-words box, signature block, legal footer, and every ledger row with `break-inside: avoid`, and set `print-color-adjust: exact`.
+- **Do** add new document types (X-reading, Z-reading, liquidation register) as per-type header / body / totals variations of this one A4 shell, reusing the `--af-*` tokens.
+- **Do** express page geometry in mm / pt.
+
+### Don't:
+- **Don't** add a logo watermark, accent panel, gradient, tinted fill, section band, zebra row, or "Thank you" hero — the form's authority is its spareness.
+- **Don't** introduce a serif or display typeface, a rounded corner, or any shadow.
+- **Don't** let the hotel accent past the single 2px letterhead rule.
+- **Don't** use px or rem for page geometry, and don't make the layout responsive — the sheet is a fixed 210mm; a narrow screen scrolls, the PDF does not change.
+- **Don't** put a figure in Inter, or a name / label in mono.
+- **Don't** style the `/{hotel}/finance/**` BIR-management screens with this world — they stay on the staff shadcn/oklch shell.

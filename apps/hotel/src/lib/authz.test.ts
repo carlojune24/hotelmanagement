@@ -21,4 +21,20 @@ describe('roleCan', () => {
 		expect(roleCan('read_only', 'booking:read')).toBe(true);
 		expect(roleCan('read_only', 'booking:create')).toBe(false);
 	});
+
+	it('front desk can cashier but not run the finance back office', () => {
+		expect(roleCan('front_desk', 'payment:record')).toBe(true);
+		expect(roleCan('front_desk', 'shift:open')).toBe(true);
+		expect(roleCan('front_desk', 'finance:read')).toBe(true);
+		expect(roleCan('front_desk', 'finance:write')).toBe(false);
+		expect(roleCan('front_desk', 'expense:create')).toBe(false);
+		expect(roleCan('front_desk', 'dayclose:run')).toBe(false);
+	});
+
+	it('accountant runs the finance back office', () => {
+		expect(roleCan('accountant', 'expense:create')).toBe(true);
+		expect(roleCan('accountant', 'receivable:write_off')).toBe(true);
+		expect(roleCan('accountant', 'dayclose:run')).toBe(true);
+		expect(roleCan('accountant', 'shift:close')).toBe(true);
+	});
 });
