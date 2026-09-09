@@ -60,9 +60,47 @@ Closes the inventory-leak: the webhook only handled
   free (today: flagged for manual staff refund).
 - `impeccable`-designed expired empty-state.
 
+## 3. Guest booking-confirmation email (Phase-1 client-flow gap)
+
+Decisions (user): nodemailer + SMTP · run impeccable for the template first ·
+add the `email_log` table now.
+
+- **impeccable** — ran `impeccable context`, presented the design direction
+  (world: Woven Ledger; the email *is* the Confirmation Ticket relocated to the
+  inbox), user approved, then built. Direction + the four email-medium deviations
+  recorded on `DESIGN.md`'s Confirmation Ticket section and a new surface brief
+  `.impeccable/surfaces/src-lib-server-email-booking-confirmation.md`.
+- **`lib/server/email/`** — `transport.ts` (nodemailer from `SMTP_*`; unset →
+  console-print JSON transport), `send.ts` (`sendMail` + one `email_log` row per
+  attempt + `alreadySent` guard), `booking-confirmation.ts`
+  (`renderBookingConfirmation` — pure, 10 unit tests → `{ subject, html, text }`),
+  `send-booking-confirmation.ts` (DB gather + render + send, idempotent,
+  never throws).
+- **Template** — 600px table layout, inline styles, `text/plain` alt, Outlook VML
+  button. Manifest ticket (flat-accent 6px stripe, mono data register), price
+  breakdown, one flat-accent CTA to `/{slug}/book/confirmation`, "before you
+  arrive" block, storefront trust-line footer. Per-hotel accent/paper/logo.
+  Deviations from DESIGN.md: flat stripe (not the nested weave) · Georgia
+  fallback · 1px frame (not the lift shadow) · warm `#f4f1ea` ground ·
+  `--ledger-ink-muted` → `#6b6155` for 4.5:1.
+- **`email_log`** (migration `0023`) — `sent`/`failed` + `messageId`/`error`, FK
+  hotel + order. Hook for a future staff resend UI.
+- **Trigger** — the PayMongo webhook's paid handler now returns whether *this*
+  delivery confirmed the order; if so it calls `sendBookingConfirmation` after
+  the tx commits, `.catch`-guarded. Idempotent on redelivery.
+- Verified: `pnpm check` clean, 64 unit tests (was 54); live-DB gather + send +
+  idempotency via a throwaway vitest. Rendered previews sent to the user.
+  Committed `c101ee0`; migration `0023` applied locally. Nothing pushed.
+
+### Not done / follow-ups
+- Real cross-client render QA (Outlook/Gmail/Apple Mail — built to best practice,
+  not yet tested for real).
+- Staff email-log viewer / resend button.
+- Cancellation + payment-failed guest emails.
+- Attaching the BIR Invoice/OR PDF (BIR module Step 4).
+
 ## Next
 
-Other Phase-1 client-flow gaps: **guest confirmation email** (needs an email
-provider decision — no mail infra exists; also unblocks BIR Step 4's PDF
-attachment), **staff cancel / no-show / modify-stay** booking mutation, or the
-**basic staff dashboard**.
+Remaining Phase-1 client-flow gaps: **staff cancel / no-show / modify-stay**
+booking mutation, **guest self-service manage-booking**, or the **basic staff
+dashboard**.
