@@ -2,7 +2,13 @@ import { fail } from '@sveltejs/kit';
 import { z } from 'zod';
 import { requireCap } from '$lib/server/auth/rbac';
 import { businessDateFor, FinanceError } from '$lib/server/finance/shared';
-import { arAging, listReceivables, settleReceivable, writeOffReceivable } from '$lib/server/finance/receivables';
+import {
+	arAging,
+	listReceivables,
+	reopenReceivable,
+	settleReceivable,
+	writeOffReceivable
+} from '$lib/server/finance/receivables';
 import type { Actions, PageServerLoad } from './$types';
 
 const METHODS = ['cash', 'card', 'gcash', 'maya', 'bank_transfer', 'cheque'] as const;
@@ -60,6 +66,28 @@ export const actions: Actions = {
 		try {
 			await writeOffReceivable(hotel.id, parsed.data.id, parsed.data.reason, event.locals.user);
 			return { ok: 'Written off.' };
+		} catch (e) {
+			if (e instanceof FinanceError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
+	reopen: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'receivable:write');
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		const hotel = event.locals.hotel!;
+		const parsed = z
+			.object({ id: z.string().uuid() })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: 'Missing account.' });
+		try {
+			const res = await reopenReceivable(hotel.id, parsed.data.id, event.locals.user);
+			return {
+				ok:
+					res.status === 'settled'
+						? 'Reopened — the account is now settled.'
+						: `Reopened — ₱${(res.outstandingCentavos / 100).toFixed(2)} outstanding.`
+			};
 		} catch (e) {
 			if (e instanceof FinanceError) return fail(400, { error: e.message });
 			throw e;

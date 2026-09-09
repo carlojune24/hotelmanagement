@@ -16,10 +16,12 @@
 		if (form && 'ok' in form && form.ok) {
 			toast.success(form.ok);
 			settlingId = null;
+			writeOffId = null;
 		}
 		if (form && 'error' in form && form.error) toast.error(form.error);
 	});
 	let settlingId = $state<string | null>(null);
+	let writeOffId = $state<string | null>(null);
 
 	const statusClass: Record<string, string> = {
 		open: 'border-transparent bg-danger/15 text-danger',
@@ -121,12 +123,22 @@
 							{#if (r.status === 'open' || r.status === 'partial') && data.finance.canReceivable}
 								<button type="button" onclick={() => (settlingId = settlingId === r.id ? null : r.id)} class="ml-2 text-xs text-ok underline underline-offset-2">Collect</button>
 								{#if data.finance.canAdmin}
-									<form method="POST" action="?/writeOff" use:enhance class="inline">
-										<input type="hidden" name="id" value={r.id} />
-										<input type="hidden" name="reason" value="Written off from city ledger" />
-										<button class="ml-2 text-xs text-ink-muted underline underline-offset-2 hover:text-danger">Write off</button>
-									</form>
+									<button
+										type="button"
+										onclick={() => (writeOffId = writeOffId === r.id ? null : r.id)}
+										class="ml-2 text-xs text-ink-muted underline underline-offset-2 hover:text-danger"
+									>
+										Write off
+									</button>
 								{/if}
+							{/if}
+							{#if r.status === 'written_off' && data.finance.canAdmin}
+								<form method="POST" action="?/reopen" use:enhance class="inline">
+									<input type="hidden" name="id" value={r.id} />
+									<button class="ml-2 text-xs text-ink-muted underline underline-offset-2 hover:text-ink">
+										Reopen
+									</button>
+								</form>
 							{/if}
 						</Table.Cell>
 					</Table.Row>
@@ -147,6 +159,35 @@
 									</div>
 									<div><Label class="text-xs">Reference</Label><Input name="referenceNo" class="mt-1 h-8" /></div>
 									<Button type="submit" size="sm">Record collection</Button>
+								</form>
+							</Table.Cell>
+						</Table.Row>
+					{/if}
+					{#if writeOffId === r.id}
+						<Table.Row>
+							<Table.Cell colspan={6} class="bg-surface-2">
+								<form method="POST" action="?/writeOff" use:enhance class="flex flex-wrap items-end gap-2">
+									<input type="hidden" name="id" value={r.id} />
+									<div class="min-w-56 flex-1">
+										<Label class="text-xs">
+											Reason for writing off {peso(r.outstandingCentavos)} — this closes the account
+										</Label>
+										<Input
+											name="reason"
+											required
+											maxlength={300}
+											placeholder="e.g. uncollectable — agency dissolved; approved by GM"
+											class="mt-1 h-8"
+										/>
+									</div>
+									<Button type="submit" size="sm" variant="destructive">Confirm write-off</Button>
+									<button
+										type="button"
+										onclick={() => (writeOffId = null)}
+										class="pb-1.5 text-xs text-ink-muted underline underline-offset-2"
+									>
+										Cancel
+									</button>
 								</form>
 							</Table.Cell>
 						</Table.Row>

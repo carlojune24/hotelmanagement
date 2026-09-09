@@ -218,6 +218,66 @@ export async function writeOffReceivable(
 	});
 }
 
+/**
+ * Undoes a write-off: the account goes back to `open` / `partial` / `settled`
+ * with its outstanding balance recomputed from the original amount minus every
+ * real collection recorded against it. A write-off posts no cash, so there is
+ * nothing to reverse in the ledger — this is a pure status restore.
+ */
+export async function reopenReceivable(
+	hotelId: string,
+	receivableId: string,
+	actor: SessionUser | null
+): Promise<{ status: Receivable['status']; outstandingCentavos: number }> {
+	const [r] = await db
+		.select()
+		.from(receivables)
+		.where(and(eq(receivables.id, receivableId), eq(receivables.hotelId, hotelId)))
+		.limit(1);
+	if (!r) throw new FinanceError('Receivable not found.');
+	if (r.status !== 'written_off')
+		throw new FinanceError('Only a written-off account can be reopened.');
+
+	const [collected] = await db
+		.select({ total: sql<number>`coalesce(sum(${cashMovements.amountCentavos}), 0)::bigint` })
+		.from(cashMovements)
+		.where(
+			and(
+				eq(cashMovements.hotelId, hotelId),
+				eq(cashMovements.sourceType, 'receivable_settlement'),
+				eq(cashMovements.sourceId, receivableId),
+				isNull(cashMovements.voidedAt)
+			)
+		);
+	const paid = Number(collected?.total ?? 0);
+	const outstanding = Math.max(0, r.originalAmountCentavos - paid);
+	const status: Receivable['status'] =
+		outstanding <= 0 ? 'settled' : paid > 0 ? 'partial' : 'open';
+
+	await db
+		.update(receivables)
+		.set({
+			status,
+			outstandingCentavos: outstanding,
+			writtenOffByUserId: null,
+			writeOffReason: null,
+			settledAt: status === 'settled' ? (r.settledAt ?? new Date()) : null,
+			updatedAt: new Date()
+		})
+		.where(eq(receivables.id, receivableId));
+
+	await writeAudit({
+		hotelId,
+		actor,
+		action: 'finance.reopen_receivable',
+		entityType: 'receivable',
+		entityId: receivableId,
+		before: { status: 'written_off', reason: r.writeOffReason },
+		after: { status, outstandingCentavos: outstanding }
+	});
+	return { status, outstandingCentavos: outstanding };
+}
+
 export async function listReceivables(
 	hotelId: string,
 	opts: { status?: Receivable['status'] | 'active' } = {}
