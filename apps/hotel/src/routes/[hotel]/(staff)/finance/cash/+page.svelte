@@ -8,6 +8,7 @@
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import { RANGE_PRESETS, matchPreset, resolveRange } from '$lib/finance-range';
 	import type { ActionData, PageData } from './$types';
 
@@ -25,6 +26,13 @@
 	let panel = $state<null | 'transfer' | 'deposit' | 'manual' | 'ownerdraw'>(null);
 	let drawAccountId = $state('');
 	const drawAccount = $derived(data.activeAccounts.find((a) => a.id === drawAccountId));
+
+	const reconTotals = $derived({
+		opening: data.position.reduce((s, p) => s + p.openingCentavos, 0),
+		in: data.position.reduce((s, p) => s + p.inCentavos, 0),
+		out: data.position.reduce((s, p) => s + p.outCentavos, 0),
+		closing: data.position.reduce((s, p) => s + p.closingCentavos, 0)
+	});
 
 	const kindLabel: Record<string, string> = {
 		cash_drawer: 'Drawer',
@@ -208,47 +216,62 @@
 	{/if}
 
 	<!-- Position / reconciliation -->
-	<div class="mb-4 overflow-x-auto rounded-xl border border-border">
-		<div class="border-b border-border px-4 py-2.5 text-sm font-semibold text-ink">
-			Reconciliation {data.rangeActive ? '· selected range' : '· all time'}
-		</div>
-		<table class="w-full text-sm">
-			<thead class="border-b border-border bg-surface-2 text-left text-xs text-ink-muted">
-				<tr>
-					<th class="px-4 py-2">Account</th>
-					<th class="px-4 py-2 text-right">Opening</th>
-					<th class="px-4 py-2 text-right">In</th>
-					<th class="px-4 py-2 text-right">Out</th>
-					<th class="px-4 py-2 text-right">{data.rangeActive ? 'Closing' : 'Balance now'}</th>
-				</tr>
-			</thead>
-			<tbody>
-				{#each data.position as p (p.accountId)}
-					<tr class="border-b border-border/60 last:border-0">
-						<td class="px-4 py-2 text-ink">{p.name}</td>
-						<td class="px-4 py-2 text-right tabular-nums text-ink-muted">{peso(p.openingCentavos)}</td>
-						<td class="px-4 py-2 text-right tabular-nums text-ok">{p.inCentavos ? peso(p.inCentavos) : '—'}</td>
-						<td class="px-4 py-2 text-right tabular-nums text-danger">{p.outCentavos ? peso(p.outCentavos) : '—'}</td>
-						<td class="px-4 py-2 text-right font-medium tabular-nums text-ink">{peso(p.closingCentavos)}</td>
+	<details class="group mb-4 overflow-hidden rounded-xl border border-border">
+		<summary
+			class="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5 text-sm hover:bg-surface-2 [&::-webkit-details-marker]:hidden"
+		>
+			<span class="font-semibold text-ink">
+				Reconciliation
+				<span class="font-normal text-ink-muted">
+					· {data.rangeActive ? 'selected range' : 'all time'}
+				</span>
+			</span>
+			<span class="flex items-center gap-2 text-ink-muted">
+				<span class="tabular-nums">
+					{data.rangeActive ? 'Closing' : 'Balance'} {peso(reconTotals.closing)}
+				</span>
+				<ChevronDownIcon class="size-4 transition-transform group-open:rotate-180" />
+			</span>
+		</summary>
+		<div class="overflow-x-auto border-t border-border">
+			<table class="w-full text-sm">
+				<thead class="border-b border-border bg-surface-2 text-left text-xs text-ink-muted">
+					<tr>
+						<th class="px-4 py-2">Account</th>
+						<th class="px-4 py-2 text-right">Opening</th>
+						<th class="px-4 py-2 text-right">In</th>
+						<th class="px-4 py-2 text-right">Out</th>
+						<th class="px-4 py-2 text-right">{data.rangeActive ? 'Closing' : 'Balance now'}</th>
 					</tr>
-				{/each}
-				<tr class="border-t border-border font-semibold">
-					<td class="px-4 py-2 text-ink">Total</td>
-					<td class="px-4 py-2 text-right tabular-nums text-ink-muted">{peso(data.position.reduce((s, p) => s + p.openingCentavos, 0))}</td>
-					<td class="px-4 py-2 text-right tabular-nums">{peso(data.position.reduce((s, p) => s + p.inCentavos, 0))}</td>
-					<td class="px-4 py-2 text-right tabular-nums">{peso(data.position.reduce((s, p) => s + p.outCentavos, 0))}</td>
-					<td class="px-4 py-2 text-right tabular-nums text-ink">{peso(data.position.reduce((s, p) => s + p.closingCentavos, 0))}</td>
-				</tr>
-			</tbody>
-		</table>
-		{#if !data.rangeActive}
-			<p class="border-t border-border px-4 py-2 text-xs text-ink-muted">
-				“Opening” is each account’s starting float, set when it was created (no ledger entry) —
-				this is the gap between the movements list and Cash on hand. Total balance here matches
-				the dashboard’s Cash on hand.
-			</p>
-		{/if}
-	</div>
+				</thead>
+				<tbody>
+					{#each data.position as p (p.accountId)}
+						<tr class="border-b border-border/60 last:border-0">
+							<td class="px-4 py-2 text-ink">{p.name}</td>
+							<td class="px-4 py-2 text-right tabular-nums text-ink-muted">{peso(p.openingCentavos)}</td>
+							<td class="px-4 py-2 text-right tabular-nums text-ok">{p.inCentavos ? peso(p.inCentavos) : '—'}</td>
+							<td class="px-4 py-2 text-right tabular-nums text-danger">{p.outCentavos ? peso(p.outCentavos) : '—'}</td>
+							<td class="px-4 py-2 text-right font-medium tabular-nums text-ink">{peso(p.closingCentavos)}</td>
+						</tr>
+					{/each}
+					<tr class="border-t border-border font-semibold">
+						<td class="px-4 py-2 text-ink">Total</td>
+						<td class="px-4 py-2 text-right tabular-nums text-ink-muted">{peso(reconTotals.opening)}</td>
+						<td class="px-4 py-2 text-right tabular-nums">{peso(reconTotals.in)}</td>
+						<td class="px-4 py-2 text-right tabular-nums">{peso(reconTotals.out)}</td>
+						<td class="px-4 py-2 text-right tabular-nums text-ink">{peso(reconTotals.closing)}</td>
+					</tr>
+				</tbody>
+			</table>
+			{#if !data.rangeActive}
+				<p class="border-t border-border px-4 py-2 text-xs text-ink-muted">
+					“Opening” is each account’s starting float, set when it was created (no ledger entry) —
+					this is the gap between the movements list and Cash on hand. Total balance here matches
+					the dashboard’s Cash on hand.
+				</p>
+			{/if}
+		</div>
+	</details>
 
 	<!-- Date range presets (matches the Finance dashboard) -->
 	<div class="mb-2 flex flex-wrap gap-1">
