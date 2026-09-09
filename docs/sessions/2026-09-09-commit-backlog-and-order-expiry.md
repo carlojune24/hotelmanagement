@@ -137,8 +137,64 @@ today" / "revenue MTD" flow, fixed periods, no range).
   demo hotel's real data (cash on hand ₱14,953.12, revenue ₱10,453.12, today net
   ₱61.12 all match the old tiles). `193ac4f`.
 
+## 6. Finance polish pass (continued 2026-09-09 → 09-10, from user Q&A)
+
+All small, driven by the user testing the finance UI:
+
+- **Cash ledger date-range presets** (`46a14fe`) — the same All time / Today /
+  Yesterday / This week / This month / Last month row as the dashboard, on
+  `/{slug}/finance/cash`, keeping the Account / Direction filters.
+- **Shift payout ↔ expense bridge** (`13cea21`, option 3 of a design Q) — a
+  "paid to / for" drawer payout only hit `cash_movements` before, so it never
+  reached the Expenses total. Now: `expenseReport` folds in unlinked `expense`
+  cash-outs as a "Cash payouts — uncategorised" row; and the payout form gained
+  an optional **Expense category** + VAT-incl. box that also writes a paid
+  `expenses` row (`sourceType='expense'`, no double count). Cash category from
+  the group like `markExpensePaid`.
+- **Z-reading readiness panel** (`9f5caf9`) — `/{slug}/finance/bir/readings` now
+  detects and explains state per the date picker: Issued / Blocked (N open
+  shifts → close them → run day close) / Pending / Closed-no-Z. Confirms the
+  chain: Z needs the day closed, the day won't close with an open shift
+  (enforced in `runDayClose`).
+- **City ledger** — a "How the city ledger works" `<details>` explainer on
+  `/{slug}/finance/receivables` (populated only by the hotel-admin "charge to
+  city ledger" override at check-out; front desk can't check out unpaid).
+  **Reopen a write-off** (`80b94f3`): `reopenReceivable` restores status +
+  recomputes outstanding = original − collected; write-off is now a two-step
+  inline confirm with a required reason. **Still not done:** a formal BIR Sales
+  Invoice for a credit sale, and the "bill the whole stay to a company up front"
+  flow.
+- **Statement of Account** (`5cf3c83`) — non-accountable follow-up billing doc
+  for a receivable. `getStatementOfAccount` + `statement-of-account.svelte` +
+  `/{slug}/print/statement/[receivableId]`, "Statement" link per City-ledger
+  row. New per-type variant of the Accountable Forms A4 world; doctype word in
+  **ink not brick red** (not serial-numbered). Totals reconcile charges →
+  settled-at-checkout → balance carried → payments received → amount due.
+- **Cash reconciliation + owner draw** (`dcc400b`, accordion `de5b56a`) — the
+  ₱5,000 "gap" between Cash on hand and the ledger was Petty Cash's **opening
+  float** (on the account, no `cash_movements` row). Added a collapsible
+  Reconciliation strip (per account Opening → In → Out → Balance, total = Cash
+  on hand; `getCashPosition` now always called with a range), a synthetic
+  "Opening balance" row in the all-time ledger, and an **Owner draw** action
+  (cash-out, category `owner_draw`, "withdraw full balance" box) so an owner
+  taking money out is first-class.
+- **Front-desk fix** (`6b4526d`) — check-out from the room dialog left an empty
+  dialog shell ("empty toast"); `checkOut` now returns `{ checkedOut: true }`
+  and the client closes the dialog.
+- **Dashboard layout** (`bdfb010` → `87123bd`) — Balances row is now Cash on
+  hand (tall, left) beside a stacked [Owed to you] + brand-highlighted
+  [Day close] on the right; Needs attention full-width below. Per the user's
+  sketch.
+
+**End state:** `pnpm check` clean, 74 unit tests, migrations 0020–0023 applied.
+Nothing pushed. Demo hotel state is messy from testing (owner-draw of the full
+drawer on 09-10 → cash on hand ₱6,060; an LGU receivable reopened from a
+write-off; 09-10 day closed).
+
 ## Next
 
 Remaining Phase-1 client-flow gaps: **staff cancel / no-show / modify-stay**
 booking mutation (also unblocks the cancellation email), **guest self-service
-manage-booking**, or the **basic staff dashboard**.
+manage-booking**, or the **basic staff dashboard**. Also queued: the
+**Mailgun two-way email conversation** feature (§4), and the two city-ledger
+follow-ups (formal BIR Sales Invoice; bill-company-up-front flow).
