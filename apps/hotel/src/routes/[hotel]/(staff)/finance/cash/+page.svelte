@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { enhance } from '$app/forms';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -7,6 +8,7 @@
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
+	import { RANGE_PRESETS, matchPreset, resolveRange } from '$lib/finance-range';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -37,6 +39,24 @@
 		const q = new URLSearchParams();
 		for (const [k, v] of fd) if (v) q.set(k, String(v));
 		location.href = `${location.pathname}?${q}`;
+	}
+
+	// Preset date ranges — same control as the Finance dashboard. They set from/to
+	// and keep the current Account / Direction filters.
+	const activePreset = $derived(
+		data.filters.from && data.filters.to
+			? matchPreset(data.filters.from, data.filters.to, data.today)
+			: 'all'
+	);
+	function goToRange(from: string | null, to: string | null) {
+		const q = new URLSearchParams();
+		if (from && to) {
+			q.set('from', from);
+			q.set('to', to);
+		}
+		if (data.filters.account) q.set('account', data.filters.account);
+		if (data.filters.direction) q.set('direction', data.filters.direction);
+		goto(`?${q}`, { keepFocus: true, noScroll: true });
 	}
 </script>
 
@@ -132,6 +152,32 @@
 			</div>
 		</form>
 	{/if}
+
+	<!-- Date range presets (matches the Finance dashboard) -->
+	<div class="mb-2 flex flex-wrap gap-1">
+		<Button
+			size="sm"
+			variant={activePreset === 'all' ? 'default' : 'outline'}
+			onclick={() => goToRange(null, null)}
+		>
+			All time
+		</Button>
+		{#each RANGE_PRESETS as p (p.key)}
+			<Button
+				size="sm"
+				variant={activePreset === p.key ? 'default' : 'outline'}
+				onclick={() => {
+					const r = resolveRange(p.key, data.today);
+					goToRange(r.from, r.to);
+				}}
+			>
+				{p.label}
+			</Button>
+		{/each}
+		{#if activePreset === 'custom'}
+			<Button size="sm" variant="default" disabled>Custom</Button>
+		{/if}
+	</div>
 
 	<!-- Filters -->
 	<form onsubmit={applyFilter} class="mb-3 flex flex-wrap items-end gap-2">
