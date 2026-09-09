@@ -470,6 +470,7 @@ export const actions: Actions = {
 					: undefined
 			);
 			return {
+				checkedOut: true,
 				ok: wantsCityLedger
 					? 'Checked out — balance moved to the city ledger.'
 					: 'Guest checked out.'

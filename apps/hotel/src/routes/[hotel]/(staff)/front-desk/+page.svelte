@@ -70,6 +70,13 @@
 			toast.success(formHallWalkInOk);
 			hallWalkInOpen = false;
 		}
+		// Check-out ends the in-house view — close the room dialog instead of
+		// leaving it open with no `roomDetail` payload behind it (empty shell).
+		if (form && 'checkedOut' in form) {
+			detailDialogOpen = false;
+			checkoutCityLedger = false;
+			selectedRoomId = null;
+		}
 	});
 
 	let detailDialogOpen = $state(false);
