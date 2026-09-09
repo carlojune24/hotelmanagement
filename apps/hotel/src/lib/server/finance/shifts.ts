@@ -4,7 +4,10 @@ import {
 	cashAccounts,
 	cashMovements,
 	cashierShifts,
+	expenseCategories,
+	expenses,
 	financeSettings,
+	hotels,
 	payments,
 	shiftEvents,
 	users,
@@ -13,7 +16,7 @@ import {
 import { writeAudit } from '../audit';
 import type { SessionUser } from '../auth/session';
 import { FinanceError, type Tx } from './shared';
-import { expectedShiftCash } from './calc';
+import { expectedShiftCash, inputVatOf } from './calc';
 import { recordCashMovement } from './cash';
 
 export { expectedShiftCash } from './calc';
@@ -270,6 +273,12 @@ export async function addShiftEvent(input: {
 	/** Only consulted for `adjustment` — whether the drawer went up (`in`) or down (`out`). */
 	direction?: 'in' | 'out';
 	reason?: string | null;
+	/** `payout` only — when set, the payout is also recorded as a paid `expenses`
+	 *  row (category + optional VAT), so a drawer payout shows up everywhere an
+	 *  expense does, not just as an unlabelled cash-out. The `reason` ("paid to /
+	 *  for") becomes the expense description + the cash-movement counterparty. */
+	expenseCategoryId?: string | null;
+	isVatable?: boolean;
 	actor: SessionUser | null;
 }): Promise<void> {
 	if (!Number.isInteger(input.amountCentavos) || input.amountCentavos <= 0) {
@@ -308,15 +317,90 @@ export async function addShiftEvent(input: {
 		} as const;
 
 		if (input.kind === 'payout') {
-			await recordCashMovement(
-				{
-					...common,
-					direction: 'out',
-					category: 'expense',
-					memo: input.reason?.trim() || 'Cash payout'
-				},
-				tx
-			);
+			if (input.expenseCategoryId) {
+				// Bridge the payout to a real expense record.
+				const [cat] = await tx
+					.select({ id: expenseCategories.id, group: expenseCategories.group, name: expenseCategories.name })
+					.from(expenseCategories)
+					.where(
+						and(
+							eq(expenseCategories.id, input.expenseCategoryId),
+							eq(expenseCategories.hotelId, input.hotelId)
+						)
+					)
+					.limit(1);
+				if (!cat) throw new FinanceError('Pick a valid expense category.');
+
+				const [h] = await tx
+					.select({ bps: hotels.vatRateBps })
+					.from(hotels)
+					.where(eq(hotels.id, input.hotelId))
+					.limit(1);
+				const inputVat = input.isVatable
+					? Math.min(input.amountCentavos, inputVatOf(input.amountCentavos, h?.bps ?? 1200))
+					: 0;
+				const payee = input.reason?.trim() || '';
+				const description = payee || 'Cash payout';
+
+				const [exp] = await tx
+					.insert(expenses)
+					.values({
+						hotelId: input.hotelId,
+						expenseDate: shift.businessDate,
+						categoryId: cat.id,
+						description,
+						grossCentavos: input.amountCentavos,
+						inputVatCentavos: inputVat,
+						netOfVatCentavos: input.amountCentavos - inputVat,
+						isVatable: !!input.isVatable,
+						status: 'paid',
+						paidFromAccountId: shift.cashAccountId,
+						paidAt: new Date(),
+						createdByUserId: input.actor?.id ?? null,
+						approvedByUserId: input.actor?.id ?? null,
+						approvedAt: new Date()
+					})
+					.returning({ id: expenses.id });
+
+				const category =
+					cat.group === 'payroll'
+						? 'payroll'
+						: cat.group === 'taxes_licenses'
+							? 'statutory_remittance'
+							: 'expense';
+
+				await recordCashMovement(
+					{
+						...common,
+						sourceType: 'expense',
+						sourceId: exp!.id,
+						direction: 'out',
+						category,
+						...(payee ? { counterpartyType: 'vendor' as const, counterpartyName: payee } : {}),
+						memo: `${cat.name} — ${description}`
+					},
+					tx
+				);
+
+				await writeAudit({
+					hotelId: input.hotelId,
+					actor: input.actor,
+					action: 'finance.create_expense',
+					entityType: 'expense',
+					entityId: exp!.id,
+					after: { grossCentavos: input.amountCentavos, status: 'paid', via: 'shift_payout' }
+				});
+			} else {
+				await recordCashMovement(
+					{
+						...common,
+						direction: 'out',
+						category: 'expense',
+						memo: input.reason?.trim() || 'Cash payout'
+					},
+					tx
+				);
+			}
 		} else if (input.kind === 'adjustment') {
 			await recordCashMovement(
 				{

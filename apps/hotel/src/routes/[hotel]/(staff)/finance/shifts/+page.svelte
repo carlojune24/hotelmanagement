@@ -128,10 +128,31 @@
 							</Label>
 							<Input name="reason" class="mt-1 h-8" />
 						</div>
+						{#if (eventKind[r.shift.id] ?? 'payout') === 'payout'}
+							<div>
+								<Label class="text-xs">Expense category</Label>
+								<select
+									name="expenseCategoryId"
+									class="mt-1 h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+								>
+									<option value="">— Uncategorised —</option>
+									{#each data.expenseCategories as c (c.id)}
+										<option value={c.id}>{c.name}</option>
+									{/each}
+								</select>
+							</div>
+							<label class="flex items-center gap-1.5 pb-2 text-xs text-ink-muted">
+								<input type="checkbox" name="isVatable" value="1" class="size-3.5" /> VAT-incl.
+							</label>
+						{/if}
 						<Button type="submit" size="sm" variant="outline">Add</Button>
 					</div>
 					<p class="mt-2 text-xs text-ink-muted">
 						{EVENT_DEFS[eventKind[r.shift.id] ?? 'payout'].help}
+						{#if (eventKind[r.shift.id] ?? 'payout') === 'payout'}
+							Pick a category to also record it as a paid expense (shows in the expense report
+							&amp; P&amp;L); leave it Uncategorised for a quick petty cash-out.
+						{/if}
 					</p>
 				</form>
 

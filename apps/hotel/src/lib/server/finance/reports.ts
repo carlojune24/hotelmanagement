@@ -239,18 +239,61 @@ export async function expenseReport(hotelId: string, from: string, to: string) {
 		)
 		.groupBy(expenseCategories.group, expenseCategories.name);
 
-	const rows = grouped.map((r) => ({
+	const rows: {
+		group: string;
+		categoryName: string;
+		count: number;
+		grossCentavos: number;
+		inputVatCentavos: number;
+	}[] = grouped.map((r) => ({
 		group: r.group,
 		categoryName: r.categoryName,
 		count: Number(r.count),
 		grossCentavos: Number(r.grossCentavos),
 		inputVatCentavos: Number(r.inputVatCentavos)
 	}));
+
+	// Cash that left a drawer/account as an "expense" without a structured
+	// `expenses` row behind it — a shift payout ("paid to / paid for") or a manual
+	// cash-out. `sourceType = 'expense'` movements are the payment leg of a real
+	// expense row (already counted above), so they're excluded here to avoid a
+	// double count. No vendor / category / input VAT on these — that's what
+	// bridging the payout dialog to an expense record (a follow-up) would add.
+	const [payout] = await db
+		.select({
+			count: sql<number>`count(*)::int`,
+			grossCentavos: sql<number>`coalesce(sum(${cashMovements.amountCentavos}), 0)::bigint`
+		})
+		.from(cashMovements)
+		.where(
+			and(
+				eq(cashMovements.hotelId, hotelId),
+				eq(cashMovements.direction, 'out'),
+				eq(cashMovements.category, 'expense'),
+				sql`${cashMovements.sourceType} <> 'expense'`,
+				sql`${cashMovements.voidedAt} is null`,
+				gte(cashMovements.businessDate, from),
+				lte(cashMovements.businessDate, to)
+			)
+		);
+	const payoutGross = Number(payout?.grossCentavos ?? 0);
+	const payoutCount = Number(payout?.count ?? 0);
+	if (payoutCount > 0) {
+		rows.push({
+			group: 'Cash payouts',
+			categoryName: 'Drawer / manual (uncategorised)',
+			count: payoutCount,
+			grossCentavos: payoutGross,
+			inputVatCentavos: 0
+		});
+	}
+
 	rows.sort((a, b) => b.grossCentavos - a.grossCentavos);
 	return {
 		rows,
 		totalGrossCentavos: rows.reduce((s, r) => s + r.grossCentavos, 0),
-		totalInputVatCentavos: rows.reduce((s, r) => s + r.inputVatCentavos, 0)
+		totalInputVatCentavos: rows.reduce((s, r) => s + r.inputVatCentavos, 0),
+		uncategorisedPayoutCentavos: payoutGross
 	};
 }
 

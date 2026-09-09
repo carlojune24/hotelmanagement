@@ -216,7 +216,13 @@
 			<div class="mt-1 text-lg font-semibold text-ink tabular-nums">
 				{peso(data.expenses.totalGrossCentavos)}
 			</div>
-			<div class="mt-0.5 text-[11px] text-ink-muted">approved &amp; recorded</div>
+			<div class="mt-0.5 text-[11px] text-ink-muted">
+				{#if data.expenses.uncategorisedPayoutCentavos > 0}
+					incl. {peso(data.expenses.uncategorisedPayoutCentavos)} drawer payouts
+				{:else}
+					recorded expenses + drawer payouts
+				{/if}
+			</div>
 		</div>
 	</div>
 
