@@ -54,15 +54,24 @@ check-in/check-out manifest pair is stacked, not arrow-paired, for legibility at
 600px. `--ledger-ink-muted` nudged to `#6b6155` and the default body ground set to
 a warm `#f4f1ea` so the mail keeps the world's warm register and clears 4.5:1.
 
-**Staff view (shipped 2026-09-09):** the reservation detail page
-(`(staff)/reservations/[kind]/[id]`) gains a "Confirmation email" card — the
-`email_log` rows for the order (status badge, recipient, timestamp, error text)
-and a **Resend / Send now** action (`?/resendConfirmation`, `booking:write`,
-`sendBookingConfirmation(orderId, { force: true })`). Pure staff shadcn/oklch
-operate-mode, matching the page's existing `rounded-xl border p-4` card idiom and
-the payment-status badge vocabulary — no new visual world.
+**Staff views (shipped 2026-09-09):**
+- **`(staff)/emails`** — a dedicated hotel-wide list of every `email_log` row
+  (`listEmailLog`): status badge, guest, email type + subject, recipient,
+  timestamp, failure error. Each row links to the Reservations detail of the
+  booking it belongs to, and carries a **Resend** action for a confirmed order
+  (`?/resend`, `booking:write`, `sendBookingConfirmation(orderId,{force:true})`).
+  Own sidebar nav item ("Emails", after Reservations, `booking:read`). Clones the
+  Reservations list page's structure (max-w-6xl, filter row, `rounded-xl border`
+  table, `bg-ok/15`/`bg-danger/15` badges) — staff operate-mode, no new world.
+- **Reservation detail card** — the same information scoped to one order, kept as
+  an in-context shorthand on `(staff)/reservations/[kind]/[id]` with its own
+  Resend button.
 
-**Out of scope:** the confirmation *page* itself (already built); SMS (post-MVP);
-attaching the BIR Invoice/OR PDF (BIR module Step 4); a hotel-wide email-log
-page (only the per-reservation view exists); cancellation / payment-failed guest
-emails.
+`TYPE_LABELS` in the Emails page is the human-readable registry of email types;
+keep it in sync with the `email_type` enum.
+
+**Roadmap (not built):** cancellation email (depends on the staff-cancel-booking
+flow, which has no transition path yet — TODO Phase 1); "needs follow-up" flag /
+view for bookings; an in-app preview of a sent email's body (the body isn't
+stored — would re-render from the order); SMS (post-MVP); the BIR Invoice/OR PDF
+attachment (BIR module Step 4).

@@ -10,6 +10,7 @@
 	import LayoutDashboardIcon from '@lucide/svelte/icons/layout-dashboard';
 	import ConciergeBellIcon from '@lucide/svelte/icons/concierge-bell';
 	import CalendarCheckIcon from '@lucide/svelte/icons/calendar-check';
+	import MailIcon from '@lucide/svelte/icons/mail';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import GemIcon from '@lucide/svelte/icons/gem';
 	import WalletIcon from '@lucide/svelte/icons/wallet';
@@ -61,6 +62,7 @@
 				icon: CalendarCheckIcon,
 				show: can('booking:read')
 			},
+			{ seg: 'emails', label: 'Emails', icon: MailIcon, show: can('booking:read') },
 			{
 				seg: 'housekeeping',
 				label: 'Housekeeping',
