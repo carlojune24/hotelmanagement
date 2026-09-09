@@ -29,16 +29,50 @@
 </script>
 
 <div class="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6">
-	<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+	<div class="mb-3 flex flex-wrap items-center justify-between gap-3">
 		<div>
 			<h1 class="text-xl font-semibold tracking-tight text-ink">City ledger</h1>
-			<p class="text-sm text-ink-muted">Balances guests or companies still owe after checkout.</p>
+			<p class="text-sm text-ink-muted">
+				What a company or an approved guest still owes after check-out — billed and collected later.
+			</p>
 		</div>
 		<div class="flex gap-1 text-sm">
 			<a href="?show=active" class="rounded-md px-3 py-1.5 {data.show === 'active' ? 'bg-surface-2 text-ink' : 'text-ink-muted'}">Outstanding</a>
 			<a href="?show=all" class="rounded-md px-3 py-1.5 {data.show === 'all' ? 'bg-surface-2 text-ink' : 'text-ink-muted'}">All</a>
 		</div>
 	</div>
+
+	<details class="mb-6 rounded-xl border border-border bg-surface-2/50 text-sm">
+		<summary class="cursor-pointer px-4 py-2.5 font-medium text-ink">How the city ledger works</summary>
+		<div class="space-y-2 border-t border-border px-4 py-3 text-ink-muted">
+			<p>
+				The <span class="text-ink">city ledger</span> is money owed to the hotel for stays that
+				left the front desk unpaid — <span class="text-ink">corporate accounts</span> invoiced
+				monthly, <span class="text-ink">travel agencies / OTAs</span> paying a net rate,
+				<span class="text-ink">event clients</span> settling after the function, or a trusted
+				repeat guest a manager lets pay by transfer.
+			</p>
+			<p>
+				<span class="text-ink">How a balance lands here:</span> front desk normally
+				<span class="text-ink">cannot</span> check a guest out with an unpaid folio. At check-out a
+				<span class="text-ink">hotel admin</span> can override with
+				<span class="text-ink">“Check out with balance → charge to city ledger”</span> and enter who
+				it’s billed to (name, company, PO / reference). That squares the guest’s folio and opens a
+				receivable here for the amount. If you never use that override, this page stays empty — that’s
+				expected.
+			</p>
+			<p>
+				<span class="text-ink">Collecting:</span> when the company pays, open the row and hit
+				<span class="text-ink">Collect</span> to record the payment into a cash or bank account.
+				Partial payments are fine — the row stays <span class="text-ink">partial</span> until it’s
+				settled. <span class="text-ink">Write off</span> (admin) marks a balance uncollectable.
+			</p>
+			<p>
+				The buckets above age each balance by how long it has been outstanding (Current · 1–30 ·
+				31–60 · 60+ days).
+			</p>
+		</div>
+	</details>
 
 	<div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
 		{#each data.aging.buckets as b (b.label)}
@@ -109,7 +143,13 @@
 						</Table.Row>
 					{/if}
 				{:else}
-					<Table.Row><Table.Cell colspan={6} class="py-6 text-center text-ink-muted">Nothing outstanding.</Table.Cell></Table.Row>
+					<Table.Row>
+						<Table.Cell colspan={6} class="py-6 text-center text-ink-muted">
+							{data.show === 'all'
+								? 'The city ledger is empty — no balance has been charged to it yet.'
+								: 'No outstanding balances. Settled and written-off accounts are under “All”.'}
+						</Table.Cell>
+					</Table.Row>
 				{/each}
 			</Table.Body>
 		</Table.Root>
