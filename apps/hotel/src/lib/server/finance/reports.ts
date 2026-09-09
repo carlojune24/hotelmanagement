@@ -153,6 +153,42 @@ export async function cashflowReport(
 
 // ---------------------------------------------------------------------------
 
+/** Per-business-date cash in / out for a range — the series behind the dashboard's
+ *  daily net-cash chart. Dates with no movement are omitted; the caller fills gaps. */
+export async function dailyCashflowReport(
+	hotelId: string,
+	from: string,
+	to: string
+): Promise<{ date: string; inCentavos: number; outCentavos: number }[]> {
+	const grouped = await db
+		.select({
+			date: cashMovements.businessDate,
+			direction: cashMovements.direction,
+			amountCentavos: sql<number>`coalesce(sum(${cashMovements.amountCentavos}), 0)::bigint`
+		})
+		.from(cashMovements)
+		.where(
+			and(
+				eq(cashMovements.hotelId, hotelId),
+				gte(cashMovements.businessDate, from),
+				lte(cashMovements.businessDate, to),
+				sql`${cashMovements.voidedAt} is null`
+			)
+		)
+		.groupBy(cashMovements.businessDate, cashMovements.direction);
+
+	const byDate = new Map<string, { inCentavos: number; outCentavos: number }>();
+	for (const r of grouped) {
+		const e = byDate.get(r.date) ?? { inCentavos: 0, outCentavos: 0 };
+		if (r.direction === 'in') e.inCentavos += Number(r.amountCentavos);
+		else e.outCentavos += Number(r.amountCentavos);
+		byDate.set(r.date, e);
+	}
+	return [...byDate.entries()]
+		.map(([date, v]) => ({ date, ...v }))
+		.sort((a, b) => a.date.localeCompare(b.date));
+}
+
 export async function revenueBySourceReport(hotelId: string, from: string, to: string) {
 	const grouped = await db
 		.select({
