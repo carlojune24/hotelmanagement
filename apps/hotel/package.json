@@ -29,6 +29,7 @@
 		"@mm/finance-core": "workspace:*",
 		"@mm/hr-core": "workspace:*",
 		"@mm/integration": "workspace:*",
+		"@mm/paymongo": "workspace:*",
 		"@node-rs/argon2": "^2.0.2",
 		"@oslojs/crypto": "^1.0.1",
 		"@oslojs/encoding": "^1.1.0",

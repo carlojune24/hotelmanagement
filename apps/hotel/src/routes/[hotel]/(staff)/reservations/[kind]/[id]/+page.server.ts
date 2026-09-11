@@ -1,5 +1,6 @@
 import { error, fail } from '@sveltejs/kit';
 import { z } from 'zod';
+import { roleCan } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
 import { getHallBookingDetail, getRoomBookingDetail } from '$lib/server/reservations';
 import { CheckInError, checkInBooking, listEligibleRooms, todayInTimezone } from '$lib/server/front-desk';
@@ -21,6 +22,11 @@ import {
 	markThreadReadByStaff,
 	sendStaffReply
 } from '$lib/server/guest-messages';
+import {
+	StatusOverrideError,
+	manuallyConfirmOrder,
+	reinstateBooking
+} from '$lib/server/status-override';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, params, url }) => {
@@ -28,6 +34,10 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 	const hotel = locals.hotel!;
 	const hotelId = hotel.id;
 	const actionHint = url.searchParams.get('action'); // 'cancel' | 'no-show', from a deep link
+	// Reservation status override (manual-confirm / reinstate) is hotel_admin-only —
+	// same double-gate `(staff)/finance`'s day-close reopen uses, not plain `booking:write`
+	// (which `front_desk` already has).
+	const canAdmin = locals.user?.isPlatformAdmin || (locals.role ? roleCan(locals.role, 'hotel:admin') : false);
 
 	if (params.kind === 'room') {
 		const detail = await getRoomBookingDetail(hotelId, params.id);
@@ -63,6 +73,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 			eligibleRooms,
 			cancelQuote,
 			canMarkNoShow,
+			canAdmin,
 			thread,
 			openRequest,
 			autoOpen: actionHint === 'cancel' && cancelQuote ? 'cancel' : actionHint === 'no-show' && canMarkNoShow ? 'no-show' : null
@@ -88,6 +99,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 			detail,
 			cancelQuote,
 			canMarkNoShow: false,
+			canAdmin,
 			thread,
 			openRequest,
 			autoOpen: actionHint === 'cancel' && cancelQuote ? 'cancel' : null
@@ -229,6 +241,78 @@ export const actions: Actions = {
 			return { ok: 'Request declined.' };
 		} catch (e) {
 			if (e instanceof GuestMessageError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
+	manualConfirm: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		const hotelId = event.locals.hotel!.id;
+
+		const detail =
+			event.params.kind === 'room'
+				? await getRoomBookingDetail(hotelId, event.params.id)
+				: await getHallBookingDetail(hotelId, event.params.id);
+		if (!detail) return fail(404, { error: 'Booking not found.' });
+
+		const parsed = z
+			.object({
+				method: z.enum(['cash', 'card', 'gcash', 'maya', 'bank_transfer', 'cheque']),
+				referenceNo: z.string().trim().max(120).optional(),
+				reason: z.string().trim().min(1, 'Enter a reason.').max(500)
+			})
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) {
+			return fail(400, { error: parsed.error.issues[0]?.message ?? 'Check the form and try again.' });
+		}
+
+		try {
+			await manuallyConfirmOrder({
+				hotelId,
+				orderId: detail.order.id,
+				method: parsed.data.method,
+				referenceNo: parsed.data.referenceNo || null,
+				reason: parsed.data.reason,
+				actor: event.locals.user
+			});
+			return { ok: 'Order manually confirmed.' };
+		} catch (e) {
+			if (e instanceof StatusOverrideError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
+	reinstate: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		const hotelId = event.locals.hotel!.id;
+		if (event.params.kind !== 'room' && event.params.kind !== 'hall') {
+			return fail(400, { error: 'Booking not found.' });
+		}
+
+		const parsed = z
+			.object({ reason: z.string().trim().min(1, 'Enter a reason.').max(500) })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) {
+			return fail(400, { error: parsed.error.issues[0]?.message ?? 'Enter a reason.' });
+		}
+
+		try {
+			const res = await reinstateBooking({
+				hotelId,
+				target:
+					event.params.kind === 'room'
+						? { kind: 'room', bookingId: event.params.id }
+						: { kind: 'hall', hallBookingId: event.params.id },
+				reason: parsed.data.reason,
+				actor: event.locals.user
+			});
+			const bits = ['Booking reinstated.'];
+			if (res.refundReversed) bits.push('The earlier refund was reversed.');
+			return { ok: bits.join(' ') };
+		} catch (e) {
+			if (e instanceof StatusOverrideError) return fail(400, { error: e.message });
 			throw e;
 		}
 	},

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from './db/index';
 import {
 	bookingRooms,
@@ -296,6 +296,23 @@ export async function markThreadReadByStaff(orderId: string) {
 				isNull(guestMessages.readByStaffAt)
 			)
 		);
+}
+
+/** Count of unread guest-authored rows for a hotel — cheap enough to run on
+ *  every staff page load (the sidebar's "Messages" badge), unlike pulling the
+ *  full list just to count it. */
+export async function countUnreadGuestMessages(hotelId: string): Promise<number> {
+	const [row] = await db
+		.select({ count: sql<number>`count(*)::int` })
+		.from(guestMessages)
+		.where(
+			and(
+				eq(guestMessages.hotelId, hotelId),
+				eq(guestMessages.direction, 'guest'),
+				isNull(guestMessages.readByStaffAt)
+			)
+		);
+	return row?.count ?? 0;
 }
 
 export interface GuestMessageListLine {

@@ -1,9 +1,39 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { invalidate } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
+
+	// Poll for staff replies — this page has no push channel, and a guest may
+	// sit on it waiting for a reply without ever submitting a form themselves.
+	// Paused while the tab isn't visible so an idle background tab doesn't
+	// keep hitting the server.
+	$effect(() => {
+		const POLL_MS = 15_000;
+		let timer: ReturnType<typeof setInterval> | undefined;
+
+		function start() {
+			if (timer) return;
+			timer = setInterval(() => invalidate('app:guest-messages'), POLL_MS);
+		}
+		function stop() {
+			clearInterval(timer);
+			timer = undefined;
+		}
+		function onVisibilityChange() {
+			if (document.hidden) stop();
+			else start();
+		}
+
+		start();
+		document.addEventListener('visibilitychange', onVisibilityChange);
+		return () => {
+			stop();
+			document.removeEventListener('visibilitychange', onVisibilityChange);
+		};
+	});
 
 	const peso = (centavos: number) =>
 		`₱${(centavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;

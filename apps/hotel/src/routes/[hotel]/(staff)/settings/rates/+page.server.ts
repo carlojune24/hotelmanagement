@@ -1,5 +1,5 @@
 import { fail } from '@sveltejs/kit';
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import {
@@ -64,6 +64,7 @@ const createPolicySchema = z.object({
 	penaltyType: z.enum(cancellationPenaltyType.enumValues),
 	penaltyValueBps: z.coerce.number().int().min(0).max(10000).optional()
 });
+const updatePolicySchema = createPolicySchema.extend({ id: z.string().uuid() });
 
 /** Empty form fields post `""`; treat that (and null) as "not provided" before coercion. */
 const blankToUndef = (v: unknown) => (v === '' || v == null ? undefined : v);
@@ -123,6 +124,45 @@ export const actions: Actions = {
 		});
 
 		return { ok: `Created policy "${parsed.data.name}".` };
+	},
+
+	updatePolicy: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		const hotelId = event.locals.hotel!.id;
+
+		const raw = Object.fromEntries(await event.request.formData());
+		const parsed = updatePolicySchema.safeParse(raw);
+		if (!parsed.success)
+			return fail(400, { error: 'Check the cancellation policy and try again.' });
+
+		const [existing] = await db
+			.select({ id: cancellationPolicies.id })
+			.from(cancellationPolicies)
+			.where(and(eq(cancellationPolicies.id, parsed.data.id), eq(cancellationPolicies.hotelId, hotelId)))
+			.limit(1);
+		if (!existing) return fail(404, { error: 'Policy not found.' });
+
+		await db
+			.update(cancellationPolicies)
+			.set({
+				name: parsed.data.name.trim(),
+				description: parsed.data.description?.trim() || null,
+				freeCancelHours: parsed.data.freeCancelHours ?? null,
+				penaltyType: parsed.data.penaltyType,
+				penaltyValueBps: parsed.data.penaltyValueBps ?? null
+			})
+			.where(eq(cancellationPolicies.id, parsed.data.id));
+
+		await writeAudit({
+			hotelId,
+			actor: event.locals.user,
+			action: 'cancellation_policy.update',
+			entityType: 'cancellation_policy',
+			entityId: parsed.data.id,
+			after: parsed.data
+		});
+
+		return { ok: `Updated policy "${parsed.data.name}".` };
 	},
 
 	createRatePlan: async (event) => {

@@ -9,6 +9,7 @@
 	import CalendarCheckIcon from '@lucide/svelte/icons/calendar-check';
 	import BedIcon from '@lucide/svelte/icons/bed';
 	import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
+	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -119,7 +120,9 @@
 				<Table.Body>
 					{#each filtered as line (line.kind + line.id)}
 						<Table.Row
-							class="cursor-pointer"
+							class="cursor-pointer {line.hasOpenCancellationRequest
+								? 'bg-danger/5 hover:bg-danger/10'
+								: ''}"
 							onclick={() => (window.location.href = `${base}/reservations/${line.kind}/${line.id}`)}
 						>
 							<Table.Cell>
@@ -147,6 +150,12 @@
 								</Badge>
 								{#if line.status === 'pending_payment' && line.orderStatus === 'cancelled'}
 									<div class="mt-1 text-xs text-danger">Order cancelled</div>
+								{/if}
+								{#if line.hasOpenCancellationRequest}
+									<div class="mt-1 flex items-center gap-1 text-xs font-medium text-danger">
+										<TriangleAlertIcon class="size-3.5" />
+										Cancellation requested
+									</div>
 								{/if}
 							</Table.Cell>
 							<Table.Cell class="text-right text-ink">{peso(line.totalCentavos)}</Table.Cell>

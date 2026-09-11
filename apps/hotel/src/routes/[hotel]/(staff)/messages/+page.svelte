@@ -87,7 +87,14 @@
 				</Table.Header>
 				<Table.Body>
 					{#each filtered as m (m.id)}
-						<Table.Row class={m.isRead ? '' : 'bg-surface-2/50'}>
+						{@const isOpenCancellation = m.kind === 'cancellation_request' && m.status === 'open'}
+						<Table.Row
+							class={isOpenCancellation
+								? 'border-l-2 border-l-danger bg-danger/5 hover:bg-danger/10'
+								: m.isRead
+									? ''
+									: 'bg-surface-2/50'}
+						>
 							<Table.Cell class="align-top">
 								<Badge variant="outline" class={statusClass(m.status)}>{kindLabel(m.kind)}</Badge>
 								{#if !m.isRead}
