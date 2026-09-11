@@ -50,6 +50,7 @@
 			<p class="mt-6 max-w-md text-sm text-[var(--ledger-ink)]">{form.ok}</p>
 		{:else}
 			<form method="POST" action="?/submit" use:enhance class="mt-6 space-y-5">
+				<input type="hidden" name="t" value={data.accessToken} />
 				<div>
 					<span class="ledger-label">Rating</span>
 					<div class="mt-2 flex items-center gap-1">

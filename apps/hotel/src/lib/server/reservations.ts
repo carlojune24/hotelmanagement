@@ -5,6 +5,7 @@ import {
 	bookingRooms,
 	bookingStatusHistory,
 	emailLog,
+	guestMessages,
 	hallBookings,
 	hallBookingStatusHistory,
 	orders,
@@ -49,6 +50,8 @@ export interface ReservationLine {
 	orderStatus: string;
 	totalCentavos: number;
 	createdAt: Date;
+	/** An open (unresolved) guest cancellation request against this specific line. */
+	hasOpenCancellationRequest: boolean;
 }
 
 /** Every booking line for a hotel, newest first — verification list, not a dated calendar view. */
@@ -96,6 +99,23 @@ export async function listReservationLines(hotelId: string): Promise<Reservation
 		.innerJoin(functionHalls, eq(functionHalls.id, hallBookings.functionHallId))
 		.where(eq(orders.hotelId, hotelId));
 
+	const openRequests = await db
+		.select({ bookingId: guestMessages.bookingId, hallBookingId: guestMessages.hallBookingId })
+		.from(guestMessages)
+		.where(
+			and(
+				eq(guestMessages.hotelId, hotelId),
+				eq(guestMessages.kind, 'cancellation_request'),
+				eq(guestMessages.status, 'open')
+			)
+		);
+	const bookingsWithOpenRequest = new Set(
+		openRequests.map((r) => r.bookingId).filter((v): v is string => Boolean(v))
+	);
+	const hallBookingsWithOpenRequest = new Set(
+		openRequests.map((r) => r.hallBookingId).filter((v): v is string => Boolean(v))
+	);
+
 	const lines: ReservationLine[] = [
 		...roomRows.map((r) => ({
 			kind: 'room' as const,
@@ -110,7 +130,8 @@ export async function listReservationLines(hotelId: string): Promise<Reservation
 			status: r.status,
 			orderStatus: r.orderStatus,
 			totalCentavos: r.totalCentavos,
-			createdAt: r.createdAt
+			createdAt: r.createdAt,
+			hasOpenCancellationRequest: bookingsWithOpenRequest.has(r.id)
 		})),
 		...hallRows.map((h) => ({
 			kind: 'hall' as const,
@@ -125,7 +146,8 @@ export async function listReservationLines(hotelId: string): Promise<Reservation
 			status: h.status,
 			orderStatus: h.orderStatus,
 			totalCentavos: h.totalCentavos,
-			createdAt: h.createdAt
+			createdAt: h.createdAt,
+			hasOpenCancellationRequest: hallBookingsWithOpenRequest.has(h.id)
 		}))
 	];
 

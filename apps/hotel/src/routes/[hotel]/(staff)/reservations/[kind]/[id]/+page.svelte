@@ -5,18 +5,40 @@
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
+	import { Input } from '$lib/components/ui/input/index.js';
+	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
 	import BedIcon from '@lucide/svelte/icons/bed';
 	import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
+	import CancelBookingDialog from '$lib/components/staff/cancel-booking-dialog.svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
+
+	let cancelOpen = $state(data.autoOpen === 'cancel');
+	let confirmingNoShow = $state(data.autoOpen === 'no-show');
+	let decliningRequest = $state(false);
+	let replying = $state(false);
+	let manualConfirmOpen = $state(false);
+	let reinstateOpen = $state(false);
+	let manualConfirmReason = $state('');
+	let reinstateReason = $state('');
+	let overrideSubmitting = $state(false);
 
 	const base = $derived(`/${page.params.hotel}`);
 	const peso = (centavos: number) => `₱${(centavos / 100).toFixed(2)}`;
 	const statusLabel = (s: string) => s.replace(/_/g, ' ');
 	const fmtDateTime = (v: string | Date) =>
 		new Date(v).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+	const currentStatus = $derived(data.kind === 'room' ? data.detail.booking.status : data.detail.hallBooking.status);
+	const MANUAL_CONFIRM_METHODS = [
+		{ v: 'cash', label: 'Cash' },
+		{ v: 'gcash', label: 'GCash' },
+		{ v: 'maya', label: 'Maya' },
+		{ v: 'bank_transfer', label: 'Bank transfer' },
+		{ v: 'cheque', label: 'Cheque' }
+	] as const;
+	let manualConfirmMethod = $state<(typeof MANUAL_CONFIRM_METHODS)[number]['v']>('bank_transfer');
 
 	let resending = $state(false);
 
@@ -309,6 +331,172 @@
 		{/if}
 	</div>
 
+	<!-- Cancel / no-show -->
+	{#if data.cancelQuote || data.canMarkNoShow}
+		<div class="mt-4 rounded-xl border border-border p-4">
+			<h2 class="mb-1 text-sm font-semibold text-ink">
+				Cancel {data.kind === 'room' ? 'booking' : 'event'}
+			</h2>
+			<p class="mb-3 text-xs text-ink-muted">
+				{#if data.cancelQuote}
+					Releases the {data.kind === 'room' ? 'room' : 'hall'} hold and, for a paid booking,
+					records the refund after any cancellation fee.
+				{:else}
+					This arrival is past its check-in date.
+				{/if}
+			</p>
+
+			{#if data.openRequest}
+				<div class="mb-3 rounded-lg border border-border bg-surface-2 p-3">
+					<p class="text-xs font-semibold text-ink">Guest requested cancellation</p>
+					<p class="mt-1 text-sm text-ink">{data.openRequest.body}</p>
+					{#if decliningRequest}
+						<form
+							method="POST"
+							action="?/declineRequest"
+							use:enhance
+							class="mt-3 space-y-2"
+						>
+							<input type="hidden" name="requestId" value={data.openRequest.id} />
+							<textarea
+								name="note"
+								rows="2"
+								required
+								maxlength={2000}
+								placeholder="Explain why you're declining this request…"
+								class="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm"
+							></textarea>
+							<div class="flex items-center gap-2">
+								<Button type="submit" variant="destructive" size="sm">Confirm decline</Button>
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									onclick={() => (decliningRequest = false)}
+								>
+									Back
+								</Button>
+							</div>
+						</form>
+					{:else}
+						<div class="mt-2 flex gap-2">
+							<Button size="sm" onclick={() => (cancelOpen = true)}>Cancel this booking</Button>
+							<Button variant="outline" size="sm" onclick={() => (decliningRequest = true)}>
+								Decline request
+							</Button>
+						</div>
+					{/if}
+				</div>
+			{/if}
+
+			<div class="flex flex-wrap gap-2">
+				{#if data.cancelQuote}
+					<Button variant="outline" onclick={() => (cancelOpen = true)}>
+						Cancel {data.kind === 'room' ? 'booking' : 'event'}
+					</Button>
+				{/if}
+				{#if data.canMarkNoShow}
+					{#if confirmingNoShow}
+						<form method="POST" action="?/markNoShow" use:enhance class="flex items-center gap-2">
+							<Button type="submit" variant="destructive">Confirm no-show</Button>
+							<Button type="button" variant="ghost" onclick={() => (confirmingNoShow = false)}>
+								Cancel
+							</Button>
+						</form>
+					{:else}
+						<Button variant="outline" onclick={() => (confirmingNoShow = true)}>Mark no-show</Button>
+					{/if}
+				{/if}
+			</div>
+			{#if data.canMarkNoShow && confirmingNoShow}
+				<p class="mt-2 text-xs text-ink-muted">
+					The room is released. Any payment is kept — issue a refund separately if your policy
+					requires it.
+				</p>
+			{/if}
+		</div>
+	{/if}
+
+	<!-- Status override (hotel_admin only) -->
+	{#if data.canAdmin && (currentStatus === 'pending_payment' || currentStatus === 'cancelled' || currentStatus === 'no_show')}
+		<div class="mt-4 rounded-xl border border-border p-4">
+			<h2 class="mb-1 text-sm font-semibold text-ink">Override status</h2>
+			<p class="mb-3 text-xs text-ink-muted">
+				Admin-only escape hatch for a stuck or wrongly-set status — not a substitute for the
+				normal check-in/check-out/cancel flows.
+			</p>
+			<div class="flex flex-wrap gap-2">
+				{#if currentStatus === 'pending_payment'}
+					<Button variant="outline" onclick={() => (manualConfirmOpen = true)}>
+						Manually confirm this {data.kind === 'room' ? 'booking' : 'event'}
+					</Button>
+				{/if}
+				{#if currentStatus === 'cancelled' || currentStatus === 'no_show'}
+					<Button variant="outline" onclick={() => (reinstateOpen = true)}>
+						Reinstate this {data.kind === 'room' ? 'booking' : 'event'}
+					</Button>
+				{/if}
+			</div>
+		</div>
+	{/if}
+
+	<!-- Guest messages -->
+	<div class="mt-4 rounded-xl border border-border p-4">
+		<h2 class="mb-2 text-sm font-semibold text-ink">Messages</h2>
+		{#if data.thread.length === 0}
+			<p class="text-sm text-ink-muted">No messages from this guest yet.</p>
+		{:else}
+			<div class="space-y-3">
+				{#each data.thread as m (m.id)}
+					<div class="text-sm">
+						<div class="flex items-baseline justify-between gap-3">
+							<span class="font-medium text-ink">
+								{m.direction === 'guest' ? 'Guest' : (m.staffName ?? 'Staff')}
+								{#if m.kind === 'cancellation_request'}
+									<Badge
+										variant="outline"
+										class="ml-1.5 {m.status === 'declined'
+											? 'border-transparent bg-danger/15 text-danger'
+											: m.status === 'actioned'
+												? 'border-transparent bg-ok/15 text-ok'
+												: 'border-border bg-surface-2 text-ink-muted'}"
+									>
+										cancellation request{m.status ? ` · ${m.status}` : ''}
+									</Badge>
+								{/if}
+							</span>
+							<span class="shrink-0 text-xs text-ink-muted">{fmtDateTime(m.createdAt)}</span>
+						</div>
+						<p class="mt-0.5 whitespace-pre-wrap text-ink">{m.body}</p>
+					</div>
+				{/each}
+			</div>
+		{/if}
+
+		<form
+			method="POST"
+			action="?/replyMessage"
+			use:enhance={() => {
+				replying = true;
+				return async ({ update }) => {
+					await update();
+					replying = false;
+				};
+			}}
+			class="mt-4 space-y-2 border-t border-border pt-4"
+		>
+			<textarea
+				name="body"
+				rows="2"
+				required
+				maxlength={2000}
+				placeholder="Reply to the guest…"
+				class="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm"
+			></textarea>
+			<Button type="submit" size="sm" disabled={replying}>{replying ? 'Sending…' : 'Reply'}</Button>
+		</form>
+	</div>
+
 	<!-- Status history -->
 	<div class="mt-4 rounded-xl border border-border p-4">
 		<h2 class="mb-2 text-sm font-semibold text-ink">Status history</h2>
@@ -327,3 +515,134 @@
 		{/if}
 	</div>
 </div>
+
+{#if data.cancelQuote}
+	<CancelBookingDialog bind:open={cancelOpen} quote={data.cancelQuote} action="?/cancel" />
+{/if}
+
+<Dialog.Root bind:open={manualConfirmOpen}>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>Manually confirm this {data.kind === 'room' ? 'booking' : 'event'}</Dialog.Title>
+			<Dialog.Description>
+				For a guest who paid outside PayMongo (bank transfer, cash on file, a missed webhook).
+				Records a real payment for the full amount and confirms the order.
+			</Dialog.Description>
+		</Dialog.Header>
+		<form
+			method="POST"
+			action="?/manualConfirm"
+			use:enhance={() => {
+				overrideSubmitting = true;
+				return async ({ update, result }) => {
+					await update({ reset: false });
+					overrideSubmitting = false;
+					if (result.type === 'success') {
+						manualConfirmOpen = false;
+						manualConfirmReason = '';
+					}
+				};
+			}}
+			class="space-y-4"
+		>
+			<div>
+				<Label for="manual-confirm-method" class="text-xs">Method</Label>
+				<select
+					id="manual-confirm-method"
+					name="method"
+					bind:value={manualConfirmMethod}
+					class="mt-1 w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm"
+				>
+					{#each MANUAL_CONFIRM_METHODS as m (m.v)}
+						<option value={m.v}>{m.label}</option>
+					{/each}
+				</select>
+			</div>
+			<div>
+				<Label for="manual-confirm-ref" class="text-xs">Reference / notes</Label>
+				<Input id="manual-confirm-ref" name="referenceNo" maxlength={120} class="mt-1" />
+			</div>
+			<div>
+				<Label for="manual-confirm-reason" class="text-xs"
+					>Reason <span class="text-danger">*</span></Label
+				>
+				<textarea
+					id="manual-confirm-reason"
+					name="reason"
+					bind:value={manualConfirmReason}
+					required
+					rows="2"
+					placeholder="How was this payment verified?"
+					class="mt-1 w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm"
+				></textarea>
+			</div>
+			<div class="flex justify-end gap-2 pt-1">
+				<Button
+					type="button"
+					variant="ghost"
+					onclick={() => (manualConfirmOpen = false)}
+					disabled={overrideSubmitting}
+				>
+					Cancel
+				</Button>
+				<Button type="submit" disabled={overrideSubmitting || manualConfirmReason.trim().length === 0}>
+					{overrideSubmitting ? 'Confirming…' : 'Confirm'}
+				</Button>
+			</div>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={reinstateOpen}>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>Reinstate this {data.kind === 'room' ? 'booking' : 'event'}</Dialog.Title>
+			<Dialog.Description>
+				Re-checks availability first; if this booking was paid and refunded, the refund is
+				reversed.
+			</Dialog.Description>
+		</Dialog.Header>
+		<form
+			method="POST"
+			action="?/reinstate"
+			use:enhance={() => {
+				overrideSubmitting = true;
+				return async ({ update, result }) => {
+					await update({ reset: false });
+					overrideSubmitting = false;
+					if (result.type === 'success') {
+						reinstateOpen = false;
+						reinstateReason = '';
+					}
+				};
+			}}
+			class="space-y-4"
+		>
+			<div>
+				<Label for="reinstate-reason" class="text-xs">Reason <span class="text-danger">*</span></Label>
+				<textarea
+					id="reinstate-reason"
+					name="reason"
+					bind:value={reinstateReason}
+					required
+					rows="2"
+					placeholder="Why is this being reinstated?"
+					class="mt-1 w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm"
+				></textarea>
+			</div>
+			<div class="flex justify-end gap-2 pt-1">
+				<Button
+					type="button"
+					variant="ghost"
+					onclick={() => (reinstateOpen = false)}
+					disabled={overrideSubmitting}
+				>
+					Never mind
+				</Button>
+				<Button type="submit" disabled={overrideSubmitting || reinstateReason.trim().length === 0}>
+					{overrideSubmitting ? 'Reinstating…' : 'Reinstate'}
+				</Button>
+			</div>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>

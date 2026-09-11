@@ -26,6 +26,7 @@
 
 	let createPlanOpen = $state(false);
 	let createPolicyOpen = $state(false);
+	let editPolicyOpen = $state(false);
 
 	let planSearch = $state('');
 	let planStatusFilter = $state<'all' | 'active' | 'inactive'>('all');
@@ -58,6 +59,25 @@
 		'full_amount'
 	);
 
+	let editPolicyId = $state('');
+	let editPolicyName = $state('');
+	let editPolicyFreeCancelHours = $state('');
+	let editPolicyPenaltyType = $state<'percentage_of_total' | 'first_night' | 'full_amount'>(
+		'full_amount'
+	);
+	let editPolicyPenaltyPct = $state('');
+	let editPolicyPenaltyValueBps = $state('');
+
+	function openEditPolicy(c: (typeof data.cancellationPolicies)[number]) {
+		editPolicyId = c.id;
+		editPolicyName = c.name;
+		editPolicyFreeCancelHours = c.freeCancelHours != null ? String(c.freeCancelHours) : '';
+		editPolicyPenaltyType = c.penaltyType;
+		editPolicyPenaltyValueBps = c.penaltyValueBps != null ? String(c.penaltyValueBps) : '';
+		editPolicyPenaltyPct = c.penaltyValueBps != null ? String(c.penaltyValueBps / 100) : '';
+		editPolicyOpen = true;
+	}
+
 	const penaltyLabel: Record<string, string> = {
 		percentage_of_total: 'Percentage of total',
 		first_night: 'First night',
@@ -70,6 +90,7 @@
 			toast.success(form.ok);
 			createPlanOpen = false;
 			createPolicyOpen = false;
+			editPolicyOpen = false;
 		}
 	});
 </script>
@@ -248,6 +269,16 @@
 											? `Free up to ${c.freeCancelHours}h before check-in`
 											: 'No free cancellation'} · {penaltyLabel[c.penaltyType]}
 									</div>
+								</Table.Cell>
+								<Table.Cell class="text-right">
+									<Button
+										variant="ghost"
+										size="icon"
+										aria-label="Edit {c.name}"
+										onclick={() => openEditPolicy(c)}
+									>
+										<PencilIcon class="size-4" />
+									</Button>
 								</Table.Cell>
 							</Table.Row>
 						{/each}
@@ -434,6 +465,70 @@
 		<Dialog.Footer>
 			<Button variant="outline" onclick={() => (createPolicyOpen = false)}>Cancel</Button>
 			<Button type="submit" form="createPolicyForm">Create policy</Button>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={editPolicyOpen}>
+	<Dialog.Content>
+		<Dialog.Header>
+			<Dialog.Title>Edit cancellation policy</Dialog.Title>
+			<Dialog.Description>Changes apply to every rate plan pointing at this policy.</Dialog.Description>
+		</Dialog.Header>
+		<form id="updatePolicyForm" method="POST" action="?/updatePolicy" use:enhance class="space-y-3">
+			<input type="hidden" name="id" value={editPolicyId} />
+			<div>
+				<Label for="editPolicyName">Name</Label>
+				<Input id="editPolicyName" name="name" required bind:value={editPolicyName} class="mt-1" />
+			</div>
+			<div>
+				<Label for="editFreeCancelHours">Free cancellation until (hours before check-in)</Label>
+				<Input
+					id="editFreeCancelHours"
+					name="freeCancelHours"
+					type="number"
+					min="0"
+					placeholder="Leave blank for none"
+					bind:value={editPolicyFreeCancelHours}
+					class="mt-1"
+				/>
+			</div>
+			<div>
+				<Label for="editPenaltyType">Penalty</Label>
+				<Select.Root type="single" name="penaltyType" bind:value={editPolicyPenaltyType}>
+					<Select.Trigger id="editPenaltyType" class="mt-1 w-full">
+						{penaltyLabel[editPolicyPenaltyType]}
+					</Select.Trigger>
+					<Select.Content>
+						<Select.Item value="full_amount" label="Full amount" />
+						<Select.Item value="first_night" label="First night" />
+						<Select.Item value="percentage_of_total" label="Percentage of total" />
+					</Select.Content>
+				</Select.Root>
+			</div>
+			{#if editPolicyPenaltyType === 'percentage_of_total'}
+				<div>
+					<Label for="editPenaltyValueBpsPct">Penalty percentage</Label>
+					<Input
+						id="editPenaltyValueBpsPct"
+						type="number"
+						min="0"
+						max="100"
+						step="0.01"
+						class="mt-1"
+						bind:value={editPolicyPenaltyPct}
+						oninput={(e) => {
+							const pct = parseFloat(e.currentTarget.value || '0');
+							editPolicyPenaltyValueBps = Math.round(pct * 100).toString();
+						}}
+					/>
+					<input type="hidden" name="penaltyValueBps" value={editPolicyPenaltyValueBps} />
+				</div>
+			{/if}
+		</form>
+		<Dialog.Footer>
+			<Button variant="outline" onclick={() => (editPolicyOpen = false)}>Cancel</Button>
+			<Button type="submit" form="updatePolicyForm">Save changes</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

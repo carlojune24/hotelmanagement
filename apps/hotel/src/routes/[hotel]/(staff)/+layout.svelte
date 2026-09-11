@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { invalidate } from '$app/navigation';
+	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
@@ -11,6 +13,7 @@
 	import ConciergeBellIcon from '@lucide/svelte/icons/concierge-bell';
 	import CalendarCheckIcon from '@lucide/svelte/icons/calendar-check';
 	import MailIcon from '@lucide/svelte/icons/mail';
+	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import GemIcon from '@lucide/svelte/icons/gem';
 	import WalletIcon from '@lucide/svelte/icons/wallet';
@@ -63,6 +66,7 @@
 				show: can('booking:read')
 			},
 			{ seg: 'emails', label: 'Emails', icon: MailIcon, show: can('booking:read') },
+			{ seg: 'messages', label: 'Messages', icon: MessageSquareIcon, show: can('booking:read') },
 			{
 				seg: 'housekeeping',
 				label: 'Housekeeping',
@@ -85,6 +89,14 @@
 	);
 
 	const active = (seg: string) => page.url.pathname.startsWith(`${base}/${seg}`);
+
+	// Keep the unread badge live across the whole staff app — not just on the
+	// Messages page itself — so a new cancellation request is noticed without
+	// staff having to think to check, or stumble into it inside a booking.
+	$effect(() => {
+		const interval = setInterval(() => invalidate('app:guest-messages'), 30_000);
+		return () => clearInterval(interval);
+	});
 </script>
 
 <form bind:this={logoutForm} method="POST" action="/auth/logout" class="hidden"></form>
@@ -116,6 +128,14 @@
 									<a href="{base}/{item.seg}" {...props}>
 										<item.icon />
 										<span>{item.label}</span>
+										{#if item.seg === 'messages' && data.unreadMessageCount > 0}
+											<Badge
+												variant="outline"
+												class="ml-auto border-transparent bg-brand/15 px-1.5 text-brand"
+											>
+												{data.unreadMessageCount}
+											</Badge>
+										{/if}
 									</a>
 								{/snippet}
 							</Sidebar.MenuButton>

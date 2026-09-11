@@ -6,9 +6,9 @@ export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
 	server: {
 		port: 5175,
-		// Lets the Cloudflare quick-tunnel host (a random *.trycloudflare.com hostname each
-		// run, via `pnpm dev:tunnel`) reach the dev server — Vite's DNS-rebinding host check
-		// otherwise blocks any request whose Host header isn't localhost.
+		// Lets a dev tunnel host (a random *.trycloudflare.com or *.ngrok-free.app hostname
+		// each run, via `pnpm dev:tunnel` / `dev:tunnel:ngrok`) reach the dev server — Vite's
+		// DNS-rebinding host check otherwise blocks any request whose Host header isn't localhost.
 		allowedHosts: true
 	},
 	test: {

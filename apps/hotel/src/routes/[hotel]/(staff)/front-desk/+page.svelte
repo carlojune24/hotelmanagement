@@ -677,7 +677,16 @@
 								<div class="flex items-center justify-between px-3 py-2.5">
 									<div>
 										<div class="text-sm font-medium text-ink">{a.guestName}</div>
-										<div class="text-xs text-ink-muted">{channelLabel(a.channel)}</div>
+										<div class="text-xs text-ink-muted">
+											{channelLabel(a.channel)}
+											<span class="mx-1 text-ink-muted/40">·</span>
+											<a
+												href="{base}/reservations/room/{a.bookingId}?action=cancel"
+												class="underline-offset-2 hover:text-danger hover:underline"
+											>
+												Cancel
+											</a>
+										</div>
 									</div>
 									<Badge variant="outline" class="border-transparent bg-ok/15 text-ok">
 										from {data.checkInTime.slice(0, 5)}
@@ -746,6 +755,13 @@
 											<div class="text-sm font-medium text-ink">{a.guestName}</div>
 											<div class="text-xs text-ink-muted">
 												{a.roomTypeName} · {channelLabel(a.channel)}
+												<span class="mx-1 text-ink-muted/40">·</span>
+												<a
+													href="{base}/reservations/room/{a.bookingId}?action=cancel"
+													class="underline-offset-2 hover:text-danger hover:underline"
+												>
+													Cancel
+												</a>
 											</div>
 										</div>
 										<Badge variant="outline" class="border-transparent bg-ok/15 text-ok">

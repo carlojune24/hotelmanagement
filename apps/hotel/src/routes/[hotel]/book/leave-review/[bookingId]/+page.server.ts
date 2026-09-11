@@ -52,6 +52,11 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		.where(eq(reviews.bookingId, booking.bookingId));
 
 	return {
+		// Carried into a hidden form field — `enhance`'s `?/submit` action URL is
+		// resolved against the DOM and drops the page's own query string (verified
+		// against the WHATWG URL spec, not assumed), so the token has to travel in
+		// the POST body instead of relying on `event.url` inside the action.
+		accessToken: booking.accessToken,
 		stayComplete: booking.status === 'checked_out',
 		roomTypeName: room?.roomTypeName ?? '',
 		checkIn: booking.checkIn,
@@ -70,15 +75,19 @@ const submitSchema = z.object({
 export const actions: Actions = {
 	submit: async (event) => {
 		const hotelId = event.locals.hotel!.id;
-		const token = event.url.searchParams.get('t');
+		const formData = await event.request.formData();
+		// Prefer the hidden field the form posts — the URL's own query string
+		// doesn't survive `enhance`'s action-URL resolution (see the load fn above).
+		const tokenField = formData.get('t');
+		const token =
+			typeof tokenField === 'string' && tokenField ? tokenField : event.url.searchParams.get('t');
 		const booking = await loadGuardedBooking(hotelId, event.params.bookingId, token);
 
 		if (booking.status !== 'checked_out') {
 			return fail(400, { error: 'Reviews can only be left after your stay is complete.' });
 		}
 
-		const raw = Object.fromEntries(await event.request.formData());
-		const parsed = submitSchema.safeParse(raw);
+		const parsed = submitSchema.safeParse(Object.fromEntries(formData));
 		if (!parsed.success) return fail(400, { error: 'Add a rating and a few words about your stay.' });
 
 		try {

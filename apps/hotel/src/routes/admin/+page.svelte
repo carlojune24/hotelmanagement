@@ -12,6 +12,9 @@
 	const webhookUrl = $derived(
 		data.devTunnelUrl ? `${data.devTunnelUrl}/api/webhooks/paymongo` : null
 	);
+	const tunnelProvider = $derived(
+		data.devTunnelUrl?.includes('.ngrok') ? 'ngrok' : 'cloudflared'
+	);
 </script>
 
 <div class="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
@@ -31,7 +34,7 @@
 	{#if data.devTunnelUrl}
 		<div class="mt-4 rounded-xl border border-border bg-surface-2 p-5 shadow-sm">
 			<div class="text-sm font-semibold uppercase tracking-wide text-ink-muted">
-				Dev tunnel (cloudflared)
+				Dev tunnel ({tunnelProvider})
 			</div>
 			<p class="mt-2 text-sm text-ink-muted">
 				Use this as the PayMongo webhook URL while testing locally:

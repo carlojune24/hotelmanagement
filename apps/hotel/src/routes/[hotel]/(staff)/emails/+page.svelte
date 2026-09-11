@@ -26,7 +26,9 @@
 	// Every transactional email the app can send. Keep in sync with the `email_type`
 	// enum (src/lib/server/db/schema/email-log.ts).
 	const TYPE_LABELS: Record<string, string> = {
-		booking_confirmation: 'Booking confirmation'
+		booking_confirmation: 'Booking confirmation',
+		booking_cancelled: 'Cancellation notice',
+		guest_message_reply: 'Message reply notice'
 	};
 	const typeLabel = (t: string) => TYPE_LABELS[t] ?? t.replace(/_/g, ' ');
 

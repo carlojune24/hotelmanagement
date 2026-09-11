@@ -1,12 +1,5 @@
-import { paymongoRequest } from './client';
+import { getPaymongoClient } from './client';
 import type { Guest, Order } from '$lib/server/db/schema/index';
-
-interface CheckoutSessionResponse {
-	data: {
-		id: string;
-		attributes: { checkout_url: string };
-	};
-}
 
 export interface CheckoutLineItem {
 	name: string;
@@ -48,27 +41,20 @@ export async function createCheckoutSession(params: {
 		});
 	}
 
-	const res = await paymongoRequest<CheckoutSessionResponse>('/checkout_sessions', {
-		method: 'POST',
-		body: {
-			data: {
-				attributes: {
-					billing: { name: guest.fullName, email: guest.email, phone: guest.phone ?? undefined },
-					send_email_receipt: false,
-					show_description: true,
-					show_line_items: true,
-					line_items: lineItems,
-					payment_method_types: ['gcash', 'card', 'paymaya'],
-					description: `${hotelName} — ${items.map((i) => i.name).join(', ')}`,
-					success_url: successUrl,
-					cancel_url: cancelUrl,
-					metadata: { orderId: order.id }
-				}
-			}
-		}
+	const session = await getPaymongoClient().createCheckoutSession({
+		billing: { name: guest.fullName, email: guest.email, phone: guest.phone ?? undefined },
+		send_email_receipt: false,
+		show_description: true,
+		show_line_items: true,
+		line_items: lineItems,
+		payment_method_types: ['gcash', 'card', 'paymaya', 'qrph'],
+		description: `${hotelName} — ${items.map((i) => i.name).join(', ')}`,
+		success_url: successUrl,
+		cancel_url: cancelUrl,
+		metadata: { orderId: order.id }
 	});
 
-	return { checkoutSessionId: res.data.id, checkoutUrl: res.data.attributes.checkout_url };
+	return { checkoutSessionId: session.id, checkoutUrl: session.attributes.checkout_url };
 }
 
 /**
@@ -78,5 +64,5 @@ export async function createCheckoutSession(params: {
  * session is already paid or expired — callers treat any failure as non-fatal.
  */
 export async function expireCheckoutSession(checkoutSessionId: string): Promise<void> {
-	await paymongoRequest(`/checkout_sessions/${checkoutSessionId}/expire`, { method: 'POST' });
+	await getPaymongoClient().expireCheckoutSession(checkoutSessionId);
 }
