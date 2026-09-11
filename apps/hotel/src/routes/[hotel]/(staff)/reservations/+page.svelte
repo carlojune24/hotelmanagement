@@ -113,6 +113,7 @@
 						<Table.Head>Dates</Table.Head>
 						<Table.Head>Status</Table.Head>
 						<Table.Head class="text-right">Total</Table.Head>
+						<Table.Head></Table.Head>
 					</Table.Row>
 				</Table.Header>
 				<Table.Body>
@@ -149,6 +150,27 @@
 								{/if}
 							</Table.Cell>
 							<Table.Cell class="text-right text-ink">{peso(line.totalCentavos)}</Table.Cell>
+							<Table.Cell class="whitespace-nowrap text-right">
+								{#if ['confirmed', 'pending_payment'].includes(line.status)}
+									<a
+										href="{base}/reservations/{line.kind}/{line.id}?action=cancel"
+										onclick={(e) => e.stopPropagation()}
+										class="text-xs text-ink-muted underline-offset-2 hover:text-danger hover:underline"
+									>
+										Cancel
+									</a>
+									{#if line.kind === 'room' && line.status === 'confirmed' && line.startDate < data.today}
+										<span class="mx-1 text-ink-muted/40">·</span>
+										<a
+											href="{base}/reservations/{line.kind}/{line.id}?action=no-show"
+											onclick={(e) => e.stopPropagation()}
+											class="text-xs text-ink-muted underline-offset-2 hover:text-danger hover:underline"
+										>
+											No-show
+										</a>
+									{/if}
+								{/if}
+							</Table.Cell>
 						</Table.Row>
 					{/each}
 				</Table.Body>

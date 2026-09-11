@@ -53,6 +53,9 @@ export interface BookingConfirmationData {
 	totalCentavos: number;
 	/** Absolute URL of the guest's confirmation page (carries the order token). */
 	manageUrl: string;
+	/** Absolute URL of `/book/manage/[orderId]` — request a cancellation or ask
+	 *  the hotel a question (carries the order token). */
+	manageBookingUrl: string;
 }
 
 export interface RenderedEmail {
@@ -259,6 +262,9 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 		<!--[if !mso]><!-- -->
 		<a href="${esc(data.manageUrl)}" style="display:inline-block;background:${accent};color:${paper};font-family:${FONT_BODY};font-size:15px;font-weight:600;text-decoration:none;padding:14px 28px;border-radius:4px;">View your booking</a>
 		<!--<![endif]-->
+		<div style="margin-top:14px;font-family:${FONT_BODY};font-size:13px;">
+			<a href="${esc(data.manageBookingUrl)}" style="color:${accentDeep};text-decoration:underline;">Need to make a change or ask us something? Manage your booking →</a>
+		</div>
 	</td></tr>
 
 	<!-- before you arrive -->
@@ -320,6 +326,9 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 	tLines.push('');
 	tLines.push('View your booking:');
 	tLines.push(data.manageUrl);
+	tLines.push('');
+	tLines.push('Need to make a change or ask us something? Manage your booking:');
+	tLines.push(data.manageBookingUrl);
 	tLines.push('');
 	tLines.push(`Before you arrive: check-in from ${fmtTime(hotel.checkInTime)}, check-out by ${fmtTime(hotel.checkOutTime)}.`);
 	if (addressBits) tLines.push(addressBits);

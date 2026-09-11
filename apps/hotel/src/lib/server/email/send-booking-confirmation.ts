@@ -70,6 +70,7 @@ export async function sendBookingConfirmation(
 
 		const origin = (env.ORIGIN ?? '').replace(/\/$/, '');
 		const manageUrl = `${origin}/${hotel.slug}/book/confirmation/${order.id}?t=${order.accessToken}`;
+		const manageBookingUrl = `${origin}/${hotel.slug}/book/manage/${order.id}?t=${order.accessToken}`;
 
 		let logoUrl: string | null = null;
 		if (branding.logoUrl) {
@@ -100,7 +101,8 @@ export async function sendBookingConfirmation(
 			feesCentavos: order.feesCentavos,
 			vatCentavos: order.vatCentavos,
 			totalCentavos: order.totalCentavos,
-			manageUrl
+			manageUrl,
+			manageBookingUrl
 		};
 
 		const { subject, html, text } = renderBookingConfirmation(data);

@@ -8,9 +8,15 @@
 	import * as Table from '$lib/components/ui/table/index.js';
 	import BedIcon from '@lucide/svelte/icons/bed';
 	import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
+	import CancelBookingDialog from '$lib/components/staff/cancel-booking-dialog.svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
+
+	let cancelOpen = $state(data.autoOpen === 'cancel');
+	let confirmingNoShow = $state(data.autoOpen === 'no-show');
+	let decliningRequest = $state(false);
+	let replying = $state(false);
 
 	const base = $derived(`/${page.params.hotel}`);
 	const peso = (centavos: number) => `₱${(centavos / 100).toFixed(2)}`;
@@ -309,6 +315,149 @@
 		{/if}
 	</div>
 
+	<!-- Cancel / no-show -->
+	{#if data.cancelQuote || data.canMarkNoShow}
+		<div class="mt-4 rounded-xl border border-border p-4">
+			<h2 class="mb-1 text-sm font-semibold text-ink">
+				Cancel {data.kind === 'room' ? 'booking' : 'event'}
+			</h2>
+			<p class="mb-3 text-xs text-ink-muted">
+				{#if data.cancelQuote}
+					Releases the {data.kind === 'room' ? 'room' : 'hall'} hold and, for a paid booking,
+					records the refund after any cancellation fee.
+				{:else}
+					This arrival is past its check-in date.
+				{/if}
+			</p>
+
+			{#if data.openRequest}
+				<div class="mb-3 rounded-lg border border-border bg-surface-2 p-3">
+					<p class="text-xs font-semibold text-ink">Guest requested cancellation</p>
+					<p class="mt-1 text-sm text-ink">{data.openRequest.body}</p>
+					{#if decliningRequest}
+						<form
+							method="POST"
+							action="?/declineRequest"
+							use:enhance
+							class="mt-3 space-y-2"
+						>
+							<input type="hidden" name="requestId" value={data.openRequest.id} />
+							<textarea
+								name="note"
+								rows="2"
+								required
+								maxlength={2000}
+								placeholder="Explain why you're declining this request…"
+								class="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm"
+							></textarea>
+							<div class="flex items-center gap-2">
+								<Button type="submit" variant="destructive" size="sm">Confirm decline</Button>
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									onclick={() => (decliningRequest = false)}
+								>
+									Back
+								</Button>
+							</div>
+						</form>
+					{:else}
+						<div class="mt-2 flex gap-2">
+							<Button size="sm" onclick={() => (cancelOpen = true)}>Cancel this booking</Button>
+							<Button variant="outline" size="sm" onclick={() => (decliningRequest = true)}>
+								Decline request
+							</Button>
+						</div>
+					{/if}
+				</div>
+			{/if}
+
+			<div class="flex flex-wrap gap-2">
+				{#if data.cancelQuote}
+					<Button variant="outline" onclick={() => (cancelOpen = true)}>
+						Cancel {data.kind === 'room' ? 'booking' : 'event'}
+					</Button>
+				{/if}
+				{#if data.canMarkNoShow}
+					{#if confirmingNoShow}
+						<form method="POST" action="?/markNoShow" use:enhance class="flex items-center gap-2">
+							<Button type="submit" variant="destructive">Confirm no-show</Button>
+							<Button type="button" variant="ghost" onclick={() => (confirmingNoShow = false)}>
+								Cancel
+							</Button>
+						</form>
+					{:else}
+						<Button variant="outline" onclick={() => (confirmingNoShow = true)}>Mark no-show</Button>
+					{/if}
+				{/if}
+			</div>
+			{#if data.canMarkNoShow && confirmingNoShow}
+				<p class="mt-2 text-xs text-ink-muted">
+					The room is released. Any payment is kept — issue a refund separately if your policy
+					requires it.
+				</p>
+			{/if}
+		</div>
+	{/if}
+
+	<!-- Guest messages -->
+	<div class="mt-4 rounded-xl border border-border p-4">
+		<h2 class="mb-2 text-sm font-semibold text-ink">Messages</h2>
+		{#if data.thread.length === 0}
+			<p class="text-sm text-ink-muted">No messages from this guest yet.</p>
+		{:else}
+			<div class="space-y-3">
+				{#each data.thread as m (m.id)}
+					<div class="text-sm">
+						<div class="flex items-baseline justify-between gap-3">
+							<span class="font-medium text-ink">
+								{m.direction === 'guest' ? 'Guest' : (m.staffName ?? 'Staff')}
+								{#if m.kind === 'cancellation_request'}
+									<Badge
+										variant="outline"
+										class="ml-1.5 {m.status === 'declined'
+											? 'border-transparent bg-danger/15 text-danger'
+											: m.status === 'actioned'
+												? 'border-transparent bg-ok/15 text-ok'
+												: 'border-border bg-surface-2 text-ink-muted'}"
+									>
+										cancellation request{m.status ? ` · ${m.status}` : ''}
+									</Badge>
+								{/if}
+							</span>
+							<span class="shrink-0 text-xs text-ink-muted">{fmtDateTime(m.createdAt)}</span>
+						</div>
+						<p class="mt-0.5 whitespace-pre-wrap text-ink">{m.body}</p>
+					</div>
+				{/each}
+			</div>
+		{/if}
+
+		<form
+			method="POST"
+			action="?/replyMessage"
+			use:enhance={() => {
+				replying = true;
+				return async ({ update }) => {
+					await update();
+					replying = false;
+				};
+			}}
+			class="mt-4 space-y-2 border-t border-border pt-4"
+		>
+			<textarea
+				name="body"
+				rows="2"
+				required
+				maxlength={2000}
+				placeholder="Reply to the guest…"
+				class="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm"
+			></textarea>
+			<Button type="submit" size="sm" disabled={replying}>{replying ? 'Sending…' : 'Reply'}</Button>
+		</form>
+	</div>
+
 	<!-- Status history -->
 	<div class="mt-4 rounded-xl border border-border p-4">
 		<h2 class="mb-2 text-sm font-semibold text-ink">Status history</h2>
@@ -327,3 +476,7 @@
 		{/if}
 	</div>
 </div>
+
+{#if data.cancelQuote}
+	<CancelBookingDialog bind:open={cancelOpen} quote={data.cancelQuote} action="?/cancel" />
+{/if}

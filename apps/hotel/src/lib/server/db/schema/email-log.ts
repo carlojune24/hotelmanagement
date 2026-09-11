@@ -5,7 +5,11 @@ import { hotels } from './hotels';
 import { orders } from './orders';
 
 /** What a logged email was. Extend as more transactional mails are added. */
-export const emailType = pgEnum('email_type', ['booking_confirmation']);
+export const emailType = pgEnum('email_type', [
+	'booking_confirmation',
+	'booking_cancelled',
+	'guest_message_reply'
+]);
 
 /** Delivery outcome as reported by the transport. `sent` means the transport
  *  accepted it (not a guaranteed inbox delivery). */

@@ -71,6 +71,14 @@
 			</div>
 		</div>
 
+		<div class="mt-6 flex items-center justify-between gap-4 rounded-md border border-[var(--ledger-rule)] px-4 py-3">
+			<p class="text-sm text-[var(--ledger-ink-muted)]">Need to request a change or ask a question?</p>
+			<a
+				href="../manage/{data.order.id}?t={data.order.accessToken}"
+				class="ledger-btn-ghost text-sm whitespace-nowrap">Manage your booking</a
+			>
+		</div>
+
 		{#each data.roomLines.filter((r) => r.status === 'checked_out') as r (r.id)}
 			<div class="mt-6 flex items-center justify-between gap-4 rounded-md border border-[var(--ledger-rule)] px-4 py-3">
 				<p class="text-sm text-[var(--ledger-ink-muted)]">

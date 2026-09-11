@@ -36,6 +36,7 @@ const base = (over: Partial<BookingConfirmationData> = {}): BookingConfirmationD
 	vatCentavos: 108_00,
 	totalCentavos: 1008_00,
 	manageUrl: 'https://book.example/acacia/book/confirmation/abc?t=tok',
+	manageBookingUrl: 'https://book.example/acacia/book/manage/abc?t=tok',
 	...over
 });
 
