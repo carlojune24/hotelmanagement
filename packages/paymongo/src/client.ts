@@ -34,7 +34,7 @@ export class PayMongoClient {
 	/** Auth is HTTP Basic with the secret key as username, empty password. */
 	async request<T = unknown>(
 		path: string,
-		options: { method?: 'GET' | 'POST' | 'PATCH'; body?: unknown } = {}
+		options: { method?: 'GET' | 'POST' | 'PATCH' | 'PUT'; body?: unknown } = {}
 	): Promise<T> {
 		const auth = Buffer.from(`${this.#secretKey}:`).toString('base64');
 		const res = await fetch(`${this.#baseUrl}${path}`, {
@@ -96,6 +96,14 @@ export class PayMongoClient {
 
 	async retrieveWebhook(id: string): Promise<Webhook> {
 		const res = await this.request<{ data: Webhook }>(`/webhooks/${id}`);
+		return res.data;
+	}
+
+	async updateWebhook(id: string, params: { url?: string; events?: string[] }): Promise<Webhook> {
+		const res = await this.request<{ data: Webhook }>(`/webhooks/${id}`, {
+			method: 'PUT',
+			body: { data: { attributes: params } }
+		});
 		return res.data;
 	}
 
