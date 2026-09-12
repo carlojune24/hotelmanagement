@@ -26,7 +26,8 @@
 		{ v: 'gcash', label: 'GCash' },
 		{ v: 'maya', label: 'Maya' },
 		{ v: 'bank_transfer', label: 'Bank transfer' },
-		{ v: 'card', label: 'Card' }
+		{ v: 'card', label: 'Card' },
+		{ v: 'paymongo', label: 'PayMongo (refund to original payment method)' }
 	] as const;
 
 	let fee = $state('0.00');
@@ -46,10 +47,16 @@
 	});
 
 	const paidCentavos = $derived(quote?.paidCentavos ?? 0);
+	const paymongoRefundableCentavos = $derived(quote?.paymongoRefundableCentavos ?? 0);
 	const feeCentavos = $derived(Math.max(0, Math.round(parseFloat(fee || '0') * 100)));
 	const feeOverPaid = $derived(feeCentavos > paidCentavos);
 	const refundCentavos = $derived(Math.max(0, paidCentavos - Math.min(feeCentavos, paidCentavos)));
-	const canSubmit = $derived(!submitting && reason.trim().length > 0 && !feeOverPaid);
+	const paymongoOverLimit = $derived(
+		refundMethod === 'paymongo' && refundCentavos > paymongoRefundableCentavos
+	);
+	const canSubmit = $derived(
+		!submitting && reason.trim().length > 0 && !feeOverPaid && !paymongoOverLimit
+	);
 </script>
 
 <Dialog.Root bind:open>
@@ -140,13 +147,27 @@
 									class="mt-1 w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm"
 								>
 									{#each REFUND_METHODS as m (m.v)}
-										<option value={m.v}>{m.label}</option>
+										<option value={m.v} disabled={m.v === 'paymongo' && paymongoRefundableCentavos <= 0}>
+											{m.label}
+										</option>
 									{/each}
 								</select>
-								<p class="mt-1 text-xs text-ink-muted">
-									Records the payout here. For an online (PayMongo) payment, process the refund in
-									your PayMongo dashboard as well.
-								</p>
+								{#if refundMethod === 'paymongo'}
+									<p class="mt-1 text-xs" class:text-danger={paymongoOverLimit}>
+										{#if paymongoOverLimit}
+											Only {peso(paymongoRefundableCentavos)} of this booking's payment was made via
+											PayMongo — reduce the refund or pick another method for the rest.
+										{:else}
+											Actually refunds {peso(refundCentavos)} to the guest's card/e-wallet through PayMongo
+											right now — not just a bookkeeping record.
+										{/if}
+									</p>
+								{:else}
+									<p class="mt-1 text-xs text-ink-muted">
+										Records the payout here — hand the guest the money yourself (cash) or process the
+										transfer on your end (GCash/Maya/bank/card).
+									</p>
+								{/if}
 							</div>
 						{/if}
 					</div>

@@ -275,6 +275,114 @@ export async function POST({ request }) {
 			});
 			break;
 		}
+		case 'payment.refund_updated':
+		case 'payment.refunded': {
+			// `refundOrderViaPaymongo` (lib/server/paymongo-refund.ts) already records a
+			// *standard* refund as paid at creation time, since that call already confirmed
+			// PayMongo accepted it — so for those this is reconciliation only, catching the
+			// rarer case where an accepted refund later fails to actually land (card issuer
+			// decline, etc.). A *QR Ph* refund is different: it's recorded `pending` at
+			// creation (the guest must still open and claim a transfer link), so this is
+			// where that one actually gets confirmed — flipping it to paid and posting its
+			// cash-out movement only once PayMongo reports it `succeeded`.
+			const refund = event?.data?.attributes?.data;
+			const refundId = refund?.id as string | undefined;
+			const refundStatus = refund?.attributes?.status as string | undefined;
+
+			if (!refundId) {
+				console.warn('paymongo webhook: refund event without a refund id', eventId, type);
+				break;
+			}
+
+			const paymentRow = await db
+				.select({
+					id: payments.id,
+					orderId: payments.orderId,
+					status: payments.status,
+					amountCentavos: payments.amountCentavos
+				})
+				.from(payments)
+				.where(eq(payments.paymongoRefundId, refundId))
+				.then((r) => r.at(0));
+			if (!paymentRow) {
+				console.warn('paymongo webhook: refund event for an unknown refund', refundId);
+				break;
+			}
+
+			if (refundStatus === 'succeeded' && paymentRow.status === 'pending') {
+				const [order] = await db
+					.select({ id: orders.id, hotelId: orders.hotelId })
+					.from(orders)
+					.where(eq(orders.id, paymentRow.orderId))
+					.limit(1);
+				if (order) {
+					await db
+						.update(payments)
+						.set({ status: 'paid', paidAt: new Date(), rawPayload: event })
+						.where(eq(payments.id, paymentRow.id));
+
+					const [settings] = await db
+						.select({
+							autoPost: financeSettings.autoPostOnlinePayments,
+							undepositedAccountId: financeSettings.undepositedAccountId
+						})
+						.from(financeSettings)
+						.where(eq(financeSettings.hotelId, order.hotelId))
+						.limit(1);
+					if (settings?.autoPost && settings.undepositedAccountId) {
+						const [hotelRow] = await db
+							.select({ timezone: hotels.timezone })
+							.from(hotels)
+							.where(eq(hotels.id, order.hotelId))
+							.limit(1);
+						try {
+							await recordCashMovement({
+								hotelId: order.hotelId,
+								businessDate: businessDateFor(hotelRow?.timezone ?? 'Asia/Manila'),
+								direction: 'out',
+								category: 'refund',
+								cashAccountId: settings.undepositedAccountId,
+								amountCentavos: Math.abs(paymentRow.amountCentavos),
+								counterpartyType: 'guest',
+								sourceType: 'payment',
+								sourceId: paymentRow.id,
+								paymentId: paymentRow.id,
+								memo: 'Cancellation refund — PayMongo (QR Ph, claimed)'
+							});
+						} catch (e) {
+							console.error('paymongo webhook: could not post QR Ph refund cash movement', order.id, e);
+						}
+					}
+				}
+			} else if (refundStatus === 'failed') {
+				// Flip the refund's own row to `failed` — the PayMongo transactions list reads
+				// this directly, so staff see it there without digging into order history.
+				await db
+					.update(payments)
+					.set({ status: 'failed', rawPayload: event })
+					.where(eq(payments.id, paymentRow.id));
+
+				const [order] = await db
+					.select({ id: orders.id, status: orders.status })
+					.from(orders)
+					.where(eq(orders.id, paymentRow.orderId))
+					.limit(1);
+				if (order) {
+					// Self-loop status (no actual transition) just to attach a note — same
+					// device the checkout-on-a-cancelled-order case above already uses.
+					await db.insert(orderStatusHistory).values({
+						orderId: order.id,
+						fromStatus: order.status,
+						toStatus: order.status,
+						note: `PayMongo refund ${refundId} failed after being accepted — needs manual follow-up`
+					});
+					console.error('paymongo webhook: refund failed after acceptance', refundId, paymentRow.id);
+				}
+			} else {
+				console.log('paymongo webhook: refund status update', refundId, refundStatus);
+			}
+			break;
+		}
 		default:
 			console.log('paymongo webhook: unhandled event type', type);
 	}

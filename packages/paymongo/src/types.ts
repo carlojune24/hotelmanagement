@@ -58,6 +58,25 @@ export interface CheckoutSession {
 	};
 }
 
+export interface Refund {
+	id: string;
+	type: 'refund';
+	attributes: {
+		amount: number;
+		currency: string;
+		payment_id: string;
+		reason: 'duplicate' | 'fraudulent' | 'requested_by_customer' | 'others';
+		notes?: string | null;
+		/** `processing`/`refunding` only occur for a QR Ph refund — a standard refund
+		 *  goes straight to `pending` (accepted, not yet reflected) or `succeeded`/`failed`. */
+		status: 'pending' | 'processing' | 'refunding' | 'succeeded' | 'failed';
+		/** QR Ph only — the link the *guest* must open and claim to actually receive
+		 *  the money; a standard refund has no equivalent manual step. */
+		transfer_link?: string;
+		[key: string]: unknown;
+	};
+}
+
 export interface Webhook {
 	id: string;
 	type: 'webhook';

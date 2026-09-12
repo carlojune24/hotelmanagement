@@ -25,13 +25,17 @@ import { ensureFolio, getOrderIdForTarget, type FolioTarget } from './folio';
 import { recordCashMovement } from './finance/cash';
 import { resolvePaymentAccount, type PaymentMethod } from './finance/payments';
 import { businessDateFor, FinanceError } from './finance/shared';
+import { getPaymongoRefundableCentavos, refundOrderViaPaymongo } from './paymongo-refund';
 import type { SessionUser } from './auth/session';
 import { nightsBetween } from './pricing';
 
 export class CancellationError extends Error {}
 
-/** Refund tenders a cancellation payout may be issued as (a subset of `payment_method`). */
-export const REFUND_METHODS = ['cash', 'gcash', 'maya', 'bank_transfer', 'card'] as const;
+/** Refund tenders a cancellation payout may be issued as (a subset of `payment_method`),
+ *  plus `paymongo` — a real refund back to the guest's original online payment method via
+ *  PayMongo's Refunds API, only offered when `CancellationQuote.paymongoRefundableCentavos`
+ *  covers the amount. */
+export const REFUND_METHODS = ['cash', 'gcash', 'maya', 'bank_transfer', 'card', 'paymongo'] as const;
 export type RefundMethod = (typeof REFUND_METHODS)[number];
 
 type PenaltyType = typeof cancellationPolicies.$inferSelect.penaltyType;
@@ -180,6 +184,10 @@ export interface CancellationQuote {
 	orderStatus: string;
 	lineTotalCentavos: number;
 	paidCentavos: number;
+	/** How much of `paidCentavos` could be refunded back through PayMongo (vs. manually
+	 *  recorded) — 0 when nothing was paid online, or the online portion is smaller than
+	 *  the total paid (mixed cash + online). */
+	paymongoRefundableCentavos: number;
 	nights: number;
 	fee: CancellationFeeResult;
 }
@@ -227,6 +235,8 @@ export async function getCancellationQuote(
 
 		const nights = nightsBetween(row.booking.checkIn, row.booking.checkOut).length;
 		const paid = row.order.status === 'confirmed' ? await paidCentavosForOrder(row.order.id) : 0;
+		const paymongoRefundable =
+			paid > 0 ? await getPaymongoRefundableCentavos(hotelId, row.order.id) : 0;
 		const hoursUntilCheckIn =
 			(wallTimeToUtcMs(row.booking.checkIn, hotel.checkInTime, hotel.timezone) - now) / 3_600_000;
 
@@ -256,6 +266,7 @@ export async function getCancellationQuote(
 			orderStatus: row.order.status,
 			lineTotalCentavos: row.booking.totalCentavos,
 			paidCentavos: paid,
+			paymongoRefundableCentavos: paymongoRefundable,
 			nights,
 			fee
 		};
@@ -277,6 +288,7 @@ export async function getCancellationQuote(
 	if (!row) return null;
 
 	const paid = row.order.status === 'confirmed' ? await paidCentavosForOrder(row.order.id) : 0;
+	const paymongoRefundable = paid > 0 ? await getPaymongoRefundableCentavos(hotelId, row.order.id) : 0;
 	const hoursUntilCheckIn =
 		(wallTimeToUtcMs(row.hallBooking.eventDate, row.hallBooking.startTime, hotel.timezone) - now) /
 		3_600_000;
@@ -301,6 +313,7 @@ export async function getCancellationQuote(
 		orderStatus: row.order.status,
 		lineTotalCentavos: row.hallBooking.totalCentavos,
 		paidCentavos: paid,
+		paymongoRefundableCentavos: paymongoRefundable,
 		nights: 1,
 		fee
 	};
@@ -351,6 +364,55 @@ export async function cancelBooking(input: CancelBookingInput): Promise<CancelBo
 		.where(eq(hotels.id, hotelId))
 		.limit(1);
 	const businessDate = businessDateFor(hotel?.timezone ?? 'Asia/Manila');
+
+	// A real PayMongo refund is an external, hard-to-reverse action — it must happen
+	// *before* the transaction below (never hold row locks across a network call), and
+	// the booking must never be flipped to cancelled claiming a refund that didn't
+	// actually happen. Pre-compute the same way the transaction would, refund it for
+	// real, then use the amount PayMongo actually moved (not a fresh recompute) as the
+	// authoritative figure once inside the transaction.
+	let paymongoRefund: { refundedCentavos: number; refundPaymentIds: string[] } | null = null;
+	if (refundMethod === 'paymongo') {
+		const [orderRow] = await db.select({ status: orders.status }).from(orders).where(eq(orders.id, orderId)).limit(1);
+		if (!orderRow) throw new CancellationError('Booking not found.');
+		if (orderRow.status === 'confirmed') {
+			const lineTotalCentavos = isRoom
+				? (
+						await db
+							.select({ v: bookings.totalCentavos })
+							.from(bookings)
+							.where(eq(bookings.id, target.bookingId))
+							.limit(1)
+					)[0]?.v
+				: (
+						await db
+							.select({ v: hallBookings.totalCentavos })
+							.from(hallBookings)
+							.where(eq(hallBookings.id, target.hallBookingId))
+							.limit(1)
+					)[0]?.v;
+			if (lineTotalCentavos == null) throw new CancellationError('Booking not found.');
+
+			const paidNow = await paidCentavosForOrder(orderId);
+			const feeNow = Math.min(Math.max(0, Math.round(input.feeCentavos)), Math.max(0, paidNow));
+			const refundNow = Math.max(0, Math.min(paidNow, lineTotalCentavos) - feeNow);
+
+			if (refundNow > 0) {
+				try {
+					paymongoRefund = await refundOrderViaPaymongo({
+						hotelId,
+						orderId,
+						amountCentavos: refundNow,
+						notes: reason,
+						actor
+					});
+				} catch (e) {
+					if (e instanceof FinanceError) throw new CancellationError(e.message);
+					throw e;
+				}
+			}
+		}
+	}
 
 	let result: {
 		orderId: string;
@@ -428,63 +490,88 @@ export async function cancelBooking(input: CancelBookingInput): Promise<CancelBo
 			if (order.status === 'confirmed') {
 				const paid = await paidCentavosForOrder(orderId);
 				feeCentavos = Math.min(Math.max(0, Math.round(input.feeCentavos)), Math.max(0, paid));
-				refundCentavos = Math.max(0, Math.min(paid, lineTotalCentavos) - feeCentavos);
 
-				if (refundCentavos > 0) {
-					const { cashAccountId, shiftId } = await resolvePaymentAccount(
-						hotelId,
-						refundMethod as PaymentMethod
-					);
-					const folioId = await ensureFolio(tx, hotelId, target);
+				if (refundMethod === 'paymongo') {
+					// Real money already moved via PayMongo before this transaction started —
+					// use what actually happened, not a fresh recompute, as authoritative.
+					refundCentavos = paymongoRefund?.refundedCentavos ?? 0;
+					refundPaymentId = paymongoRefund?.refundPaymentIds[0] ?? null;
 
-					// Bring the folio back to zero: it was seeded at the line total and fully paid;
-					// after the retained fee the "real" charge is `fee`, so credit back the difference.
-					await tx.insert(folioCharges).values({
-						folioId,
-						description: `Cancellation — ${reason.slice(0, 120)}`,
-						quantity: 1,
-						unitPriceCentavos: -refundCentavos,
-						taxCentavos: 0,
-						totalCentavos: -refundCentavos,
-						addedByUserId: actor?.id ?? null
-					});
-
-					const [refundRow] = await tx
-						.insert(payments)
-						.values({
-							orderId,
-							provider: 'cash',
-							method: refundMethod as PaymentMethod,
-							purpose: 'refund',
-							status: 'paid',
-							amountCentavos: -refundCentavos,
+					if (refundCentavos > 0) {
+						const folioId = await ensureFolio(tx, hotelId, target);
+						// Bring the folio back to zero: it was seeded at the line total and fully
+						// paid; after the retained fee the "real" charge is `fee`, so credit back
+						// the difference. The refund payment row itself was already written by
+						// `refundOrderViaPaymongo` (possibly split across several origin payments).
+						await tx.insert(folioCharges).values({
 							folioId,
-							cashAccountId,
-							shiftId: shiftId ?? null,
-							recordedByUserId: actor?.id ?? null,
-							paidAt: new Date()
-						})
-						.returning({ id: payments.id });
-					refundPaymentId = refundRow!.id;
+							description: `Cancellation — ${reason.slice(0, 120)}`,
+							quantity: 1,
+							unitPriceCentavos: -refundCentavos,
+							taxCentavos: 0,
+							totalCentavos: -refundCentavos,
+							addedByUserId: actor?.id ?? null
+						});
+					}
+				} else {
+					refundCentavos = Math.max(0, Math.min(paid, lineTotalCentavos) - feeCentavos);
 
-					await recordCashMovement(
-						{
+					if (refundCentavos > 0) {
+						const { cashAccountId, shiftId } = await resolvePaymentAccount(
 							hotelId,
-							businessDate,
-							direction: 'out',
-							category: 'refund',
-							cashAccountId,
-							amountCentavos: refundCentavos,
-							counterpartyType: 'guest',
-							sourceType: 'payment',
-							sourceId: refundRow!.id,
-							paymentId: refundRow!.id,
-							shiftId: shiftId ?? null,
-							memo: `Cancellation refund — ${target.kind} booking`,
-							actor
-						},
-						tx
-					);
+							refundMethod as PaymentMethod
+						);
+						const folioId = await ensureFolio(tx, hotelId, target);
+
+						// Bring the folio back to zero: it was seeded at the line total and fully paid;
+						// after the retained fee the "real" charge is `fee`, so credit back the difference.
+						await tx.insert(folioCharges).values({
+							folioId,
+							description: `Cancellation — ${reason.slice(0, 120)}`,
+							quantity: 1,
+							unitPriceCentavos: -refundCentavos,
+							taxCentavos: 0,
+							totalCentavos: -refundCentavos,
+							addedByUserId: actor?.id ?? null
+						});
+
+						const [refundRow] = await tx
+							.insert(payments)
+							.values({
+								orderId,
+								provider: 'cash',
+								method: refundMethod as PaymentMethod,
+								purpose: 'refund',
+								status: 'paid',
+								amountCentavos: -refundCentavos,
+								folioId,
+								cashAccountId,
+								shiftId: shiftId ?? null,
+								recordedByUserId: actor?.id ?? null,
+								paidAt: new Date()
+							})
+							.returning({ id: payments.id });
+						refundPaymentId = refundRow!.id;
+
+						await recordCashMovement(
+							{
+								hotelId,
+								businessDate,
+								direction: 'out',
+								category: 'refund',
+								cashAccountId,
+								amountCentavos: refundCentavos,
+								counterpartyType: 'guest',
+								sourceType: 'payment',
+								sourceId: refundRow!.id,
+								paymentId: refundRow!.id,
+								shiftId: shiftId ?? null,
+								memo: `Cancellation refund — ${target.kind} booking`,
+								actor
+							},
+							tx
+						);
+					}
 				}
 			}
 
@@ -509,7 +596,9 @@ export async function cancelBooking(input: CancelBookingInput): Promise<CancelBo
 			if (feeCentavos > 0) noteParts.push(`fee ₱${(feeCentavos / 100).toFixed(2)} retained`);
 			if (refundCentavos > 0)
 				noteParts.push(
-					`₱${(refundCentavos / 100).toFixed(2)} refunded (${refundMethod.replace(/_/g, ' ')})`
+					`₱${(refundCentavos / 100).toFixed(2)} refunded (${
+						refundMethod === 'paymongo' ? 'PayMongo' : refundMethod.replace(/_/g, ' ')
+					})`
 				);
 			const note = noteParts.join('; ');
 

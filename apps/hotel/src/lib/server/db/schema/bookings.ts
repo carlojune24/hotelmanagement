@@ -269,13 +269,24 @@ export const payments = pgTable(
 		/** Soft-void, mirrors `folio_charges` — excluded from balances/reports but kept for audit. */
 		voidedAt: timestamp('voided_at', { withTimezone: true }),
 		voidedByUserId: uuid('voided_by_user_id').references(() => users.id, { onDelete: 'set null' }),
-		voidReason: text('void_reason')
+		voidReason: text('void_reason'),
+
+		// --- Refund tracking (cancellation flow) ---
+		/** On a `purpose: 'refund'` row: the original payment it refunds. Plain uuid
+		 *  (no self-referential FK) — see `folioId`'s own comment for why. */
+		refundsPaymentId: uuid('refunds_payment_id'),
+		/** PayMongo's own refund object id (`ref_...`), set when the refund was actually
+		 *  issued via their Refunds API — lets the webhook match `payment.refund_updated` /
+		 *  `payment.refunded` events back to this row. */
+		paymongoRefundId: text('paymongo_refund_id')
 	},
 	(t) => [
 		index('payments_order_idx').on(t.orderId),
 		uniqueIndex('payments_paymongo_event_idx').on(t.paymongoEventId),
 		index('payments_folio_idx').on(t.folioId),
-		index('payments_shift_idx').on(t.shiftId)
+		index('payments_shift_idx').on(t.shiftId),
+		index('payments_refunds_payment_idx').on(t.refundsPaymentId),
+		index('payments_paymongo_refund_idx').on(t.paymongoRefundId)
 	]
 );
 

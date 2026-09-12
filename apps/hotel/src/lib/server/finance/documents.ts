@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '../db/index';
 import {
 	birSettings,
@@ -111,10 +112,39 @@ export function formatSerial(prefix: string, serialNo: number, padWidth: number)
 }
 
 const ONES = [
-	'ZERO', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE', 'TEN',
-	'ELEVEN', 'TWELVE', 'THIRTEEN', 'FOURTEEN', 'FIFTEEN', 'SIXTEEN', 'SEVENTEEN', 'EIGHTEEN', 'NINETEEN'
+	'ZERO',
+	'ONE',
+	'TWO',
+	'THREE',
+	'FOUR',
+	'FIVE',
+	'SIX',
+	'SEVEN',
+	'EIGHT',
+	'NINE',
+	'TEN',
+	'ELEVEN',
+	'TWELVE',
+	'THIRTEEN',
+	'FOURTEEN',
+	'FIFTEEN',
+	'SIXTEEN',
+	'SEVENTEEN',
+	'EIGHTEEN',
+	'NINETEEN'
 ] as const;
-const TENS = ['', '', 'TWENTY', 'THIRTY', 'FORTY', 'FIFTY', 'SIXTY', 'SEVENTY', 'EIGHTY', 'NINETY'] as const;
+const TENS = [
+	'',
+	'',
+	'TWENTY',
+	'THIRTY',
+	'FORTY',
+	'FIFTY',
+	'SIXTY',
+	'SEVENTY',
+	'EIGHTY',
+	'NINETY'
+] as const;
 const SCALES = ['', ' THOUSAND', ' MILLION', ' BILLION'] as const;
 
 function threeDigitsToWords(n: number): string {
@@ -160,7 +190,11 @@ export function amountInWords(centavos: number): string {
 // ---------------------------------------------------------------------------
 
 export async function getBirSettings(hotelId: string): Promise<BirSettings | null> {
-	const [row] = await db.select().from(birSettings).where(eq(birSettings.hotelId, hotelId)).limit(1);
+	const [row] = await db
+		.select()
+		.from(birSettings)
+		.where(eq(birSettings.hotelId, hotelId))
+		.limit(1);
 	return row ?? null;
 }
 
@@ -396,7 +430,11 @@ export async function allocateSerial(
 		})
 		.where(eq(documentSeries.id, series.id));
 
-	return { seriesId: series.id, serialNo, formattedNo: formatSerial(series.prefix, serialNo, padWidth) };
+	return {
+		seriesId: series.id,
+		serialNo,
+		formattedNo: formatSerial(series.prefix, serialNo, padWidth)
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -424,9 +462,7 @@ function baseSnapshot(
 	s: BirSettings | null
 ): Pick<DocumentSnapshot, 'hotel' | 'bir'> {
 	const address =
-		s?.registeredAddress ||
-		[hotel.addressLine, hotel.city].filter(Boolean).join(', ') ||
-		null;
+		s?.registeredAddress || [hotel.addressLine, hotel.city].filter(Boolean).join(', ') || null;
 	return {
 		hotel: {
 			name: hotel.name,
@@ -477,11 +513,7 @@ export async function buildInvoiceSnapshot(
 	let stayDates: string | null = null;
 	let bookingRef: string | null = null;
 	if (target.kind === 'room') {
-		const [b] = await db
-			.select()
-			.from(bookings)
-			.where(eq(bookings.id, target.bookingId))
-			.limit(1);
+		const [b] = await db.select().from(bookings).where(eq(bookings.id, target.bookingId)).limit(1);
 		if (b) {
 			stayDates = `${b.checkIn} → ${b.checkOut}`;
 			bookingRef = b.id.slice(0, 8).toUpperCase();
@@ -520,7 +552,11 @@ export async function buildInvoiceSnapshot(
 				// The seeded line already bundles VAT — recover it from the booking/hall breakdown.
 				if (target.kind === 'room') {
 					const [b] = await db
-						.select({ v: bookings.vatCentavos, sub: bookings.subtotalCentavos, fees: bookings.feesCentavos })
+						.select({
+							v: bookings.vatCentavos,
+							sub: bookings.subtotalCentavos,
+							fees: bookings.feesCentavos
+						})
 						.from(bookings)
 						.where(eq(bookings.id, target.bookingId))
 						.limit(1);
@@ -694,7 +730,10 @@ export async function buildReceiptSnapshot(
 // Issuance
 // ---------------------------------------------------------------------------
 
-function fillSerialRange(snap: DocumentSnapshot, series: { prefix: string; serialFrom: number; serialTo: number }) {
+function fillSerialRange(
+	snap: DocumentSnapshot,
+	series: { prefix: string; serialFrom: number; serialTo: number }
+) {
 	snap.bir.serialRange = { prefix: series.prefix, from: series.serialFrom, to: series.serialTo };
 }
 
@@ -914,15 +953,32 @@ export interface DocumentListRow {
 	billToName: string | null;
 	grossCentavos: number;
 	issuedAt: Date;
+	/** For an Official Receipt: the Invoice it's applied to, if any (looked up live via
+	 *  `documents.appliesToDocumentId`, not the frozen snapshot string, so it reflects the
+	 *  invoice's current formatted number even if that invoice was later cancelled/replaced). */
+	appliedToInvoiceId: string | null;
+	appliedToInvoiceNo: string | null;
 }
 
 export async function listDocuments(
 	hotelId: string,
 	filter?: { type?: DocType }
 ): Promise<DocumentListRow[]> {
+	const appliedInvoice = alias(documents, 'applied_invoice');
 	const rows = await db
-		.select()
+		.select({
+			id: documents.id,
+			type: documents.type,
+			formattedNo: documents.formattedNo,
+			status: documents.status,
+			billToName: documents.billToName,
+			snapshot: documents.snapshot,
+			issuedAt: documents.issuedAt,
+			appliedToInvoiceId: appliedInvoice.id,
+			appliedToInvoiceNo: appliedInvoice.formattedNo
+		})
 		.from(documents)
+		.leftJoin(appliedInvoice, eq(appliedInvoice.id, documents.appliesToDocumentId))
 		.where(
 			filter?.type
 				? and(eq(documents.hotelId, hotelId), eq(documents.type, filter.type))
@@ -938,7 +994,9 @@ export async function listDocuments(
 		status: r.status,
 		billToName: r.billToName,
 		grossCentavos: (r.snapshot as DocumentSnapshot)?.totals?.grossCentavos ?? 0,
-		issuedAt: r.issuedAt
+		issuedAt: r.issuedAt,
+		appliedToInvoiceId: r.appliedToInvoiceId,
+		appliedToInvoiceNo: r.appliedToInvoiceNo
 	}));
 }
 
@@ -997,7 +1055,11 @@ export async function cancelDocument(
 	if (opts.issueReplacement) {
 		try {
 			if (doc.type === 'invoice' && doc.bookingId) {
-				replacement = await issueInvoice(hotelId, { kind: 'room', bookingId: doc.bookingId }, actor);
+				replacement = await issueInvoice(
+					hotelId,
+					{ kind: 'room', bookingId: doc.bookingId },
+					actor
+				);
 			} else if (doc.type === 'invoice' && doc.hallBookingId) {
 				replacement = await issueInvoice(
 					hotelId,
@@ -1020,7 +1082,9 @@ export async function cancelDocument(
 		} catch (e) {
 			// The cancellation stands regardless — a replacement can be issued later.
 			const msg = e instanceof DocumentError ? e.message : 'unexpected error';
-			throw new DocumentError(`Cancelled ${doc.formattedNo}, but could not issue a replacement: ${msg}`);
+			throw new DocumentError(
+				`Cancelled ${doc.formattedNo}, but could not issue a replacement: ${msg}`
+			);
 		}
 	}
 
@@ -1030,7 +1094,11 @@ export async function cancelDocument(
 		action: 'bir.cancel_document',
 		entityType: 'document',
 		entityId: documentId,
-		after: { formattedNo: doc.formattedNo, reason: reason.trim(), replacementId: replacement?.id ?? null }
+		after: {
+			formattedNo: doc.formattedNo,
+			reason: reason.trim(),
+			replacementId: replacement?.id ?? null
+		}
 	});
 
 	return { cancelled: { ...doc, status: 'cancelled' }, replacement };
@@ -1137,7 +1205,13 @@ export function assembleLiquidationRows(
 	const bySerial = new Map(entries.map((e) => [e.serialNo, e]));
 	const fmt = (n: number) => formatSerial(prefix, n, padWidth);
 	const rows: LiquidationRow[] = [];
-	const summary = { issued: 0, cancelled: 0, spoiled: 0, unused: 0, total: serialTo - serialFrom + 1 };
+	const summary = {
+		issued: 0,
+		cancelled: 0,
+		spoiled: 0,
+		unused: 0,
+		total: serialTo - serialFrom + 1
+	};
 	let runStart: number | null = null;
 
 	const flushUnused = (endExclusive: number) => {

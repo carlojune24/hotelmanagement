@@ -10,11 +10,16 @@
 		[
 			{ seg: '', label: 'Dashboard' },
 			{ seg: '/cash', label: 'Cash' },
-			{ seg: '/expenses', label: 'Expenses', show: data.finance.canExpense || data.finance.canWrite },
+			{
+				seg: '/expenses',
+				label: 'Expenses',
+				show: data.finance.canExpense || data.finance.canWrite
+			},
 			{ seg: '/receivables', label: 'City ledger' },
 			{ seg: '/shifts', label: 'Shifts' },
 			{ seg: '/reports', label: 'Reports' },
 			{ seg: '/bir', label: 'BIR' },
+			{ seg: '/paymongo', label: 'PayMongo' },
 			{ seg: '/settings', label: 'Settings', show: data.finance.canAdmin }
 		].filter((t) => t.show === undefined || t.show)
 	);

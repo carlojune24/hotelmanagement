@@ -56,6 +56,7 @@
 					<th class="px-3 py-2">No.</th>
 					<th class="px-3 py-2">Type</th>
 					<th class="px-3 py-2">Bill to</th>
+					<th class="px-3 py-2">Applied to invoice</th>
 					<th class="px-3 py-2 text-right">Amount</th>
 					<th class="px-3 py-2">Issued</th>
 					<th class="px-3 py-2">Status</th>
@@ -68,6 +69,17 @@
 						<td class="px-3 py-2 font-mono">{d.formattedNo}</td>
 						<td class="px-3 py-2">{d.type === 'invoice' ? 'Invoice' : 'Official Receipt'}</td>
 						<td class="px-3 py-2">{d.billToName ?? '—'}</td>
+						<td class="px-3 py-2">
+							{#if d.appliedToInvoiceId}
+								<a
+									class="font-mono text-xs underline underline-offset-2"
+									href="{base}/print/invoice/{d.appliedToInvoiceId}"
+									target="_blank">{d.appliedToInvoiceNo}</a
+								>
+							{:else if d.type === 'official_receipt'}
+								<span class="text-xs text-ink-muted">—</span>
+							{/if}
+						</td>
 						<td class="px-3 py-2 text-right font-mono">
 							{d.status === 'spoiled' ? '—' : peso(d.grossCentavos)}
 						</td>
@@ -77,7 +89,9 @@
 						<td class="px-3 py-2"><Badge variant={statusVariant(d.status)}>{d.status}</Badge></td>
 						<td class="px-3 py-2 text-right whitespace-nowrap">
 							{#if d.status !== 'spoiled'}
-								<a class="text-xs font-medium underline" href={printHref(d)} target="_blank">Print</a>
+								<a class="text-xs font-medium underline" href={printHref(d)} target="_blank"
+									>Print</a
+								>
 							{/if}
 							{#if data.canWrite && d.status === 'issued'}
 								<button
@@ -92,14 +106,15 @@
 					</tr>
 					{#if cancelId === d.id}
 						<tr class="border-b border-border/60 bg-surface-2/50">
-							<td colspan="7" class="px-3 py-3">
+							<td colspan="8" class="px-3 py-3">
 								<form
 									method="POST"
 									action="?/cancel"
-									use:enhance={() => async ({ update }) => {
-										await update();
-										cancelId = null;
-									}}
+									use:enhance={() =>
+										async ({ update }) => {
+											await update();
+											cancelId = null;
+										}}
 									class="flex flex-wrap items-end gap-3"
 								>
 									<input type="hidden" name="documentId" value={d.id} />
@@ -116,8 +131,8 @@
 									<Button type="submit" size="sm" variant="destructive">Cancel document</Button>
 								</form>
 								<p class="mt-2 text-xs text-ink-muted">
-									The serial number stays permanently used. This does not void the payment or folio —
-									handle the money separately at the front desk if it's being reversed.
+									The serial number stays permanently used. This does not void the payment or folio
+									— handle the money separately at the front desk if it's being reversed.
 								</p>
 							</td>
 						</tr>
