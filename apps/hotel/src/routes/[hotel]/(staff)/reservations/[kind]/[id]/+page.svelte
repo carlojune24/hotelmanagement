@@ -25,6 +25,69 @@
 	let reinstateReason = $state('');
 	let overrideSubmitting = $state(false);
 
+	let modifyOpen = $state(false);
+	let modifySubmitting = $state(false);
+	let modifyCheckIn = $state(data.kind === 'room' ? data.detail.booking.checkIn : '');
+	let modifyCheckOut = $state(data.kind === 'room' ? data.detail.booking.checkOut : '');
+	let modifyReason = $state('');
+	let modifyQuoting = $state(false);
+	let modifyQuoteError = $state<string | null>(null);
+	let modifyQuote = $state<{
+		segments: { edge: 'front' | 'back'; direction: 'added' | 'removed'; nights: string[]; amountCentavos: number }[];
+		deltaCentavos: number;
+		blockingReason: string | null;
+	} | null>(null);
+	let modifyQuoteTimer: ReturnType<typeof setTimeout> | undefined;
+
+	function openModifyDialog() {
+		if (data.kind !== 'room') return;
+		modifyCheckIn = data.detail.booking.checkIn;
+		modifyCheckOut = data.detail.booking.checkOut;
+		modifyReason = '';
+		modifyQuote = null;
+		modifyQuoteError = null;
+		modifyOpen = true;
+	}
+
+	function requestModifyQuote() {
+		clearTimeout(modifyQuoteTimer);
+		modifyQuote = null;
+		modifyQuoteError = null;
+		if (!modifyCheckIn || !modifyCheckOut) return;
+		modifyQuoteTimer = setTimeout(async () => {
+			modifyQuoting = true;
+			try {
+				const res = await fetch(`${base}/reservations/room/${page.params.id}/api/modify-quote`, {
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ checkIn: modifyCheckIn, checkOut: modifyCheckOut })
+				});
+				if (!res.ok) {
+					modifyQuoteError = (await res.text()) || 'Could not quote this change.';
+					return;
+				}
+				modifyQuote = await res.json();
+			} catch {
+				modifyQuoteError = 'Could not reach the server.';
+			} finally {
+				modifyQuoting = false;
+			}
+		}, 400);
+	}
+
+	function modifySegmentLabel(s: { edge: 'front' | 'back'; direction: 'added' | 'removed'; nights: string[] }) {
+		const n = `${s.nights.length} night${s.nights.length === 1 ? '' : 's'}`;
+		const desc =
+			s.edge === 'front'
+				? s.direction === 'added'
+					? 'earlier arrival'
+					: 'later arrival'
+				: s.direction === 'added'
+					? 'later departure'
+					: 'earlier departure';
+		return `${s.direction === 'added' ? '+' : '-'}${n} (${desc})`;
+	}
+
 	const base = $derived(`/${page.params.hotel}`);
 	const peso = (centavos: number) => `₱${(centavos / 100).toFixed(2)}`;
 	const statusLabel = (s: string) => s.replace(/_/g, ' ');
@@ -87,7 +150,15 @@
 				</p>
 			</div>
 		</div>
-		<Button variant="outline" href="{base}/reservations">← Reservations</Button>
+		<div class="flex items-center gap-2">
+			<Button
+				variant="outline"
+				size="sm"
+				href="{base}/print/invoice/for/{data.kind === 'room' ? 'booking' : 'hall'}/{page.params.id}"
+				target="_blank">Print invoice</Button
+			>
+			<Button variant="outline" href="{base}/reservations">← Reservations</Button>
+		</div>
 	</div>
 
 	<div class="flex items-center gap-2">
@@ -120,7 +191,12 @@
 	<!-- Stay / Event details -->
 	<div class="mt-4 rounded-xl border border-border p-4">
 		{#if data.kind === 'room'}
-			<h2 class="mb-2 text-sm font-semibold text-ink">Stay</h2>
+			<div class="mb-2 flex items-center justify-between gap-3">
+				<h2 class="text-sm font-semibold text-ink">Stay</h2>
+				{#if data.canModifyStay}
+					<Button variant="outline" size="sm" onclick={openModifyDialog}>Modify dates</Button>
+				{/if}
+			</div>
 			<div class="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
 				<div>
 					<div class="text-xs text-ink-muted">Check-in</div>
@@ -275,7 +351,18 @@
 								<span class="ml-2 text-xs text-ink-muted">{p.paidAt}</span>
 							{/if}
 						</div>
-						<span class="text-ink">{peso(p.amountCentavos)}</span>
+						<div class="flex items-center gap-2">
+							{#if !p.voidedAt && p.amountCentavos > 0}
+								<a
+									href="{base}/print/receipt/{p.id}"
+									target="_blank"
+									class="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
+								>
+									Receipt
+								</a>
+							{/if}
+							<span class="text-ink">{peso(p.amountCentavos)}</span>
+						</div>
 					</div>
 				{/each}
 			</div>
@@ -518,6 +605,120 @@
 
 {#if data.cancelQuote}
 	<CancelBookingDialog bind:open={cancelOpen} quote={data.cancelQuote} action="?/cancel" />
+{/if}
+
+{#if data.kind === 'room' && data.canModifyStay}
+	<Dialog.Root bind:open={modifyOpen}>
+		<Dialog.Content class="sm:max-w-md">
+			<Dialog.Header>
+				<Dialog.Title>Modify stay dates</Dialog.Title>
+				<Dialog.Description>
+					{data.detail.booking.status === 'checked_in'
+						? 'The guest is already checked in — only the departure date can move.'
+						: 'Re-checks room-type availability for any added nights.'}
+				</Dialog.Description>
+			</Dialog.Header>
+			<form
+				method="POST"
+				action="?/modifyStay"
+				use:enhance={() => {
+					modifySubmitting = true;
+					return async ({ update, result }) => {
+						await update({ reset: false });
+						modifySubmitting = false;
+						if (result.type === 'success') {
+							modifyOpen = false;
+							modifyReason = '';
+							modifyQuote = null;
+						}
+					};
+				}}
+				class="space-y-4"
+			>
+				<div class="grid grid-cols-2 gap-3">
+					<div>
+						<Label for="modify-check-in" class="text-xs">Check-in</Label>
+						<Input
+							id="modify-check-in"
+							name="checkIn"
+							type="date"
+							bind:value={modifyCheckIn}
+							disabled={data.detail.booking.status === 'checked_in'}
+							oninput={requestModifyQuote}
+							class="mt-1"
+						/>
+					</div>
+					<div>
+						<Label for="modify-check-out" class="text-xs">Check-out</Label>
+						<Input
+							id="modify-check-out"
+							name="checkOut"
+							type="date"
+							bind:value={modifyCheckOut}
+							oninput={requestModifyQuote}
+							class="mt-1"
+						/>
+					</div>
+				</div>
+
+				{#if modifyQuoting}
+					<p class="text-xs text-ink-muted">Checking availability and pricing…</p>
+				{:else if modifyQuoteError}
+					<p class="text-xs text-danger">{modifyQuoteError}</p>
+				{:else if modifyQuote}
+					{#if modifyQuote.segments.length === 0}
+						<p class="text-xs text-ink-muted">{modifyQuote.blockingReason ?? 'No change.'}</p>
+					{:else}
+						<div class="rounded-lg border border-border bg-surface-2 p-3 text-sm">
+							{#each modifyQuote.segments as s, i (i)}
+								<div class="flex items-center justify-between text-xs">
+									<span class="text-ink-muted">{modifySegmentLabel(s)}</span>
+									<span class="text-ink">
+										{s.direction === 'added' ? '+' : '−'}₱{(s.amountCentavos / 100).toFixed(2)}
+									</span>
+								</div>
+							{/each}
+							<div class="mt-2 flex items-center justify-between border-t border-border pt-2 font-semibold">
+								<span class="text-ink">{modifyQuote.deltaCentavos >= 0 ? 'Folio charge' : 'Folio credit'}</span>
+								<span class="text-ink">₱{(Math.abs(modifyQuote.deltaCentavos) / 100).toFixed(2)}</span>
+							</div>
+						</div>
+						{#if modifyQuote.blockingReason}
+							<p class="text-xs text-danger">{modifyQuote.blockingReason}</p>
+						{/if}
+					{/if}
+				{/if}
+
+				<div>
+					<Label for="modify-reason" class="text-xs">Reason <span class="text-danger">*</span></Label>
+					<textarea
+						id="modify-reason"
+						name="reason"
+						bind:value={modifyReason}
+						required
+						rows="2"
+						placeholder="Why are these dates changing?"
+						class="mt-1 w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm"
+					></textarea>
+				</div>
+
+				<div class="flex justify-end gap-2 pt-1">
+					<Button type="button" variant="ghost" onclick={() => (modifyOpen = false)} disabled={modifySubmitting}>
+						Cancel
+					</Button>
+					<Button
+						type="submit"
+						disabled={modifySubmitting ||
+							modifyReason.trim().length === 0 ||
+							!!modifyQuote?.blockingReason ||
+							modifyQuoting}
+					>
+						{modifySubmitting ? 'Saving…' : 'Apply change'}
+					</Button>
+				</div>
+			</form>
+		</Dialog.Content>
+	</Dialog.Root>
 {/if}
 
 <Dialog.Root bind:open={manualConfirmOpen}>

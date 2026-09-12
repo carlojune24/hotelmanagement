@@ -27,6 +27,7 @@ import {
 	manuallyConfirmOrder,
 	reinstateBooking
 } from '$lib/server/status-override';
+import { ModifyStayError, modifyBookingStay } from '$lib/server/booking-modify';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, params, url }) => {
@@ -60,6 +61,9 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		const canMarkNoShow =
 			detail.booking.status === 'confirmed' &&
 			detail.booking.checkIn < todayInTimezone(hotel.timezone);
+		const canModifyStay =
+			(detail.booking.status === 'confirmed' || detail.booking.status === 'checked_in') &&
+			detail.order.status === 'confirmed';
 
 		const [thread, openRequest] = await Promise.all([
 			listThread(detail.order.id),
@@ -73,6 +77,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 			eligibleRooms,
 			cancelQuote,
 			canMarkNoShow,
+			canModifyStay,
 			canAdmin,
 			thread,
 			openRequest,
@@ -313,6 +318,41 @@ export const actions: Actions = {
 			return { ok: bits.join(' ') };
 		} catch (e) {
 			if (e instanceof StatusOverrideError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
+	modifyStay: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		const hotelId = event.locals.hotel!.id;
+		if (event.params.kind !== 'room') return fail(400, { error: 'Only room bookings can have their dates modified.' });
+
+		const parsed = z
+			.object({
+				checkIn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Enter a valid check-in date.'),
+				checkOut: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Enter a valid check-out date.'),
+				reason: z.string().trim().min(1, 'Enter a reason for the date change.').max(500)
+			})
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) {
+			return fail(400, { error: parsed.error.issues[0]?.message ?? 'Check the form and try again.' });
+		}
+
+		try {
+			const res = await modifyBookingStay({
+				hotelId,
+				bookingId: event.params.id,
+				newCheckIn: parsed.data.checkIn,
+				newCheckOut: parsed.data.checkOut,
+				reason: parsed.data.reason,
+				actor: event.locals.user
+			});
+			const bits = ['Booking dates updated.'];
+			if (res.deltaCentavos > 0) bits.push(`Folio charged ₱${(res.deltaCentavos / 100).toFixed(2)}.`);
+			if (res.deltaCentavos < 0) bits.push(`Folio credited ₱${(-res.deltaCentavos / 100).toFixed(2)}.`);
+			return { ok: bits.join(' ') };
+		} catch (e) {
+			if (e instanceof ModifyStayError) return fail(400, { error: e.message });
 			throw e;
 		}
 	},
