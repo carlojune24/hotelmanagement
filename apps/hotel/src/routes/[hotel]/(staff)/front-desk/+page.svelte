@@ -20,6 +20,10 @@
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
 	import PaymentFields from '$lib/components/staff/payment-fields.svelte';
 	import WalkinPaymentFields from '$lib/components/staff/walkin-payment-fields.svelte';
+	import AvailabilityCalendarSheet, {
+		type AvailabilityTarget
+	} from '$lib/components/staff/availability-calendar-sheet.svelte';
+	import CalendarRangeIcon from '@lucide/svelte/icons/calendar-range';
 	import ClockIcon from '@lucide/svelte/icons/clock';
 	import type { ActionData, PageData } from './$types';
 	import type { HallGridCell, RoomGridCell } from '$lib/server/front-desk';
@@ -105,6 +109,20 @@
 	let railTab = $state<'arrivals' | 'departures'>('arrivals');
 
 	const roomTypeNames = $derived([...new Set(data.cells.map((c) => c.roomTypeName))].sort());
+
+	const roomTypeOptions = $derived.by(() => {
+		const map = new Map<string, { id: string; name: string }>();
+		for (const c of data.cells) map.set(c.roomTypeId, { id: c.roomTypeId, name: c.roomTypeName });
+		return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+	});
+
+	// --- Availability calendar sheet ---
+	let calendarOpen = $state(false);
+	let calendarTarget = $state<AvailabilityTarget | null>(null);
+	function openAvailability(kind: AvailabilityTarget['kind'], id: string, name: string) {
+		calendarTarget = { kind, id, name };
+		calendarOpen = true;
+	}
 
 	const walkInSelectedTotal = $derived.by(() => {
 		if (!walkInSelection || !formAvailableRoomTypes) return null;
@@ -469,6 +487,21 @@
 
 	<div class="flex min-h-0 flex-1">
 		<div class="min-w-0 flex-1 overflow-y-auto p-6">
+			{#if roomTypeOptions.length > 0}
+				<div class="mb-5 flex flex-wrap items-center gap-2">
+					<span class="text-xs font-medium text-ink-muted">Check availability:</span>
+					{#each roomTypeOptions as rt (rt.id)}
+						<button
+							type="button"
+							onclick={() => openAvailability('roomType', rt.id, rt.name)}
+							class="flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs text-ink-muted transition hover:border-brand/50 hover:text-ink"
+						>
+							<CalendarRangeIcon class="size-3" />
+							{rt.name}
+						</button>
+					{/each}
+				</div>
+			{/if}
 			{#if floorGroups.length === 0}
 				<p class="text-sm text-ink-muted">No rooms match this filter.</p>
 			{:else}
@@ -521,10 +554,20 @@
 											<div class="text-xs text-ink-muted">Capacity {hall.capacity}</div>
 										</div>
 									</div>
-									<Button size="sm" onclick={() => openHallWalkIn(hall)}>
-										<UserPlusIcon class="size-3.5" />
-										Walk-in event
-									</Button>
+									<div class="flex items-center gap-2">
+										<Button
+											size="sm"
+											variant="outline"
+											onclick={() => openAvailability('hall', hall.functionHallId, hall.hallName)}
+										>
+											<CalendarRangeIcon class="size-3.5" />
+											Availability
+										</Button>
+										<Button size="sm" onclick={() => openHallWalkIn(hall)}>
+											<UserPlusIcon class="size-3.5" />
+											Walk-in event
+										</Button>
+									</div>
 								</div>
 								{#if hall.events.length === 0}
 									<p class="text-sm text-ink-muted">No events today.</p>
@@ -681,6 +724,13 @@
 											{channelLabel(a.channel)}
 											<span class="mx-1 text-ink-muted/40">·</span>
 											<a
+												href="{base}/reservations/room/{a.bookingId}"
+												class="underline-offset-2 hover:text-ink hover:underline"
+											>
+												Check in
+											</a>
+											<span class="mx-1 text-ink-muted/40">·</span>
+											<a
 												href="{base}/reservations/room/{a.bookingId}?action=cancel"
 												class="underline-offset-2 hover:text-danger hover:underline"
 											>
@@ -755,6 +805,13 @@
 											<div class="text-sm font-medium text-ink">{a.guestName}</div>
 											<div class="text-xs text-ink-muted">
 												{a.roomTypeName} · {channelLabel(a.channel)}
+												<span class="mx-1 text-ink-muted/40">·</span>
+												<a
+													href="{base}/reservations/room/{a.bookingId}"
+													class="underline-offset-2 hover:text-ink hover:underline"
+												>
+													Check in
+												</a>
 												<span class="mx-1 text-ink-muted/40">·</span>
 												<a
 													href="{base}/reservations/room/{a.bookingId}?action=cancel"
@@ -1668,3 +1725,10 @@
 		</div>
 	</Sheet.Content>
 </Sheet.Root>
+
+<AvailabilityCalendarSheet
+	bind:open={calendarOpen}
+	target={calendarTarget}
+	{base}
+	businessDate={data.businessDate}
+/>

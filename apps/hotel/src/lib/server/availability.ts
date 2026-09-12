@@ -5,7 +5,9 @@ import {
 	bookingRooms,
 	bookings,
 	cancellationPolicies,
+	guests,
 	hotelAmenities,
+	orders,
 	ratePlans,
 	roomTypeAmenities,
 	roomTypes,
@@ -200,7 +202,10 @@ export async function searchAvailability(params: {
 	if (available.length === 0) return [];
 
 	const [plansByType, cancellationByPlan, highlightsByType, amenitiesByType] = await Promise.all([
-		db.select().from(ratePlans).where(and(eq(ratePlans.hotelId, hotelId), eq(ratePlans.isActive, true))),
+		db
+			.select()
+			.from(ratePlans)
+			.where(and(eq(ratePlans.hotelId, hotelId), eq(ratePlans.isActive, true))),
 		db
 			.select({
 				ratePlanId: ratePlans.id,
@@ -406,4 +411,135 @@ export async function listHotelAmenities(hotelId: string): Promise<HotelAmenityH
 		.where(eq(hotelAmenities.hotelId, hotelId))
 		.orderBy(asc(hotelAmenities.sortOrder));
 	return rows;
+}
+
+/** Statuses that still hold a room going forward, for the "suggest an open date"
+ *  calendar — deliberately narrower than `ACTIVE_BOOKING_STATUSES`. That list includes
+ *  `checked_out` because same-day inventory/eligibility checks (`searchAvailability`,
+ *  `listEligibleRooms`) need a just-vacated room to still count as occupied until
+ *  turnover; a multi-week forward-looking calendar has no such same-day concern, and a
+ *  `checked_out` stay is history — the guest has already left, so it must not still
+ *  render as blocking (it was, confirmed against real hotel data: a `checked_out`
+ *  booking showed as "Reserved" on a date nothing was actually holding). */
+export const CALENDAR_BLOCKING_BOOKING_STATUSES = [
+	'pending_payment',
+	'confirmed',
+	'checked_in'
+] as const;
+
+/** One booking's stay, packed into a capacity lane for the front-desk availability tape chart. */
+export interface RoomTypeAvailabilityBar {
+	laneIndex: number;
+	bookingId: string;
+	checkIn: string;
+	checkOut: string;
+	guestName: string;
+	/** Drives the day cell's Occupied-vs-Reserved tag: `checked_in` means a guest is
+	 *  actually in-house that day; `pending_payment`/`confirmed` mean the room is held
+	 *  but nobody's checked in yet. */
+	status: (typeof CALENDAR_BLOCKING_BOOKING_STATUSES)[number];
+}
+
+export interface RoomTypeAvailabilityCalendar {
+	roomTypeId: string;
+	roomTypeName: string;
+	totalRooms: number;
+	/** Rows to render — `max(totalRooms, bars actually needing a lane)`, so a data
+	 *  inconsistency (more overlapping bookings than active rooms) still renders
+	 *  every bar rather than silently dropping one. */
+	lanes: number;
+	bars: RoomTypeAvailabilityBar[];
+}
+
+/**
+ * Every active booking overlapping `[rangeStart, rangeEnd)` for one room type, packed
+ * into capacity lanes via greedy interval scheduling — not physical rooms, since a
+ * room isn't assigned to a booking until check-in (`front-desk.ts`'s `roomAssignments`
+ * comment). Each booking claims the first lane free since its own `checkIn`, opening a
+ * new lane only when none is. Powers front desk's "suggest an open date" tape chart.
+ */
+export async function getRoomTypeAvailabilityCalendar(
+	hotelId: string,
+	roomTypeId: string,
+	rangeStart: string,
+	rangeEnd: string
+): Promise<RoomTypeAvailabilityCalendar> {
+	const [typeRows, roomCountRows, overlapping] = await Promise.all([
+		db
+			.select({ name: roomTypes.name })
+			.from(roomTypes)
+			.where(eq(roomTypes.id, roomTypeId))
+			.limit(1),
+		db
+			.select({ n: count() })
+			.from(rooms)
+			.where(
+				and(
+					eq(rooms.hotelId, hotelId),
+					eq(rooms.roomTypeId, roomTypeId),
+					eq(rooms.isActive, true),
+					eq(rooms.operationalStatus, 'available')
+				)
+			),
+		db
+			.select({
+				bookingId: bookings.id,
+				checkIn: bookings.checkIn,
+				checkOut: bookings.checkOut,
+				quantity: bookingRooms.quantity,
+				guestName: guests.fullName,
+				status: bookings.status
+			})
+			.from(bookingRooms)
+			.innerJoin(bookings, eq(bookings.id, bookingRooms.bookingId))
+			.innerJoin(orders, eq(orders.id, bookings.orderId))
+			.innerJoin(guests, eq(guests.id, orders.guestId))
+			.where(
+				and(
+					eq(bookings.hotelId, hotelId),
+					eq(bookingRooms.roomTypeId, roomTypeId),
+					inArray(bookings.status, [...CALENDAR_BLOCKING_BOOKING_STATUSES]),
+					lt(bookings.checkIn, rangeEnd),
+					gt(bookings.checkOut, rangeStart)
+				)
+			)
+			.orderBy(asc(bookings.checkIn))
+	]);
+
+	const roomTypeName = typeRows[0]?.name ?? 'Room type';
+	const totalRooms = roomCountRows[0]?.n ?? 0;
+
+	// Expand quantity > 1 rows into that many identical sub-intervals — one booking can
+	// hold several rooms of the same type, each needing its own lane.
+	const intervals = overlapping.flatMap((row) =>
+		Array.from({ length: row.quantity }, () => ({
+			bookingId: row.bookingId,
+			checkIn: row.checkIn,
+			checkOut: row.checkOut,
+			guestName: row.guestName,
+			// Narrowed safely: the query above already filters to CALENDAR_BLOCKING_BOOKING_STATUSES.
+			status: row.status as (typeof CALENDAR_BLOCKING_BOOKING_STATUSES)[number]
+		}))
+	);
+
+	const laneFreeFrom: string[] = [];
+	const bars: RoomTypeAvailabilityBar[] = [];
+	for (const interval of intervals) {
+		let lane = laneFreeFrom.findIndex((freeFrom) => freeFrom <= interval.checkIn);
+		if (lane === -1) {
+			lane = laneFreeFrom.length;
+			laneFreeFrom.push(interval.checkOut);
+		} else {
+			laneFreeFrom[lane] = interval.checkOut;
+		}
+		bars.push({ laneIndex: lane, ...interval });
+	}
+
+	return {
+		roomTypeId,
+		roomTypeName,
+		totalRooms,
+		lanes: Math.max(totalRooms, laneFreeFrom.length),
+		bars
+	};
 }
