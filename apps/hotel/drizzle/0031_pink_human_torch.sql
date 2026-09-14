@@ -1,0 +1,1 @@
+ALTER TABLE "room_types" ADD COLUMN "color_hex" text;

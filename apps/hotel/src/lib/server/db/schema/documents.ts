@@ -83,6 +83,12 @@ export const birSettings = pgTable('bir_settings', {
 	autoIssueReceiptOnPayment: boolean('auto_issue_receipt_on_payment').notNull().default(true),
 	/** One extra hotel-authored line in the document footer (optional). */
 	footerNote: text('footer_note'),
+	/** Continuous-roll thermal printer width for the Invoice / Official Receipt print
+	 *  routes (58 or 80, app-validated — see `lib/components/print/thermal-receipt.svelte`).
+	 *  Resolved live at render time, never frozen into a document's snapshot: it's a "how
+	 *  do I print this today" preference, not a compliance fact. A4 stays available as a
+	 *  toggle on the same routes via `accountable-form.svelte`. */
+	thermalPaperWidthMm: integer('thermal_paper_width_mm').notNull().default(80),
 	createdAt: createdAt(),
 	updatedAt: updatedAt()
 });

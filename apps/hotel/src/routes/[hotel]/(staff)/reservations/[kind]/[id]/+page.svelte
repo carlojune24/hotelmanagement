@@ -11,6 +11,7 @@
 	import BedIcon from '@lucide/svelte/icons/bed';
 	import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
 	import CancelBookingDialog from '$lib/components/staff/cancel-booking-dialog.svelte';
+	import IdCameraCapture from '$lib/components/staff/id-camera-capture.svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -29,24 +30,67 @@
 	let modifySubmitting = $state(false);
 	let modifyCheckIn = $state(data.kind === 'room' ? data.detail.booking.checkIn : '');
 	let modifyCheckOut = $state(data.kind === 'room' ? data.detail.booking.checkOut : '');
+	// Room type/rate plan/occupancy changes are confirmed-only (see booking-modify.ts) —
+	// these stay at the booking's current values (inert) once checked in.
+	let modifyRoomTypeId = $state(data.kind === 'room' ? data.detail.bookingRoom.roomTypeId : '');
+	let modifyRatePlanId = $state(data.kind === 'room' ? data.detail.bookingRoom.ratePlanId : '');
+	let modifyOccupancy = $state(data.kind === 'room' ? data.detail.booking.occupancy : 1);
+	// Allowed both before and after check-in — a physical add-on, not a room
+	// re-assignment — unlike room type/rate plan/occupancy above.
+	let modifyExtraBeds = $state(data.kind === 'room' ? data.detail.bookingRoom.extraBeds : 0);
 	let modifyReason = $state('');
 	let modifyQuoting = $state(false);
 	let modifyQuoteError = $state<string | null>(null);
 	let modifyQuote = $state<{
 		segments: { edge: 'front' | 'back'; direction: 'added' | 'removed'; nights: string[]; amountCentavos: number }[];
+		roomChange: { newRoomTypeId: string; newRatePlanId: string; oldTotalCentavos: number; newTotalCentavos: number } | null;
 		deltaCentavos: number;
 		blockingReason: string | null;
+		oldExtraBeds: number;
+		newExtraBeds: number | null;
+		extraBedNote: string | null;
 	} | null>(null);
 	let modifyQuoteTimer: ReturnType<typeof setTimeout> | undefined;
+
+	// The rate plans offered depend on whichever room type is currently selected.
+	const modifyRatePlanOptions = $derived(
+		data.kind === 'room'
+			? (data.modifyRoomTypeOptions.find((t) => t.id === modifyRoomTypeId)?.ratePlans ?? [])
+			: []
+	);
+	// The server refuses to combine a room type/rate plan change with an extra-bed change
+	// in the same submission (the delta math can't cleanly represent both at once) — mirror
+	// that here so the field visibly disables instead of silently failing on submit.
+	const modifyRoomOrRateChanged = $derived(
+		data.kind === 'room' &&
+			(modifyRoomTypeId !== data.detail.bookingRoom.roomTypeId ||
+				modifyRatePlanId !== data.detail.bookingRoom.ratePlanId)
+	);
+	const modifyMaxExtraBeds = $derived(
+		data.kind === 'room' && data.detail.roomType.extraBedAllowed
+			? (data.detail.roomType.maxExtraBeds ?? 0) * data.detail.bookingRoom.quantity
+			: 0
+	);
 
 	function openModifyDialog() {
 		if (data.kind !== 'room') return;
 		modifyCheckIn = data.detail.booking.checkIn;
 		modifyCheckOut = data.detail.booking.checkOut;
+		modifyRoomTypeId = data.detail.bookingRoom.roomTypeId;
+		modifyRatePlanId = data.detail.bookingRoom.ratePlanId;
+		modifyOccupancy = data.detail.booking.occupancy;
+		modifyExtraBeds = data.detail.bookingRoom.extraBeds;
 		modifyReason = '';
 		modifyQuote = null;
 		modifyQuoteError = null;
 		modifyOpen = true;
+	}
+
+	function onModifyRoomTypeChange() {
+		// Switching room type invalidates whatever rate plan was picked — a rate plan
+		// only ever belongs to one room type.
+		modifyRatePlanId = modifyRatePlanOptions[0]?.id ?? '';
+		requestModifyQuote();
 	}
 
 	function requestModifyQuote() {
@@ -60,7 +104,14 @@
 				const res = await fetch(`${base}/reservations/room/${page.params.id}/api/modify-quote`, {
 					method: 'POST',
 					headers: { 'content-type': 'application/json' },
-					body: JSON.stringify({ checkIn: modifyCheckIn, checkOut: modifyCheckOut })
+					body: JSON.stringify({
+						checkIn: modifyCheckIn,
+						checkOut: modifyCheckOut,
+						roomTypeId: modifyRoomTypeId || undefined,
+						ratePlanId: modifyRatePlanId || undefined,
+						occupancy: modifyOccupancy,
+						extraBeds: modifyRoomOrRateChanged ? undefined : modifyExtraBeds
+					})
 				});
 				if (!res.ok) {
 					modifyQuoteError = (await res.text()) || 'Could not quote this change.';
@@ -104,6 +155,19 @@
 	let manualConfirmMethod = $state<(typeof MANUAL_CONFIRM_METHODS)[number]['v']>('bank_transfer');
 
 	let resending = $state(false);
+
+	// Splits the Bill's opaque "Fees" total into what a staff member/guest can actually
+	// read — the extra-bed portion (derivable from `bookingRoom.extraBeds` × the rate
+	// plan's own fee) plus whatever's left over (hotel-wide taxes/fees, if configured),
+	// instead of one unlabeled number ("what fees?").
+	const extraBedFeeTotal = $derived(
+		data.kind === 'room' && data.detail.bookingRoom.extraBeds > 0
+			? data.detail.bookingRoom.extraBeds * (data.detail.ratePlan.extraBedFeeCentavos ?? 0)
+			: 0
+	);
+	const otherFeesTotal = $derived(
+		data.kind === 'room' ? data.detail.booking.feesCentavos - extraBedFeeTotal : 0
+	);
 
 	$effect(() => {
 		if (form?.error) toast.error(form.error);
@@ -157,7 +221,15 @@
 				href="{base}/print/invoice/for/{data.kind === 'room' ? 'booking' : 'hall'}/{page.params.id}"
 				target="_blank">Print invoice</Button
 			>
-			<Button variant="outline" href="{base}/reservations">← Reservations</Button>
+			{#if page.url.searchParams.get('from') === 'front-desk'}
+				{@const roomId = page.url.searchParams.get('roomId')}
+				<Button
+					variant="outline"
+					href="{base}/front-desk{roomId ? `?roomId=${roomId}` : ''}">← Front desk</Button
+				>
+			{:else}
+				<Button variant="outline" href="{base}/reservations">← Reservations</Button>
+			{/if}
 		</div>
 	</div>
 
@@ -194,7 +266,7 @@
 			<div class="mb-2 flex items-center justify-between gap-3">
 				<h2 class="text-sm font-semibold text-ink">Stay</h2>
 				{#if data.canModifyStay}
-					<Button variant="outline" size="sm" onclick={openModifyDialog}>Modify dates</Button>
+					<Button variant="outline" size="sm" onclick={openModifyDialog}>Modify booking</Button>
 				{/if}
 			</div>
 			<div class="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
@@ -214,6 +286,12 @@
 					<div class="text-xs text-ink-muted">Rooms</div>
 					<div class="text-ink">{data.detail.bookingRoom.quantity}</div>
 				</div>
+				{#if data.detail.bookingRoom.extraBeds > 0}
+					<div>
+						<div class="text-xs text-ink-muted">Extra beds</div>
+						<div class="text-ink">{data.detail.bookingRoom.extraBeds}</div>
+					</div>
+				{/if}
 			</div>
 
 			{#if data.detail.assignedRooms.length > 0}
@@ -227,6 +305,7 @@
 				<form
 					method="POST"
 					action="?/checkIn"
+					enctype="multipart/form-data"
 					use:enhance
 					class="mt-4 border-t border-border pt-4"
 				>
@@ -249,6 +328,11 @@
 									{/each}
 								</select>
 							{/each}
+						</div>
+						<div class="mt-3">
+							<IdCameraCapture />
+						</div>
+						<div class="mt-3">
 							<Button type="submit" size="sm">Check in</Button>
 						</div>
 					{/if}
@@ -285,10 +369,19 @@
 						<Table.Cell class="text-ink-muted">Subtotal</Table.Cell>
 						<Table.Cell class="text-right text-ink">{peso(data.detail.booking.subtotalCentavos)}</Table.Cell>
 					</Table.Row>
-					{#if data.detail.booking.feesCentavos > 0}
+					{#if extraBedFeeTotal > 0}
 						<Table.Row>
-							<Table.Cell class="text-ink-muted">Fees</Table.Cell>
-							<Table.Cell class="text-right text-ink">{peso(data.detail.booking.feesCentavos)}</Table.Cell>
+							<Table.Cell class="text-ink-muted"
+								>Extra bed{data.detail.bookingRoom.extraBeds === 1 ? '' : 's'} × {data.detail
+									.bookingRoom.extraBeds}</Table.Cell
+							>
+							<Table.Cell class="text-right text-ink">{peso(extraBedFeeTotal)}</Table.Cell>
+						</Table.Row>
+					{/if}
+					{#if otherFeesTotal > 0}
+						<Table.Row>
+							<Table.Cell class="text-ink-muted">Other fees</Table.Cell>
+							<Table.Cell class="text-right text-ink">{peso(otherFeesTotal)}</Table.Cell>
 						</Table.Row>
 					{/if}
 					<Table.Row>
@@ -611,11 +704,11 @@
 	<Dialog.Root bind:open={modifyOpen}>
 		<Dialog.Content class="sm:max-w-md">
 			<Dialog.Header>
-				<Dialog.Title>Modify stay dates</Dialog.Title>
+				<Dialog.Title>Modify booking</Dialog.Title>
 				<Dialog.Description>
 					{data.detail.booking.status === 'checked_in'
-						? 'The guest is already checked in — only the departure date can move.'
-						: 'Re-checks room-type availability for any added nights.'}
+						? 'The guest is already checked in — only the departure date can move; room type and guest count are locked to what was checked in.'
+						: 'Re-checks availability for any date/room-type change.'}
 				</Dialog.Description>
 			</Dialog.Header>
 			<form
@@ -661,13 +754,119 @@
 					</div>
 				</div>
 
+				{#if data.detail.booking.status === 'confirmed'}
+					<div class="grid grid-cols-2 gap-3">
+						<div>
+							<Label for="modify-room-type" class="text-xs">Room type</Label>
+							<select
+								id="modify-room-type"
+								name="roomTypeId"
+								bind:value={modifyRoomTypeId}
+								onchange={onModifyRoomTypeChange}
+								class="mt-1 w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm"
+							>
+								{#each data.modifyRoomTypeOptions as t (t.id)}
+									<option value={t.id}>{t.name}</option>
+								{/each}
+							</select>
+						</div>
+						<div>
+							<Label for="modify-rate-plan" class="text-xs">Rate plan</Label>
+							<select
+								id="modify-rate-plan"
+								name="ratePlanId"
+								bind:value={modifyRatePlanId}
+								onchange={requestModifyQuote}
+								class="mt-1 w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm"
+							>
+								{#each modifyRatePlanOptions as p (p.id)}
+									<option value={p.id}>{p.name}</option>
+								{/each}
+							</select>
+						</div>
+					</div>
+					<div>
+						<Label for="modify-occupancy" class="text-xs">Guests</Label>
+						<Input
+							id="modify-occupancy"
+							name="occupancy"
+							type="number"
+							min="1"
+							bind:value={modifyOccupancy}
+							oninput={requestModifyQuote}
+							class="mt-1 w-24"
+						/>
+					</div>
+				{:else}
+					<input type="hidden" name="roomTypeId" value={modifyRoomTypeId} />
+					<input type="hidden" name="ratePlanId" value={modifyRatePlanId} />
+					<input type="hidden" name="occupancy" value={modifyOccupancy} />
+				{/if}
+
+				{#if data.detail.roomType.extraBedAllowed}
+					<div>
+						<Label for="modify-extra-beds" class="text-xs">Extra beds</Label>
+						<Input
+							id="modify-extra-beds"
+							type="number"
+							min="0"
+							max={modifyMaxExtraBeds}
+							bind:value={modifyExtraBeds}
+							disabled={modifyRoomOrRateChanged}
+							oninput={requestModifyQuote}
+							class="mt-1 w-24"
+						/>
+						<input
+							type="hidden"
+							name="extraBeds"
+							value={modifyRoomOrRateChanged ? data.detail.bookingRoom.extraBeds : modifyExtraBeds}
+						/>
+						{#if modifyRoomOrRateChanged}
+							<p class="mt-1 text-xs text-ink-muted">
+								Locked while the room type/rate plan is also changing — apply that first, then
+								modify extra beds separately.
+							</p>
+						{:else}
+							<p class="mt-1 text-xs text-ink-muted">Up to {modifyMaxExtraBeds} for this room.</p>
+						{/if}
+					</div>
+				{/if}
+
 				{#if modifyQuoting}
 					<p class="text-xs text-ink-muted">Checking availability and pricing…</p>
 				{:else if modifyQuoteError}
 					<p class="text-xs text-danger">{modifyQuoteError}</p>
 				{:else if modifyQuote}
-					{#if modifyQuote.segments.length === 0}
-						<p class="text-xs text-ink-muted">{modifyQuote.blockingReason ?? 'No change.'}</p>
+					{#if modifyQuote.roomChange}
+						<div class="rounded-lg border border-border bg-surface-2 p-3 text-sm">
+							<div class="flex items-center justify-between text-xs">
+								<span class="text-ink-muted">Re-priced for the new room type/rate plan</span>
+								<span class="text-ink">₱{(modifyQuote.roomChange.oldTotalCentavos / 100).toFixed(2)} → ₱{(modifyQuote.roomChange.newTotalCentavos / 100).toFixed(2)}</span>
+							</div>
+							<div class="mt-2 flex items-center justify-between border-t border-border pt-2 font-semibold">
+								<span class="text-ink">{modifyQuote.deltaCentavos >= 0 ? 'Folio charge' : 'Folio credit'}</span>
+								<span class="text-ink">₱{(Math.abs(modifyQuote.deltaCentavos) / 100).toFixed(2)}</span>
+							</div>
+						</div>
+					{:else if modifyQuote.segments.length === 0 && modifyQuote.newExtraBeds != null}
+						<div class="rounded-lg border border-border bg-surface-2 p-3 text-sm">
+							<div class="flex items-center justify-between text-xs">
+								<span class="text-ink-muted"
+									>Extra beds {modifyQuote.oldExtraBeds} → {modifyQuote.newExtraBeds}</span
+								>
+							</div>
+							{#if modifyQuote.deltaCentavos !== 0}
+								<div class="mt-2 flex items-center justify-between border-t border-border pt-2 font-semibold">
+									<span class="text-ink">{modifyQuote.deltaCentavos >= 0 ? 'Folio charge' : 'Folio credit'}</span>
+									<span class="text-ink">₱{(Math.abs(modifyQuote.deltaCentavos) / 100).toFixed(2)}</span>
+								</div>
+							{/if}
+						</div>
+						{#if modifyQuote.blockingReason}
+							<p class="text-xs text-danger">{modifyQuote.blockingReason}</p>
+						{/if}
+					{:else if modifyQuote.segments.length === 0}
+						<p class="text-xs text-ink-muted">{modifyQuote.blockingReason ?? 'No pricing change.'}</p>
 					{:else}
 						<div class="rounded-lg border border-border bg-surface-2 p-3 text-sm">
 							{#each modifyQuote.segments as s, i (i)}
@@ -697,7 +896,7 @@
 						bind:value={modifyReason}
 						required
 						rows="2"
-						placeholder="Why are these dates changing?"
+						placeholder="Why is this booking changing?"
 						class="mt-1 w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm"
 					></textarea>
 				</div>

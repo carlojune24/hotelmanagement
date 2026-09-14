@@ -318,6 +318,16 @@
 				<option value="out" selected={data.filters.direction === 'out'}>Out</option>
 			</select>
 		</div>
+		<label class="flex items-center gap-1.5 pb-1.5 text-xs text-ink-muted">
+			<input
+				type="checkbox"
+				name="includeVoided"
+				value="1"
+				checked={data.filters.includeVoided}
+				class="size-3.5"
+			/>
+			Include voided
+		</label>
 		<Button type="submit" size="sm" variant="outline">Filter</Button>
 		<a href={location.pathname} class="text-xs text-ink-muted underline underline-offset-2">Clear</a>
 	</form>

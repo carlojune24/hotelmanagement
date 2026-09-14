@@ -49,7 +49,8 @@ export const actions: Actions = {
 				autoIssueReceiptOnPayment: z
 					.union([z.literal('on'), z.undefined()])
 					.transform((v) => v === 'on'),
-				footerNote: nullableStr(400)
+				footerNote: nullableStr(400),
+				thermalPaperWidthMm: z.coerce.number().int().refine((v) => v === 58 || v === 80).default(80)
 			})
 			.safeParse(Object.fromEntries(await event.request.formData()));
 		if (!parsed.success) return fail(400, { error: 'Check the BIR setup fields.' });

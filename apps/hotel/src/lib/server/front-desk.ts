@@ -9,6 +9,7 @@ import {
 	guests,
 	hallBookings,
 	hallBookingStatusHistory,
+	hotels,
 	orders,
 	orderStatusHistory,
 	payments,
@@ -24,7 +25,7 @@ import { recordWalkInPayment, resolvePaymentAccount, type PaymentMethod } from '
 import { openReceivable } from './finance/receivables';
 import { getBirSettings, issueInvoice } from './finance/documents';
 import { priceEventHall } from './pricing';
-import { scaleRoomPrice } from '$lib/pricing-utils';
+import { addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
 import { writeAudit } from './audit';
 import type { SessionUser } from './auth/session';
 
@@ -87,7 +88,11 @@ export async function checkInBooking(
 	hotelId: string,
 	bookingId: string,
 	roomIds: string[],
-	actor: SessionUser | null
+	actor: SessionUser | null,
+	/** A live camera capture of the guest's ID, already saved via `saveUpload` by the
+	 *  caller (never a raw file upload — the check-in form only offers a camera capture
+	 *  widget). Optional: check-in never blocks on it. */
+	guestIdPhotoUrl?: string | null
 ): Promise<void> {
 	const uniqueRoomIds = [...new Set(roomIds)];
 	if (uniqueRoomIds.length !== roomIds.length) {
@@ -167,14 +172,18 @@ export async function checkInBooking(
 
 		await tx
 			.update(bookings)
-			.set({ status: 'checked_in', updatedAt: new Date() })
+			.set({
+				status: 'checked_in',
+				updatedAt: new Date(),
+				...(guestIdPhotoUrl ? { guestIdPhotoUrl } : {})
+			})
 			.where(eq(bookings.id, bookingId));
 
 		await tx.insert(bookingStatusHistory).values({
 			bookingId,
 			fromStatus: 'confirmed',
 			toStatus: 'checked_in',
-			note: null
+			note: guestIdPhotoUrl ? 'ID photo captured at check-in' : null
 		});
 	});
 
@@ -184,7 +193,41 @@ export async function checkInBooking(
 		action: 'booking.check_in',
 		entityType: 'booking',
 		entityId: bookingId,
-		after: { roomIds: uniqueRoomIds }
+		after: { roomIds: uniqueRoomIds, idPhotoCaptured: !!guestIdPhotoUrl }
+	});
+}
+
+/**
+ * Captures (or replaces) a guest's ID photo for a booking that's already checked
+ * in — the check-in form's own camera capture is optional, so front desk needs a
+ * way to add it later without redoing check-in. Same live-camera-only source
+ * (`IdCameraCapture`), just a standalone action instead of bundled into `checkIn`.
+ */
+export async function setGuestIdPhoto(
+	hotelId: string,
+	bookingId: string,
+	photoUrl: string,
+	actor: SessionUser | null
+): Promise<void> {
+	const [booking] = await db
+		.select({ id: bookings.id })
+		.from(bookings)
+		.where(and(eq(bookings.id, bookingId), eq(bookings.hotelId, hotelId)))
+		.limit(1);
+	if (!booking) throw new CheckInError('Booking not found.');
+
+	await db
+		.update(bookings)
+		.set({ guestIdPhotoUrl: photoUrl, updatedAt: new Date() })
+		.where(eq(bookings.id, bookingId));
+
+	await writeAudit({
+		hotelId,
+		actor,
+		action: 'booking.id_photo_captured',
+		entityType: 'booking',
+		entityId: bookingId,
+		after: { idPhotoCaptured: true }
 	});
 }
 
@@ -227,6 +270,8 @@ export interface RoomGridCell {
 	floor: string | null;
 	roomTypeId: string;
 	roomTypeName: string;
+	/** Staff-only identifier color from `roomTypes.colorHex`, or null if unset. */
+	roomTypeColor: string | null;
 	status: RoomGridStatus;
 	/** `rooms.notes` — only meaningful (and only shown) for `ooo`. */
 	notes: string | null;
@@ -261,7 +306,8 @@ export async function getRoomStatusGrid(
 			notes: rooms.notes,
 			operationalStatus: rooms.operationalStatus,
 			roomTypeId: rooms.roomTypeId,
-			roomTypeName: roomTypes.name
+			roomTypeName: roomTypes.name,
+			roomTypeColor: roomTypes.colorHex
 		})
 		.from(rooms)
 		.innerJoin(roomTypes, eq(roomTypes.id, rooms.roomTypeId))
@@ -397,6 +443,7 @@ export async function getRoomStatusGrid(
 			floor: room.floor,
 			roomTypeId: room.roomTypeId,
 			roomTypeName: room.roomTypeName,
+			roomTypeColor: room.roomTypeColor,
 			status,
 			notes: room.notes,
 			occupant,
@@ -459,7 +506,7 @@ export async function createWalkInBooking(params: {
 	// `resolvePaymentAccount` throws a FinanceError the action turns into `walkInError`.
 	const { cashAccountId, shiftId } = await resolvePaymentAccount(hotelId, payment.method);
 
-	const bookingId = await db.transaction(async (tx) => {
+	const { bookingId, totalPaidCentavos } = await db.transaction(async (tx) => {
 		await tx.execute(
 			sql`select pg_advisory_xact_lock(hashtext(${hotelId}), hashtext(${'room:' + roomTypeId}))`
 		);
@@ -476,7 +523,25 @@ export async function createWalkInBooking(params: {
 		if (!available || !plan) {
 			throw new WalkInError('That room type/rate is no longer available for these dates.');
 		}
-		const price = scaleRoomPrice(plan.price, roomCount);
+		// Extra beds needed is re-derived here from the room type's own capacity/policy
+		// (`getAvailableRoomType` already ran the occupancy solver) rather than trusting
+		// anything the client sent — same "never trust the preview" posture the rest of
+		// this file already takes with prices and room selections.
+		const extraBeds = available.extraBedsNeeded;
+		let price = scaleRoomPrice(plan.price, roomCount);
+		if (extraBeds > 0 && plan.extraBedFeeCentavos) {
+			const [hotelRow] = await tx
+				.select({ vatRateBps: hotels.vatRateBps })
+				.from(hotels)
+				.where(eq(hotels.id, hotelId))
+				.limit(1);
+			price = addFlatFeeCentavos(
+				price,
+				`Extra bed × ${extraBeds}`,
+				extraBeds * plan.extraBedFeeCentavos,
+				hotelRow?.vatRateBps ?? 0
+			);
+		}
 		const lineFees = price.fees.reduce((sum, f) => sum + f.amountCentavos, 0);
 
 		const [guestRow] = await tx
@@ -531,14 +596,15 @@ export async function createWalkInBooking(params: {
 			bookingId: booking!.id,
 			roomTypeId,
 			ratePlanId,
-			quantity: roomCount
+			quantity: roomCount,
+			extraBeds
 		});
 
 		await tx.insert(bookingStatusHistory).values({
 			bookingId: booking!.id,
 			fromStatus: null,
 			toStatus: 'confirmed',
-			note: 'Walk-in booking'
+			note: extraBeds > 0 ? `Walk-in booking — ${extraBeds} extra bed(s) added` : 'Walk-in booking'
 		});
 
 		// Full settlement + its cash-ledger movement, in the same transaction.
@@ -559,7 +625,7 @@ export async function createWalkInBooking(params: {
 			actor
 		});
 
-		return booking!.id;
+		return { bookingId: booking!.id, totalPaidCentavos: price.totalCentavos };
 	});
 
 	await writeAudit({
@@ -568,7 +634,17 @@ export async function createWalkInBooking(params: {
 		action: 'booking.walk_in',
 		entityType: 'booking',
 		entityId: bookingId,
-		after: { roomTypeId, ratePlanId, checkIn, checkOut, occupancy, roomCount }
+		after: {
+			roomTypeId,
+			ratePlanId,
+			checkIn,
+			checkOut,
+			occupancy,
+			roomCount,
+			paymentMethod: payment.method,
+			amountCentavos: totalPaidCentavos,
+			tenderedCentavos: payment.tenderedCentavos ?? null
+		}
 	});
 
 	return { bookingId };
@@ -838,7 +914,7 @@ export async function createWalkInHallBooking(params: {
 
 	const { cashAccountId, shiftId } = await resolvePaymentAccount(hotelId, payment.method);
 
-	const hallBookingId = await db.transaction(async (tx) => {
+	const { hallBookingId, totalPaidCentavos } = await db.transaction(async (tx) => {
 		await tx.execute(
 			sql`select pg_advisory_xact_lock(hashtext(${hotelId}), hashtext(${'hall:' + functionHallId + ':' + eventDate}))`
 		);
@@ -929,7 +1005,7 @@ export async function createWalkInHallBooking(params: {
 			actor
 		});
 
-		return hallBooking!.id;
+		return { hallBookingId: hallBooking!.id, totalPaidCentavos: price.totalCentavos };
 	});
 
 	await writeAudit({
@@ -938,7 +1014,17 @@ export async function createWalkInHallBooking(params: {
 		action: 'hall_booking.walk_in',
 		entityType: 'hall_booking',
 		entityId: hallBookingId,
-		after: { functionHallId, eventDate, startTime, endTime, eventType, guestCount }
+		after: {
+			functionHallId,
+			eventDate,
+			startTime,
+			endTime,
+			eventType,
+			guestCount,
+			paymentMethod: payment.method,
+			amountCentavos: totalPaidCentavos,
+			tenderedCentavos: payment.tenderedCentavos ?? null
+		}
 	});
 
 	return { hallBookingId };

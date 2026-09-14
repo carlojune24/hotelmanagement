@@ -1,4 +1,4 @@
-import { and, asc, eq, count, gt, gte, inArray, lt } from 'drizzle-orm';
+import { and, asc, eq, count, gt, inArray, lt } from 'drizzle-orm';
 import { db } from './db/index';
 import {
 	amenities,
@@ -9,6 +9,7 @@ import {
 	hotelAmenities,
 	orders,
 	ratePlans,
+	roomAssignments,
 	roomTypeAmenities,
 	roomTypes,
 	rooms,
@@ -16,6 +17,7 @@ import {
 	type RoomPhoto
 } from './db/schema/index';
 import { nightsBetween, priceStay, type PriceBreakdown } from './pricing';
+import { resolveOccupancyPlan, type OccupancyPlan } from '$lib/occupancy';
 
 export interface AmenityHighlight {
 	name: string;
@@ -44,7 +46,11 @@ export interface AvailableRatePlan {
 	minStayNights: number | null;
 	maxStayNights: number | null;
 	cancellation: CancellationTerms | null;
+	/** Per room — not yet scaled by room count. */
 	price: PriceBreakdown;
+	/** Flat charge per extra bed on this plan, if any (`ratePlans.extraBedFeeCentavos`) —
+	 *  for showing "+ ₱X per extra bed" alongside `AvailableRoomType.extraBedsNeeded`. */
+	extraBedFeeCentavos: number | null;
 }
 
 export interface AvailableRoomType {
@@ -56,6 +62,19 @@ export interface AvailableRoomType {
 	baseOccupancy: number;
 	maxOccupancy: number;
 	availableRooms: number;
+	/** Whether the requested party fits on base occupancy alone — false means it only
+	 *  qualified because extra beds cover the shortfall (see `extraBedsNeeded`). */
+	fitsBaseOccupancy: boolean;
+	extraBedAllowed: boolean;
+	maxExtraBeds: number;
+	/** Extra beds needed across the whole line (all `roomCount` rooms combined) to fit
+	 *  the party — 0 when `fitsBaseOccupancy`. */
+	extraBedsNeeded: number;
+	/** Smallest larger room count that would fit the party on base occupancy alone, with
+	 *  no extra bed — offered as an alternative whether or not extra beds already solved
+	 *  it (a guest may prefer a clean extra room over a rollaway). Null if none helps, or
+	 *  none is needed. */
+	suggestedRoomCount: number | null;
 	photos: RoomPhoto[];
 	sizeSqm: number | null;
 	bedConfiguration: BedConfigEntry[];
@@ -150,16 +169,40 @@ export async function searchAvailability(params: {
 	if (checkIn >= checkOut) throw new Error('checkOut must be after checkIn');
 	const stayNights = nightsBetween(checkIn, checkOut).length;
 
-	const types = await db
+	// `occupancy` is the party's *total* guest count across all `roomCount` rooms, not
+	// what one room must hold alone — filtering by `maxOccupancy >= occupancy` directly
+	// (as this used to) meant 3 guests across 2 rooms of max-occupancy 2 each (4 total
+	// capacity, genuinely fine) was rejected as if a single room had to sleep all 3.
+	// Now goes one step further via `resolveOccupancyPlan`: a type that doesn't fit on
+	// base occupancy alone still qualifies if its own extra-bed allowance covers the
+	// shortfall — previously such a type just vanished from results with no way for a
+	// guest/front-desk to know an extra bed would have solved it.
+	const allTypes = await db
 		.select()
 		.from(roomTypes)
 		.where(
 			and(
 				eq(roomTypes.hotelId, hotelId),
-				gte(roomTypes.maxOccupancy, occupancy),
 				accessibleOnly ? eq(roomTypes.wheelchairAccessible, true) : undefined
 			)
 		);
+	const occupancyPlanByType = new Map<string, OccupancyPlan>();
+	for (const t of allTypes) {
+		occupancyPlanByType.set(
+			t.id,
+			resolveOccupancyPlan(
+				{
+					maxOccupancy: t.maxOccupancy,
+					extraBedAllowed: t.extraBedAllowed,
+					maxExtraBeds: t.maxExtraBeds ?? 0,
+					extraBedCapacity: t.extraBedCapacity
+				},
+				occupancy,
+				roomCount
+			)
+		);
+	}
+	const types = allTypes.filter((t) => occupancyPlanByType.get(t.id)!.fits);
 	if (types.length === 0) return [];
 
 	const roomCounts = await db
@@ -175,22 +218,52 @@ export async function searchAvailability(params: {
 		.groupBy(rooms.roomTypeId);
 	const countByType = new Map(roomCounts.map((r) => [r.roomTypeId, r.n]));
 
-	// Rooms already booked (active statuses) for any night overlapping [checkIn, checkOut).
-	const bookedRows = await db
-		.select({ roomTypeId: bookingRooms.roomTypeId, quantity: bookingRooms.quantity })
-		.from(bookingRooms)
-		.innerJoin(bookings, eq(bookings.id, bookingRooms.bookingId))
-		.where(
-			and(
-				eq(bookings.hotelId, hotelId),
-				inArray(bookings.status, [...ACTIVE_BOOKING_STATUSES]),
-				lt(bookings.checkIn, checkOut),
-				gt(bookings.checkOut, checkIn)
+	// Rooms already booked, for any night overlapping [checkIn, checkOut) — split by
+	// whether a physical room is actually assigned yet:
+	// - Not yet checked in (pending_payment/confirmed): no `room_assignments` row exists,
+	//   so block by the *booking's* own stay dates, `quantity` rooms of the type at once.
+	// - Checked in or checked out: a physical room IS assigned, so block by the
+	//   *assignment's* own checkIn/checkOut instead — one row per physically-held room
+	//   (already 1:1, no `quantity` multiply). This is what makes an early checkout
+	//   actually free the room for same-day resale: `checkOutBooking` caps a capped
+	//   assignment's `checkOut` to the checkout business date, but the booking's own
+	//   `checkIn`/`checkOut` never change, so counting against the booking's dates
+	//   instead of the assignment's kept the room blocked through the original,
+	//   never-happened checkout date (the exact "no rooms available" bug a real early
+	//   checkout surfaced — front desk showed the room vacant, walk-in search didn't).
+	const [preAssignedRows, assignedRows] = await Promise.all([
+		db
+			.select({ roomTypeId: bookingRooms.roomTypeId, quantity: bookingRooms.quantity })
+			.from(bookingRooms)
+			.innerJoin(bookings, eq(bookings.id, bookingRooms.bookingId))
+			.where(
+				and(
+					eq(bookings.hotelId, hotelId),
+					inArray(bookings.status, ['pending_payment', 'confirmed']),
+					lt(bookings.checkIn, checkOut),
+					gt(bookings.checkOut, checkIn)
+				)
+			),
+		db
+			.select({ roomTypeId: bookingRooms.roomTypeId })
+			.from(roomAssignments)
+			.innerJoin(bookingRooms, eq(bookingRooms.id, roomAssignments.bookingRoomId))
+			.innerJoin(bookings, eq(bookings.id, bookingRooms.bookingId))
+			.where(
+				and(
+					eq(bookings.hotelId, hotelId),
+					inArray(bookings.status, ['checked_in', 'checked_out']),
+					lt(roomAssignments.checkIn, checkOut),
+					gt(roomAssignments.checkOut, checkIn)
+				)
 			)
-		);
+	]);
 	const bookedByType = new Map<string, number>();
-	for (const row of bookedRows) {
+	for (const row of preAssignedRows) {
 		bookedByType.set(row.roomTypeId, (bookedByType.get(row.roomTypeId) ?? 0) + row.quantity);
+	}
+	for (const row of assignedRows) {
+		bookedByType.set(row.roomTypeId, (bookedByType.get(row.roomTypeId) ?? 0) + 1);
 	}
 
 	const available = types
@@ -244,10 +317,12 @@ export async function searchAvailability(params: {
 				cancellation: cancellation
 					? { freeCancelHours: cancellation.freeCancelHours, penaltyType: cancellation.penaltyType }
 					: null,
-				price
+				price,
+				extraBedFeeCentavos: plan.extraBedFeeCentavos ?? null
 			});
 		}
 
+		const occupancyPlan = occupancyPlanByType.get(type.id)!;
 		results.push({
 			id: type.id,
 			name: type.name,
@@ -257,6 +332,11 @@ export async function searchAvailability(params: {
 			baseOccupancy: type.baseOccupancy,
 			maxOccupancy: type.maxOccupancy,
 			availableRooms,
+			fitsBaseOccupancy: occupancyPlan.fitsBase,
+			extraBedAllowed: type.extraBedAllowed,
+			maxExtraBeds: type.maxExtraBeds ?? 0,
+			extraBedsNeeded: occupancyPlan.extraBedsNeeded,
+			suggestedRoomCount: occupancyPlan.suggestedRoomCount,
 			photos: (type.photos as RoomPhoto[]) ?? [],
 			sizeSqm: type.sizeSqm,
 			bedConfiguration: (type.bedConfiguration as BedConfigEntry[]) ?? [],
@@ -274,6 +354,37 @@ export async function searchAvailability(params: {
 	}
 
 	return results;
+}
+
+/**
+ * When `searchAvailability` comes back empty for a given party size, this answers "would
+ * more rooms of *any* type actually help?" — the smallest room count (above `roomCount`,
+ * capped at `MAX_ROOMS_PER_LINE`) across every room type in the hotel that would fit the
+ * party on base occupancy alone. Deliberately a separate, cheap follow-up query (no
+ * availability/pricing) rather than folding into `searchAvailability` itself, so that
+ * function's return shape stays `AvailableRoomType[]` for its many existing callers.
+ */
+export async function suggestRoomCountForOccupancy(
+	hotelId: string,
+	occupancy: number,
+	roomCount: number
+): Promise<number | null> {
+	const types = await db
+		.select({ maxOccupancy: roomTypes.maxOccupancy })
+		.from(roomTypes)
+		.where(eq(roomTypes.hotelId, hotelId));
+	let best: number | null = null;
+	for (const t of types) {
+		const plan = resolveOccupancyPlan(
+			{ maxOccupancy: t.maxOccupancy, extraBedAllowed: false, maxExtraBeds: 0, extraBedCapacity: 1 },
+			occupancy,
+			roomCount
+		);
+		if (plan.suggestedRoomCount != null && (best == null || plan.suggestedRoomCount < best)) {
+			best = plan.suggestedRoomCount;
+		}
+	}
+	return best;
 }
 
 export interface BrowsableRoomType {

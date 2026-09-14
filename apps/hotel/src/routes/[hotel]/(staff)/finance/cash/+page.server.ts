@@ -29,6 +29,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const to = url.searchParams.get('to') || undefined;
 	const accountId = url.searchParams.get('account') || undefined;
 	const direction = (url.searchParams.get('direction') as 'in' | 'out' | null) || undefined;
+	const includeVoided = url.searchParams.get('includeVoided') === '1';
 
 	// Always compute an opening → in → out → closing position so the ledger
 	// reconciles to the balance cards even when no range is chosen (an account's
@@ -38,7 +39,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
 	const [accounts, movements, position] = await Promise.all([
 		listCashAccounts(hotel.id, { includeInactive: true }),
-		listMovements(hotel.id, { from, to, cashAccountId: accountId, direction, limit: 400 }),
+		listMovements(hotel.id, { from, to, cashAccountId: accountId, direction, includeVoided, limit: 400 }),
 		getCashPosition(hotel.id, { from: posFrom, to: posTo })
 	]);
 
@@ -73,7 +74,13 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		position,
 		rangeActive: !!(from || to),
 		manualCategories: MANUAL_CATEGORIES,
-		filters: { from: from ?? '', to: to ?? '', account: accountId ?? '', direction: direction ?? '' }
+		filters: {
+			from: from ?? '',
+			to: to ?? '',
+			account: accountId ?? '',
+			direction: direction ?? '',
+			includeVoided
+		}
 	};
 };
 

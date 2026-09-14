@@ -17,6 +17,7 @@ import {
 import { recordCashMovement } from '$lib/server/finance/cash';
 import { businessDateFor } from '$lib/server/finance/shared';
 import { sendBookingConfirmation } from '$lib/server/email/send-booking-confirmation';
+import { writeAudit } from '$lib/server/audit';
 
 export async function POST({ request }) {
 	const secret = env.PAYMONGO_WEBHOOK_SECRET;
@@ -52,14 +53,14 @@ export async function POST({ request }) {
 
 			// Whether *this* delivery is the one that flipped the order to confirmed —
 			// gates the one-time guest confirmation email sent after the tx commits.
-			const confirmedNow = await db.transaction(async (tx) => {
+			const { confirmedNow, auditInfo } = await db.transaction(async (tx) => {
 				// Idempotency: a retried delivery of the same event must not double-write.
 				const existing = await tx
 					.select({ id: payments.id })
 					.from(payments)
 					.where(eq(payments.paymongoEventId, eventId))
 					.then((r) => r.at(0));
-				if (existing) return false;
+				if (existing) return { confirmedNow: false, auditInfo: null };
 
 				const order = await tx
 					.select()
@@ -68,7 +69,7 @@ export async function POST({ request }) {
 					.then((r) => r.at(0));
 				if (!order) {
 					console.error('paymongo webhook: order not found', orderId);
-					return false;
+					return { confirmedNow: false, auditInfo: null };
 				}
 
 				const [paymentRow] = await tx
@@ -88,6 +89,16 @@ export async function POST({ request }) {
 						paidAt: new Date()
 					})
 					.returning({ id: payments.id });
+
+				// A payment row now exists regardless of how this closure exits below —
+				// the audit entry (written after commit) must fire for all of them, not
+				// just the "advanced the order" path.
+				const auditInfo = {
+					hotelId: order.hotelId,
+					paymentId: paymentRow!.id,
+					amountCentavos,
+					currency
+				};
 
 				// Post the receipt to Finance's Undeposited Funds account so it shows in
 				// cash-in / revenue reports; a later PayMongo payout is recorded as a
@@ -152,12 +163,12 @@ export async function POST({ request }) {
 						order.id,
 						paymentRow!.id
 					);
-					return false;
+					return { confirmedNow: false, auditInfo };
 				}
 
 				// Only advance an order that's still awaiting payment — never clobber a
 				// further-advanced status.
-				if (order.status !== 'pending_payment') return false;
+				if (order.status !== 'pending_payment') return { confirmedNow: false, auditInfo };
 
 				await tx
 					.update(orders)
@@ -209,8 +220,28 @@ export async function POST({ request }) {
 					});
 				}
 
-				return true;
+				return { confirmedNow: true, auditInfo };
 			});
+
+			// Audit trail for the payment itself — every branch above that actually
+			// inserted a `payments` row reaches here with a non-null `auditInfo`; only
+			// the idempotency-skip (a retried webhook delivery) leaves it null.
+			if (auditInfo) {
+				await writeAudit({
+					hotelId: auditInfo.hotelId,
+					actor: null,
+					action: 'payment.paymongo_confirmed',
+					entityType: 'order',
+					entityId: orderId,
+					after: {
+						paymentId: auditInfo.paymentId,
+						amountCentavos: auditInfo.amountCentavos,
+						currency: auditInfo.currency,
+						paymongoEventId: eventId,
+						confirmedOrder: confirmedNow
+					}
+				});
+			}
 
 			// Guest confirmation email — after the tx commits, only on the delivery
 			// that actually confirmed the order. Best-effort: a mail failure is logged

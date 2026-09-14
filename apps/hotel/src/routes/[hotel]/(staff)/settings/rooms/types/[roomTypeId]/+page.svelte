@@ -34,6 +34,7 @@
 	let beds = $state<BedConfigEntry[]>((t.bedConfiguration as BedConfigEntry[]) ?? []);
 	const photos = $derived((t.photos as RoomPhoto[]) ?? []);
 	let viewType = $state(t.viewType ?? '');
+	let colorHex = $state(t.colorHex ?? '');
 	let photoFileInput = $state<HTMLInputElement | undefined>(undefined);
 	let photoTag = $state<'cover' | 'gallery'>('gallery');
 
@@ -187,6 +188,37 @@
 							</div>
 						</div>
 						<div>
+							<Label for="colorHex">Front-desk color</Label>
+							<div class="mt-1 flex items-center gap-2">
+								<input
+									id="colorHex"
+									type="color"
+									value={t.colorHex ?? '#94a3b8'}
+									oninput={(e) => (colorHex = e.currentTarget.value)}
+									class="h-9 w-12 cursor-pointer rounded-md border border-border bg-surface p-0.5"
+								/>
+								<Input
+									name="colorHex"
+									bind:value={colorHex}
+									placeholder="#94a3b8"
+									class="w-28 font-mono text-xs"
+								/>
+								{#if colorHex}
+									<button
+										type="button"
+										onclick={() => (colorHex = '')}
+										class="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
+									>
+										Clear
+									</button>
+								{/if}
+							</div>
+							<p class="mt-1 text-xs text-ink-muted">
+								Colors this type's room number on the front-desk grid so staff can tell room types
+								apart at a glance. Staff-only — guests never see it.
+							</p>
+						</div>
+						<div>
 							<Label for="sizeSqm">Room size (m²)</Label>
 							<Input
 								id="sizeSqm"
@@ -275,18 +307,36 @@
 						/>
 						Extra bed policy allowed
 					</label>
-					<div class="mt-2">
-						<Label for="maxExtraBeds">Max extra beds</Label>
-						<Input
-							id="maxExtraBeds"
-							name="maxExtraBeds"
-							type="number"
-							min="0"
-							max="10"
-							value={t.maxExtraBeds ?? ''}
-							class="mt-1"
-						/>
+					<div class="mt-2 grid grid-cols-2 gap-3">
+						<div>
+							<Label for="maxExtraBeds">Max extra beds</Label>
+							<Input
+								id="maxExtraBeds"
+								name="maxExtraBeds"
+								type="number"
+								min="0"
+								max="10"
+								value={t.maxExtraBeds ?? ''}
+								class="mt-1"
+							/>
+						</div>
+						<div>
+							<Label for="extraBedCapacity">Guests per extra bed</Label>
+							<Input
+								id="extraBedCapacity"
+								name="extraBedCapacity"
+								type="number"
+								min="1"
+								max="4"
+								value={t.extraBedCapacity}
+								class="mt-1"
+							/>
+						</div>
 					</div>
+					<p class="mt-1.5 text-xs text-ink-muted">
+						Used to offer an extra bed automatically when a party is too big for the room's
+						base/max occupancy alone, in front desk and guest booking.
+					</p>
 				</div>
 			</div>
 

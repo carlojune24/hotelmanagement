@@ -77,6 +77,11 @@ export const bookings = pgTable(
 		feesCentavos: bigint('fees_centavos', { mode: 'number' }).notNull(),
 		vatCentavos: bigint('vat_centavos', { mode: 'number' }).notNull(),
 		totalCentavos: bigint('total_centavos', { mode: 'number' }).notNull(),
+		/** A photo of the guest's valid ID, captured live from the front-desk camera at
+		 *  check-in (never a file picker — see `checkInBooking`'s own comment). Optional:
+		 *  check-in never blocks on it. Stored via `lib/server/uploads.ts`, same convention
+		 *  as every other uploaded image (`/uploads/<hotelId>/<file>`). */
+		guestIdPhotoUrl: text('guest_id_photo_url'),
 		createdAt: createdAt(),
 		updatedAt: updatedAt()
 	},
@@ -112,6 +117,8 @@ export const bookingRooms = pgTable(
 			.notNull()
 			.references(() => ratePlans.id, { onDelete: 'restrict' }),
 		quantity: integer('quantity').notNull().default(1),
+		/** Extra beds/rollaways added across this line's rooms — see `roomTypes.extraBedAllowed`/`maxExtraBeds`/`extraBedCapacity`. */
+		extraBeds: integer('extra_beds').notNull().default(0),
 		createdAt: createdAt()
 	},
 	(t) => [

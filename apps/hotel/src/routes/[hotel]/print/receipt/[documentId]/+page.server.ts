@@ -6,6 +6,7 @@ import { orders } from '$lib/server/db/schema/index';
 import { parseBranding } from '$lib/server/branding';
 import {
 	DocumentError,
+	getBirSettings,
 	getDocumentForRender,
 	getOrIssueReceiptForPayment
 } from '$lib/server/finance/documents';
@@ -48,9 +49,13 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		if (!token || !stored || token !== stored) error(403, 'This document link is not valid.');
 	}
 
+	const birSettings = await getBirSettings(hotel.id);
+
 	return {
 		snapshot: rendered.snapshot,
 		logoUrl: parseBranding(hotel.config).logoUrl ?? null,
-		cancelled: rendered.document.status === 'cancelled'
+		cancelled: rendered.document.status === 'cancelled',
+		thermalPaperWidthMm: (birSettings?.thermalPaperWidthMm === 58 ? 58 : 80) as 58 | 80,
+		format: url.searchParams.get('format') === 'a4' ? ('a4' as const) : ('thermal' as const)
 	};
 };

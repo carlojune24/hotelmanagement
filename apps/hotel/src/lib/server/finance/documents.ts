@@ -214,6 +214,8 @@ export interface BirSettingsInput {
 	autoIssueInvoiceOnCheckout: boolean;
 	autoIssueReceiptOnPayment: boolean;
 	footerNote: string | null;
+	/** 58 or 80 — app-validated, not a DB constraint. See the schema column's own comment. */
+	thermalPaperWidthMm: number;
 }
 
 export async function upsertBirSettings(
@@ -227,6 +229,7 @@ export async function upsertBirSettings(
 		invoicePrefix: input.invoicePrefix.trim() || 'INV',
 		orPrefix: input.orPrefix.trim() || 'OR',
 		serialPadWidth: Math.min(12, Math.max(1, Math.round(input.serialPadWidth || 6))),
+		thermalPaperWidthMm: input.thermalPaperWidthMm === 58 ? 58 : 80,
 		updatedAt: new Date()
 	};
 	await db

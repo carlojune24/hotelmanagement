@@ -1,0 +1,1 @@
+ALTER TABLE "bir_settings" ADD COLUMN "thermal_paper_width_mm" integer DEFAULT 80 NOT NULL;

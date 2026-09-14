@@ -89,12 +89,18 @@ const updateSchema = z.object({
 	code: z.string().max(40).optional(),
 	category: z.enum(roomCategory.enumValues).optional().or(z.literal('')),
 	description: z.string().max(4000).optional(),
+	colorHex: z
+		.string()
+		.regex(/^#[0-9a-fA-F]{6}$/, 'Use a hex color like #2563eb.')
+		.optional()
+		.or(z.literal('')),
 	baseOccupancy: z.coerce.number().int().min(1).max(20),
 	maxOccupancy: z.coerce.number().int().min(1).max(20),
 	maxAdults: z.coerce.number().int().min(0).max(20).optional(),
 	maxChildren: z.coerce.number().int().min(0).max(20).optional(),
 	extraBedAllowed: z.coerce.boolean(),
 	maxExtraBeds: z.coerce.number().int().min(0).max(10).optional(),
+	extraBedCapacity: z.coerce.number().int().min(1).max(4).default(1),
 	sizeSqm: z.coerce.number().int().min(0).max(10000).optional(),
 	bedConfigurationJson: z.string(),
 	bedFlexible: z.coerce.boolean(),
@@ -148,12 +154,14 @@ export const actions: Actions = {
 					code: parsed.data.code?.trim() || null,
 					category: parsed.data.category || null,
 					description: parsed.data.description?.trim() || null,
+				colorHex: parsed.data.colorHex || null,
 					baseOccupancy: parsed.data.baseOccupancy,
 					maxOccupancy: parsed.data.maxOccupancy,
 					maxAdults: parsed.data.maxAdults ?? null,
 					maxChildren: parsed.data.maxChildren ?? null,
 					extraBedAllowed: parsed.data.extraBedAllowed,
 					maxExtraBeds: parsed.data.maxExtraBeds ?? null,
+					extraBedCapacity: parsed.data.extraBedCapacity,
 					sizeSqm: parsed.data.sizeSqm ?? null,
 					bedConfiguration,
 					bedFlexible: parsed.data.bedFlexible,

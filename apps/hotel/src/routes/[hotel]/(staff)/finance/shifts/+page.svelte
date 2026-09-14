@@ -237,6 +237,13 @@
 								: 'text-ink-muted'}"
 						>
 							{s.varianceCentavos != null ? peso(s.varianceCentavos) : '—'}
+							{#if s.varianceChargebackStatus === 'owed'}
+								<Badge variant="outline" class="ml-1.5 border-transparent bg-danger/15 text-danger">Owed</Badge>
+							{:else if s.varianceChargebackStatus === 'collected'}
+								<Badge variant="outline" class="ml-1.5 border-transparent bg-ok/15 text-ok">Recovered</Badge>
+							{:else if s.varianceChargebackStatus === 'written_off'}
+								<Badge variant="outline" class="ml-1.5 border-border bg-surface-2 text-ink-muted">Written off</Badge>
+							{/if}
 						</Table.Cell>
 						<Table.Cell class="text-right"
 							><a href="{base}/{s.id}" class="text-xs underline underline-offset-2">Details</a

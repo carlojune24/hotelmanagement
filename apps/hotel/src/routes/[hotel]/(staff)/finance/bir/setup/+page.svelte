@@ -142,5 +142,24 @@
 		</div>
 	</section>
 
+	<section class="rounded-xl border border-border p-5">
+		<h2 class="mb-3 text-sm font-semibold text-ink">Printing</h2>
+		<div class="max-w-xs">
+			<Label class="text-xs" for="thermalPaperWidthMm">Receipt printer paper width</Label>
+			<select
+				id="thermalPaperWidthMm"
+				name="thermalPaperWidthMm"
+				class="mt-1 w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm"
+			>
+				<option value="80" selected={(s?.thermalPaperWidthMm ?? 80) === 80}>80mm</option>
+				<option value="58" selected={s?.thermalPaperWidthMm === 58}>58mm</option>
+			</select>
+		</div>
+		<p class="mt-2 text-xs text-ink-muted">
+			Invoices and Official Receipts print to this width by default at the front desk; a
+			full-page (A4) version stays one click away on the same print page.
+		</p>
+	</section>
+
 	<Button type="submit">Save BIR setup</Button>
 </form>

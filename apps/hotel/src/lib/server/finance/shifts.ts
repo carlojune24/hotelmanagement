@@ -15,7 +15,7 @@ import {
 } from '../db/schema/index';
 import { writeAudit } from '../audit';
 import type { SessionUser } from '../auth/session';
-import { FinanceError, type Tx } from './shared';
+import { FinanceError, businessDateFor, type Tx } from './shared';
 import { expectedShiftCash, inputVatOf } from './calc';
 import { recordCashMovement } from './cash';
 
@@ -127,6 +127,7 @@ export interface ShiftReconciliation {
 	drawerName: string;
 	openedByName: string | null;
 	closedByName: string | null;
+	chargebackCollectedByName: string | null;
 	openingFloatCentavos: number;
 	cashInCentavos: number;
 	cashOutCentavos: number;
@@ -170,7 +171,7 @@ export async function getShiftReconciliation(
 		.where(eq(cashAccounts.id, shift.cashAccountId))
 		.limit(1);
 
-	const [openedBy, closedBy] = await Promise.all([
+	const [openedBy, closedBy, chargebackCollectedBy] = await Promise.all([
 		shift.openedByUserId
 			? db
 					.select({ name: users.name })
@@ -183,6 +184,13 @@ export async function getShiftReconciliation(
 					.select({ name: users.name })
 					.from(users)
 					.where(eq(users.id, shift.closedByUserId))
+					.limit(1)
+			: Promise.resolve([]),
+		shift.varianceChargebackCollectedByUserId
+			? db
+					.select({ name: users.name })
+					.from(users)
+					.where(eq(users.id, shift.varianceChargebackCollectedByUserId))
 					.limit(1)
 			: Promise.resolve([])
 	]);
@@ -236,6 +244,7 @@ export async function getShiftReconciliation(
 		drawerName: drawer?.name ?? 'Drawer',
 		openedByName: openedBy[0]?.name ?? null,
 		closedByName: closedBy[0]?.name ?? null,
+		chargebackCollectedByName: chargebackCollectedBy[0]?.name ?? null,
 		openingFloatCentavos: shift.openingFloatCentavos,
 		cashInCentavos: cashIn,
 		cashOutCentavos: cashOut,
@@ -553,7 +562,9 @@ export async function listShifts(hotelId: string, limit = 60) {
 			openingFloatCentavos: cashierShifts.openingFloatCentavos,
 			expectedCashCentavos: cashierShifts.expectedCashCentavos,
 			countedCashCentavos: cashierShifts.countedCashCentavos,
-			varianceCentavos: cashierShifts.varianceCentavos
+			varianceCentavos: cashierShifts.varianceCentavos,
+			varianceChargebackStatus: cashierShifts.varianceChargebackStatus,
+			varianceChargebackCentavos: cashierShifts.varianceChargebackCentavos
 		})
 		.from(cashierShifts)
 		.innerJoin(cashAccounts, eq(cashAccounts.id, cashierShifts.cashAccountId))
@@ -561,4 +572,184 @@ export async function listShifts(hotelId: string, limit = 60) {
 		.where(eq(cashierShifts.hotelId, hotelId))
 		.orderBy(desc(cashierShifts.openedAt))
 		.limit(limit);
+}
+
+/**
+ * Charges a closed shift's shortage back to the cashier who ran it (`opened_by_user_id`) —
+ * a claim, not a cash movement: nothing moves until `collectShiftChargeback` runs. Only a
+ * shortage (`variance_centavos < 0`) can be charged back; an overage is never billed to
+ * anyone. `amountCentavos` may be less than the full shortfall (partial charge-back) but
+ * never more.
+ */
+export async function chargeBackShiftVariance(input: {
+	hotelId: string;
+	shiftId: string;
+	amountCentavos?: number;
+	note: string;
+	actor: SessionUser | null;
+}): Promise<void> {
+	const note = input.note.trim();
+	if (!note) throw new FinanceError('Enter a note explaining the charge-back.');
+
+	const [shift] = await db
+		.select()
+		.from(cashierShifts)
+		.where(and(eq(cashierShifts.id, input.shiftId), eq(cashierShifts.hotelId, input.hotelId)))
+		.limit(1);
+	if (!shift) throw new FinanceError('Shift not found.');
+	if (shift.status !== 'closed') throw new FinanceError('Close the shift before charging back a shortage.');
+	if ((shift.varianceCentavos ?? 0) >= 0) {
+		throw new FinanceError('Only a shortage can be charged back — this shift has no shortfall.');
+	}
+	if (shift.varianceChargebackStatus !== 'none') {
+		throw new FinanceError('This shortage has already been charged back or written off.');
+	}
+
+	const shortfall = Math.abs(shift.varianceCentavos!);
+	const amount =
+		input.amountCentavos != null
+			? Math.min(shortfall, Math.max(0, Math.round(input.amountCentavos)))
+			: shortfall;
+	if (amount <= 0) throw new FinanceError('Enter an amount greater than zero.');
+
+	const flipped = await db
+		.update(cashierShifts)
+		.set({
+			varianceChargebackStatus: 'owed',
+			varianceChargebackCentavos: amount,
+			varianceChargebackNote: note,
+			varianceChargebackAt: new Date(),
+			varianceChargebackByUserId: input.actor?.id ?? null,
+			updatedAt: new Date()
+		})
+		.where(and(eq(cashierShifts.id, input.shiftId), eq(cashierShifts.varianceChargebackStatus, 'none')))
+		.returning({ id: cashierShifts.id });
+	if (flipped.length === 0) throw new FinanceError('This shift just changed — reload and try again.');
+
+	await writeAudit({
+		hotelId: input.hotelId,
+		actor: input.actor,
+		action: 'finance.shift_chargeback',
+		entityType: 'cashier_shift',
+		entityId: input.shiftId,
+		after: { amountCentavos: amount, note }
+	});
+}
+
+/**
+ * Records that an "owed" charge-back was actually recovered in cash — posts a matching
+ * `cash_movements` in-flow (today's business date, not the shift's own; the money changes
+ * hands now, possibly days after the shift ran) and flips the shift to `collected`.
+ * Deliberately does **not** tag the movement with `shiftId`: that column drives the shift
+ * reconciliation view's live "expected cash" recompute (`getShiftReconciliation`), and a
+ * recovery posted after close must never retroactively change a closed shift's own figures.
+ * `sourceType`/`sourceId` still link it back to the shift for the cash ledger / reports.
+ */
+export async function collectShiftChargeback(input: {
+	hotelId: string;
+	shiftId: string;
+	cashAccountId: string;
+	actor: SessionUser | null;
+}): Promise<void> {
+	const [shift] = await db
+		.select()
+		.from(cashierShifts)
+		.where(and(eq(cashierShifts.id, input.shiftId), eq(cashierShifts.hotelId, input.hotelId)))
+		.limit(1);
+	if (!shift) throw new FinanceError('Shift not found.');
+	if (shift.varianceChargebackStatus !== 'owed') {
+		throw new FinanceError('Nothing is currently owed for this shift.');
+	}
+
+	const [hotel] = await db.select({ timezone: hotels.timezone }).from(hotels).where(eq(hotels.id, input.hotelId)).limit(1);
+	const businessDate = businessDateFor(hotel?.timezone ?? 'Asia/Manila');
+	const cashierName = shift.openedByUserId
+		? (
+				await db.select({ name: users.name }).from(users).where(eq(users.id, shift.openedByUserId)).limit(1)
+			)[0]?.name ?? null
+		: null;
+
+	await db.transaction(async (tx: Tx) => {
+		await recordCashMovement(
+			{
+				hotelId: input.hotelId,
+				businessDate,
+				cashAccountId: input.cashAccountId,
+				amountCentavos: shift.varianceChargebackCentavos!,
+				direction: 'in',
+				category: 'adjustment',
+				counterpartyType: 'employee',
+				counterpartyName: cashierName,
+				counterpartyId: shift.openedByUserId ?? undefined,
+				sourceType: 'shift_variance_chargeback',
+				sourceId: shift.id,
+				memo: `Shift shortage recovered${cashierName ? ` — ${cashierName}` : ''} (${shift.businessDate} shift)`,
+				actor: input.actor
+			},
+			tx
+		);
+
+		const flipped = await tx
+			.update(cashierShifts)
+			.set({
+				varianceChargebackStatus: 'collected',
+				varianceChargebackCollectedAt: new Date(),
+				varianceChargebackCollectedByUserId: input.actor?.id ?? null,
+				updatedAt: new Date()
+			})
+			.where(and(eq(cashierShifts.id, input.shiftId), eq(cashierShifts.varianceChargebackStatus, 'owed')))
+			.returning({ id: cashierShifts.id });
+		if (flipped.length === 0) throw new FinanceError('This shift just changed — reload and try again.');
+	});
+
+	await writeAudit({
+		hotelId: input.hotelId,
+		actor: input.actor,
+		action: 'finance.shift_chargeback_collected',
+		entityType: 'cashier_shift',
+		entityId: input.shiftId,
+		after: { amountCentavos: shift.varianceChargebackCentavos, cashAccountId: input.cashAccountId }
+	});
+}
+
+/** Closes out an "owed" charge-back without collecting it — the hotel absorbs the loss
+ *  formally instead of leaving a bare claim hanging with no resolution. */
+export async function writeOffShiftChargeback(input: {
+	hotelId: string;
+	shiftId: string;
+	note: string;
+	actor: SessionUser | null;
+}): Promise<void> {
+	const note = input.note.trim();
+	if (!note) throw new FinanceError('Enter a reason for writing this off.');
+
+	const [shift] = await db
+		.select()
+		.from(cashierShifts)
+		.where(and(eq(cashierShifts.id, input.shiftId), eq(cashierShifts.hotelId, input.hotelId)))
+		.limit(1);
+	if (!shift) throw new FinanceError('Shift not found.');
+	if (shift.varianceChargebackStatus !== 'owed') {
+		throw new FinanceError('Nothing is currently owed for this shift.');
+	}
+
+	const flipped = await db
+		.update(cashierShifts)
+		.set({
+			varianceChargebackStatus: 'written_off',
+			varianceChargebackNote: `${shift.varianceChargebackNote ?? ''}\n\nWritten off: ${note}`.trim(),
+			updatedAt: new Date()
+		})
+		.where(and(eq(cashierShifts.id, input.shiftId), eq(cashierShifts.varianceChargebackStatus, 'owed')))
+		.returning({ id: cashierShifts.id });
+	if (flipped.length === 0) throw new FinanceError('This shift just changed — reload and try again.');
+
+	await writeAudit({
+		hotelId: input.hotelId,
+		actor: input.actor,
+		action: 'finance.shift_chargeback_written_off',
+		entityType: 'cashier_shift',
+		entityId: input.shiftId,
+		after: { note }
+	});
 }

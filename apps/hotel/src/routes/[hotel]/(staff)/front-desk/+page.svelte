@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { page } from '$app/state';
 	import { enhance } from '$app/forms';
 	import { toast } from 'svelte-sonner';
@@ -6,7 +7,6 @@
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
-	import * as Select from '$lib/components/ui/select/index.js';
 	import * as Sheet from '$lib/components/ui/sheet/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
@@ -20,6 +20,7 @@
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
 	import PaymentFields from '$lib/components/staff/payment-fields.svelte';
 	import WalkinPaymentFields from '$lib/components/staff/walkin-payment-fields.svelte';
+	import IdCameraCapture from '$lib/components/staff/id-camera-capture.svelte';
 	import AvailabilityCalendarSheet, {
 		type AvailabilityTarget
 	} from '$lib/components/staff/availability-calendar-sheet.svelte';
@@ -28,6 +29,8 @@
 	import type { ActionData, PageData } from './$types';
 	import type { HallGridCell, RoomGridCell } from '$lib/server/front-desk';
 	import type { HallPriceBreakdown } from '$lib/server/pricing';
+	import type { AvailableRatePlan, AvailableRoomType } from '$lib/server/availability';
+	import { addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
@@ -44,6 +47,9 @@
 	const formAvailableRoomTypes = $derived(
 		form && 'availableRoomTypes' in form ? form.availableRoomTypes : undefined
 	);
+	const formSuggestedRoomCount = $derived(
+		form && 'suggestedRoomCount' in form ? form.suggestedRoomCount : null
+	);
 	const formRoomDetail = $derived(form && 'roomDetail' in form ? form.roomDetail : undefined);
 	const formFolio = $derived(form && 'folio' in form ? form.folio : undefined);
 	const formFolioError = $derived(form && 'folioError' in form ? form.folioError : undefined);
@@ -55,6 +61,8 @@
 		form && 'hallWalkInError' in form ? form.hallWalkInError : undefined
 	);
 	const formHallWalkInOk = $derived(form && 'hallWalkInOk' in form ? form.hallWalkInOk : undefined);
+	const formIdPhotoOk = $derived(form && 'idPhotoOk' in form ? form.idPhotoOk : undefined);
+	const formIdPhotoError = $derived(form && 'idPhotoError' in form ? form.idPhotoError : undefined);
 
 	$effect(() => {
 		if (formOk) toast.success(formOk);
@@ -74,23 +82,44 @@
 			toast.success(formHallWalkInOk);
 			hallWalkInOpen = false;
 		}
-		// Check-out ends the in-house view — close the room dialog instead of
-		// leaving it open with no `roomDetail` payload behind it (empty shell).
+		if (formIdPhotoOk) {
+			toast.success('ID photo saved.');
+			idCaptureOpen = false;
+		}
+		if (formIdPhotoError) toast.error(formIdPhotoError);
+		// Check-out ends the in-house view — deselect the room instead of leaving the
+		// rail showing a folio for a booking that's no longer checked in.
 		if (form && 'checkedOut' in form) {
-			detailDialogOpen = false;
 			checkoutCityLedger = false;
 			selectedRoomId = null;
 		}
 	});
 
-	let detailDialogOpen = $state(false);
+	// Folio/payments/history for the selected occupied room now render inline in the
+	// right rail (no more "Full details" dialog) — fetched automatically the moment a
+	// new room is selected, via a hidden form posting the same `?/roomDetail` action
+	// every folio/payment mutation already returns fresh data from.
+	let roomDetailFormEl = $state<HTMLFormElement>();
+	let roomDetailBookingId = $state('');
+	let loadedRoomDetailFor = $state<string | null>(null);
 	$effect(() => {
-		if (formRoomDetail) detailDialogOpen = true;
+		const bookingId = selectedRoom?.occupant?.bookingId ?? null;
+		if (!bookingId) {
+			loadedRoomDetailFor = null;
+			return;
+		}
+		if (bookingId !== loadedRoomDetailFor) {
+			loadedRoomDetailFor = bookingId;
+			roomDetailBookingId = bookingId;
+			idCaptureOpen = false;
+			tick().then(() => roomDetailFormEl?.requestSubmit());
+		}
 	});
 
 	// Folio payment / refund panels (room + hall dialogs), and the checkout city-ledger form.
 	let roomPayOpen = $state(false);
 	let roomRefundOpen = $state(false);
+	let idCaptureOpen = $state(false);
 	let hallPayOpen = $state(false);
 	let hallRefundOpen = $state(false);
 	let checkoutCityLedger = $state(false);
@@ -105,14 +134,17 @@
 	// --- Room grid filtering ---
 	let search = $state('');
 	let typeFilter = $state('all');
-	let selectedRoomId = $state<string | null>(null);
+	// Arriving from a just-completed check-in (see the reservation detail page's `checkIn`
+	// action) lands here with the assigned room pre-selected, so staff see it immediately
+	// instead of having to find it again in the grid.
+	let selectedRoomId = $state<string | null>(page.url.searchParams.get('roomId'));
 	let railTab = $state<'arrivals' | 'departures'>('arrivals');
 
-	const roomTypeNames = $derived([...new Set(data.cells.map((c) => c.roomTypeName))].sort());
-
 	const roomTypeOptions = $derived.by(() => {
-		const map = new Map<string, { id: string; name: string }>();
-		for (const c of data.cells) map.set(c.roomTypeId, { id: c.roomTypeId, name: c.roomTypeName });
+		const map = new Map<string, { id: string; name: string; color: string | null }>();
+		for (const c of data.cells) {
+			map.set(c.roomTypeId, { id: c.roomTypeId, name: c.roomTypeName, color: c.roomTypeColor });
+		}
 		return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
 	});
 
@@ -124,13 +156,17 @@
 		calendarOpen = true;
 	}
 
+	// Was scaling `plan.price.totalCentavos` (per-room, no extra-bed fee) by roomCount
+	// itself — a second, stale copy of `walkInLineTotal`'s math that never got the
+	// extra-bed fee, so cash tendered/change was computed against the wrong total
+	// while the row right above it showed the correct (fee-inclusive) price. Reuse
+	// the one real total instead of recomputing a second, divergent one.
 	const walkInSelectedTotal = $derived.by(() => {
 		if (!walkInSelection || !formAvailableRoomTypes) return null;
 		const [rtId, planId] = walkInSelection.split('|');
 		const rt = formAvailableRoomTypes.find((r) => r.id === rtId);
 		const plan = rt?.ratePlans.find((p) => p.id === planId);
-		const per = plan?.price.totalCentavos ?? null;
-		return per == null ? null : per * (formWalkInSearch?.roomCount ?? 1);
+		return rt && plan ? walkInLineTotal(rt, plan) : null;
 	});
 
 	const filteredCells = $derived(
@@ -198,16 +234,56 @@
 	function humanize(s: string): string {
 		return s.replace(/_/g, ' ');
 	}
-	function paymentStatusClass(status: string): string {
-		if (status === 'paid') return 'border-transparent bg-ok/15 text-ok';
-		if (status === 'failed') return 'border-transparent bg-danger/15 text-danger';
-		return 'border-border bg-surface-2 text-ink-muted';
-	}
 
 	// --- Walk-in drawer ---
 	let walkInOpen = $state(false);
 	let walkInSelection = $state('');
 	let walkInPrefillType = $state<string | null>(null);
+	let walkInSearchFormEl = $state<HTMLFormElement>();
+	// Bound (not just echoed from the last search result) so results stay reactive to
+	// typing — changing Guests/Rooms (or the dates) re-runs the search automatically,
+	// instead of leaving stale results on screen that no longer match what's entered
+	// (a real report: staff bumped Guests from 2 to 3 without re-clicking "Check
+	// availability" and the extra-bed offer/price shown was still for the old count).
+	// Also lets the "Use N rooms" suggestion button update the field and resubmit in
+	// one step.
+	let wiCheckIn = $state(data.businessDate);
+	let wiCheckOut = $state(todayPlus(1));
+	let wiOccupancy = $state(1);
+	let wiRoomCount = $state(1);
+	$effect(() => {
+		if (formWalkInSearch?.checkIn != null) wiCheckIn = formWalkInSearch.checkIn;
+		if (formWalkInSearch?.checkOut != null) wiCheckOut = formWalkInSearch.checkOut;
+		if (formWalkInSearch?.occupancy != null) wiOccupancy = formWalkInSearch.occupancy;
+		if (formWalkInSearch?.roomCount != null) wiRoomCount = formWalkInSearch.roomCount;
+	});
+
+	let walkInSearchTimer: ReturnType<typeof setTimeout> | undefined;
+	function scheduleWalkInSearch() {
+		clearTimeout(walkInSearchTimer);
+		walkInSearchTimer = setTimeout(() => walkInSearchFormEl?.requestSubmit(), 400);
+	}
+
+	function useSuggestedRoomCount(n: number) {
+		wiRoomCount = n;
+		tick().then(() => walkInSearchFormEl?.requestSubmit());
+	}
+
+	/** Scales the per-room quote by the searched room count and adds the extra-bed fee if
+	 *  needed — same math `createWalkInBooking` actually charges, so this row's displayed
+	 *  price never understates what the guest is about to be charged. */
+	function walkInLineTotal(rt: AvailableRoomType, plan: AvailableRatePlan): number {
+		let price = scaleRoomPrice(plan.price, formWalkInSearch?.roomCount ?? 1);
+		if (rt.extraBedsNeeded > 0 && plan.extraBedFeeCentavos) {
+			price = addFlatFeeCentavos(
+				price,
+				`Extra bed × ${rt.extraBedsNeeded}`,
+				rt.extraBedsNeeded * plan.extraBedFeeCentavos,
+				data.vatRateBps
+			);
+		}
+		return price.totalCentavos;
+	}
 
 	function todayPlus(days: number): string {
 		const d = new Date(`${data.businessDate}T00:00:00Z`);
@@ -351,15 +427,16 @@
 					)}
 				{/if}
 			</div>
-			<div class="mt-0.5 flex gap-3">
+			<div class="mt-1 flex items-center gap-1.5">
 				{#if !p.voidedAt && p.amountCentavos > 0}
-					<a
+					<Button
+						variant="outline"
+						size="xs"
 						href="{base}/print/receipt/{p.id}"
 						target="_blank"
-						class="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
 					>
 						Receipt
-					</a>
+					</Button>
 				{/if}
 				{#if !p.voidedAt && p.status === 'paid' && p.provider !== 'paymongo' && p.method !== 'house_use'}
 					<form method="POST" action="?/voidPayment" use:enhance>
@@ -367,12 +444,9 @@
 						<input type="hidden" name="id" value={id} />
 						<input type="hidden" name="paymentId" value={p.id} />
 						<input type="hidden" name="reason" value="Voided at front desk" />
-						<button
-							type="submit"
-							class="text-xs text-ink-muted underline underline-offset-2 hover:text-danger"
-						>
+						<Button type="submit" variant="outline" size="xs" class="text-danger hover:text-danger">
 							Void payment
-						</button>
+						</Button>
 					</form>
 				{/if}
 			</div>
@@ -467,17 +541,6 @@
 			</div>
 		</div>
 		<div class="flex items-center gap-2">
-			<Select.Root type="single" bind:value={typeFilter}>
-				<Select.Trigger class="w-44 shrink-0">
-					{typeFilter === 'all' ? 'All room types' : typeFilter}
-				</Select.Trigger>
-				<Select.Content>
-					<Select.Item value="all" label="All room types" />
-					{#each roomTypeNames as t (t)}
-						<Select.Item value={t} label={t} />
-					{/each}
-				</Select.Content>
-			</Select.Root>
 			<div class="relative">
 				<SearchIcon class="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-muted" />
 				<Input placeholder="Find a room or guest…" bind:value={search} class="w-56 pl-8" />
@@ -488,6 +551,33 @@
 	<div class="flex min-h-0 flex-1">
 		<div class="min-w-0 flex-1 overflow-y-auto p-6">
 			{#if roomTypeOptions.length > 0}
+				<div class="mb-3 flex flex-wrap items-center gap-2">
+					<span class="text-xs font-medium text-ink-muted">Filter:</span>
+					<button
+						type="button"
+						onclick={() => (typeFilter = 'all')}
+						class="rounded-full border px-2.5 py-1 text-xs transition {typeFilter === 'all'
+							? 'border-brand bg-brand/10 font-medium text-ink'
+							: 'border-border text-ink-muted hover:border-brand/50 hover:text-ink'}"
+					>
+						All room types
+					</button>
+					{#each roomTypeOptions as rt (rt.id)}
+						<button
+							type="button"
+							onclick={() => (typeFilter = rt.name)}
+							class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition {typeFilter ===
+							rt.name
+								? 'border-brand bg-brand/10 font-medium text-ink'
+								: 'border-border text-ink-muted hover:border-brand/50 hover:text-ink'}"
+						>
+							{#if rt.color}
+								<span class="size-2 rounded-full" style="background-color: {rt.color}"></span>
+							{/if}
+							{rt.name}
+						</button>
+					{/each}
+				</div>
 				<div class="mb-5 flex flex-wrap items-center gap-2">
 					<span class="text-xs font-medium text-ink-muted">Check availability:</span>
 					{#each roomTypeOptions as rt (rt.id)}
@@ -529,7 +619,12 @@
 									{:else if c.status === 'reserved'}
 										<span class="absolute top-2 right-2 size-1.5 rounded-full bg-brand"></span>
 									{/if}
-									<div class="text-base font-bold text-ink tabular-nums">{c.roomNumber}</div>
+									<div
+										class="text-base font-bold tabular-nums {c.roomTypeColor ? '' : 'text-ink'}"
+										style={c.roomTypeColor ? `color: ${c.roomTypeColor}` : undefined}
+									>
+										{c.roomNumber}
+									</div>
 									<div class="truncate text-[11px] text-ink-muted">{c.roomTypeName}</div>
 								</button>
 							{/each}
@@ -612,7 +707,7 @@
 			{/if}
 		</div>
 
-		<div class="hidden w-100 shrink-0 overflow-y-auto border-l border-border lg:block">
+		<div class="hidden w-120 shrink-0 overflow-y-auto border-l border-border lg:block">
 			{#if selectedRoom}
 				<div class="p-4">
 					<button
@@ -625,7 +720,15 @@
 					</button>
 					<h3 class="text-lg font-bold text-ink tabular-nums">Room {selectedRoom.roomNumber}</h3>
 					<p class="mb-2 text-xs text-ink-muted">
-						{selectedRoom.roomTypeName} · Floor {selectedRoom.floor ?? '—'}
+						<a
+							href="{base}/book/rooms/{selectedRoom.roomTypeId}"
+							target="_blank"
+							class="underline-offset-2 hover:text-ink hover:underline"
+							title="View this room type's photos and details (guest-facing page)"
+						>
+							{selectedRoom.roomTypeName}
+						</a>
+						· Floor {selectedRoom.floor ?? '—'}
 					</p>
 					<div class="mb-4 flex flex-wrap items-center gap-2">
 						<Badge variant="outline" class={statusPillClass(selectedRoom.status)}>
@@ -645,38 +748,38 @@
 
 					{#if selectedRoom.occupant}
 						{@const o = selectedRoom.occupant}
-						<dl class="mb-4 space-y-2 text-sm">
-							<div class="flex justify-between gap-3 border-b border-border pb-2">
+						<dl class="mb-4 divide-y divide-border rounded-lg border border-border text-sm">
+							<div class="flex items-center justify-between gap-3 px-3 py-1.5">
 								<dt class="text-ink-muted">Guest</dt>
 								<dd class="text-right font-medium text-ink">{o.guestName}</dd>
 							</div>
-							<div class="flex justify-between gap-3 border-b border-border pb-2">
+							<div class="flex items-center justify-between gap-3 px-3 py-1.5">
 								<dt class="text-ink-muted">Email</dt>
-								<dd class="text-right text-ink">{o.guestEmail}</dd>
+								<dd class="truncate text-right text-ink">{o.guestEmail}</dd>
 							</div>
 							{#if o.guestPhone}
-								<div class="flex justify-between gap-3 border-b border-border pb-2">
+								<div class="flex items-center justify-between gap-3 px-3 py-1.5">
 									<dt class="text-ink-muted">Phone</dt>
 									<dd class="text-right text-ink">{o.guestPhone}</dd>
 								</div>
 							{/if}
-							<div class="flex justify-between gap-3 border-b border-border pb-2">
+							<div class="flex items-center justify-between gap-3 px-3 py-1.5">
 								<dt class="text-ink-muted">Check-in</dt>
 								<dd class="text-right text-ink">{o.checkIn}</dd>
 							</div>
-							<div class="flex justify-between gap-3 border-b border-border pb-2">
+							<div class="flex items-center justify-between gap-3 px-3 py-1.5">
 								<dt class="text-ink-muted">Check-out</dt>
 								<dd class="text-right text-ink">{o.checkOut}</dd>
 							</div>
-							<div class="flex justify-between gap-3 border-b border-border pb-2">
+							<div class="flex items-center justify-between gap-3 px-3 py-1.5">
 								<dt class="text-ink-muted">Occupancy</dt>
 								<dd class="text-right text-ink">{o.occupancy} guests</dd>
 							</div>
-							<div class="flex justify-between gap-3 border-b border-border pb-2">
+							<div class="flex items-center justify-between gap-3 px-3 py-1.5">
 								<dt class="text-ink-muted">Rate plan</dt>
 								<dd class="text-right text-ink">{o.ratePlanName}</dd>
 							</div>
-							<div class="flex justify-between gap-3 border-b border-border pb-2">
+							<div class="flex items-center justify-between gap-3 px-3 py-1.5">
 								<dt class="text-ink-muted">Total</dt>
 								<dd class="text-right font-semibold text-ink">{peso(o.totalCentavos)}</dd>
 							</div>
@@ -691,7 +794,7 @@
 							<p class="mb-3 rounded-md bg-surface-2 px-3 py-2 text-xs text-ink-muted">
 								Wants to keep the room past {data.checkOutTime.slice(0, 5)}? Late checkout fee:
 								<strong class="text-ink">{peso(data.lateCheckoutFeePerHourCentavos)}/hour</strong> — add
-								it to the folio in Full details before checking out.
+								it to the folio below before checking out.
 							</p>
 						{/if}
 						<div class="flex gap-2">
@@ -703,11 +806,388 @@
 									</Button>
 								</form>
 							{/if}
-							<form method="POST" action="?/roomDetail" use:enhance class="flex-1">
-								<input type="hidden" name="bookingId" value={o.bookingId} />
-								<Button type="submit" variant="outline" class="w-full">Full details</Button>
-							</form>
+							<Button
+								variant="outline"
+								class="flex-1"
+								href="{base}/print/invoice/for/booking/{o.bookingId}"
+								target="_blank"
+							>
+								Print invoice
+							</Button>
 						</div>
+						<div class="mt-2 flex gap-2">
+							<Button
+								variant="outline"
+								size="sm"
+								class="flex-1"
+								href="{base}/print/registration/{o.bookingId}"
+								target="_blank"
+							>
+								Registration card
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								class="flex-1"
+								href="{base}/reservations/room/{o.bookingId}?from=front-desk&roomId={selectedRoomId}"
+							>
+								View full details
+							</Button>
+						</div>
+
+						<!-- Fetches automatically whenever a new occupied room is selected — see the
+						     $effect above. Never shown to the staff; it just keeps `formRoomDetail`/
+						     `formFolio` current for the inline sections below. -->
+						<form
+							method="POST"
+							action="?/roomDetail"
+							use:enhance
+							bind:this={roomDetailFormEl}
+							class="hidden"
+						>
+							<input type="hidden" name="bookingId" value={roomDetailBookingId} />
+						</form>
+
+						{#if formRoomDetail && formFolio && formRoomDetail.booking.id === o.bookingId}
+							<div class="mt-4 rounded-lg border border-border p-3">
+								<div class="mb-2 flex items-center justify-between">
+									<h4 class="text-sm font-semibold text-ink">Guest ID</h4>
+									{#if formRoomDetail.booking.guestIdPhotoUrl && !idCaptureOpen}
+										<button
+											type="button"
+											onclick={() => (idCaptureOpen = true)}
+											class="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
+										>
+											Retake
+										</button>
+									{/if}
+								</div>
+								{#if formRoomDetail.booking.guestIdPhotoUrl && !idCaptureOpen}
+									<a
+										href={formRoomDetail.booking.guestIdPhotoUrl}
+										target="_blank"
+										class="block"
+									>
+										<img
+											src={formRoomDetail.booking.guestIdPhotoUrl}
+											alt="Captured guest ID"
+											class="max-h-32 rounded-md border border-border"
+										/>
+									</a>
+								{:else if idCaptureOpen}
+									<form
+										method="POST"
+										action="?/captureIdPhoto"
+										use:enhance
+										enctype="multipart/form-data"
+										class="space-y-2"
+									>
+										<input type="hidden" name="bookingId" value={o.bookingId} />
+										<IdCameraCapture />
+										<div class="flex gap-2">
+											<Button type="submit" size="sm">Save ID photo</Button>
+											<button
+												type="button"
+												onclick={() => (idCaptureOpen = false)}
+												class="text-xs text-ink-muted underline underline-offset-2"
+											>
+												Cancel
+											</button>
+										</div>
+									</form>
+								{:else}
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										onclick={() => (idCaptureOpen = true)}
+									>
+										Capture ID photo
+									</Button>
+								{/if}
+							</div>
+
+							<div class="mt-4 rounded-lg border border-border p-3">
+								<div class="mb-2 flex items-center justify-between">
+									<h4 class="text-sm font-semibold text-ink">Folio</h4>
+									<Badge
+										variant="outline"
+										class={formFolio.balanceCentavos > 0
+											? 'border-transparent bg-danger/15 text-danger'
+											: 'border-transparent bg-ok/15 text-ok'}
+									>
+										{formFolio.balanceCentavos > 0
+											? `Balance due ${peso(formFolio.balanceCentavos)}`
+											: 'Settled'}
+									</Badge>
+								</div>
+
+								<div class="divide-y divide-border text-sm">
+									{#each formFolio.charges as c (c.id)}
+										<div class="flex items-start justify-between gap-2 py-1.5">
+											<div class="min-w-0 {c.voidedAt ? 'opacity-50' : ''}">
+												<span class="{c.voidedAt ? 'line-through' : ''} text-ink-muted">
+													{c.description}{#if c.quantity > 1}
+														<span class="text-xs">× {c.quantity}</span>
+													{/if}
+												</span>
+												{#if c.voidedAt}
+													<div class="text-xs text-danger">
+														Voided{#if c.voidReason}
+															— {c.voidReason}{/if}
+													</div>
+												{:else if !c.isBaseCharge}
+													<form method="POST" action="?/voidCharge" use:enhance>
+														<input type="hidden" name="bookingId" value={o.bookingId} />
+														<input type="hidden" name="chargeId" value={c.id} />
+														<button
+															type="submit"
+															class="text-xs text-ink-muted underline underline-offset-2 hover:text-danger"
+														>
+															Void
+														</button>
+													</form>
+												{/if}
+											</div>
+											<span class="shrink-0 text-right text-ink {c.voidedAt ? 'line-through opacity-50' : ''}">
+												{peso(c.totalCentavos)}
+											</span>
+										</div>
+									{/each}
+									<div class="flex items-center justify-between gap-2 py-1.5">
+										<span class="text-ink-muted">Paid</span>
+										<span class="shrink-0 text-ink">−{peso(formFolio.paidTotalCentavos)}</span>
+									</div>
+									<div class="flex items-center justify-between gap-2 py-1.5 font-semibold">
+										<span class="text-ink">Balance</span>
+										<span class="shrink-0 text-ink">{peso(formFolio.balanceCentavos)}</span>
+									</div>
+								</div>
+
+								{#if formFolio.balanceCentavos > 0}
+									<div class="mt-3">
+										{#if roomPayOpen}
+											<PaymentFields
+												action="?/recordPayment"
+												kind="room"
+												id={o.bookingId}
+												balanceCentavos={formFolio.balanceCentavos}
+												cashier={data.cashier}
+												onDone={() => (roomPayOpen = false)}
+											/>
+											<button
+												type="button"
+												onclick={() => (roomPayOpen = false)}
+												class="mt-1 text-xs text-ink-muted underline underline-offset-2"
+											>
+												Cancel
+											</button>
+										{:else}
+											<Button size="sm" class="w-full" onclick={() => (roomPayOpen = true)}>
+												Take payment ({peso(formFolio.balanceCentavos)} due)
+											</Button>
+										{/if}
+									</div>
+								{:else if formFolio.balanceCentavos < 0}
+									<div class="mt-3">
+										{#if roomRefundOpen}
+											<PaymentFields
+												action="?/refundPayment"
+												kind="room"
+												id={o.bookingId}
+												balanceCentavos={-formFolio.balanceCentavos}
+												cashier={data.cashier}
+												mode="refund"
+												onDone={() => (roomRefundOpen = false)}
+											/>
+											<button
+												type="button"
+												onclick={() => (roomRefundOpen = false)}
+												class="mt-1 text-xs text-ink-muted underline underline-offset-2"
+											>
+												Cancel
+											</button>
+										{:else}
+											<Button
+												size="sm"
+												variant="outline"
+												class="w-full"
+												onclick={() => (roomRefundOpen = true)}
+											>
+												Refund credit ({peso(-formFolio.balanceCentavos)})
+											</Button>
+										{/if}
+									</div>
+								{/if}
+
+								{#if formFolio.balanceCentavos > 0 && canChargeCityLedger && formRoomDetail.booking.status === 'checked_in'}
+									<div class="mt-3 rounded-lg border border-dashed border-border p-3">
+										{#if checkoutCityLedger}
+											<form method="POST" action="?/checkOut" use:enhance class="space-y-2">
+												<input type="hidden" name="bookingId" value={o.bookingId} />
+												<input type="hidden" name="cityLedger" value="1" />
+												<p class="text-xs text-ink-muted">
+													Move the {peso(formFolio.balanceCentavos)} balance to the Finance city ledger
+													and check the guest out.
+												</p>
+												<Input
+													name="billToName"
+													placeholder="Bill to (name)"
+													required
+													class="h-8 text-sm"
+												/>
+												<Input
+													name="billToCompany"
+													placeholder="Company (optional)"
+													class="h-8 text-sm"
+												/>
+												<Input
+													name="billReference"
+													placeholder="PO / reference (optional)"
+													class="h-8 text-sm"
+												/>
+												<Input name="billNotes" placeholder="Note (optional)" class="h-8 text-sm" />
+												<div class="flex gap-2">
+													<Button type="submit" size="sm" variant="outline" class="flex-1"
+														>Charge & check out</Button
+													>
+													<button
+														type="button"
+														onclick={() => (checkoutCityLedger = false)}
+														class="text-xs text-ink-muted underline underline-offset-2"
+													>
+														Cancel
+													</button>
+												</div>
+											</form>
+										{:else}
+											<button
+												type="button"
+												onclick={() => (checkoutCityLedger = true)}
+												class="text-xs font-medium text-ink-muted underline underline-offset-2 hover:text-ink"
+											>
+												Check out with balance → charge to city ledger
+											</button>
+										{/if}
+									</div>
+								{/if}
+
+								<div class="mt-4 border-t border-border pt-3">
+									<h4 class="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">
+										Add a charge
+									</h4>
+									{#if data.amenityItemOptions.length > 0}
+										<form
+											method="POST"
+											action="?/addItemCharge"
+											use:enhance
+											class="flex items-end gap-2"
+										>
+											<input type="hidden" name="bookingId" value={o.bookingId} />
+											<select
+												name="amenityItemId"
+												required
+												class="w-full min-w-0 flex-1 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm"
+											>
+												<option value="" disabled selected>Select an item…</option>
+												{#each data.amenityItemOptions as item (item.id)}
+													<option value={item.id}>{item.name} — {peso(item.priceCentavos)}</option>
+												{/each}
+											</select>
+											<Input name="quantity" type="number" min="1" value="1" class="w-16" />
+											<Button type="submit" size="sm">Add</Button>
+										</form>
+									{:else}
+										<p class="text-xs text-ink-muted">
+											No sellable items set up yet — add some in
+											<a href="{base}/settings/amenity-items" class="underline underline-offset-2">
+												Settings → Sellable items
+											</a>.
+										</p>
+									{/if}
+
+									{#if data.lateCheckoutFeePerHourCentavos > 0 || data.earlyCheckInFeePerHourCentavos > 0}
+										<div class="mt-3 flex flex-wrap gap-2">
+											{#if data.lateCheckoutFeePerHourCentavos > 0}
+												<form
+													method="POST"
+													action="?/addExtensionCharge"
+													use:enhance
+													class="flex items-center gap-1.5"
+												>
+													<input type="hidden" name="bookingId" value={o.bookingId} />
+													<input type="hidden" name="kind" value="late_checkout" />
+													<Input
+														name="hours"
+														type="number"
+														min="0.5"
+														step="0.5"
+														value="1"
+														class="w-16"
+													/>
+													<Button type="submit" size="sm" variant="outline">+ Late checkout fee</Button
+													>
+												</form>
+											{/if}
+											{#if data.earlyCheckInFeePerHourCentavos > 0}
+												<form
+													method="POST"
+													action="?/addExtensionCharge"
+													use:enhance
+													class="flex items-center gap-1.5"
+												>
+													<input type="hidden" name="bookingId" value={o.bookingId} />
+													<input type="hidden" name="kind" value="early_check_in" />
+													<Input
+														name="hours"
+														type="number"
+														min="0.5"
+														step="0.5"
+														value="1"
+														class="w-16"
+													/>
+													<Button type="submit" size="sm" variant="outline"
+														>+ Early check-in fee</Button
+													>
+												</form>
+											{/if}
+										</div>
+									{/if}
+								</div>
+							</div>
+
+							<div class="mt-4 rounded-lg border border-border p-3">
+								<h4 class="mb-2 text-sm font-semibold text-ink">Payments</h4>
+								{#if formRoomDetail.payments.length === 0}
+									<p class="text-sm text-ink-muted">No payment recorded yet.</p>
+								{:else}
+									<div class="space-y-2">
+										{#each formRoomDetail.payments as p (p.id)}
+											{@render paymentRow(p, 'room', o.bookingId)}
+										{/each}
+									</div>
+								{/if}
+							</div>
+
+							{#if formRoomDetail.history.length > 0}
+								<div class="mt-4 rounded-lg border border-border p-3">
+									<h4 class="mb-2 text-sm font-semibold text-ink">Status history</h4>
+									<div class="space-y-1.5">
+										{#each formRoomDetail.history as h (h.id)}
+											<div class="text-xs">
+												<span class="text-ink-muted"
+													>{h.fromStatus ? humanize(h.fromStatus) : 'created'} →</span
+												>
+												<span class="text-ink">{humanize(h.toStatus)}</span>
+												{#if h.note}<span class="text-ink-muted"> — {h.note}</span>{/if}
+											</div>
+										{/each}
+									</div>
+								</div>
+							{/if}
+						{:else}
+							<p class="mt-4 text-xs text-ink-muted">Loading folio…</p>
+						{/if}
 					{:else if selectedRoom.status === 'reserved'}
 						<div class="mb-3 text-xs font-bold tracking-wide text-ink-muted uppercase">
 							Expected today · {selectedRoom.expectedArrivals.length} arrival{selectedRoom
@@ -724,14 +1204,14 @@
 											{channelLabel(a.channel)}
 											<span class="mx-1 text-ink-muted/40">·</span>
 											<a
-												href="{base}/reservations/room/{a.bookingId}"
+												href="{base}/reservations/room/{a.bookingId}?from=front-desk&roomId={selectedRoomId}"
 												class="underline-offset-2 hover:text-ink hover:underline"
 											>
 												Check in
 											</a>
 											<span class="mx-1 text-ink-muted/40">·</span>
 											<a
-												href="{base}/reservations/room/{a.bookingId}?action=cancel"
+												href="{base}/reservations/room/{a.bookingId}?action=cancel&from=front-desk&roomId={selectedRoomId}"
 												class="underline-offset-2 hover:text-danger hover:underline"
 											>
 												Cancel
@@ -757,7 +1237,7 @@
 							<p class="mb-4 rounded-md bg-surface-2 px-3 py-2 text-xs text-ink-muted">
 								Wants to move in before {data.checkInTime.slice(0, 5)}? Early check-in fee:
 								<strong class="text-ink">{peso(data.earlyCheckInFeePerHourCentavos)}/hour</strong> — add
-								it to the folio in Full details once they've checked in.
+								it to the folio once they've checked in.
 							</p>
 						{/if}
 						<Button variant="outline" class="w-full" href="{base}/reservations">
@@ -807,14 +1287,14 @@
 												{a.roomTypeName} · {channelLabel(a.channel)}
 												<span class="mx-1 text-ink-muted/40">·</span>
 												<a
-													href="{base}/reservations/room/{a.bookingId}"
+													href="{base}/reservations/room/{a.bookingId}?from=front-desk"
 													class="underline-offset-2 hover:text-ink hover:underline"
 												>
 													Check in
 												</a>
 												<span class="mx-1 text-ink-muted/40">·</span>
 												<a
-													href="{base}/reservations/room/{a.bookingId}?action=cancel"
+													href="{base}/reservations/room/{a.bookingId}?action=cancel&from=front-desk"
 													class="underline-offset-2 hover:text-danger hover:underline"
 												>
 													Cancel
@@ -864,6 +1344,7 @@
 			<form
 				method="POST"
 				action="?/walkInSearch"
+				bind:this={walkInSearchFormEl}
 				use:enhance={() => {
 					return async ({ update }) => {
 						await update({ reset: false });
@@ -878,7 +1359,8 @@
 							id="wiCheckIn"
 							type="date"
 							name="checkIn"
-							value={formWalkInSearch?.checkIn ?? data.businessDate}
+							bind:value={wiCheckIn}
+							onchange={scheduleWalkInSearch}
 						/>
 					</div>
 					<div>
@@ -887,7 +1369,8 @@
 							id="wiCheckOut"
 							type="date"
 							name="checkOut"
-							value={formWalkInSearch?.checkOut ?? todayPlus(1)}
+							bind:value={wiCheckOut}
+							onchange={scheduleWalkInSearch}
 						/>
 					</div>
 					<div>
@@ -898,7 +1381,8 @@
 							min="1"
 							max="20"
 							name="occupancy"
-							value={formWalkInSearch?.occupancy ?? 1}
+							bind:value={wiOccupancy}
+							oninput={scheduleWalkInSearch}
 						/>
 					</div>
 					<div>
@@ -909,7 +1393,8 @@
 							min="1"
 							max="8"
 							name="roomCount"
-							value={formWalkInSearch?.roomCount ?? 1}
+							oninput={scheduleWalkInSearch}
+							bind:value={wiRoomCount}
 						/>
 					</div>
 				</div>
@@ -918,7 +1403,24 @@
 
 			{#if formAvailableRoomTypes}
 				{#if formAvailableRoomTypes.length === 0}
-					<p class="mt-4 text-sm text-ink-muted">No rooms available for these dates/occupancy.</p>
+					<div class="mt-4 rounded-lg border border-dashed border-border p-3">
+						<p class="text-sm text-ink-muted">No rooms available for these dates/occupancy.</p>
+						{#if formSuggestedRoomCount}
+							<p class="mt-1.5 text-xs text-ink-muted">
+								No room type fits {formWalkInSearch?.occupancy} guests in {formWalkInSearch?.roomCount}
+								room{formWalkInSearch?.roomCount === 1 ? '' : 's'}, even with extra beds.
+							</p>
+							<Button
+								type="button"
+								size="sm"
+								variant="outline"
+								class="mt-2"
+								onclick={() => useSuggestedRoomCount(formSuggestedRoomCount!)}
+							>
+								Try {formSuggestedRoomCount} rooms instead
+							</Button>
+						{/if}
+					</div>
 				{:else}
 					<div class="mt-4 divide-y divide-border rounded-lg border border-border">
 						{#each formAvailableRoomTypes as rt (rt.id)}
@@ -939,10 +1441,30 @@
 											<div class="text-sm font-medium text-ink">{rt.name}</div>
 											<div class="text-xs text-ink-muted">
 												{plan.name} · {rt.availableRooms} free
+												{#if rt.extraBedsNeeded > 0}
+													<span class="ml-1 rounded border border-border px-1 py-0.5 text-[10px] font-medium text-ink">
+														+{rt.extraBedsNeeded} extra bed{rt.extraBedsNeeded === 1 ? '' : 's'}
+														{#if plan.extraBedFeeCentavos}
+															({peso(rt.extraBedsNeeded * plan.extraBedFeeCentavos)})
+														{/if}
+													</span>
+												{/if}
 											</div>
+											{#if rt.extraBedsNeeded > 0 && rt.suggestedRoomCount}
+												<button
+													type="button"
+													onclick={(e) => {
+														e.preventDefault();
+														useSuggestedRoomCount(rt.suggestedRoomCount!);
+													}}
+													class="mt-0.5 text-[11px] text-ink-muted underline underline-offset-2 hover:text-ink"
+												>
+													or use {rt.suggestedRoomCount} rooms instead, no extra bed
+												</button>
+											{/if}
 										</div>
 									</div>
-									<div class="text-sm font-medium text-ink">{peso(plan.price.totalCentavos)}</div>
+									<div class="text-sm font-medium text-ink">{peso(walkInLineTotal(rt, plan))}</div>
 								</label>
 							{/each}
 						{/each}
@@ -964,6 +1486,7 @@
 					<input type="hidden" name="roomCount" value={formWalkInSearch.roomCount} />
 					<input type="hidden" name="roomTypeId" value={roomTypeId} />
 					<input type="hidden" name="ratePlanId" value={ratePlanId} />
+					<input type="hidden" name="originRoomId" value={selectedRoomId ?? ''} />
 					<div>
 						<Label for="wiFullName">Full name</Label>
 						<Input id="wiFullName" name="fullName" required maxlength={160} />
@@ -995,364 +1518,6 @@
 		</div>
 	</Sheet.Content>
 </Sheet.Root>
-
-<Dialog.Root bind:open={detailDialogOpen}>
-	<Dialog.Content class="max-h-[85vh] overflow-y-auto sm:max-w-lg">
-		{#if formRoomDetail}
-			<Dialog.Header>
-				<Dialog.Title
-					>Room {formRoomDetail.assignedRooms?.[0]?.roomNumber ?? ''} — {formRoomDetail.guest
-						.fullName}</Dialog.Title
-				>
-				<Dialog.Description>{formRoomDetail.roomType.name}</Dialog.Description>
-			</Dialog.Header>
-
-			<div class="space-y-4">
-				<div class="rounded-lg border border-border p-4">
-					<h3 class="mb-2 text-sm font-semibold text-ink">Guest</h3>
-					<div class="text-sm text-ink">{formRoomDetail.guest.fullName}</div>
-					<div class="text-sm text-ink-muted">{formRoomDetail.guest.email}</div>
-					{#if formRoomDetail.guest.phone}
-						<div class="text-sm text-ink-muted">{formRoomDetail.guest.phone}</div>
-					{/if}
-					{#if formRoomDetail.guest.specialRequests}
-						<p class="mt-2 text-xs text-ink-muted">
-							Special requests: {formRoomDetail.guest.specialRequests}
-						</p>
-					{/if}
-				</div>
-
-				<div class="rounded-lg border border-border p-4">
-					<h3 class="mb-2 text-sm font-semibold text-ink">Stay</h3>
-					<div class="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-						<div>
-							<div class="text-xs text-ink-muted">Check-in</div>
-							<div class="text-ink">{formRoomDetail.booking.checkIn}</div>
-						</div>
-						<div>
-							<div class="text-xs text-ink-muted">Check-out</div>
-							<div class="text-ink">{formRoomDetail.booking.checkOut}</div>
-						</div>
-						<div>
-							<div class="text-xs text-ink-muted">Occupancy</div>
-							<div class="text-ink">{formRoomDetail.booking.occupancy} guests</div>
-						</div>
-						<div>
-							<div class="text-xs text-ink-muted">Rate plan</div>
-							<div class="text-ink">{formRoomDetail.ratePlan.name}</div>
-						</div>
-						<div>
-							<div class="text-xs text-ink-muted">Rooms</div>
-							<div class="text-ink">{formRoomDetail.bookingRoom.quantity}</div>
-						</div>
-						{#if formRoomDetail.assignedRooms.length > 0}
-							<div>
-								<div class="text-xs text-ink-muted">Assigned</div>
-								<div class="text-ink">
-									{formRoomDetail.assignedRooms.map((r) => r.roomNumber).join(', ')}
-								</div>
-							</div>
-						{/if}
-					</div>
-				</div>
-
-				<div class="rounded-lg border border-border p-4">
-					<div class="mb-2 flex items-center justify-between">
-						<h3 class="text-sm font-semibold text-ink">Folio</h3>
-						{#if formFolio}
-							<Badge
-								variant="outline"
-								class={formFolio.balanceCentavos > 0
-									? 'border-transparent bg-danger/15 text-danger'
-									: 'border-transparent bg-ok/15 text-ok'}
-							>
-								{formFolio.balanceCentavos > 0
-									? `Balance due ${peso(formFolio.balanceCentavos)}`
-									: 'Settled'}
-							</Badge>
-						{/if}
-					</div>
-
-					{#if formFolio}
-						<Table.Root>
-							<Table.Body>
-								{#each formFolio.charges as c (c.id)}
-									<Table.Row class={c.voidedAt ? 'opacity-50' : ''}>
-										<Table.Cell class="text-ink-muted">
-											<span class={c.voidedAt ? 'line-through' : ''}>
-												{c.description}{#if c.quantity > 1}<span class="text-xs">
-														× {c.quantity}</span
-													>{/if}
-											</span>
-											{#if c.voidedAt}
-												<span class="ml-1.5 text-xs text-danger"
-													>Voided{#if c.voidReason}
-														— {c.voidReason}{/if}</span
-												>
-											{/if}
-										</Table.Cell>
-										<Table.Cell class="text-right text-ink">
-											<span class={c.voidedAt ? 'line-through' : ''}>{peso(c.totalCentavos)}</span>
-										</Table.Cell>
-										<Table.Cell class="w-8 text-right">
-											{#if !c.isBaseCharge && !c.voidedAt}
-												<form method="POST" action="?/voidCharge" use:enhance>
-													<input type="hidden" name="bookingId" value={formRoomDetail.booking.id} />
-													<input type="hidden" name="chargeId" value={c.id} />
-													<button
-														type="submit"
-														class="text-xs text-ink-muted underline underline-offset-2 hover:text-danger"
-													>
-														Void
-													</button>
-												</form>
-											{/if}
-										</Table.Cell>
-									</Table.Row>
-								{/each}
-								<Table.Row>
-									<Table.Cell class="text-ink-muted">Paid</Table.Cell>
-									<Table.Cell class="text-right text-ink"
-										>−{peso(formFolio.paidTotalCentavos)}</Table.Cell
-									>
-									<Table.Cell></Table.Cell>
-								</Table.Row>
-								<Table.Row>
-									<Table.Cell class="font-semibold text-ink">Balance</Table.Cell>
-									<Table.Cell class="text-right font-semibold text-ink"
-										>{peso(formFolio.balanceCentavos)}</Table.Cell
-									>
-									<Table.Cell></Table.Cell>
-								</Table.Row>
-							</Table.Body>
-						</Table.Root>
-
-						{#if formFolio.balanceCentavos > 0}
-							<div class="mt-3">
-								{#if roomPayOpen}
-									<PaymentFields
-										action="?/recordPayment"
-										kind="room"
-										id={formRoomDetail.booking.id}
-										balanceCentavos={formFolio.balanceCentavos}
-										cashier={data.cashier}
-										onDone={() => (roomPayOpen = false)}
-									/>
-									<button
-										type="button"
-										onclick={() => (roomPayOpen = false)}
-										class="mt-1 text-xs text-ink-muted underline underline-offset-2"
-									>
-										Cancel
-									</button>
-								{:else}
-									<Button size="sm" class="w-full" onclick={() => (roomPayOpen = true)}>
-										Take payment ({peso(formFolio.balanceCentavos)} due)
-									</Button>
-								{/if}
-							</div>
-						{:else if formFolio.balanceCentavos < 0}
-							<div class="mt-3">
-								{#if roomRefundOpen}
-									<PaymentFields
-										action="?/refundPayment"
-										kind="room"
-										id={formRoomDetail.booking.id}
-										balanceCentavos={-formFolio.balanceCentavos}
-										cashier={data.cashier}
-										mode="refund"
-										onDone={() => (roomRefundOpen = false)}
-									/>
-									<button
-										type="button"
-										onclick={() => (roomRefundOpen = false)}
-										class="mt-1 text-xs text-ink-muted underline underline-offset-2"
-									>
-										Cancel
-									</button>
-								{:else}
-									<Button
-										size="sm"
-										variant="outline"
-										class="w-full"
-										onclick={() => (roomRefundOpen = true)}
-									>
-										Refund credit ({peso(-formFolio.balanceCentavos)})
-									</Button>
-								{/if}
-							</div>
-						{/if}
-
-						{#if formFolio.balanceCentavos > 0 && canChargeCityLedger && formRoomDetail.booking.status === 'checked_in'}
-							<div class="mt-3 rounded-lg border border-dashed border-border p-3">
-								{#if checkoutCityLedger}
-									<form method="POST" action="?/checkOut" use:enhance class="space-y-2">
-										<input type="hidden" name="bookingId" value={formRoomDetail.booking.id} />
-										<input type="hidden" name="cityLedger" value="1" />
-										<p class="text-xs text-ink-muted">
-											Move the {peso(formFolio.balanceCentavos)} balance to the Finance city ledger and
-											check the guest out.
-										</p>
-										<Input
-											name="billToName"
-											placeholder="Bill to (name)"
-											required
-											class="h-8 text-sm"
-										/>
-										<Input
-											name="billToCompany"
-											placeholder="Company (optional)"
-											class="h-8 text-sm"
-										/>
-										<Input
-											name="billReference"
-											placeholder="PO / reference (optional)"
-											class="h-8 text-sm"
-										/>
-										<Input name="billNotes" placeholder="Note (optional)" class="h-8 text-sm" />
-										<div class="flex gap-2">
-											<Button type="submit" size="sm" variant="outline" class="flex-1"
-												>Charge & check out</Button
-											>
-											<button
-												type="button"
-												onclick={() => (checkoutCityLedger = false)}
-												class="text-xs text-ink-muted underline underline-offset-2"
-											>
-												Cancel
-											</button>
-										</div>
-									</form>
-								{:else}
-									<button
-										type="button"
-										onclick={() => (checkoutCityLedger = true)}
-										class="text-xs font-medium text-ink-muted underline underline-offset-2 hover:text-ink"
-									>
-										Check out with balance → charge to city ledger
-									</button>
-								{/if}
-							</div>
-						{/if}
-
-						<div class="mt-4 border-t border-border pt-3">
-							<h4 class="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">
-								Add a charge
-							</h4>
-							{#if data.amenityItemOptions.length > 0}
-								<form
-									method="POST"
-									action="?/addItemCharge"
-									use:enhance
-									class="flex items-end gap-2"
-								>
-									<input type="hidden" name="bookingId" value={formRoomDetail.booking.id} />
-									<select
-										name="amenityItemId"
-										required
-										class="w-full min-w-0 flex-1 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm"
-									>
-										<option value="" disabled selected>Select an item…</option>
-										{#each data.amenityItemOptions as item (item.id)}
-											<option value={item.id}>{item.name} — {peso(item.priceCentavos)}</option>
-										{/each}
-									</select>
-									<Input name="quantity" type="number" min="1" value="1" class="w-16" />
-									<Button type="submit" size="sm">Add</Button>
-								</form>
-							{:else}
-								<p class="text-xs text-ink-muted">
-									No sellable items set up yet — add some in
-									<a href="{base}/settings/amenity-items" class="underline underline-offset-2">
-										Settings → Sellable items
-									</a>.
-								</p>
-							{/if}
-
-							{#if data.lateCheckoutFeePerHourCentavos > 0 || data.earlyCheckInFeePerHourCentavos > 0}
-								<div class="mt-3 flex flex-wrap gap-2">
-									{#if data.lateCheckoutFeePerHourCentavos > 0}
-										<form
-											method="POST"
-											action="?/addExtensionCharge"
-											use:enhance
-											class="flex items-center gap-1.5"
-										>
-											<input type="hidden" name="bookingId" value={formRoomDetail.booking.id} />
-											<input type="hidden" name="kind" value="late_checkout" />
-											<Input
-												name="hours"
-												type="number"
-												min="0.5"
-												step="0.5"
-												value="1"
-												class="w-16"
-											/>
-											<Button type="submit" size="sm" variant="outline">+ Late checkout fee</Button>
-										</form>
-									{/if}
-									{#if data.earlyCheckInFeePerHourCentavos > 0}
-										<form
-											method="POST"
-											action="?/addExtensionCharge"
-											use:enhance
-											class="flex items-center gap-1.5"
-										>
-											<input type="hidden" name="bookingId" value={formRoomDetail.booking.id} />
-											<input type="hidden" name="kind" value="early_check_in" />
-											<Input
-												name="hours"
-												type="number"
-												min="0.5"
-												step="0.5"
-												value="1"
-												class="w-16"
-											/>
-											<Button type="submit" size="sm" variant="outline">+ Early check-in fee</Button
-											>
-										</form>
-									{/if}
-								</div>
-							{/if}
-						</div>
-					{/if}
-				</div>
-
-				<div class="rounded-lg border border-border p-4">
-					<h3 class="mb-2 text-sm font-semibold text-ink">Payments</h3>
-					{#if formRoomDetail.payments.length === 0}
-						<p class="text-sm text-ink-muted">No payment recorded yet.</p>
-					{:else}
-						<div class="space-y-2">
-							{#each formRoomDetail.payments as p (p.id)}
-								{@render paymentRow(p, 'room', formRoomDetail.booking.id)}
-							{/each}
-						</div>
-					{/if}
-				</div>
-
-				<div class="rounded-lg border border-border p-4">
-					<h3 class="mb-2 text-sm font-semibold text-ink">Status history</h3>
-					{#if formRoomDetail.history.length === 0}
-						<p class="text-sm text-ink-muted">No status changes recorded yet.</p>
-					{:else}
-						<div class="space-y-2">
-							{#each formRoomDetail.history as h (h.id)}
-								<div class="text-sm">
-									<span class="text-ink-muted"
-										>{h.fromStatus ? humanize(h.fromStatus) : 'created'} →</span
-									>
-									<span class="text-ink">{humanize(h.toStatus)}</span>
-									{#if h.note}<span class="text-ink-muted"> — {h.note}</span>{/if}
-								</div>
-							{/each}
-						</div>
-					{/if}
-				</div>
-			</div>
-		{/if}
-	</Dialog.Content>
-</Dialog.Root>
 
 <Dialog.Root bind:open={hallDetailDialogOpen}>
 	<Dialog.Content class="max-h-[85vh] overflow-y-auto sm:max-w-lg">

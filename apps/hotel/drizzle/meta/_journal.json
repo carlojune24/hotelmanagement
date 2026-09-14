@@ -190,6 +190,41 @@
       "when": 1789137200899,
       "tag": "0026_tidy_mariko_yashida",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1789220488983,
+      "tag": "0027_outgoing_tenebrous",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1789221869949,
+      "tag": "0028_tidy_meteorite",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1789278885529,
+      "tag": "0029_stormy_smasher",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1789289843942,
+      "tag": "0030_smart_lester",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1789297845398,
+      "tag": "0031_pink_human_torch",
+      "breakpoints": true
     }
   ]
 }

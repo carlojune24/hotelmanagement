@@ -230,6 +230,8 @@ Two distinct headers, never both on screen at once. On the five wizard steps (`d
 
 **Scope: the printable / PDF documents a hotel issues from a folio** — `src/routes/[hotel]/print/**` and the shared `accountable-form.svelte` component. Currently Invoice and Official Receipt (incl. a Refund variant); later X-reading, Z-reading, and the OR-liquidation register as per-type variations of the same A4 shell. Rendered byte-identically for a guest (order `access_token`) and for staff, and to PDF. It does **not** style the `/{hotel}/finance/**` management screens — those keep the staff shadcn/oklch shell. A guest booking route never inherits this world; this world never inherits either of the other two.
 
+**Invoice and Official Receipt also render as a thermal continuous-roll receipt** (`thermal-receipt.svelte`, 58mm/80mm — a per-hotel `bir_settings.thermalPaperWidthMm` setting, Finance → BIR → Setup) — the default rendering at the three print routes since front desk actually hands these two documents across the counter on a thermal printer; this A4 shell stays one click away via `format-toggle.svelte`. X-reading, Z-reading, the liquidation register, and the city-ledger statement stay A4-only — see the "Thermal Receipt variant" section below for how it departs from this world.
+
 ## Overview
 
 **Creative North Star: "The BIR-Registered Accountable Form"**
@@ -395,3 +397,23 @@ Two equal columns, gap 14mm, `margin-top: 10mm`. Each: a `border-top: 1px solid 
 - **Don't** use px or rem for page geometry, and don't make the layout responsive — the sheet is a fixed 210mm; a narrow screen scrolls, the PDF does not change.
 - **Don't** put a figure in Inter, or a name / label in mono.
 - **Don't** style the `/{hotel}/finance/**` BIR-management screens with this world — they stay on the staff shadcn/oklch shell.
+
+<!-- ===================================================================== -->
+
+## Thermal Receipt variant (58mm / 80mm)
+
+**Scope: `thermal-receipt.svelte`, the Invoice/Official Receipt-only continuous-roll rendering.** Same `DocumentSnapshot` data as the A4 shell above, same BIR-compliance content obligations (permit/printer/serial-range block or the disclaimer, VAT split or the non-VAT line, amount in words) — every content section carries over, none dropped. It is a **scoped deviation** from the A4 world above, not a new brand: same family (ink-on-white, BIR-authoritative-by-spareness, JetBrains Mono for every figure), forced into a genuinely different topology by two hard constraints a 55–80mm continuous roll imposes that A4 does not: a 30–48 character width budget, and a monochrome thermal head that cannot print the brick-red accent at all.
+
+**What carries over unchanged:** ink-on-white; BIR content completeness; `print-color-adjust: exact`; the whole page reads as the same "verify this against your books" register the A4 world's `.af-mono` carries, just applied everywhere instead of figures only (see below for why) — set once as `.tr-page`'s own `font-family`, not a per-element class.
+
+**What's deliberately different, and why:**
+- **No brick red — bold-on-black instead.** A real thermal print head is single-colour; red ink is not physically producible. The one emphasis move the A4 world spends on `--af-red` moves here to a filled black block (`.tr-doctype-block`, `background:#000; color:#fff`) around the document-type word and serial — genre-authentic (real POS receipts use reverse-video for the header) and, unlike a CSS color that a thermal driver would just render as black anyway, an actually-printable design choice.
+- **Monospace for everything, not just figures.** The A4 world's Two-Register Rule (Inter for names/labels, mono for figures) is suspended here: a thermal receipt's whole identity is rigid fixed-width columns — item lines, the totals ladder, every `label ⟷ value` row — and a proportional face would break that alignment discipline that defines the format. JetBrains Mono Variable runs the entire page.
+- **Dashed rules, no frame.** The A4 world's `3px double` outer frame and 1px structural rules become a single `.tr-rule`/`.tr-dashed` hairline between sections — a continuous roll has no page edge to frame, and dashed rules (not solid) are the genre's own section-break idiom.
+- **Stacked, not columnar.** Every side-by-side A4 pairing (letterhead + serial block, parties + reference, amount-in-words + totals, the two signature columns) collapses to one column top-to-bottom — there is no width budget for two columns at 58mm.
+- **Item lines are two-line, not four-column.** `Description / Qty / Unit price / Amount` doesn't fit one 30–48 char line; each item renders as `Description` then `  Qty x Unit price          Amount` on the next line, the standard POS receipt idiom.
+- **A quiet close.** `Thank you for staying with us.` — the one line this variant adds that the A4 shell doesn't carry, since a receipt handed across a counter earns the courtesy an internal accountable form doesn't need. Static, not data-driven; never a fabricated claim.
+
+**Geometry.** `@page { size: <58|80>mm auto; margin: 0 }`, width set from a per-hotel `bir_settings.thermalPaperWidthMm` (58 or 80, app-validated) rather than PDF-rendered — the roll's length is whatever the content needs (`auto`), not a fixed sheet height. Base type 8pt, hotel name 11pt, doctype/serial/total 9–11pt bold. Long values (a multi-night stay-date range) wrap rather than risk overflowing the roll edge — the one place this variant trades right-aligned tidiness for correctness.
+
+**Toggle.** `format-toggle.svelte`, a screen-only (`@media print { display:none }`) text link at the top of both renderings — "View full-page (A4)" from thermal, "View thermal receipt" from A4 — driving a `?format=a4` query param on the same route. Same `DocumentSnapshot`, same access-token guard; the toggle never re-fetches or re-authorizes.

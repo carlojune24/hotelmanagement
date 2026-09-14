@@ -10,7 +10,7 @@
 	import type { CartStore } from '$lib/cart.svelte';
 	import type { BedConfigEntry } from '$lib/server/db/schema/inventory';
 	import type { AmenityHighlight, AvailableRatePlan, AvailableRoomType, CancellationTerms } from '$lib/server/availability';
-	import { MAX_ROOMS_PER_LINE, scaleRoomPrice } from '$lib/pricing-utils';
+	import { MAX_ROOMS_PER_LINE, addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -28,6 +28,17 @@
 
 	function addRoomToCart(roomType: AvailableRoomType, plan: AvailableRatePlan) {
 		const count = roomCounts[roomType.id] ?? 1;
+		let price = scaleRoomPrice(plan.price, count);
+		// Mirrors the real charge `book/details`'s `createOrder` re-derives server-side —
+		// shown here too so the cart/review total isn't a surprise jump at checkout.
+		if (roomType.extraBedsNeeded > 0 && plan.extraBedFeeCentavos) {
+			price = addFlatFeeCentavos(
+				price,
+				`Extra bed × ${roomType.extraBedsNeeded}`,
+				roomType.extraBedsNeeded * plan.extraBedFeeCentavos,
+				data.hotel.vatRateBps
+			);
+		}
 		cart.addRoom({
 			roomTypeId: roomType.id,
 			ratePlanId: plan.id,
@@ -37,12 +48,27 @@
 			checkOut: data.checkOut,
 			occupancy: data.adults + data.children,
 			roomCount: count,
-			price: scaleRoomPrice(plan.price, count)
+			price
 		});
 	}
 
 	const bedConfigText = (entries: BedConfigEntry[]) =>
 		entries.map((e) => `${e.quantity} ${e.type}`).join(' + ');
+
+	/** Same scale-then-extra-bed math `addRoomToCart` uses — kept in sync so the displayed
+	 *  row total always matches what actually lands in the cart. */
+	function lineTotalCentavos(roomType: AvailableRoomType, plan: AvailableRatePlan, count: number): number {
+		let price = scaleRoomPrice(plan.price, count);
+		if (roomType.extraBedsNeeded > 0 && plan.extraBedFeeCentavos) {
+			price = addFlatFeeCentavos(
+				price,
+				`Extra bed × ${roomType.extraBedsNeeded}`,
+				roomType.extraBedsNeeded * plan.extraBedFeeCentavos,
+				data.hotel.vatRateBps
+			);
+		}
+		return price.totalCentavos;
+	}
 
 	function cancellationLabel(c: CancellationTerms | null): { text: string; free: boolean } {
 		if (c && c.freeCancelHours != null) {
@@ -212,10 +238,19 @@
 											/>{/if}
 										{cancel.text}
 									</span>
+									{#if roomType.extraBedsNeeded > 0}
+										<p class="mt-0.5 text-xs text-[var(--ledger-ink-muted)]">
+											Includes {roomType.extraBedsNeeded} extra bed{roomType.extraBedsNeeded === 1
+												? ''
+												: 's'} for your party size{#if plan.extraBedFeeCentavos}
+												({peso(roomType.extraBedsNeeded * plan.extraBedFeeCentavos)})
+											{/if}
+										</p>
+									{/if}
 								</div>
 								<div class="flex items-center gap-4">
 									<div class="ledger-data text-right">
-										{peso(plan.price.totalCentavos * count)}
+										{peso(lineTotalCentavos(roomType, plan, count))}
 										<span class="ledger-label block"
 											>total{count > 1 ? ` · ${count} rooms` : ''}</span
 										>

@@ -15,7 +15,6 @@
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
-	import GemIcon from '@lucide/svelte/icons/gem';
 	import WalletIcon from '@lucide/svelte/icons/wallet';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import BanknoteIcon from '@lucide/svelte/icons/banknote';
@@ -23,6 +22,7 @@
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	import ShieldIcon from '@lucide/svelte/icons/shield';
+	import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
 	import BuildingIcon from '@lucide/svelte/icons/building-2';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MoonIcon from '@lucide/svelte/icons/moon';
@@ -73,12 +73,17 @@
 				icon: SparklesIcon,
 				show: can('housekeeping:read')
 			},
-			{ seg: 'amenities', label: 'Amenities', icon: GemIcon, show: can('booking:read') },
 			{ seg: 'reviews', label: 'Reviews', icon: StarIcon, show: can('review:read') },
 			{ seg: 'finance', label: 'Finance', icon: WalletIcon, show: can('finance:read') },
 			{ seg: 'hr', label: 'HR', icon: UsersIcon, show: can('hr:read') },
 			{ seg: 'payroll', label: 'Payroll', icon: BanknoteIcon, show: can('payroll:read') },
 			{ seg: 'reports', label: 'Reports', icon: ChartColumnIcon, show: can('reports:read') },
+			{
+				seg: 'settings/audit',
+				label: 'Audit log',
+				icon: ShieldCheckIcon,
+				show: can('hotel:admin') || isAdmin
+			},
 			{
 				seg: 'settings',
 				label: 'Settings',
@@ -88,7 +93,15 @@
 		].filter((i) => i.show)
 	);
 
-	const active = (seg: string) => page.url.pathname.startsWith(`${base}/${seg}`);
+	const active = (seg: string) => {
+		const path = page.url.pathname;
+		const target = `${base}/${seg}`;
+		if (path === target) return true;
+		// "Settings" would otherwise also read active on /settings/audit, since that
+		// route nests under it — it now has its own top-level entry, so exclude it here.
+		if (seg === 'settings') return path.startsWith(`${target}/`) && !path.startsWith(`${base}/settings/audit`);
+		return path.startsWith(`${target}/`);
+	};
 
 	// Keep the unread badge live across the whole staff app — not just on the
 	// Messages page itself — so a new cancellation request is noticed without
@@ -106,11 +119,17 @@
 		<Sidebar.Header>
 			<Sidebar.Menu>
 				<Sidebar.MenuItem>
-					<Sidebar.MenuButton size="lg" tooltipContent={data.hotel?.name}>
+					<Sidebar.MenuButton
+						size="lg"
+						tooltipContent={data.hotel?.name}
+						class="group-data-[collapsible=icon]:justify-center"
+					>
 						{#snippet child({ props })}
 							<a href={base} {...props}>
 								<BuildingIcon />
-								<span class="truncate font-semibold">{data.hotel?.name}</span>
+								<span class="truncate font-semibold group-data-[collapsible=icon]:hidden"
+								>{data.hotel?.name}</span
+							>
 							</a>
 						{/snippet}
 					</Sidebar.MenuButton>

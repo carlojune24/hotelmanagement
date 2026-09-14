@@ -28,3 +28,28 @@ export function scaleRoomPrice(perRoom: PriceBreakdown, roomCount: number): Pric
 		totalCentavos: perRoom.totalCentavos * roomCount
 	};
 }
+
+/**
+ * Adds one more flat fee (+ its own VAT share) on top of an already-computed breakdown —
+ * for a charge that's per *line*, not per room, so it must be added after `scaleRoomPrice`
+ * rather than baked into the per-room price and multiplied along with everything else.
+ * The extra-bed fee (`ratePlans.extraBedFeeCentavos` × however many beds the whole line
+ * needs, from `$lib/occupancy.ts`'s solver) is the first user of this; kept generic since
+ * nothing about it is extra-bed-specific.
+ */
+export function addFlatFeeCentavos(
+	breakdown: PriceBreakdown,
+	name: string,
+	amountCentavos: number,
+	vatRateBps: number
+): PriceBreakdown {
+	if (amountCentavos <= 0) return breakdown;
+	const feeVatCentavos = Math.round((amountCentavos * vatRateBps) / 10000);
+	return {
+		nights: breakdown.nights,
+		subtotalCentavos: breakdown.subtotalCentavos,
+		fees: [...breakdown.fees, { name, amountCentavos }],
+		vatCentavos: breakdown.vatCentavos + feeVatCentavos,
+		totalCentavos: breakdown.totalCentavos + amountCentavos + feeVatCentavos
+	};
+}

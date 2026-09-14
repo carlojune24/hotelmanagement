@@ -135,7 +135,10 @@ export function computeFeesAndVat(params: {
 	return { fees, vatCentavos, totalCentavos: subtotalCentavos + feesTotalCentavos + vatCentavos };
 }
 
-/** Bill builder: nightly rates (with per-date overrides) + fees + VAT → total, in centavos. */
+/** Bill builder: nightly rates (with per-date overrides) + fees + VAT → total, in centavos.
+ *  Per-room (not scaled by room count) — an extra-bed charge, being per-line rather than
+ *  per-room, is added separately after `scaleRoomPrice`; see `pricing-utils.ts`'s
+ *  `addFlatFeeCentavos`. */
 export async function priceStay(params: {
 	hotelId: string;
 	ratePlanId: string;

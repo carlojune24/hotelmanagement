@@ -1,4 +1,4 @@
-import { error, fail } from '@sveltejs/kit';
+import { error, fail, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { roleCan } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
@@ -27,7 +27,8 @@ import {
 	manuallyConfirmOrder,
 	reinstateBooking
 } from '$lib/server/status-override';
-import { ModifyStayError, modifyBookingStay } from '$lib/server/booking-modify';
+import { ModifyStayError, listRoomTypeOptionsForModify, modifyBookingStay } from '$lib/server/booking-modify';
+import { saveUpload } from '$lib/server/uploads';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, params, url }) => {
@@ -64,6 +65,12 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		const canModifyStay =
 			(detail.booking.status === 'confirmed' || detail.booking.status === 'checked_in') &&
 			detail.order.status === 'confirmed';
+		// Room type/rate plan/occupancy changes are confirmed-only (see booking-modify.ts) —
+		// no need to fetch the picker options otherwise.
+		const modifyRoomTypeOptions =
+			canModifyStay && detail.booking.status === 'confirmed'
+				? await listRoomTypeOptionsForModify(hotelId)
+				: [];
 
 		const [thread, openRequest] = await Promise.all([
 			listThread(detail.order.id),
@@ -78,6 +85,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 			cancelQuote,
 			canMarkNoShow,
 			canModifyStay,
+			modifyRoomTypeOptions,
 			canAdmin,
 			thread,
 			openRequest,
@@ -130,9 +138,24 @@ export const actions: Actions = {
 		const parsed = z.array(z.string().uuid()).min(1).safeParse(raw.getAll('roomId'));
 		if (!parsed.success) return fail(400, { error: 'Select a room for check-in.' });
 
+		// Optional — a live camera capture from the check-in form, never a file picker.
+		// Never blocks check-in: a bad/oversized photo is dropped with a toast, not a
+		// failed check-in.
+		let guestIdPhotoUrl: string | null = null;
+		const idPhoto = raw.get('guestIdPhoto');
+		if (idPhoto instanceof File && idPhoto.size > 0) {
+			try {
+				guestIdPhotoUrl = await saveUpload(hotelId, idPhoto);
+			} catch (e) {
+				console.error('checkIn: could not save guest ID photo', event.params.id, e);
+			}
+		}
+
 		try {
-			await checkInBooking(hotelId, event.params.id, parsed.data, event.locals.user);
-			return { ok: 'Guest checked in.' };
+			await checkInBooking(hotelId, event.params.id, parsed.data, event.locals.user, guestIdPhotoUrl);
+			// Check-in is a front-desk operation — land back on the room grid with the
+			// just-assigned room selected, instead of leaving staff on this booking page.
+			redirect(303, `/${event.params.hotel}/front-desk?roomId=${parsed.data[0]}`);
 		} catch (e) {
 			if (e instanceof CheckInError) return fail(400, { error: e.message });
 			throw e;
@@ -325,13 +348,17 @@ export const actions: Actions = {
 	modifyStay: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'booking:write');
 		const hotelId = event.locals.hotel!.id;
-		if (event.params.kind !== 'room') return fail(400, { error: 'Only room bookings can have their dates modified.' });
+		if (event.params.kind !== 'room') return fail(400, { error: 'Only room bookings can be modified this way.' });
 
 		const parsed = z
 			.object({
 				checkIn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Enter a valid check-in date.'),
 				checkOut: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Enter a valid check-out date.'),
-				reason: z.string().trim().min(1, 'Enter a reason for the date change.').max(500)
+				roomTypeId: z.string().uuid().optional().or(z.literal('')),
+				ratePlanId: z.string().uuid().optional().or(z.literal('')),
+				occupancy: z.coerce.number().int().min(1).max(50).optional(),
+				extraBeds: z.coerce.number().int().min(0).max(50).optional(),
+				reason: z.string().trim().min(1, 'Enter a reason for this change.').max(500)
 			})
 			.safeParse(Object.fromEntries(await event.request.formData()));
 		if (!parsed.success) {
@@ -344,10 +371,14 @@ export const actions: Actions = {
 				bookingId: event.params.id,
 				newCheckIn: parsed.data.checkIn,
 				newCheckOut: parsed.data.checkOut,
+				newRoomTypeId: parsed.data.roomTypeId || undefined,
+				newRatePlanId: parsed.data.ratePlanId || undefined,
+				newOccupancy: parsed.data.occupancy,
+				newExtraBeds: parsed.data.extraBeds,
 				reason: parsed.data.reason,
 				actor: event.locals.user
 			});
-			const bits = ['Booking dates updated.'];
+			const bits = ['Booking updated.'];
 			if (res.deltaCentavos > 0) bits.push(`Folio charged ₱${(res.deltaCentavos / 100).toFixed(2)}.`);
 			if (res.deltaCentavos < 0) bits.push(`Folio credited ₱${(-res.deltaCentavos / 100).toFixed(2)}.`);
 			return { ok: bits.join(' ') };

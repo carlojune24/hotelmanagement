@@ -5,7 +5,7 @@ import { db } from '$lib/server/db/index';
 import { amenityItems, cashAccounts } from '$lib/server/db/schema/index';
 import { requireCap } from '$lib/server/auth/rbac';
 import { getHallBookingDetail, getRoomBookingDetail } from '$lib/server/reservations';
-import { searchAvailability } from '$lib/server/availability';
+import { searchAvailability, suggestRoomCountForOccupancy } from '$lib/server/availability';
 import {
 	FolioError,
 	addAmenityItemCharge,
@@ -26,8 +26,10 @@ import {
 	createWalkInHallBooking,
 	getHallStatusBoard,
 	getRoomStatusGrid,
+	setGuestIdPhoto,
 	todayInTimezone
 } from '$lib/server/front-desk';
+import { saveUpload } from '$lib/server/uploads';
 import { FinanceError } from '$lib/server/finance/shared';
 import { recordPayment, refundPayment, voidPayment } from '$lib/server/finance/payments';
 import { getFinanceSettings } from '$lib/server/finance/settings';
@@ -82,6 +84,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 		checkOutTime: hotel.checkOutTime,
 		lateCheckoutFeePerHourCentavos: hotel.lateCheckoutFeePerHourCentavos,
 		earlyCheckInFeePerHourCentavos: hotel.earlyCheckInFeePerHourCentavos,
+		vatRateBps: hotel.vatRateBps,
 		amenityItemOptions,
 		hallGrid,
 		role: locals.role,
@@ -191,6 +194,29 @@ export const actions: Actions = {
 		if (typeof bookingId !== 'string') return fail(400, { error: 'Missing booking.' });
 
 		return loadRoomDetailPayload(hotelId, bookingId);
+	},
+
+	captureIdPhoto: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		const hotelId = event.locals.hotel!.id;
+		const raw = await event.request.formData();
+		const bookingId = raw.get('bookingId');
+		if (typeof bookingId !== 'string') return fail(400, { idPhotoError: 'Missing booking.' });
+
+		const photo = raw.get('guestIdPhoto');
+		if (!(photo instanceof File) || photo.size === 0) {
+			return fail(400, { idPhotoError: 'Capture a photo first.' });
+		}
+
+		try {
+			const url = await saveUpload(hotelId, photo);
+			await setGuestIdPhoto(hotelId, bookingId, url, event.locals.user);
+		} catch (e) {
+			console.error('captureIdPhoto: could not save guest ID photo', bookingId, e);
+			return fail(400, { idPhotoError: 'Could not save the photo — try again.' });
+		}
+
+		return { ...(await loadRoomDetailPayload(hotelId, bookingId)), idPhotoOk: true };
 	},
 
 	addItemCharge: async (event) => {
@@ -497,7 +523,13 @@ export const actions: Actions = {
 			};
 		}
 		const availableRoomTypes = await searchAvailability({ hotelId, ...search });
-		return { walkInSearch: search, availableRoomTypes };
+		// Nothing fit even with extra beds — tell staff whether more rooms of some type
+		// would actually help, instead of a bare dead end.
+		const suggestedRoomCount =
+			availableRoomTypes.length === 0
+				? await suggestRoomCountForOccupancy(hotelId, search.occupancy, search.roomCount)
+				: null;
+		return { walkInSearch: search, availableRoomTypes, suggestedRoomCount };
 	},
 
 	walkInCreate: async (event) => {
@@ -509,6 +541,10 @@ export const actions: Actions = {
 			return fail(400, { walkInError: 'Check the guest details and selection and try again.' });
 		}
 		const d = parsed.data;
+		// The room tile staff had selected on the grid before opening the walk-in
+		// form — carried through so the reservation page's back link can return
+		// here with that same room re-selected, instead of a bare front-desk view.
+		const originRoomId = typeof raw.originRoomId === 'string' ? raw.originRoomId : '';
 
 		let bookingId: string;
 		try {
@@ -537,7 +573,14 @@ export const actions: Actions = {
 			throw e;
 		}
 
-		redirect(303, `/${event.locals.hotel!.slug}/reservations/room/${bookingId}`);
+		// Hands off to the reservation page's own room-assignment/check-in UI — flag
+		// where this came from (and which room tile was selected) so that page's
+		// back link can return here with the same room re-selected, instead of
+		// the full Reservations list.
+		const backQuery = originRoomId
+			? `from=front-desk&roomId=${encodeURIComponent(originRoomId)}`
+			: 'from=front-desk';
+		redirect(303, `/${event.locals.hotel!.slug}/reservations/room/${bookingId}?${backQuery}`);
 	},
 
 	completeHall: async (event) => {

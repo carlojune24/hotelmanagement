@@ -16,7 +16,7 @@ import {
 import { priceEventHall, priceStay } from '$lib/server/pricing';
 import { searchAvailability } from '$lib/server/availability';
 import { checkHallAvailability } from '$lib/server/hall-availability';
-import { MAX_ROOMS_PER_LINE, scaleRoomPrice } from '$lib/pricing-utils';
+import { MAX_ROOMS_PER_LINE, addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
 import type { Actions } from './$types';
 
 const roomItemSchema = z.object({
@@ -90,6 +90,7 @@ export const actions: Actions = {
 			const roomLines: Array<{
 				item: Extract<CartLineInput, { kind: 'room' }>;
 				price: Awaited<ReturnType<typeof priceStay>>;
+				extraBeds: number;
 			}> = [];
 			const hallLines: Array<{
 				item: Extract<CartLineInput, { kind: 'hall' }>;
@@ -112,8 +113,8 @@ export const actions: Actions = {
 						roomCount: item.roomCount
 					});
 					const roomType = available.find((t) => t.id === item.roomTypeId);
-					const planAvailable = roomType?.ratePlans.some((p) => p.id === item.ratePlanId);
-					if (!roomType || !planAvailable) {
+					const plan = roomType?.ratePlans.find((p) => p.id === item.ratePlanId);
+					if (!roomType || !plan) {
 						return {
 							ok: false as const,
 							error: 'A room in your invoice is no longer available for those dates.'
@@ -127,13 +128,26 @@ export const actions: Actions = {
 					});
 					// Scaled by roomCount via the same helper the storefront's display uses — the
 					// single point where "price × how many rooms" is computed for the real charge.
-					const price = scaleRoomPrice(perRoomPrice, item.roomCount);
+					let price = scaleRoomPrice(perRoomPrice, item.roomCount);
+					// Extra beds needed is re-derived from the room type's own capacity/policy
+					// (`searchAvailability` already ran the occupancy solver) rather than trusted
+					// from the guest's cart — same "never trust the client" posture as the rest of
+					// this re-verification loop.
+					const extraBeds = roomType.extraBedsNeeded;
+					if (extraBeds > 0 && plan.extraBedFeeCentavos) {
+						price = addFlatFeeCentavos(
+							price,
+							`Extra bed × ${extraBeds}`,
+							extraBeds * plan.extraBedFeeCentavos,
+							event.locals.hotel!.vatRateBps
+						);
+					}
 					const lineFees = price.fees.reduce((sum, f) => sum + f.amountCentavos, 0);
 					subtotalCentavos += price.subtotalCentavos;
 					feesCentavos += lineFees;
 					vatCentavos += price.vatCentavos;
 					totalCentavos += price.totalCentavos;
-					roomLines.push({ item, price });
+					roomLines.push({ item, price, extraBeds });
 				} else {
 					const isAvailable = await checkHallAvailability({
 						hotelId,
@@ -195,7 +209,7 @@ export const actions: Actions = {
 				note: 'Order created'
 			});
 
-			for (const { item, price } of roomLines) {
+			for (const { item, price, extraBeds } of roomLines) {
 				const lineFees = price.fees.reduce((sum, f) => sum + f.amountCentavos, 0);
 				const [booking] = await tx
 					.insert(bookings)
@@ -217,13 +231,14 @@ export const actions: Actions = {
 					bookingId: booking!.id,
 					roomTypeId: item.roomTypeId,
 					ratePlanId: item.ratePlanId,
-					quantity: item.roomCount
+					quantity: item.roomCount,
+					extraBeds
 				});
 				await tx.insert(bookingStatusHistory).values({
 					bookingId: booking!.id,
 					fromStatus: null,
 					toStatus: 'pending_payment',
-					note: 'Booking created'
+					note: extraBeds > 0 ? `Booking created — ${extraBeds} extra bed(s) added` : 'Booking created'
 				});
 			}
 

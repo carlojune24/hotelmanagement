@@ -57,6 +57,10 @@ export const roomTypes = pgTable(
 		 */
 		photos: jsonb('photos').notNull().default([]),
 		sortOrder: integer('sort_order').notNull().default(0),
+		/** Staff-only identifier color (hex, e.g. `#2563eb`) — used to color-code this
+		 *  type's rooms on the front-desk grid so staff can tell types apart at a glance.
+		 *  Never shown to guests; unrelated to `hotels.config.branding.accentColor`. */
+		colorHex: text('color_hex'),
 
 		// Capacity
 		baseOccupancy: integer('base_occupancy').notNull().default(2),
@@ -65,6 +69,8 @@ export const roomTypes = pgTable(
 		maxChildren: integer('max_children'),
 		extraBedAllowed: boolean('extra_bed_allowed').notNull().default(false),
 		maxExtraBeds: integer('max_extra_beds'),
+		/** How many additional guests one extra bed/rollaway accommodates — usually 1. */
+		extraBedCapacity: integer('extra_bed_capacity').notNull().default(1),
 
 		// Spec
 		sizeSqm: integer('size_sqm'),
