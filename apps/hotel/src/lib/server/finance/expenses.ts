@@ -228,7 +228,11 @@ export async function markExpensePaid(input: {
 		.limit(1);
 	const businessDate = businessDateFor(hotel?.timezone ?? 'Asia/Manila');
 	const [cat] = await db
-		.select({ group: expenseCategories.group, name: expenseCategories.name })
+		.select({
+				group: expenseCategories.group,
+				name: expenseCategories.name,
+				coaAccountId: expenseCategories.coaAccountId
+			})
 		.from(expenseCategories)
 		.where(eq(expenseCategories.id, e.categoryId))
 		.limit(1);
@@ -261,7 +265,12 @@ export async function markExpensePaid(input: {
 				sourceType: 'expense',
 				sourceId: e.id,
 				memo: `${cat?.name ?? 'Expense'} — ${e.description}`,
-				actor: input.actor
+				actor: input.actor,
+				// Only override for the generic 'expense' category — 'payroll' and
+				// 'statutory_remittance' already map to their own specific accounts via
+				// cash_category_accounts, which the category's own coaAccountId (grouped
+				// by expenseGroup, not by cash category) would otherwise contradict.
+				coaAccountId: category === 'expense' ? (cat?.coaAccountId ?? null) : null
 			},
 			tx
 		);

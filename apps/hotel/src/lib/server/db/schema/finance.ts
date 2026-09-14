@@ -70,6 +70,11 @@ export const cashAccounts = pgTable(
 		isSystem: boolean('is_system').notNull().default(false),
 		isActive: boolean('is_active').notNull().default(true),
 		sortOrder: integer('sort_order').notNull().default(0),
+		/** The `chart_of_accounts` leaf this drawer/bank/e-wallet posts to. No DB-level
+		 *  FK (`./ledger.ts` imports `cashCategory` from this file, so a reverse import
+		 *  would be circular) — validated at the app layer in `finance/posting.ts` and
+		 *  backfilled by `finance/seed-defaults.ts`. */
+		coaAccountId: uuid('coa_account_id'),
 		createdAt: createdAt(),
 		updatedAt: updatedAt(),
 		deletedAt: deletedAt()
@@ -82,6 +87,18 @@ export const cashAccounts = pgTable(
 // ---------------------------------------------------------------------------
 
 export const shiftStatus = pgEnum('cashier_shift_status', ['open', 'closed']);
+
+/** `none` — no shortage, or one not yet acted on. `owed` — charged to the cashier who ran
+ *  the shift (`opened_by_user_id`), not yet collected. `collected` — recovered in cash, a
+ *  matching `cash_movements` row posted. `written_off` — the hotel formally absorbed the
+ *  loss instead of collecting it. Only ever set for a shortage (`variance_centavos < 0`);
+ *  an overage is never charged back to anyone. */
+export const shiftChargebackStatus = pgEnum('shift_chargeback_status', [
+	'none',
+	'owed',
+	'collected',
+	'written_off'
+]);
 
 export const cashierShifts = pgTable(
 	'cashier_shifts',
@@ -110,6 +127,26 @@ export const cashierShifts = pgTable(
 		/** Optional bill/coin breakdown entered on the close screen: `{ "1000": 3, "500": 2, ... }`. */
 		denominations: jsonb('denominations'),
 		closeNotes: text('close_notes'),
+
+		// --- Shortage charge-back (accountant/hotel_admin only — see lib/server/finance/shifts.ts) ---
+		varianceChargebackStatus: shiftChargebackStatus('variance_chargeback_status')
+			.notNull()
+			.default('none'),
+		/** May be less than `abs(variance_centavos)` when only part of the shortage is charged. */
+		varianceChargebackCentavos: bigint('variance_chargeback_centavos', { mode: 'number' }),
+		varianceChargebackNote: text('variance_chargeback_note'),
+		varianceChargebackAt: timestamp('variance_chargeback_at', { withTimezone: true }),
+		varianceChargebackByUserId: uuid('variance_chargeback_by_user_id').references(() => users.id, {
+			onDelete: 'set null'
+		}),
+		varianceChargebackCollectedAt: timestamp('variance_chargeback_collected_at', {
+			withTimezone: true
+		}),
+		varianceChargebackCollectedByUserId: uuid('variance_chargeback_collected_by_user_id').references(
+			() => users.id,
+			{ onDelete: 'set null' }
+		),
+
 		createdAt: createdAt(),
 		updatedAt: updatedAt()
 	},
@@ -220,6 +257,10 @@ export const cashMovements = pgTable(
 		recordedByUserId: uuid('recorded_by_user_id').references(() => users.id, {
 			onDelete: 'set null'
 		}),
+		/** The mirrored `journal_entries` row this movement auto-posted (or, on a void,
+		 *  its reversal target stays unchanged — the reversal is its own new entry).
+		 *  No DB-level FK, same reason as `cash_accounts.coaAccountId` above. */
+		journalEntryId: uuid('journal_entry_id'),
 		voidedAt: timestamp('voided_at', { withTimezone: true }),
 		voidedByUserId: uuid('voided_by_user_id').references(() => users.id, { onDelete: 'set null' }),
 		voidReason: text('void_reason'),
@@ -262,6 +303,11 @@ export const expenseCategories = pgTable(
 		group: expenseGroup('group').notNull().default('other'),
 		isActive: boolean('is_active').notNull().default(true),
 		sortOrder: integer('sort_order').notNull().default(0),
+		/** The specific `chart_of_accounts` expense leaf (Utilities vs. Payroll vs.
+		 *  Repairs, ...) — lets journal postings land more precisely than the generic
+		 *  `category: 'expense'` mapping alone would. No DB-level FK, same reason as
+		 *  `cash_accounts.coaAccountId` above. */
+		coaAccountId: uuid('coa_account_id'),
 		createdAt: createdAt(),
 		updatedAt: updatedAt(),
 		deletedAt: deletedAt()
@@ -477,6 +523,10 @@ export const financeSettings = pgTable('finance_settings', {
 	requireOpenShiftForCashPayment: boolean('require_open_shift_for_cash_payment')
 		.notNull()
 		.default(true),
+	/** Gapless per-hotel `journal_entries.entry_no` counter — bumped under a row lock
+	 *  in `finance/journal.ts`'s `postJournalEntry`, same pattern as
+	 *  `finance/documents.ts`'s `allocateSerial`. */
+	nextJournalEntryNo: bigint('next_journal_entry_no', { mode: 'number' }).notNull().default(1),
 	createdAt: createdAt(),
 	updatedAt: updatedAt()
 });

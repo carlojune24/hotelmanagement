@@ -55,7 +55,7 @@ and day-close.
 | `id` | uuid | |
 | `org_ref` | | |
 | `direction` | enum | `in \| out` |
-| `category` | enum | `room_revenue \| reservation_fee \| deposit \| deposit_refund \| amenity_sale \| other_revenue \| expense \| payroll \| statutory_remittance \| cash_advance \| cash_advance_repayment \| transfer \| adjustment` |
+| `category` | enum | `room_revenue \| hall_revenue \| incidental_sale \| deposit \| deposit_refund \| refund \| other_revenue \| expense \| payroll \| statutory_remittance \| bank_deposit \| transfer_in \| transfer_out \| owner_contribution \| owner_draw \| adjustment` — verbatim mirror of the hotel app's `cash_category` pgEnum (`apps/hotel/src/lib/server/db/schema/finance.ts`); any producing app maps its own domain events onto exactly these |
 | `account_ref` | `acct_<ULID>` | the cash/bank/e-wallet account moved |
 | `counterparty_ref` | `cpty_<ULID>` \| null | guest, vendor, employee, agency |
 | `amount` | `{ amount_minor, currency }` | always positive; `direction` carries the sign |
@@ -82,3 +82,17 @@ a single property, a group, or an external consolidator all call the same code:
 - **trial-balance** — debits/credits per account for the range; must balance.
 - **income-statement** — revenue less expense by `subtype`, per hotel column + total.
 - (balance-sheet, VAT summary, withholding summary follow the same signature.)
+
+## Cash-basis vs. ledger
+
+Journal entries are posted **only when a cash movement actually happens** — the same
+moment `recordCashMovement` fires, in the same transaction, never earlier. An open
+receivable (a "charge to city ledger" balance with no cash collected yet) therefore
+posts no journal entry until it's actually settled; the ledger will not show a
+building accounts-receivable balance the way a textbook accrual system would. This is
+a deliberate choice, not an oversight: it mirrors the hotel app's existing cash-basis
+design (see `CLAUDE.md`) exactly, and avoids bundling a revenue-recognition-timing
+decision (per-night? at checkout? at booking?) into the first ledger build. Real AR
+accrual — a second posting rule fired from receivables at charge time, independent of
+cash movement — is a deliberate, additive later phase once this pipeline is proven,
+not part of the initial build.

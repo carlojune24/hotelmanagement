@@ -4,6 +4,8 @@ packages:
 
 allowBuilds:
   esbuild: true
+  "@mm/integration": true
+  "@mm/finance-core": true
 
 onlyBuiltDependencies:
   - esbuild

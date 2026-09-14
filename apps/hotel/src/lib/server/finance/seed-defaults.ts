@@ -1,8 +1,19 @@
 import { and, eq } from 'drizzle-orm';
 import type { db as Db } from '../db/index';
-import { birSettings, cashAccounts, expenseCategories, financeSettings } from '../db/schema/index';
+import {
+	birSettings,
+	cashAccounts,
+	cashCategoryAccounts,
+	chartOfAccounts,
+	expenseCategories,
+	financeSettings,
+	type CashMovement
+} from '../db/schema/index';
+import { mintRef } from '../ids';
+import { COA_SEED, CASH_ACCOUNT_KIND_TO_COA_CODE, CASH_CATEGORY_TO_COA_CODE, EXPENSE_GROUP_TO_COA_CODE } from './coa-seed';
 
 type DbLike = typeof Db;
+type CashCategory = CashMovement['category'];
 
 const STARTER_CATEGORIES: [string, (typeof expenseCategories.$inferInsert)['group']][] = [
 	['Utilities — electricity', 'utilities'],
@@ -20,10 +31,83 @@ const STARTER_CATEGORIES: [string, (typeof expenseCategories.$inferInsert)['grou
 ];
 
 /**
+ * Seeds the default chart of accounts for a hotel and backfills every `coa_account_id`
+ * link that lets `finance/cash.ts`'s `recordCashMovement` auto-post a mirrored journal
+ * entry: each of the hotel's *existing* cash accounts (by `kind`), each of its
+ * *existing* expense categories (by `group`), and one `cash_category_accounts` row
+ * per `cash_movements.category` value. Reads whatever cash accounts / expense
+ * categories already exist for the hotel rather than assuming it just created them,
+ * so it works both as part of `seedFinanceDefaults` (called on new-hotel creation)
+ * and standalone (called by `db/migrate-backfill-coa.ts` for hotels that already had
+ * Finance set up before the ledger feature shipped). Idempotent — a no-op once the
+ * hotel already has `chart_of_accounts` rows.
+ */
+export async function seedChartOfAccounts(db: DbLike, hotelId: string): Promise<void> {
+	const existingCoa = await db
+		.select({ id: chartOfAccounts.id })
+		.from(chartOfAccounts)
+		.where(eq(chartOfAccounts.hotelId, hotelId))
+		.limit(1);
+	if (existingCoa.length > 0) return;
+
+	const coaRows = await db
+		.insert(chartOfAccounts)
+		.values(
+			COA_SEED.map((a) => ({
+				hotelId,
+				accountRef: mintRef('account'),
+				code: a.code,
+				name: a.name,
+				type: a.type,
+				subtype: a.subtype,
+				normalBalance: a.normalBalance,
+				isSystem: a.isSystem ?? false
+			}))
+		)
+		.returning({ id: chartOfAccounts.id, code: chartOfAccounts.code });
+	const byCode = (code: string): string => {
+		const row = coaRows.find((r) => r.code === code);
+		if (!row) throw new Error(`coa-seed.ts is missing account code ${code}`);
+		return row.id;
+	};
+
+	const existingCashAccounts = await db
+		.select({ id: cashAccounts.id, kind: cashAccounts.kind })
+		.from(cashAccounts)
+		.where(eq(cashAccounts.hotelId, hotelId));
+	for (const a of existingCashAccounts) {
+		const code = CASH_ACCOUNT_KIND_TO_COA_CODE[a.kind];
+		if (code) {
+			await db.update(cashAccounts).set({ coaAccountId: byCode(code) }).where(eq(cashAccounts.id, a.id));
+		}
+	}
+
+	await db.insert(cashCategoryAccounts).values(
+		(Object.entries(CASH_CATEGORY_TO_COA_CODE) as [CashCategory, string][]).map(([category, code]) => ({
+			hotelId,
+			category,
+			accountId: byCode(code)
+		}))
+	);
+
+	const existingExpenseCategories = await db
+		.select({ id: expenseCategories.id, group: expenseCategories.group })
+		.from(expenseCategories)
+		.where(eq(expenseCategories.hotelId, hotelId));
+	for (const c of existingExpenseCategories) {
+		await db
+			.update(expenseCategories)
+			.set({ coaAccountId: byCode(EXPENSE_GROUP_TO_COA_CODE[c.group]) })
+			.where(eq(expenseCategories.id, c.id));
+	}
+}
+
+/**
  * Gives a hotel a working Finance module from day one: a front-desk drawer, a
  * petty-cash float, a bank account, an e-wallet, the system Undeposited Funds
- * holding account, a `finance_settings` row wired to them, and a starter set of
- * expense categories. Idempotent — a no-op once the hotel already has cash accounts.
+ * holding account, a `finance_settings` row wired to them, a starter set of expense
+ * categories, and the default chart of accounts with every `coa_account_id` link
+ * backfilled. Idempotent — a no-op once the hotel already has cash accounts.
  */
 export async function seedFinanceDefaults(db: DbLike, hotelId: string): Promise<void> {
 	const existing = await db
@@ -72,4 +156,6 @@ export async function seedFinanceDefaults(db: DbLike, hotelId: string): Promise<
 				STARTER_CATEGORIES.map(([name, group], i) => ({ hotelId, name, group, sortOrder: i }))
 			);
 	}
+
+	await seedChartOfAccounts(db, hotelId);
 }

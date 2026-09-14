@@ -18,6 +18,7 @@
 	let showAccount = $state(false);
 	let showCategory = $state(false);
 	let showVendor = $state(false);
+	let showApiKey = $state(false);
 	const kindLabel = (k: string) => k.replace(/_/g, ' ');
 </script>
 
@@ -186,6 +187,49 @@
 							<button class="text-xs text-ink-muted underline underline-offset-2 hover:text-danger">Delete</button>
 						</form>
 					</div>
+				</div>
+			{/each}
+		</div>
+	</section>
+
+	<!-- API keys -->
+	<section class="mt-8 rounded-xl border border-border p-5">
+		<div class="mb-3 flex items-center justify-between">
+			<div>
+				<h2 class="text-sm font-semibold text-ink">API keys</h2>
+				<p class="text-xs text-ink-muted">
+					Read-only access to this hotel's finance data at <code>/api/v1/finance/*</code> — for a central
+					reporting tool across your businesses.
+				</p>
+			</div>
+			<Button size="sm" variant="outline" onclick={() => (showApiKey = !showApiKey)}>New key</Button>
+		</div>
+		{#if showApiKey}
+			<form method="POST" action="?/createApiKey" use:enhance class="mb-3 flex gap-2 rounded-lg border border-border p-3">
+				<Input name="name" placeholder="e.g. Central reporting — prod" required class="flex-1" />
+				<Button type="submit" size="sm">Create</Button>
+			</form>
+		{/if}
+		{#if form && 'rawKey' in form && form.rawKey}
+			<div class="mb-3 rounded-lg border border-border bg-muted/40 p-3 text-sm">
+				<p class="mb-1 font-medium text-ink">Copy this key now — it won't be shown again:</p>
+				<code class="break-all text-xs">{form.rawKey}</code>
+			</div>
+		{/if}
+		<div class="divide-y divide-border">
+			{#each data.apiKeys as k (k.id)}
+				<div class="flex items-center justify-between py-2 text-sm {k.revokedAt ? 'opacity-50' : ''}">
+					<div>
+						<span class="text-ink">{k.name}</span>
+						<span class="ml-2 text-xs text-ink-muted">{k.keyPrefix}…</span>
+						{#if k.revokedAt}<Badge variant="outline" class="ml-2">Revoked</Badge>{/if}
+					</div>
+					{#if !k.revokedAt}
+						<form method="POST" action="?/revokeApiKeyAction" use:enhance>
+							<input type="hidden" name="id" value={k.id} />
+							<button class="text-xs text-ink-muted underline underline-offset-2 hover:text-danger">Revoke</button>
+						</form>
+					{/if}
 				</div>
 			{/each}
 		</div>

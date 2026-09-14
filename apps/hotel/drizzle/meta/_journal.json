@@ -225,6 +225,13 @@
       "when": 1789297845398,
       "tag": "0031_pink_human_torch",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1789358696726,
+      "tag": "0032_tranquil_martin_li",
+      "breakpoints": true
     }
   ]
 }

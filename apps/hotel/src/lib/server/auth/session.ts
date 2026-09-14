@@ -1,9 +1,9 @@
-import { sha256 } from '@oslojs/crypto/sha2';
-import { encodeBase32LowerCaseNoPadding, encodeHexLowerCase } from '@oslojs/encoding';
+import { encodeBase32LowerCaseNoPadding } from '@oslojs/encoding';
 import { eq } from 'drizzle-orm';
 import type { RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/server/db/index';
 import { sessions, users } from '$lib/server/db/schema/index';
+import { hashOpaqueToken } from '$lib/server/crypto';
 
 export const SESSION_COOKIE = 'mm_session';
 const DAY = 1000 * 60 * 60 * 24;
@@ -22,9 +22,7 @@ export function generateSessionToken(): string {
 	return encodeBase32LowerCaseNoPadding(bytes);
 }
 
-function tokenToId(token: string): string {
-	return encodeHexLowerCase(sha256(new TextEncoder().encode(token)));
-}
+const tokenToId = hashOpaqueToken;
 
 export async function createSession(token: string, userId: string) {
 	const id = tokenToId(token);

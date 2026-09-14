@@ -11,6 +11,8 @@ import {
 import { writeAudit } from '../audit';
 import type { SessionUser } from '../auth/session';
 import { FinanceError, pesos, type Tx } from './shared';
+import { resolvePostingAccounts } from './posting';
+import { postJournalEntry, getJournalEntryLines } from './journal';
 
 type CashDirection = 'in' | 'out';
 type CashCategory = CashMovement['category'];
@@ -34,6 +36,11 @@ export interface RecordMovementInput {
 	transferGroupId?: string | null;
 	memo?: string | null;
 	actor?: SessionUser | null;
+	/** Overrides the category's default chart-of-accounts mapping for the non-cash
+	 *  leg of the auto-posted journal entry — e.g. `expenses.ts` passes the expense
+	 *  category's own account so the entry lands on "Utilities" rather than the
+	 *  generic "Other Expense" bucket that `category: 'expense'` alone maps to. */
+	coaAccountId?: string | null;
 }
 
 /**
@@ -92,6 +99,40 @@ export async function recordCashMovement(input: RecordMovementInput, tx?: Tx): P
 			})
 			.where(eq(cashAccounts.id, input.cashAccountId));
 
+		// Auto-post the mirrored journal entry — see `finance/journal.ts`. Every
+		// `recordCashMovement` call, including the two independent legs of a transfer,
+		// produces its own balanced 2-line entry; see `coa-seed.ts`'s clearing account
+		// for why that's enough to make a transfer net out correctly.
+		const { cashLegAccountId, categoryLegAccountId } = await resolvePostingAccounts(
+			input.hotelId,
+			input.cashAccountId,
+			input.category,
+			input.coaAccountId,
+			t
+		);
+		const journalEntryId = await postJournalEntry(
+			{
+				hotelId: input.hotelId,
+				entryDate: input.businessDate,
+				memo: input.memo ?? null,
+				sourceType: 'cash_movement',
+				sourceId: row!.id,
+				actor: input.actor,
+				lines:
+					input.direction === 'in'
+						? [
+								{ accountId: cashLegAccountId, debitCentavos: input.amountCentavos, creditCentavos: 0 },
+								{ accountId: categoryLegAccountId, debitCentavos: 0, creditCentavos: input.amountCentavos }
+							]
+						: [
+								{ accountId: categoryLegAccountId, debitCentavos: input.amountCentavos, creditCentavos: 0 },
+								{ accountId: cashLegAccountId, debitCentavos: 0, creditCentavos: input.amountCentavos }
+							]
+			},
+			t
+		);
+		await t.update(cashMovements).set({ journalEntryId }).where(eq(cashMovements.id, row!.id));
+
 		return row!.id;
 	};
 
@@ -133,6 +174,33 @@ export async function voidCashMovement(
 				voidReason: reason?.trim() || null
 			})
 			.where(eq(cashMovements.id, movementId));
+
+		// Journal entries are immutable — voiding can't edit the original entry, so
+		// post a reversing entry (every line's debit/credit swapped) instead.
+		if (m.journalEntryId) {
+			const originalLines = await getJournalEntryLines(m.journalEntryId, tx);
+			await postJournalEntry(
+				{
+					hotelId,
+					entryDate: m.businessDate,
+					memo: reason?.trim() || `Reversal of ${m.id}`,
+					sourceType: 'cash_movement',
+					sourceId: m.id,
+					reversalOfEntryId: m.journalEntryId,
+					actor,
+					lines: originalLines.map((l) => ({
+						accountId: l.accountId,
+						debitCentavos: l.creditCentavos,
+						creditCentavos: l.debitCentavos,
+						department: l.department,
+						costCenter: l.costCenter,
+						project: l.project,
+						counterpartyId: l.counterpartyId
+					}))
+				},
+				tx
+			);
+		}
 	});
 
 	await writeAudit({

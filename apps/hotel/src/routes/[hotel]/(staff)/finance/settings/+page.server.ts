@@ -17,6 +17,7 @@ import {
 	updateVendor
 } from '$lib/server/finance/accounts';
 import { ensureFinanceSettings, getFinanceSettings, updateFinanceSettings } from '$lib/server/finance/settings';
+import { createApiKey, listApiKeysForHotel, revokeApiKey } from '$lib/server/auth/api-key';
 import type { Actions, PageServerLoad } from './$types';
 
 const ACCOUNT_KINDS = ['cash_drawer', 'petty_cash', 'bank', 'e_wallet', 'undeposited'] as const;
@@ -38,13 +39,22 @@ export const load: PageServerLoad = async ({ locals }) => {
 	requireCap(locals.user, locals.role, 'hotel:admin');
 	const hotel = locals.hotel!;
 	await ensureFinanceSettings(hotel.id);
-	const [accounts, categories, vendors, settings] = await Promise.all([
+	const [accounts, categories, vendors, settings, apiKeys] = await Promise.all([
 		listCashAccounts(hotel.id, { includeInactive: true }),
 		listExpenseCategories(hotel.id, { includeInactive: true }),
 		listVendors(hotel.id, { includeInactive: true }),
-		getFinanceSettings(hotel.id)
+		getFinanceSettings(hotel.id),
+		listApiKeysForHotel(hotel.id)
 	]);
-	return { accounts, categories, vendors, settings, accountKinds: ACCOUNT_KINDS, expenseGroups: EXPENSE_GROUPS };
+	return {
+		accounts,
+		categories,
+		vendors,
+		settings,
+		apiKeys,
+		accountKinds: ACCOUNT_KINDS,
+		expenseGroups: EXPENSE_GROUPS
+	};
 };
 
 const wrap = async (fn: () => Promise<unknown>, ok: string) => {
@@ -253,5 +263,33 @@ export const actions: Actions = {
 				),
 			'Finance settings saved.'
 		);
+	},
+
+	createApiKey: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		const p = z
+			.object({ name: z.string().min(1).max(120) })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!p.success) return fail(400, { error: 'Give the key a name.' });
+		try {
+			const { rawKey } = await createApiKey({
+				name: p.data.name,
+				hotelIds: [event.locals.hotel!.id],
+				createdByUserId: event.locals.user?.id ?? null
+			});
+			// Shown once — never retrievable again after this response.
+			return { ok: 'API key created — copy it now, it will not be shown again.', rawKey };
+		} catch (e) {
+			if (e instanceof Error) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
+	revokeApiKeyAction: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		const id = (await event.request.formData()).get('id');
+		if (typeof id !== 'string') return fail(400, { error: 'Missing key.' });
+		await revokeApiKey(id);
+		return { ok: 'API key revoked.' };
 	}
 };

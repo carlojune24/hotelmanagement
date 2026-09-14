@@ -14,7 +14,7 @@
     "lint": "echo \"(no lint configured)\""
   },
   "dependencies": {
-    "@mm/integration": "workspace:*",
+    "@mm/integration": "github:carlojune24/core#integration@1.0.0&path:integration",
     "zod": "^4.0.0"
   },
   "devDependencies": {

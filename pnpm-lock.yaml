@@ -33,14 +33,14 @@ importers:
         specifier: ^1.37.0
         version: 1.37.0(svelte@5.57.0)
       '@mm/finance-core':
-        specifier: workspace:*
-        version: link:../../packages/finance-core
+        specifier: github:carlojune24/core#finance-core@0.2.0&path:finance-core
+        version: https://codeload.github.com/carlojune24/core/tar.gz/3118bd74e4d804f508c1928f39187e12e6e21092#path:finance-core
       '@mm/hr-core':
         specifier: workspace:*
         version: link:../../packages/hr-core
       '@mm/integration':
-        specifier: workspace:*
-        version: link:../../packages/integration
+        specifier: github:carlojune24/core#integration@1.0.0&path:integration
+        version: https://codeload.github.com/carlojune24/core/tar.gz/4840f3be01258be24057a0825ada099c0e8c72be#path:integration
       '@mm/paymongo':
         specifier: workspace:*
         version: link:../../packages/paymongo
@@ -166,40 +166,11 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)
 
-  packages/finance-core:
-    dependencies:
-      '@mm/integration':
-        specifier: workspace:*
-        version: link:../integration
-      zod:
-        specifier: ^4.0.0
-        version: 4.5.4
-    devDependencies:
-      typescript:
-        specifier: ^5.7.3
-        version: 5.9.3
-      vitest:
-        specifier: ^3.0.0
-        version: 3.2.7(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)
-
   packages/hr-core:
     dependencies:
       '@mm/integration':
-        specifier: workspace:*
-        version: link:../integration
-      zod:
-        specifier: ^4.0.0
-        version: 4.5.4
-    devDependencies:
-      typescript:
-        specifier: ^5.7.3
-        version: 5.9.3
-      vitest:
-        specifier: ^3.0.0
-        version: 3.2.7(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)
-
-  packages/integration:
-    dependencies:
+        specifier: github:carlojune24/core#integration@1.0.0&path:integration
+        version: https://codeload.github.com/carlojune24/core/tar.gz/4840f3be01258be24057a0825ada099c0e8c72be#path:integration
       zod:
         specifier: ^4.0.0
         version: 4.5.4
@@ -884,6 +855,14 @@ packages:
     resolution: {integrity: sha512-AxaiSxeuErlt4fNmmN28oaL5R7yVoQLsfSeiAONxCEK+l0/SrLAjRktQ0DkTQpomv1oRzOA3hohWY0ZHTZCMmw==}
     peerDependencies:
       svelte: ^5
+
+  '@mm/finance-core@https://codeload.github.com/carlojune24/core/tar.gz/3118bd74e4d804f508c1928f39187e12e6e21092#path:finance-core':
+    resolution: {gitHosted: true, path: finance-core, tarball: https://codeload.github.com/carlojune24/core/tar.gz/3118bd74e4d804f508c1928f39187e12e6e21092}
+    version: 0.2.0
+
+  '@mm/integration@https://codeload.github.com/carlojune24/core/tar.gz/4840f3be01258be24057a0825ada099c0e8c72be#path:integration':
+    resolution: {gitHosted: true, path: integration, tarball: https://codeload.github.com/carlojune24/core/tar.gz/4840f3be01258be24057a0825ada099c0e8c72be}
+    version: 1.0.0
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     resolution: {integrity: sha512-oTXEIha4SsuXdTA4Iyskj0kpdx2yVXdhd75c2v3xGrHFfVMsbhTPZU/nMPL4sWKo4pBHm3aucLaqGlF696dTyQ==}
@@ -2676,6 +2655,14 @@ snapshots:
   '@lucide/svelte@1.37.0(svelte@5.57.0)':
     dependencies:
       svelte: 5.57.0
+
+  '@mm/finance-core@https://codeload.github.com/carlojune24/core/tar.gz/3118bd74e4d804f508c1928f39187e12e6e21092#path:finance-core':
+    dependencies:
+      zod: 4.5.4
+
+  '@mm/integration@https://codeload.github.com/carlojune24/core/tar.gz/4840f3be01258be24057a0825ada099c0e8c72be#path:integration':
+    dependencies:
+      zod: 4.5.4
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
