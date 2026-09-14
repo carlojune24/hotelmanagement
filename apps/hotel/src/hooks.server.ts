@@ -11,6 +11,14 @@ import {
 	loadHotelBySlug,
 	loadHotelSlugByDomain
 } from '$lib/server/tenant';
+import { startJobRunner } from '$lib/server/jobs/boss';
+
+// Fire-and-forget at process boot — never blocks the server from serving
+// requests, and a startup failure (e.g. DB not reachable yet) is logged, not
+// fatal. `startJobRunner` is itself memoized, so this being a module-level
+// side effect (re-evaluated on a dev-mode server-file reload) starts at most
+// one real job runner per process.
+startJobRunner().catch((err) => console.error('[jobs] failed to start:', err));
 
 const DOMAIN_CACHE_TTL_MS = 60_000;
 const domainCache = new Map<string, { slug: string | null; expiresAt: number }>();

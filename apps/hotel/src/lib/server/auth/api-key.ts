@@ -2,7 +2,7 @@ import { encodeBase32LowerCaseNoPadding } from '@oslojs/encoding';
 import { eq } from 'drizzle-orm';
 import type { RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/server/db/index';
-import { apiKeyHotelScopes, apiKeys } from '$lib/server/db/schema/index';
+import { apiKeyHotelScopes, apiKeys, hotels } from '$lib/server/db/schema/index';
 import { hashOpaqueToken } from '$lib/server/crypto';
 import { ApiError } from '$lib/server/api/api-error';
 
@@ -67,6 +67,34 @@ export async function listApiKeysForHotel(hotelId: string) {
 		.from(apiKeys)
 		.innerJoin(apiKeyHotelScopes, eq(apiKeyHotelScopes.apiKeyId, apiKeys.id))
 		.where(eq(apiKeyHotelScopes.hotelId, hotelId));
+}
+
+/** Platform-admin view across every hotel — for issuing/managing keys that span
+ *  more than one hotel (a portfolio-owner client), which no single hotel's own
+ *  Finance settings page can do since it only knows about itself. */
+export async function listAllApiKeys() {
+	const keys = await db
+		.select({
+			id: apiKeys.id,
+			name: apiKeys.name,
+			keyPrefix: apiKeys.keyPrefix,
+			lastUsedAt: apiKeys.lastUsedAt,
+			expiresAt: apiKeys.expiresAt,
+			revokedAt: apiKeys.revokedAt,
+			createdAt: apiKeys.createdAt
+		})
+		.from(apiKeys)
+		.orderBy(apiKeys.createdAt);
+
+	const scopes = await db
+		.select({ apiKeyId: apiKeyHotelScopes.apiKeyId, hotelId: hotels.id, hotelName: hotels.name })
+		.from(apiKeyHotelScopes)
+		.innerJoin(hotels, eq(hotels.id, apiKeyHotelScopes.hotelId));
+
+	return keys.map((k) => ({
+		...k,
+		hotels: scopes.filter((s) => s.apiKeyId === k.id).map((s) => ({ id: s.hotelId, name: s.hotelName }))
+	}));
 }
 
 export interface ApiKeyAuth {

@@ -15,7 +15,8 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 			canReceivable: can('receivable:write'),
 			canDayClose: can('dayclose:run'),
 			canAdmin: can('hotel:admin'),
-			canShift: can('shift:write')
+			canShift: can('shift:write'),
+			canQuickSale: can('payment:create')
 		}
 	};
 };

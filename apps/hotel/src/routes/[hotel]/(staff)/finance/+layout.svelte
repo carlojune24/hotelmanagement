@@ -9,6 +9,7 @@
 	const tabs = $derived(
 		[
 			{ seg: '', label: 'Dashboard' },
+			{ seg: '/quick-sale', label: 'Quick sale', show: data.finance.canQuickSale },
 			{ seg: '/cash', label: 'Cash' },
 			{
 				seg: '/expenses',

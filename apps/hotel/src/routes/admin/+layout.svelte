@@ -7,7 +7,8 @@
 	const nav = [
 		{ href: '/admin', label: 'Overview' },
 		{ href: '/admin/hotels', label: 'Hotels' },
-		{ href: '/admin/users', label: 'Users' }
+		{ href: '/admin/users', label: 'Users' },
+		{ href: '/admin/api-keys', label: 'API keys' }
 	];
 
 	const isActive = (href: string) =>

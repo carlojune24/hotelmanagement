@@ -8,6 +8,7 @@
 	import UtensilsIcon from '@lucide/svelte/icons/utensils';
 	import ClockIcon from '@lucide/svelte/icons/clock';
 	import GemIcon from '@lucide/svelte/icons/gem';
+	import ZapIcon from '@lucide/svelte/icons/zap';
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 
 	const base = $derived(`/${page.params.hotel}`);
@@ -60,6 +61,12 @@
 			icon: GemIcon,
 			label: 'Sellable items',
 			desc: 'Priced extras front desk can charge to a guest’s folio — minibar, spa, damages.'
+		},
+		{
+			href: 'automation',
+			icon: ZapIcon,
+			label: 'Automation',
+			desc: 'Background jobs that run on a schedule instead of a manual button.'
 		}
 	];
 </script>
