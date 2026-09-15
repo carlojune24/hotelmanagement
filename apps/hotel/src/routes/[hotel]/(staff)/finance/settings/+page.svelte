@@ -5,16 +5,22 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
+	import * as Select from '$lib/components/ui/select/index.js';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 	const peso = (c: number) => `₱${(c / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+	const vatPct = $derived((data.hotelDetails.vatRateBps / 100).toString());
 
 	$effect(() => {
 		if (form && 'ok' in form && form.ok) toast.success(form.ok);
 		if (form && 'error' in form && form.error) toast.error(form.error);
 	});
 
+	let currency = $state(data.hotelDetails.currency);
+	$effect(() => {
+		currency = data.hotelDetails.currency;
+	});
 	let showAccount = $state(false);
 	let showCategory = $state(false);
 	let showVendor = $state(false);
@@ -24,6 +30,37 @@
 
 <div class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
 	<h1 class="mb-5 text-xl font-semibold tracking-tight text-ink">Finance settings</h1>
+
+	<!-- Hotel details -->
+	<section class="mb-8 rounded-xl border border-border p-5">
+		<h2 class="mb-3 text-sm font-semibold text-ink">Hotel details</h2>
+		<form method="POST" action="?/updateHotelDetails" use:enhance class="space-y-3">
+			<div class="grid gap-3 sm:grid-cols-3">
+				<div>
+					<Label class="text-xs" for="currency">Currency</Label>
+					<Select.Root type="single" name="currency" bind:value={currency}>
+						<Select.Trigger id="currency" class="mt-1 w-full">{currency}</Select.Trigger>
+						<Select.Content>
+							<Select.Item value="PHP" label="PHP" />
+						</Select.Content>
+					</Select.Root>
+				</div>
+				<div>
+					<Label class="text-xs" for="vatRatePct">VAT %</Label>
+					<Input id="vatRatePct" name="vatRatePct" type="number" step="0.01" value={vatPct} required />
+				</div>
+				<div>
+					<Label class="text-xs" for="timezone">Timezone</Label>
+					<Input id="timezone" name="timezone" value={data.hotelDetails.timezone} required />
+				</div>
+			</div>
+			<p class="text-xs text-ink-muted">
+				Timezone resolves this hotel's business date (day-close, reports) — changing it after
+				you've started operating can shift how past dates are grouped.
+			</p>
+			<Button type="submit" size="sm">Save hotel details</Button>
+		</form>
+	</section>
 
 	<!-- Preferences -->
 	<section class="mb-8 rounded-xl border border-border p-5">
@@ -74,6 +111,21 @@
 				<input type="checkbox" name="requireOpenShiftForCashPayment" class="size-4" checked={data.settings.requireOpenShiftForCashPayment} />
 				Require an open cashier shift before taking a cash payment
 			</label>
+			<div>
+				<Label class="text-xs" for="dayCloseCutoffTime">Don't close today's day before</Label>
+				<Input
+					id="dayCloseCutoffTime"
+					name="dayCloseCutoffTime"
+					type="time"
+					value={data.settings.dayCloseCutoffTime ?? ''}
+					class="mt-1 w-40"
+				/>
+				<p class="mt-1 text-xs text-ink-muted">
+					A safety floor for the "Close day" button — refuses to close today's business date
+					before this time. Leave blank to allow closing any time. Never affects a past date, or
+					the auto-close automation (which only ever closes yesterday).
+				</p>
+			</div>
 			<Button type="submit" size="sm">Save preferences</Button>
 		</form>
 	</section>

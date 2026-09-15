@@ -5,6 +5,7 @@ import { db } from '$lib/server/db/index';
 import { users } from '$lib/server/db/schema/index';
 import { writeAudit } from '$lib/server/audit';
 import { createInvite } from '$lib/server/auth/invite';
+import { requirePlatformAdmin } from '$lib/server/auth/rbac';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async () => {
@@ -24,6 +25,7 @@ export const load: PageServerLoad = async () => {
 
 export const actions: Actions = {
 	invitePlatformAdmin: async (event) => {
+		requirePlatformAdmin(event.locals.user);
 		const email = z
 			.string()
 			.email()
@@ -46,6 +48,7 @@ export const actions: Actions = {
 	},
 
 	setStatus: async (event) => {
+		requirePlatformAdmin(event.locals.user);
 		const fd = await event.request.formData();
 		const parsed = z
 			.object({ userId: z.string().uuid(), status: z.enum(['active', 'disabled']) })

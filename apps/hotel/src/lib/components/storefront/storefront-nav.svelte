@@ -73,6 +73,6 @@
 			{/if}
 			<a href="{base}/contact" class="storefront-nav-link">Contact</a>
 		</div>
-		<Button href="{base}#search" class="ledger-btn-primary !px-5 !py-2 text-sm">Reserve</Button>
+		<Button href="{base}#search" class="ledger-btn-primary !px-5 !py-2 text-sm">Book Now</Button>
 	</div>
 </nav>

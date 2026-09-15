@@ -24,6 +24,13 @@
 			import('leaflet/dist/images/marker-icon.png?url').then((m) => m.default as string),
 			import('leaflet/dist/images/marker-shadow.png?url').then((m) => m.default as string)
 		]);
+		// `Icon.Default`'s own `_getIconUrl` always prefixes an auto-detected `imagePath`
+		// onto whatever `*Url` option it's given (it's built for the bare filenames its own
+		// defaults use, e.g. 'marker-shadow.png') — since ours are already full, bundler-
+		// resolved URLs, that prefixing doubles the path and 404s. Deleting the override
+		// falls back to the base `Icon` class's `_getIconUrl`, which just returns the option
+		// as-is. The standard fix for Leaflet + any bundler (webpack/vite/rollup alike).
+		delete (L.Icon.Default.prototype as unknown as { _getIconUrl?: unknown })._getIconUrl;
 		L.Icon.Default.mergeOptions({ iconRetinaUrl, iconUrl, shadowUrl });
 
 		const center: [number, number] = lat != null && lng != null ? [lat, lng] : DEFAULT_CENTER;

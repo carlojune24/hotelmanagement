@@ -5,9 +5,11 @@ import { db } from '$lib/server/db/index';
 import { hotels } from '$lib/server/db/schema/index';
 import { seedHotelAmenities } from '$lib/server/amenities/catalog';
 import { seedFinanceDefaults } from '$lib/server/finance/seed-defaults';
+import { seedDefaultRoles } from '$lib/server/auth/roles';
 import { writeAudit } from '$lib/server/audit';
 import { mintRef } from '$lib/server/ids';
 import { slugError } from '$lib/server/tenant';
+import { requirePlatformAdmin } from '$lib/server/auth/rbac';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async () => {
@@ -31,6 +33,7 @@ const createSchema = z.object({
 
 export const actions: Actions = {
 	create: async (event) => {
+		requirePlatformAdmin(event.locals.user);
 		const parsed = createSchema.safeParse(Object.fromEntries(await event.request.formData()));
 		if (!parsed.success) return fail(400, { error: 'Enter a name and slug.' });
 
@@ -52,9 +55,11 @@ export const actions: Actions = {
 			throw e;
 		}
 
-		// Give the new hotel the standard amenity catalogue + a working Finance setup.
+		// Give the new hotel the standard amenity catalogue, a working Finance setup, and
+		// its default role set (so the first hotel_admin invite has a role to grant).
 		await seedHotelAmenities(db, newId);
 		await seedFinanceDefaults(db, newId);
+		await seedDefaultRoles(db, newId);
 
 		await writeAudit({
 			actor: event.locals.user,

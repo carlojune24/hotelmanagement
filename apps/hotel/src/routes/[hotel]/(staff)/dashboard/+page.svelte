@@ -1,14 +1,38 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { toast } from 'svelte-sonner';
+	import { Button } from '$lib/components/ui/button/index.js';
 	import BedIcon from '@lucide/svelte/icons/bed';
 	import WalletIcon from '@lucide/svelte/icons/wallet';
 	import ConciergeBellIcon from '@lucide/svelte/icons/concierge-bell';
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
+	import GlobeIcon from '@lucide/svelte/icons/globe';
+	import CopyIcon from '@lucide/svelte/icons/copy';
+	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 
 	const base = $derived(`/${page.params.hotel}`);
+
+	/** The hotel's own guest-facing booking site — its custom domain if set, the
+	 *  platform's own path otherwise. Never the staff shell's own origin+path
+	 *  implied elsewhere, since a custom domain drops the `/{slug}` prefix entirely
+	 *  (`hooks.server.ts`'s `reroute` hook maps it straight to this hotel). */
+	const bookingUrl = $derived(
+		data.hotel?.customDomain
+			? `https://${data.hotel.customDomain}/book`
+			: `${page.url.origin}${base}/book`
+	);
+
+	async function copyBookingUrl() {
+		try {
+			await navigator.clipboard.writeText(bookingUrl);
+			toast.success('Link copied.');
+		} catch {
+			toast.error('Could not copy — copy it manually instead.');
+		}
+	}
 
 	const setupLinks = $derived([
 		{
@@ -28,9 +52,29 @@
 
 <div class="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
 	<h1 class="mb-1 text-xl font-semibold tracking-tight text-ink">Dashboard</h1>
-	<p class="mb-8 text-sm text-ink-muted">
+	<p class="mb-6 text-sm text-ink-muted">
 		{data.hotel?.name} · {data.hotel?.timezone}
 	</p>
+
+	<div class="mb-8 flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+		<div class="flex items-start gap-3">
+			<div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">
+				<GlobeIcon class="size-4.5" />
+			</div>
+			<div class="min-w-0">
+				<div class="font-medium text-ink">Your booking site</div>
+				<p class="mt-0.5 truncate text-sm text-ink-muted">{bookingUrl}</p>
+			</div>
+		</div>
+		<div class="flex shrink-0 gap-2">
+			<Button variant="outline" size="sm" onclick={copyBookingUrl}>
+				<CopyIcon class="size-4" /> Copy link
+			</Button>
+			<Button size="sm" href={bookingUrl} target="_blank" rel="noopener noreferrer">
+				<ExternalLinkIcon class="size-4" /> View site
+			</Button>
+		</div>
+	</div>
 
 	<h2 class="text-sm font-semibold text-ink">Set up your inventory</h2>
 	<div class="mt-3 grid gap-3 sm:grid-cols-2">

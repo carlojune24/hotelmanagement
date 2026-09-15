@@ -21,7 +21,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
 	const canWrite =
 		(locals.user?.isPlatformAdmin ?? false) ||
-		(locals.role ? roleCan(locals.role, 'finance:write') : false);
+		(locals.role ? roleCan(locals.role.capabilities, 'finance:write') : false);
 
 	return { series, selectedId: selected?.id ?? null, register, canWrite };
 };

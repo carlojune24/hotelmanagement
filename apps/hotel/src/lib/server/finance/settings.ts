@@ -11,7 +11,8 @@ export const DEFAULT_FINANCE_SETTINGS = {
 	autoPostOnlinePayments: true,
 	requireExpenseApproval: true,
 	lockOnDayClose: true,
-	requireOpenShiftForCashPayment: true
+	requireOpenShiftForCashPayment: true,
+	dayCloseCutoffTime: null as string | null
 };
 
 export type ResolvedFinanceSettings = typeof DEFAULT_FINANCE_SETTINGS;
@@ -32,7 +33,8 @@ export async function getFinanceSettings(hotelId: string): Promise<ResolvedFinan
 		autoPostOnlinePayments: row.autoPostOnlinePayments,
 		requireExpenseApproval: row.requireExpenseApproval,
 		lockOnDayClose: row.lockOnDayClose,
-		requireOpenShiftForCashPayment: row.requireOpenShiftForCashPayment
+		requireOpenShiftForCashPayment: row.requireOpenShiftForCashPayment,
+		dayCloseCutoffTime: row.dayCloseCutoffTime
 	};
 }
 

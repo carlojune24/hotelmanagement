@@ -39,7 +39,8 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 	// Reservation status override (manual-confirm / reinstate) is hotel_admin-only —
 	// same double-gate `(staff)/finance`'s day-close reopen uses, not plain `booking:write`
 	// (which `front_desk` already has).
-	const canAdmin = locals.user?.isPlatformAdmin || (locals.role ? roleCan(locals.role, 'hotel:admin') : false);
+	const canAdmin =
+		locals.user?.isPlatformAdmin || (locals.role ? roleCan(locals.role.capabilities, 'hotel:admin') : false);
 
 	if (params.kind === 'room') {
 		const detail = await getRoomBookingDetail(hotelId, params.id);

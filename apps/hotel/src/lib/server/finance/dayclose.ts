@@ -1,9 +1,10 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/index';
-import { cashMovements, cashierShifts, dayCloses } from '../db/schema/index';
+import { cashMovements, cashierShifts, dayCloses, hotels } from '../db/schema/index';
 import { writeAudit } from '../audit';
 import type { SessionUser } from '../auth/session';
-import { FinanceError } from './shared';
+import { FinanceError, businessDateFor, currentTimeOfDayFor } from './shared';
+import { getFinanceSettings } from './settings';
 
 /** Aggregates for `businessDate` used both in the day-close snapshot and the
  *  dashboard's "today" tiles. Reads only non-voided `cash_movements`. */
@@ -75,6 +76,24 @@ export async function runDayClose(
 ): Promise<void> {
 	const status = await getDayCloseStatus(hotelId, businessDate);
 	if (status.closed) throw new FinanceError(`${businessDate} is already closed.`);
+
+	// Safety cutoff: only meaningful for *today's* business date — a past date's
+	// cutoff time has, by definition, already passed, so this never blocks closing
+	// yesterday (or catching up on an older backlog) regardless of the clock now.
+	const [hotel] = await db
+		.select({ timezone: hotels.timezone })
+		.from(hotels)
+		.where(eq(hotels.id, hotelId))
+		.limit(1);
+	const timezone = hotel?.timezone ?? 'Asia/Manila';
+	if (businessDate === businessDateFor(timezone)) {
+		const { dayCloseCutoffTime } = await getFinanceSettings(hotelId);
+		if (dayCloseCutoffTime && currentTimeOfDayFor(timezone) < dayCloseCutoffTime) {
+			throw new FinanceError(
+				`${businessDate} can't be closed before ${dayCloseCutoffTime} yet.`
+			);
+		}
+	}
 
 	const openShifts = await db
 		.select({ id: cashierShifts.id })

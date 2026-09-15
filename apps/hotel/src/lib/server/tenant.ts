@@ -1,9 +1,9 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '$lib/server/db/index';
-import { hotels, memberships } from '$lib/server/db/schema/index';
-import type { MembershipRole } from '$lib/authz';
+import { hotels, memberships, roles, rolePermissions } from '$lib/server/db/schema/index';
+import type { MembershipRole, ResolvedRole } from '$lib/authz';
 
-export type { MembershipRole };
+export type { MembershipRole, ResolvedRole };
 export { RESERVED_PREFIXES, isValidSlug, slugError } from '$lib/slug';
 
 export interface HotelContext {
@@ -64,14 +64,28 @@ export async function loadHotelSlugByDomain(hostname: string): Promise<string | 
 	return row?.slug ?? null;
 }
 
-export async function getMembershipRole(
-	userId: string,
-	hotelId: string
-): Promise<MembershipRole | null> {
-	const row = await db
-		.select({ role: memberships.role })
+/** Resolves the signed-in user's role at a hotel, including its DB-backed capability set.
+ *  This is the one place per-request role resolution happens — `hooks.server.ts` calls it
+ *  and assigns the result to `event.locals.role`. */
+export async function getMembershipRole(userId: string, hotelId: string): Promise<ResolvedRole | null> {
+	const membership = await db
+		.select({ roleId: memberships.roleId })
 		.from(memberships)
 		.where(and(eq(memberships.userId, userId), eq(memberships.hotelId, hotelId)))
 		.then((r) => r.at(0));
-	return (row?.role as MembershipRole | undefined) ?? null;
+	if (!membership) return null;
+
+	const role = await db
+		.select({ id: roles.id, slug: roles.slug, name: roles.name, isProtected: roles.isProtected })
+		.from(roles)
+		.where(eq(roles.id, membership.roleId))
+		.then((r) => r.at(0));
+	if (!role) return null;
+
+	const perms = await db
+		.select({ capability: rolePermissions.capability })
+		.from(rolePermissions)
+		.where(eq(rolePermissions.roleId, role.id));
+
+	return { ...role, capabilities: perms.map((p) => p.capability) };
 }

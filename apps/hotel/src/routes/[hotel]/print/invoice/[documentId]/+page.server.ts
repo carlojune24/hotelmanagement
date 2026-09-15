@@ -17,7 +17,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 	// Staff with folio access, or a guest holding the order's access token.
 	const isStaff =
 		(locals.user?.isPlatformAdmin ?? false) ||
-		(locals.role ? roleCan(locals.role, 'folio:read') : false);
+		(locals.role ? roleCan(locals.role.capabilities, 'folio:read') : false);
 	if (!isStaff) {
 		const token = url.searchParams.get('t');
 		const orderId = rendered.document.orderId;

@@ -4,12 +4,18 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { amenityIcon } from '$lib/amenity-icons';
-	import { AMENITY_CATEGORY_LABELS, AMENITY_CATEGORY_ORDER } from '$lib/amenity-categories';
+	import {
+		AMENITY_CATEGORY_LABELS,
+		AMENITY_CATEGORY_ORDER,
+		AMENITY_CATEGORY_ICONS
+	} from '$lib/amenity-categories';
 	import BedIcon from '@lucide/svelte/icons/bed';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import RulerIcon from '@lucide/svelte/icons/ruler';
 	import ImageIcon from '@lucide/svelte/icons/image';
 	import StarIcon from '@lucide/svelte/icons/star';
+	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import CalendarDaysIcon from '@lucide/svelte/icons/calendar-days';
 	import CalendarCheckIcon from '@lucide/svelte/icons/calendar-check';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
@@ -20,6 +26,8 @@
 	import type { BedConfigEntry } from '$lib/server/db/schema/inventory';
 	import type { HallPriceBreakdown } from '$lib/server/pricing';
 	import StorefrontNav from '$lib/components/storefront/storefront-nav.svelte';
+	import StorefrontFooter from '$lib/components/storefront/storefront-footer.svelte';
+	import StorefrontLightbox from '$lib/components/storefront/storefront-lightbox.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -88,7 +96,12 @@
 		}));
 	});
 
-	let lightboxSrc = $state<string | null>(null);
+	let lightboxIndex = $state<number | null>(null);
+
+	let galleryStripEl: HTMLDivElement | undefined = $state();
+	function scrollGallery(direction: 1 | -1) {
+		galleryStripEl?.scrollBy({ left: direction * 320, behavior: 'smooth' });
+	}
 
 	/** A room/gallery photo that fails to load (fake seed URLs, a stale hotel-set link) hides
 	    itself so the woven-pattern placeholder underneath shows through — never a broken-image icon. */
@@ -169,12 +182,6 @@
 	<title>{data.hotel.name} — Book your stay</title>
 </svelte:head>
 
-<svelte:window
-	onkeydown={(e) => {
-		if (e.key === 'Escape') lightboxSrc = null;
-	}}
-/>
-
 <StorefrontNav
 	hotelSlug={data.hotel.slug}
 	hotelName={data.hotel.name}
@@ -211,7 +218,7 @@
 			<button
 				type="button"
 				class="storefront-hero-gallery-cta"
-				onclick={() => (lightboxSrc = galleryImages[0]!)}
+				onclick={() => (lightboxIndex = 0)}
 			>
 				<ImageIcon aria-hidden="true" />
 				See the gallery
@@ -231,7 +238,7 @@
 			<button
 				type="button"
 				class="storefront-hero-gallery-cta"
-				onclick={() => (lightboxSrc = galleryImages[0]!)}
+				onclick={() => (lightboxIndex = 0)}
 			>
 				<ImageIcon aria-hidden="true" />
 				See the gallery
@@ -239,10 +246,16 @@
 		{/if}
 	{/if}
 	<div class="storefront-hero-inner">
-		<p class="ledger-label">Welcome to {data.hotel.name}</p>
+		<p class="storefront-eyebrow is-hero">Welcome to {data.hotel.name}</p>
 		<h1 class="ledger-display mt-2 text-4xl sm:text-[clamp(2.25rem,5vw,3.5rem)]">
-			{data.branding.tagline ?? data.hotel.name}
+			{data.hotel.name}
 		</h1>
+		{#if data.branding.tagline}
+			<p class="storefront-hero-tagline mt-1">{data.branding.tagline}</p>
+		{/if}
+		{#if data.branding.heroSubtitle}
+			<p class="storefront-hero-subtitle mt-4">{data.branding.heroSubtitle}</p>
+		{/if}
 		{#if startingPrice != null}
 			<p class="ledger-label mt-6">
 				Rates from <span class="ledger-data text-sm">{peso(startingPrice)}</span> / night
@@ -288,7 +301,8 @@
 		<div class="storefront-about-grid {aboutPhoto ? 'has-photo' : ''}">
 			<div>
 				<div class="storefront-section-head">
-					<h2 class="storefront-section-title ledger-display text-2xl sm:text-3xl">
+					<p class="storefront-eyebrow">Get to know us</p>
+					<h2 class="storefront-section-title ink-heading ledger-display mt-2 text-2xl sm:text-3xl">
 						About {data.hotel.name}
 					</h2>
 					{#if data.hotel.city}
@@ -313,21 +327,29 @@
 {#if groupedAmenities.length > 0}
 	<section id="amenities" class="storefront-section">
 		<div class="storefront-section-head">
-			<h2 class="storefront-section-title ledger-display text-2xl sm:text-3xl">Amenities</h2>
+			<p class="storefront-eyebrow">Included in your stay</p>
+			<h2 class="storefront-section-title ink-heading ledger-display mt-2 text-2xl sm:text-3xl">
+				Amenities
+			</h2>
 		</div>
 		<p class="storefront-section-lede">Everything included in your stay.</p>
 
-		<div class="storefront-amenity-columns">
+		<div class="storefront-amenity-cards">
 			{#each groupedAmenities as group (group.category)}
-				<div class="storefront-amenity-column">
-					<h3 class="storefront-amenity-group-head storefront-section-title">{group.label}</h3>
-					<ul class="storefront-amenity-list">
+				{@const CategoryIcon = AMENITY_CATEGORY_ICONS[group.category] ?? amenityIcon(null)}
+				<div class="storefront-amenity-card">
+					<div class="storefront-amenity-card-icon">
+						<CategoryIcon aria-hidden="true" />
+					</div>
+					<h3 class="storefront-amenity-card-title">{group.label}</h3>
+					<ul class="storefront-amenity-card-list">
 						{#each group.items as a (a.name)}
-							{@const Icon = amenityIcon(a.icon)}
-							<li class="storefront-amenity-item">
-								<Icon aria-hidden="true" />
-								<span>{a.name}</span>
-								{#if a.note}<span class="storefront-amenity-note">— {a.note}</span>{/if}
+							<li class="storefront-amenity-card-item">
+								<CircleCheckIcon aria-hidden="true" />
+								<span>
+									{a.name}
+									{#if a.note}<span class="storefront-amenity-note"> — {a.note}</span>{/if}
+								</span>
 							</li>
 						{/each}
 					</ul>
@@ -610,15 +632,40 @@
 
 {#if galleryImages.length > 0}
 	<section id="gallery" class="storefront-section">
-		<div class="storefront-section-head">
-			<h2 class="storefront-section-title ledger-display text-2xl sm:text-3xl">Gallery</h2>
+		<div class="storefront-gallery-head-row">
+			<div class="storefront-section-head">
+				<p class="storefront-eyebrow">Gallery</p>
+				<h2 class="storefront-section-title ink-heading ledger-display mt-2 text-2xl sm:text-3xl">
+					A Glimpse of {data.hotel.name}
+				</h2>
+			</div>
+			{#if galleryImages.length > 1}
+				<div class="storefront-gallery-nav">
+					<button
+						type="button"
+						class="storefront-gallery-nav-btn"
+						onclick={() => scrollGallery(-1)}
+						aria-label="Scroll to previous photos"
+					>
+						<ChevronLeftIcon aria-hidden="true" />
+					</button>
+					<button
+						type="button"
+						class="storefront-gallery-nav-btn"
+						onclick={() => scrollGallery(1)}
+						aria-label="Scroll to next photos"
+					>
+						<ChevronRightIcon aria-hidden="true" />
+					</button>
+				</div>
+			{/if}
 		</div>
-		<div class="storefront-gallery-grid">
+		<div class="storefront-gallery-strip" bind:this={galleryStripEl}>
 			{#each galleryImages as url, i (url)}
 				<button
 					type="button"
-					class="storefront-gallery-item {i % 5 === 0 ? 'is-wide' : ''}"
-					onclick={() => (lightboxSrc = url)}
+					class="storefront-gallery-tile"
+					onclick={() => (lightboxIndex = i)}
 					aria-label="View larger photo"
 				>
 					<img src={url} alt="" loading="lazy" onerror={hidePhoto} />
@@ -653,36 +700,17 @@
 	</section>
 {/if}
 
-<footer class="storefront-footer">
-	<div class="storefront-footer-inner">
-		<div>
-			<div class="ledger-display text-lg">{data.hotel.name}</div>
-			{#if data.hotel.city}
-				<p class="mt-1 text-sm text-[var(--ledger-ink-muted)]">{data.hotel.city}, Philippines</p>
-			{/if}
-			<p class="mt-3 max-w-sm text-sm text-[var(--ledger-ink-muted)]">
-				Booked directly with the hotel — the price you see on review is the price you pay, no
-				third-party markup.
-			</p>
-		</div>
-		<Button href="#search" class="ledger-btn-primary">Check availability</Button>
-	</div>
-</footer>
+<StorefrontFooter
+	hotelSlug={data.hotel.slug}
+	hotelName={data.hotel.name}
+	city={data.hotel.city}
+	showAmenities={data.hotelAmenities.length > 0}
+	showFunctionHall={data.functionHalls.length > 0}
+	showDining={data.diningItems.length > 0 || (data.dining.menuImages ?? []).length > 0}
+	showReviews={data.reviews.length > 0}
+	facebookUrl={data.branding.facebookUrl}
+	instagramUrl={data.branding.instagramUrl}
+	tiktokUrl={data.branding.tiktokUrl}
+/>
 
-{#if lightboxSrc}
-	<div
-		class="storefront-lightbox"
-		role="button"
-		tabindex="0"
-		aria-label="Close photo"
-		onclick={() => (lightboxSrc = null)}
-		onkeydown={(e) => {
-			if (e.key === 'Enter' || e.key === ' ') lightboxSrc = null;
-		}}
-	>
-		<img src={lightboxSrc} alt="" onerror={hidePhoto} />
-		<button type="button" class="storefront-lightbox-close" onclick={() => (lightboxSrc = null)}>
-			Close ✕
-		</button>
-	</div>
-{/if}
+<StorefrontLightbox images={galleryImages} bind:index={lightboxIndex} />

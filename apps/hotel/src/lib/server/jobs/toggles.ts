@@ -23,6 +23,15 @@ export const JOB_DEFS = {
 		label: 'Auto-flag no-shows',
 		description: "Marks a confirmed arrival no-show once its check-in date has fully passed with no check-in.",
 		defaultEnabled: true
+	},
+	auto_day_close: {
+		label: 'Auto-close the business day',
+		description:
+			"Closes yesterday's business day and issues its Z-reading once every cashier shift for it is closed — instead of waiting for the \"Close day\" button. A day with a shift still open is left for staff to close by hand.",
+		// Off by default, unlike the jobs above: closing a day issues a permanent,
+		// sequentially-numbered Z-reading (BIR keeps every one, none can be deleted),
+		// so a hotel opts in deliberately rather than getting it silently on.
+		defaultEnabled: false
 	}
 } as const;
 

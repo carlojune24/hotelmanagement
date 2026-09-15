@@ -14,6 +14,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { createdAt, deletedAt, pk, updatedAt } from './_shared';
 import { users } from './auth';
+import { roles } from './roles';
 
 /**
  * Owner / portfolio layer above hotels. Populated in Phase 6; the column exists
@@ -47,7 +48,6 @@ export const hotels = pgTable(
 		currency: text('currency').notNull().default('PHP'),
 		/** VAT rate in basis points (1200 = 12%). */
 		vatRateBps: integer('vat_rate_bps').notNull().default(1200),
-		orSeriesPrefix: text('or_series_prefix').notNull().default('OR'),
 		/** A client's own domain (bare hostname, e.g. "mmhotel.com" — no protocol/path), mapped to this
 		 *  hotel's slug by `hooks.server.ts`'s `reroute` hook. Null = reached only via the platform's own
 		 *  `/{slug}/…` path. DNS/hosting for the domain itself is set up outside this app. */
@@ -74,16 +74,6 @@ export const hotels = pgTable(
 	(t) => [index('hotels_group_idx').on(t.groupId)]
 );
 
-export const membershipRole = pgEnum('membership_role', [
-	'hotel_admin',
-	'front_desk',
-	'housekeeping',
-	'accountant',
-	'hr',
-	'read_only',
-	'group_owner'
-]);
-
 export const memberships = pgTable(
 	'memberships',
 	{
@@ -93,7 +83,9 @@ export const memberships = pgTable(
 		hotelId: uuid('hotel_id')
 			.notNull()
 			.references(() => hotels.id, { onDelete: 'cascade' }),
-		role: membershipRole('role').notNull(),
+		roleId: uuid('role_id')
+			.notNull()
+			.references(() => roles.id, { onDelete: 'restrict' }),
 		createdAt: createdAt()
 	},
 	(t) => [
@@ -109,7 +101,8 @@ export const hotelsRelations = relations(hotels, ({ one, many }) => ({
 
 export const membershipsRelations = relations(memberships, ({ one }) => ({
 	user: one(users, { fields: [memberships.userId], references: [users.id] }),
-	hotel: one(hotels, { fields: [memberships.hotelId], references: [hotels.id] })
+	hotel: one(hotels, { fields: [memberships.hotelId], references: [hotels.id] }),
+	role: one(roles, { fields: [memberships.roleId], references: [roles.id] })
 }));
 
 export type Hotel = typeof hotels.$inferSelect;

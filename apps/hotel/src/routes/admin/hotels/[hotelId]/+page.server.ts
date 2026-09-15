@@ -2,20 +2,17 @@ import { error, fail } from '@sveltejs/kit';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
-import { hotels, invites, memberships, users } from '$lib/server/db/schema/index';
+import { hotels, invites, memberships, roles, users } from '$lib/server/db/schema/index';
 import { writeAudit } from '$lib/server/audit';
-import { createInvite } from '$lib/server/auth/invite';
-import type { MembershipRole } from '$lib/server/tenant';
+import { createInvite, revokeInvite } from '$lib/server/auth/invite';
+import { sendStaffInvite } from '$lib/server/email/send-invite';
+import { requirePlatformAdmin } from '$lib/server/auth/rbac';
 import type { Actions, PageServerLoad } from './$types';
 
-const ROLES: MembershipRole[] = [
-	'hotel_admin',
-	'front_desk',
-	'housekeeping',
-	'accountant',
-	'hr',
-	'read_only'
-];
+/** Platform admin only ever grants/revokes the protected `hotel_admin` role here — every
+ *  other role is invited/managed by a hotel's own hotel_admin from inside the hotel
+ *  (`[hotel]/(staff)/settings/team`). */
+const HOTEL_ADMIN_SLUG = 'hotel_admin';
 
 export const load: PageServerLoad = async ({ params }) => {
 	const hotel = await db
@@ -30,12 +27,13 @@ export const load: PageServerLoad = async ({ params }) => {
 			userId: users.id,
 			name: users.name,
 			email: users.email,
-			role: memberships.role,
+			roleSlug: roles.slug,
 			status: users.status
 		})
 		.from(memberships)
 		.innerJoin(users, eq(users.id, memberships.userId))
-		.where(eq(memberships.hotelId, hotel.id));
+		.innerJoin(roles, eq(roles.id, memberships.roleId))
+		.where(and(eq(memberships.hotelId, hotel.id), eq(roles.slug, HOTEL_ADMIN_SLUG)));
 
 	const pendingInvites = await db
 		.select({
@@ -45,20 +43,19 @@ export const load: PageServerLoad = async ({ params }) => {
 			expiresAt: invites.expiresAt
 		})
 		.from(invites)
-		.where(and(eq(invites.hotelId, hotel.id), eq(invites.status, 'pending')));
+		.where(
+			and(
+				eq(invites.hotelId, hotel.id),
+				eq(invites.status, 'pending'),
+				eq(invites.role, HOTEL_ADMIN_SLUG)
+			)
+		);
 
-	return { hotel, members, pendingInvites, roles: ROLES };
+	return { hotel, members, pendingInvites };
 };
 
 const configSchema = z.object({
 	name: z.string().min(2).max(160),
-	legalName: z.string().max(200).optional(),
-	addressLine: z.string().max(240).optional(),
-	city: z.string().max(120).optional(),
-	timezone: z.string().min(1).max(64),
-	currency: z.enum(['PHP']),
-	vatRatePct: z.coerce.number().min(0).max(30),
-	orSeriesPrefix: z.string().min(1).max(12),
 	/** Bare hostname only — no protocol, no path, no port. Empty clears the mapping. */
 	customDomain: z
 		.string()
@@ -80,6 +77,7 @@ async function getHotelOr404(id: string) {
 
 export const actions: Actions = {
 	updateConfig: async (event) => {
+		requirePlatformAdmin(event.locals.user);
 		const parsed = configSchema.safeParse(Object.fromEntries(await event.request.formData()));
 		if (!parsed.success) return fail(400, { error: 'Check the configuration fields.' });
 		const before = await getHotelOr404(event.params.hotelId!);
@@ -90,13 +88,6 @@ export const actions: Actions = {
 				.update(hotels)
 				.set({
 					name: d.name.trim(),
-					legalName: d.legalName?.trim() || null,
-					addressLine: d.addressLine?.trim() || null,
-					city: d.city?.trim() || null,
-					timezone: d.timezone,
-					currency: d.currency,
-					vatRateBps: Math.round(d.vatRatePct * 100),
-					orSeriesPrefix: d.orSeriesPrefix.trim().toUpperCase(),
 					customDomain: d.customDomain?.trim().toLowerCase() || null,
 					updatedAt: new Date()
 				})
@@ -114,13 +105,14 @@ export const actions: Actions = {
 			action: 'hotel.update_config',
 			entityType: 'hotel',
 			entityId: before.id,
-			before: { name: before.name, vatRateBps: before.vatRateBps, customDomain: before.customDomain },
-			after: { name: d.name, vatRateBps: Math.round(d.vatRatePct * 100), customDomain: d.customDomain || null }
+			before: { name: before.name, customDomain: before.customDomain },
+			after: { name: d.name, customDomain: d.customDomain || null }
 		});
 		return { ok: 'Configuration saved.' };
 	},
 
 	setStatus: async (event) => {
+		requirePlatformAdmin(event.locals.user);
 		const fd = await event.request.formData();
 		const status = z.enum(['draft', 'published', 'archived']).safeParse(fd.get('status'));
 		if (!status.success) return fail(400, { error: 'Invalid status.' });
@@ -143,17 +135,16 @@ export const actions: Actions = {
 	},
 
 	inviteMember: async (event) => {
+		requirePlatformAdmin(event.locals.user);
 		const fd = await event.request.formData();
-		const parsed = z
-			.object({ email: z.string().email(), role: z.enum(ROLES as [string, ...string[]]) })
-			.safeParse(Object.fromEntries(fd));
-		if (!parsed.success) return fail(400, { error: 'Enter a valid email and role.' });
+		const parsed = z.object({ email: z.string().email() }).safeParse(Object.fromEntries(fd));
+		if (!parsed.success) return fail(400, { error: 'Enter a valid email.' });
 		const hotel = await getHotelOr404(event.params.hotelId!);
 
 		const { token } = await createInvite({
 			email: parsed.data.email,
 			hotelId: hotel.id,
-			role: parsed.data.role as MembershipRole,
+			role: HOTEL_ADMIN_SLUG,
 			invitedByUserId: event.locals.user?.id
 		});
 		await writeAudit({
@@ -161,37 +152,45 @@ export const actions: Actions = {
 			actor: event.locals.user,
 			action: 'hotel.invite_member',
 			entityType: 'invite',
-			after: { email: parsed.data.email, role: parsed.data.role }
+			after: { email: parsed.data.email, role: HOTEL_ADMIN_SLUG }
 		});
 
 		const link = `${event.url.origin}/auth/accept-invite/${token}`;
-		return { ok: 'Invite created.', inviteLink: link };
+		const emailed = await sendStaffInvite({
+			hotelId: hotel.id,
+			hotelName: hotel.name,
+			toEmail: parsed.data.email,
+			roleName: 'Hotel Admin',
+			inviteUrl: link,
+			inviterName: event.locals.user?.name ?? null,
+			expiresInDays: 7
+		});
+		return {
+			ok: emailed.ok ? 'Invite created and emailed.' : 'Invite created, but the email failed to send.',
+			inviteLink: link
+		};
 	},
 
-	changeRole: async (event) => {
+	revokeInvite: async (event) => {
+		requirePlatformAdmin(event.locals.user);
 		const fd = await event.request.formData();
-		const parsed = z
-			.object({ userId: z.string().uuid(), role: z.enum(ROLES as [string, ...string[]]) })
-			.safeParse(Object.fromEntries(fd));
-		if (!parsed.success) return fail(400, { error: 'Invalid role change.' });
+		const id = fd.get('id');
+		if (typeof id !== 'string') return fail(400, { error: 'Missing invite.' });
 		const hotel = await getHotelOr404(event.params.hotelId!);
 
-		await db
-			.update(memberships)
-			.set({ role: parsed.data.role as MembershipRole })
-			.where(and(eq(memberships.hotelId, hotel.id), eq(memberships.userId, parsed.data.userId)));
+		await revokeInvite(id, hotel.id);
 		await writeAudit({
 			hotelId: hotel.id,
 			actor: event.locals.user,
-			action: 'hotel.change_role',
-			entityType: 'membership',
-			entityId: parsed.data.userId,
-			after: { role: parsed.data.role }
+			action: 'hotel.revoke_invite',
+			entityType: 'invite',
+			entityId: id
 		});
-		return { ok: 'Role updated.' };
+		return { ok: 'Invite cancelled.' };
 	},
 
 	removeMember: async (event) => {
+		requirePlatformAdmin(event.locals.user);
 		const fd = await event.request.formData();
 		const userId = z.string().uuid().safeParse(fd.get('userId'));
 		if (!userId.success) return fail(400, { error: 'Invalid user.' });

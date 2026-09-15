@@ -1,10 +1,11 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, ilike, inArray, lte } from 'drizzle-orm';
 import { db } from '../db/index';
 import { amenityItems, cashMovements, hotels, standaloneSaleItems, standaloneSales } from '../db/schema/index';
 import type { PaymentMethod } from './payments';
 import { writeAudit } from '../audit';
 import type { SessionUser } from '../auth/session';
 import { FinanceError, businessDateFor } from './shared';
+import { changeFor } from './calc';
 import { recordCashMovement } from './cash';
 import { resolvePaymentAccount } from './payments';
 
@@ -23,6 +24,10 @@ export interface CreateStandaloneSaleInput {
 	hotelId: string;
 	lines: StandaloneSaleLineInput[];
 	method: PaymentMethod;
+	/** Cash only — what the walk-in handed over. Required (and must cover the
+	 *  total) for `method: 'cash'`; ignored for every other method, since a quick
+	 *  sale has no folio to carry an under-tender forward on. */
+	tenderedCentavos?: number | null;
 	actor: SessionUser | null;
 }
 
@@ -41,7 +46,9 @@ interface ResolvedLine {
  * requirement, shift reconciliation) via the same `resolvePaymentAccount` the
  * front-desk payment path uses. No guest record required.
  */
-export async function createStandaloneSale(input: CreateStandaloneSaleInput): Promise<{ saleId: string }> {
+export async function createStandaloneSale(
+	input: CreateStandaloneSaleInput
+): Promise<{ saleId: string; totalCentavos: number; changeCentavos: number }> {
 	if (input.lines.length === 0) throw new FinanceError('Add at least one item.');
 
 	const [hotel] = await db.select({ timezone: hotels.timezone }).from(hotels).where(eq(hotels.id, input.hotelId)).limit(1);
@@ -84,6 +91,16 @@ export async function createStandaloneSale(input: CreateStandaloneSaleInput): Pr
 	}
 	const totalCentavos = resolved.reduce((s, l) => s + l.lineTotalCentavos, 0);
 
+	let tenderedCentavos: number | null = null;
+	let changeCentavos = 0;
+	if (input.method === 'cash') {
+		if (!Number.isInteger(input.tenderedCentavos) || (input.tenderedCentavos ?? 0) < totalCentavos) {
+			throw new FinanceError('Cash tendered must cover the total.');
+		}
+		tenderedCentavos = input.tenderedCentavos!;
+		changeCentavos = changeFor(tenderedCentavos, totalCentavos);
+	}
+
 	const { cashAccountId, shiftId } = await resolvePaymentAccount(input.hotelId, input.method);
 
 	const saleId = await db.transaction(async (tx) => {
@@ -112,6 +129,8 @@ export async function createStandaloneSale(input: CreateStandaloneSaleInput): Pr
 				cashAccountId,
 				shiftId,
 				totalCentavos,
+				tenderedCentavos,
+				changeCentavos,
 				cashMovementId: movementId,
 				soldByUserId: input.actor?.id ?? null
 			})
@@ -132,7 +151,106 @@ export async function createStandaloneSale(input: CreateStandaloneSaleInput): Pr
 		after: { totalCentavos, lineCount: resolved.length, method: input.method }
 	});
 
-	return { saleId };
+	return { saleId, totalCentavos, changeCentavos };
+}
+
+export interface CatalogItem {
+	id: string;
+	name: string;
+	category: string | null;
+	priceCentavos: number;
+}
+
+/**
+ * A "custom item" typed at the quick-sale register becomes a real, reusable
+ * catalog entry instead of a one-off line: an exact case-insensitive name match
+ * against the hotel's existing (active) items reuses that item's own id and
+ * price rather than creating a near-duplicate; anything else inserts a new
+ * `amenity_items` row (no category, taxable by the schema's own default) so the
+ * next sale of the same thing is one tap, not retyped.
+ */
+export async function findOrCreateAmenityItem(
+	hotelId: string,
+	name: string,
+	priceCentavos: number
+): Promise<{ item: CatalogItem; matchedExisting: boolean }> {
+	const trimmed = name.trim();
+	if (!trimmed) throw new FinanceError('Enter a name.');
+	if (!Number.isInteger(priceCentavos) || priceCentavos <= 0) {
+		throw new FinanceError('Enter a positive price.');
+	}
+
+	const [existing] = await db
+		.select({ id: amenityItems.id, name: amenityItems.name, category: amenityItems.category, priceCentavos: amenityItems.priceCentavos })
+		.from(amenityItems)
+		.where(and(eq(amenityItems.hotelId, hotelId), eq(amenityItems.isActive, true), ilike(amenityItems.name, trimmed)))
+		.limit(1);
+	if (existing) return { item: existing, matchedExisting: true };
+
+	const [created] = await db
+		.insert(amenityItems)
+		.values({ hotelId, name: trimmed, priceCentavos })
+		.returning({ id: amenityItems.id, name: amenityItems.name, category: amenityItems.category, priceCentavos: amenityItems.priceCentavos });
+	return { item: created!, matchedExisting: false };
+}
+
+/** Sales that counted against one specific cashier shift — same convention
+ *  `finance/shifts.ts`'s `getShiftReconciliation` already uses for cash movements
+ *  (`shiftId` FK match, not a time-window join). A non-cash sale never carries a
+ *  `shiftId` (see `createStandaloneSale`), so it never shows up here — shifts are
+ *  a cash-drawer concept throughout this app, not a general "who was on duty" log. */
+export async function listStandaloneSalesForShift(hotelId: string, shiftId: string, limit = 50) {
+	return db
+		.select()
+		.from(standaloneSales)
+		.where(and(eq(standaloneSales.hotelId, hotelId), eq(standaloneSales.shiftId, shiftId)))
+		.orderBy(desc(standaloneSales.createdAt))
+		.limit(limit);
+}
+
+export interface QuickSalesReportRow {
+	businessDate: string;
+	createdAt: Date;
+	itemsSummary: string;
+	method: string;
+	totalCentavos: number;
+}
+
+/** Every quick sale in a business-date range, for the Finance → Reports "Quick
+ *  sales" report — one row per sale (not aggregated), same register-tape shape as
+ *  the print receipt itself, since each sale is a distinct transaction to verify. */
+export async function quickSalesReport(
+	hotelId: string,
+	from: string,
+	to: string
+): Promise<{ rows: QuickSalesReportRow[]; totalCentavos: number }> {
+	const sales = await db
+		.select()
+		.from(standaloneSales)
+		.where(and(eq(standaloneSales.hotelId, hotelId), gte(standaloneSales.businessDate, from), lte(standaloneSales.businessDate, to)))
+		.orderBy(asc(standaloneSales.businessDate), asc(standaloneSales.createdAt));
+
+	const items = sales.length
+		? await db
+				.select()
+				.from(standaloneSaleItems)
+				.where(inArray(standaloneSaleItems.saleId, sales.map((s) => s.id)))
+		: [];
+	const itemsBySale = new Map<string, typeof items>();
+	for (const i of items) {
+		const arr = itemsBySale.get(i.saleId) ?? [];
+		arr.push(i);
+		itemsBySale.set(i.saleId, arr);
+	}
+
+	const rows = sales.map((s) => ({
+		businessDate: s.businessDate,
+		createdAt: s.createdAt,
+		itemsSummary: (itemsBySale.get(s.id) ?? []).map((i) => `${i.quantity}x ${i.description}`).join(', '),
+		method: s.method,
+		totalCentavos: s.totalCentavos
+	}));
+	return { rows, totalCentavos: rows.reduce((sum, r) => sum + r.totalCentavos, 0) };
 }
 
 export async function listStandaloneSales(hotelId: string, limit = 100) {

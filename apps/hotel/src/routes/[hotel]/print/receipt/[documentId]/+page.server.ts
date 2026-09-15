@@ -16,7 +16,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 	const hotel = locals.hotel!;
 	const isStaff =
 		(locals.user?.isPlatformAdmin ?? false) ||
-		(locals.role ? roleCan(locals.role, 'folio:read') : false);
+		(locals.role ? roleCan(locals.role.capabilities, 'folio:read') : false);
 
 	// Primary path: the id is an already-issued Official Receipt document.
 	let rendered = await getDocumentForRender(hotel.id, params.documentId);

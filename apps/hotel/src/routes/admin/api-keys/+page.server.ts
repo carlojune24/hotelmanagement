@@ -5,6 +5,7 @@ import { db } from '$lib/server/db/index';
 import { hotels } from '$lib/server/db/schema/index';
 import { createApiKey, listAllApiKeys, revokeApiKey } from '$lib/server/auth/api-key';
 import { writeAudit } from '$lib/server/audit';
+import { requirePlatformAdmin } from '$lib/server/auth/rbac';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async () => {
@@ -25,6 +26,7 @@ const createSchema = z.object({
 
 export const actions: Actions = {
 	createApiKey: async (event) => {
+		requirePlatformAdmin(event.locals.user);
 		const fd = await event.request.formData();
 		const parsed = createSchema.safeParse({
 			name: fd.get('name'),
@@ -50,6 +52,7 @@ export const actions: Actions = {
 	},
 
 	revokeApiKeyAction: async (event) => {
+		requirePlatformAdmin(event.locals.user);
 		const id = (await event.request.formData()).get('id');
 		if (typeof id !== 'string') return fail(400, { error: 'Missing key.' });
 		await revokeApiKey(id);

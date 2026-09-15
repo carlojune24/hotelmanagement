@@ -85,6 +85,7 @@ export const actions: Actions = {
 			heroVideoUrl: current.heroVideoUrl,
 			fontDisplay: blankToUndef(raw.get('fontDisplay')),
 			tagline: blankToUndef(raw.get('tagline')),
+			heroSubtitle: blankToUndef(raw.get('heroSubtitle')),
 			about: blankToUndef(raw.get('about')),
 			galleryImages: current.galleryImages,
 			checkInPolicy: blankToUndef(raw.get('checkInPolicy')),
@@ -93,7 +94,10 @@ export const actions: Actions = {
 			contactEmail: blankToUndef(raw.get('contactEmail')),
 			contactAddress: blankToUndef(raw.get('contactAddress')),
 			contactLat: blankToNum(raw.get('contactLat')),
-			contactLng: blankToNum(raw.get('contactLng'))
+			contactLng: blankToNum(raw.get('contactLng')),
+			facebookUrl: blankToUndef(raw.get('facebookUrl')),
+			instagramUrl: blankToUndef(raw.get('instagramUrl')),
+			tiktokUrl: blankToUndef(raw.get('tiktokUrl'))
 		};
 		const parsed = brandingSchema.safeParse(cleaned);
 		if (!parsed.success) return fail(400, { error: 'Check the branding fields and try again.' });

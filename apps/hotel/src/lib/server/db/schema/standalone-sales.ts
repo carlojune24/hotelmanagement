@@ -30,6 +30,10 @@ export const standaloneSales = pgTable(
 		 *  accountability as any other cash sale. Null for a non-cash method. */
 		shiftId: uuid('shift_id').references(() => cashierShifts.id, { onDelete: 'set null' }),
 		totalCentavos: bigint('total_centavos', { mode: 'number' }).notNull(),
+		/** Cash only: what the walk-in handed over; `changeCentavos = tenderedCentavos - totalCentavos`.
+		 *  Same convention as `payments.tenderedCentavos`/`changeCentavos`. */
+		tenderedCentavos: bigint('tendered_centavos', { mode: 'number' }),
+		changeCentavos: bigint('change_centavos', { mode: 'number' }).notNull().default(0),
 		/** No FK — same generic-link convention as `cash_movements.sourceId`. */
 		cashMovementId: uuid('cash_movement_id').notNull(),
 		soldByUserId: uuid('sold_by_user_id').references(() => users.id, { onDelete: 'set null' }),

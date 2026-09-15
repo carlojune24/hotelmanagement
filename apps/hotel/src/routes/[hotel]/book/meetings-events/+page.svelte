@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button/index.js';
 	import StorefrontNav from '$lib/components/storefront/storefront-nav.svelte';
+	import StorefrontFooter from '$lib/components/storefront/storefront-footer.svelte';
+	import StorefrontLightbox from '$lib/components/storefront/storefront-lightbox.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -8,7 +10,14 @@
 	const peso = (centavos: number) =>
 		`₱${(centavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 
-	let lightboxSrc = $state<string | null>(null);
+	// One shared lightbox instance for the page — each hall loads its own photo set in
+	// on click, so browsing never crosses from one hall's photos into another's.
+	let lightboxImages = $state<string[]>([]);
+	let lightboxIndex = $state<number | null>(null);
+	function openLightbox(images: string[], index: number) {
+		lightboxImages = images;
+		lightboxIndex = index;
+	}
 	function hidePhoto(e: Event) {
 		(e.currentTarget as HTMLImageElement).style.display = 'none';
 	}
@@ -17,12 +26,6 @@
 <svelte:head>
 	<title>Meetings &amp; Events — {data.hotel.name}</title>
 </svelte:head>
-
-<svelte:window
-	onkeydown={(e) => {
-		if (e.key === 'Escape') lightboxSrc = null;
-	}}
-/>
 
 <StorefrontNav
 	hotelSlug={data.hotel.slug}
@@ -59,22 +62,23 @@
 				</p>
 
 				{#if mainPhoto}
+					{@const photoUrls = hall.photos.map((p) => p.url)}
 					<div class="storefront-room-dialog-gallery mt-6">
 						<button
 							type="button"
 							class="storefront-room-dialog-photo-main"
-							onclick={() => (lightboxSrc = mainPhoto.url)}
+							onclick={() => openLightbox(photoUrls, 0)}
 							aria-label="View larger photo"
 						>
 							<img src={mainPhoto.url} alt="" onerror={hidePhoto} />
 						</button>
 						{#if restPhotos.length > 0}
 							<div class="storefront-room-dialog-photo-strip">
-								{#each restPhotos as photo (photo.url)}
+								{#each restPhotos as photo, i (photo.url)}
 									<button
 										type="button"
 										class="storefront-room-dialog-photo-thumb"
-										onclick={() => (lightboxSrc = photo.url)}
+										onclick={() => openLightbox(photoUrls, i + 1)}
 										aria-label="View larger photo"
 									>
 										<img src={photo.url} alt="" loading="lazy" onerror={hidePhoto} />
@@ -113,27 +117,24 @@
 				{/if}
 
 				<Button href="/{data.hotel.slug}/book#function-hall" class="ledger-btn-primary mt-6">
-					Reserve this hall
+					Book this hall
 				</Button>
 			</section>
 		{/each}
 	{/if}
 </div>
 
-{#if lightboxSrc}
-	<div
-		class="storefront-lightbox"
-		role="button"
-		tabindex="0"
-		aria-label="Close photo"
-		onclick={() => (lightboxSrc = null)}
-		onkeydown={(e) => {
-			if (e.key === 'Enter' || e.key === ' ') lightboxSrc = null;
-		}}
-	>
-		<img src={lightboxSrc} alt="" onerror={hidePhoto} />
-		<button type="button" class="storefront-lightbox-close" onclick={() => (lightboxSrc = null)}>
-			Close ✕
-		</button>
-	</div>
-{/if}
+<StorefrontLightbox images={lightboxImages} bind:index={lightboxIndex} />
+
+<StorefrontFooter
+	hotelSlug={data.hotel.slug}
+	hotelName={data.hotel.name}
+	city={data.hotel.city}
+	showAmenities={data.hotelAmenities.length > 0}
+	showFunctionHall={data.functionHalls.length > 0}
+	showDining={data.diningItems.length > 0 || (data.dining.menuImages ?? []).length > 0}
+	showReviews={data.reviews.length > 0}
+	facebookUrl={data.branding.facebookUrl}
+	instagramUrl={data.branding.instagramUrl}
+	tiktokUrl={data.branding.tiktokUrl}
+/>

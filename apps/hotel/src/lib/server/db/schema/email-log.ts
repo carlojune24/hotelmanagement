@@ -8,7 +8,8 @@ import { orders } from './orders';
 export const emailType = pgEnum('email_type', [
 	'booking_confirmation',
 	'booking_cancelled',
-	'guest_message_reply'
+	'guest_message_reply',
+	'staff_invite'
 ]);
 
 /** Delivery outcome as reported by the transport. `sent` means the transport

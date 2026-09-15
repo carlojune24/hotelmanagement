@@ -1,6 +1,10 @@
 import { fail } from '@sveltejs/kit';
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { db } from '$lib/server/db/index';
+import { hotels } from '$lib/server/db/schema/index';
 import { requireCap } from '$lib/server/auth/rbac';
+import { writeAudit } from '$lib/server/audit';
 import { FinanceError } from '$lib/server/finance/shared';
 import {
 	createCashAccount,
@@ -39,12 +43,17 @@ export const load: PageServerLoad = async ({ locals }) => {
 	requireCap(locals.user, locals.role, 'hotel:admin');
 	const hotel = locals.hotel!;
 	await ensureFinanceSettings(hotel.id);
-	const [accounts, categories, vendors, settings, apiKeys] = await Promise.all([
+	const [accounts, categories, vendors, settings, apiKeys, hotelDetails] = await Promise.all([
 		listCashAccounts(hotel.id, { includeInactive: true }),
 		listExpenseCategories(hotel.id, { includeInactive: true }),
 		listVendors(hotel.id, { includeInactive: true }),
 		getFinanceSettings(hotel.id),
-		listApiKeysForHotel(hotel.id)
+		listApiKeysForHotel(hotel.id),
+		db
+			.select({ currency: hotels.currency, vatRateBps: hotels.vatRateBps, timezone: hotels.timezone })
+			.from(hotels)
+			.where(eq(hotels.id, hotel.id))
+			.then((r) => r[0]!)
 	]);
 	return {
 		accounts,
@@ -52,6 +61,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 		vendors,
 		settings,
 		apiKeys,
+		hotelDetails,
 		accountKinds: ACCOUNT_KINDS,
 		expenseGroups: EXPENSE_GROUPS
 	};
@@ -68,6 +78,38 @@ const wrap = async (fn: () => Promise<unknown>, ok: string) => {
 };
 
 export const actions: Actions = {
+	updateHotelDetails: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		const hotelId = event.locals.hotel!.id;
+		const p = z
+			.object({
+				currency: z.enum(['PHP']),
+				vatRatePct: z.coerce.number().min(0).max(30),
+				timezone: z.string().min(1).max(64)
+			})
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!p.success) return fail(400, { error: 'Check the hotel details.' });
+
+		await db
+			.update(hotels)
+			.set({
+				currency: p.data.currency,
+				vatRateBps: Math.round(p.data.vatRatePct * 100),
+				timezone: p.data.timezone,
+				updatedAt: new Date()
+			})
+			.where(eq(hotels.id, hotelId));
+		await writeAudit({
+			hotelId,
+			actor: event.locals.user,
+			action: 'hotel.update_details',
+			entityType: 'hotel',
+			entityId: hotelId,
+			after: p.data
+		});
+		return { ok: 'Hotel details saved.' };
+	},
+
 	createAccount: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
 		const p = z
@@ -242,7 +284,12 @@ export const actions: Actions = {
 				autoPostOnlinePayments: z.enum(['on']).optional(),
 				requireExpenseApproval: z.enum(['on']).optional(),
 				lockOnDayClose: z.enum(['on']).optional(),
-				requireOpenShiftForCashPayment: z.enum(['on']).optional()
+				requireOpenShiftForCashPayment: z.enum(['on']).optional(),
+				dayCloseCutoffTime: z
+					.string()
+					.regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+					.optional()
+					.or(z.literal(''))
 			})
 			.safeParse(fd);
 		if (!p.success) return fail(400, { error: 'Check the settings.' });
@@ -257,7 +304,8 @@ export const actions: Actions = {
 						autoPostOnlinePayments: p.data.autoPostOnlinePayments === 'on',
 						requireExpenseApproval: p.data.requireExpenseApproval === 'on',
 						lockOnDayClose: p.data.lockOnDayClose === 'on',
-						requireOpenShiftForCashPayment: p.data.requireOpenShiftForCashPayment === 'on'
+						requireOpenShiftForCashPayment: p.data.requireOpenShiftForCashPayment === 'on',
+						dayCloseCutoffTime: p.data.dayCloseCutoffTime || null
 					},
 					event.locals.user
 				),

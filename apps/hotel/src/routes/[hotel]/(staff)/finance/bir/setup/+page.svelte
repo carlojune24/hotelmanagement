@@ -9,6 +9,7 @@
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 	const s = $derived(data.settings);
+	const identity = $derived(data.identity);
 
 	$effect(() => {
 		if (form && 'ok' in form && form.ok) toast.success(form.ok);
@@ -23,6 +24,31 @@
 		<Badge variant="outline">Disclaimer mode — set TIN, permit no. &amp; printer to enable the statutory footer</Badge>
 	{/if}
 </div>
+
+<form method="POST" action="?/saveIdentity" use:enhance class="mb-6 space-y-3">
+	<section class="rounded-xl border border-border p-5">
+		<h2 class="mb-3 text-sm font-semibold text-ink">Business identity</h2>
+		<p class="mb-3 text-xs text-ink-muted">
+			The hotel's legal name and address — used as the default on invoices, receipts, and other
+			printed documents (the "Registered address" override below wins if set).
+		</p>
+		<div class="grid gap-3 sm:grid-cols-2">
+			<div>
+				<Label class="text-xs" for="legalName">Legal name</Label>
+				<Input id="legalName" name="legalName" value={identity.legalName ?? ''} />
+			</div>
+			<div>
+				<Label class="text-xs" for="city">City</Label>
+				<Input id="city" name="city" value={identity.city ?? ''} />
+			</div>
+			<div class="sm:col-span-2">
+				<Label class="text-xs" for="addressLine">Address</Label>
+				<Input id="addressLine" name="addressLine" value={identity.addressLine ?? ''} />
+			</div>
+		</div>
+		<Button type="submit" class="mt-3">Save business identity</Button>
+	</section>
+</form>
 
 <form method="POST" action="?/save" use:enhance class="space-y-6">
 	<section class="rounded-xl border border-border p-5">

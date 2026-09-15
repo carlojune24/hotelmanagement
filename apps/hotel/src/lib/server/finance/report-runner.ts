@@ -9,9 +9,11 @@ import {
 	revenueBySourceReport,
 	toCsv
 } from './reports';
+import { quickSalesReport } from './standalone-sales';
 
 export const REPORTS = [
 	{ slug: 'daily-sales', name: 'Daily sales', kind: 'day' },
+	{ slug: 'quick-sales', name: 'Quick sales', kind: 'range' },
 	{ slug: 'cash-position', name: 'Cash position', kind: 'range' },
 	{ slug: 'cashflow', name: 'Cashflow', kind: 'range' },
 	{ slug: 'revenue-by-source', name: 'Revenue by source', kind: 'range' },
@@ -46,6 +48,23 @@ export async function runReport(
 	const to = opts.to || today;
 
 	switch (slug) {
+		case 'quick-sales': {
+			const r = await quickSalesReport(hotelId, from, to);
+			const fmtTime = (d: Date) =>
+				new Intl.DateTimeFormat('en-PH', { timeZone: opts.timezone, hour: 'numeric', minute: '2-digit' }).format(d);
+			return {
+				name: meta.name,
+				kind: 'range',
+				columns: ['Date', 'Time', 'Items', 'Method', 'Amount'],
+				rows: r.rows.map((x) => [x.businessDate, fmtTime(x.createdAt), x.itemsSummary, x.method, peso(x.totalCentavos)]),
+				summary: [
+					['From', from],
+					['To', to],
+					['Sales', String(r.rows.length)],
+					['Total', peso(r.totalCentavos)]
+				]
+			};
+		}
 		case 'daily-sales': {
 			const r = await dailySalesReport(hotelId, date);
 			return {

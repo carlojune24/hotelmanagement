@@ -14,13 +14,19 @@
 </script>
 
 <div class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
-	<div class="mb-4 flex items-center justify-between">
+	<div class="mb-4 flex items-center justify-between print:hidden">
 		<a href={base} class="text-sm text-ink-muted underline underline-offset-2">← Reports</a>
-		<a href={csvHref} class="text-sm text-ink-muted underline underline-offset-2">Download CSV</a>
+		<div class="flex items-center gap-3">
+			<button type="button" onclick={() => window.print()} class="text-sm text-ink-muted underline underline-offset-2 hover:text-ink">
+				Print
+			</button>
+			<a href={csvHref} class="text-sm text-ink-muted underline underline-offset-2">Download CSV</a>
+		</div>
 	</div>
-	<h1 class="mb-3 text-xl font-semibold tracking-tight text-ink">{r.name}</h1>
+	<h1 class="mb-1 text-xl font-semibold tracking-tight text-ink print:text-black">{r.name}</h1>
+	<p class="mb-3 hidden text-sm text-black print:block">{page.data.hotel?.name ?? ''}</p>
 
-	<form method="GET" class="mb-4 flex flex-wrap items-end gap-2">
+	<form method="GET" class="mb-4 flex flex-wrap items-end gap-2 print:hidden">
 		{#if r.kind === 'day'}
 			<div><Label class="text-xs">Date</Label><Input name="date" type="date" value={data.params.date} class="mt-1 h-8" /></div>
 		{:else if r.kind === 'asOf'}
@@ -32,26 +38,26 @@
 		<Button type="submit" size="sm" variant="outline">Run</Button>
 	</form>
 
-	<dl class="mb-4 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+	<dl class="mb-4 flex flex-wrap gap-x-6 gap-y-1 text-sm print:text-black">
 		{#each r.summary as [k, v] (k)}
-			<div><dt class="inline text-ink-muted">{k}:</dt> <dd class="inline font-medium text-ink tabular-nums">{v}</dd></div>
+			<div><dt class="inline text-ink-muted print:text-black">{k}:</dt> <dd class="inline font-medium text-ink tabular-nums print:text-black">{v}</dd></div>
 		{/each}
 	</dl>
 
-	<div class="overflow-x-auto rounded-xl border border-border">
+	<div class="overflow-x-auto rounded-xl border border-border print:overflow-visible print:rounded-none print:border-0">
 		<Table.Root>
 			<Table.Header>
 				<Table.Row>
 					{#each r.columns as c, i (c)}
-						<Table.Head class={i === 0 ? '' : 'text-right'}>{c}</Table.Head>
+						<Table.Head class={i === 0 ? 'print:text-black' : 'text-right print:text-black'}>{c}</Table.Head>
 					{/each}
 				</Table.Row>
 			</Table.Header>
 			<Table.Body>
 				{#each r.rows as row, ri (ri)}
-					<Table.Row>
+					<Table.Row class="print:break-inside-avoid">
 						{#each row as cell, ci (ci)}
-							<Table.Cell class={ci === 0 ? 'text-ink' : 'text-right tabular-nums text-ink-muted'}>{cell}</Table.Cell>
+							<Table.Cell class={ci === 0 ? 'text-ink print:text-black' : 'text-right tabular-nums text-ink-muted print:text-black'}>{cell}</Table.Cell>
 						{/each}
 					</Table.Row>
 				{:else}
@@ -61,3 +67,11 @@
 		</Table.Root>
 	</div>
 </div>
+
+<style>
+	@media print {
+		:global(body) {
+			background: #fff;
+		}
+	}
+</style>

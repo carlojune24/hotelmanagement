@@ -6,7 +6,7 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 	requireCap(locals.user, locals.role, 'finance:read');
 	const role = locals.role;
 	const isAdmin = locals.user?.isPlatformAdmin ?? false;
-	const can = (cap: string) => isAdmin || (role ? roleCan(role, cap) : false);
+	const can = (cap: string) => isAdmin || (role ? roleCan(role.capabilities, cap) : false);
 
 	return {
 		finance: {
@@ -15,8 +15,7 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 			canReceivable: can('receivable:write'),
 			canDayClose: can('dayclose:run'),
 			canAdmin: can('hotel:admin'),
-			canShift: can('shift:write'),
-			canQuickSale: can('payment:create')
+			canShift: can('shift:write')
 		}
 	};
 };

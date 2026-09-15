@@ -4,6 +4,7 @@
  * @mm/hr-core and @mm/finance-core (wired in Phases 3–5).
  */
 export * from './auth';
+export * from './roles';
 export * from './hotels';
 export * from './audit';
 export * from './inventory';
@@ -23,3 +24,4 @@ export * from './standalone-sales';
 export * from './documents';
 export * from './email-log';
 export * from './guest-messages';
+export * from './hr';

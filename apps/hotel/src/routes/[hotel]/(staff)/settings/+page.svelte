@@ -9,6 +9,7 @@
 	import ClockIcon from '@lucide/svelte/icons/clock';
 	import GemIcon from '@lucide/svelte/icons/gem';
 	import ZapIcon from '@lucide/svelte/icons/zap';
+	import UsersIcon from '@lucide/svelte/icons/users';
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 
 	const base = $derived(`/${page.params.hotel}`);
@@ -67,6 +68,12 @@
 			icon: ZapIcon,
 			label: 'Automation',
 			desc: 'Background jobs that run on a schedule instead of a manual button.'
+		},
+		{
+			href: 'team',
+			icon: UsersIcon,
+			label: 'Team',
+			desc: 'Invite staff to this hotel and manage their roles.'
 		}
 	];
 </script>

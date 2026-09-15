@@ -523,6 +523,12 @@ export const financeSettings = pgTable('finance_settings', {
 	requireOpenShiftForCashPayment: boolean('require_open_shift_for_cash_payment')
 		.notNull()
 		.default(true),
+	/** `HH:MM` (24h, hotel's own timezone) — `runDayClose` refuses to close *today's*
+	 *  business date before this time, as a guard against closing (and issuing a
+	 *  Z-reading) too early in the day. Null = no cutoff, the pre-existing behavior.
+	 *  Never applies to a past business date — its cutoff has, by definition, already
+	 *  passed. */
+	dayCloseCutoffTime: text('day_close_cutoff_time'),
 	/** Gapless per-hotel `journal_entries.entry_no` counter — bumped under a row lock
 	 *  in `finance/journal.ts`'s `postJournalEntry`, same pattern as
 	 *  `finance/documents.ts`'s `allocateSerial`. */

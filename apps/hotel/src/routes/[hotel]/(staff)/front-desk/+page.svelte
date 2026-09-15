@@ -36,7 +36,7 @@
 
 	const base = $derived(`/${page.params.hotel}`);
 	const peso = (centavos: number) => `₱${(centavos / 100).toFixed(2)}`;
-	const canChargeCityLedger = $derived(data.role === 'hotel_admin');
+	const canChargeCityLedger = $derived(data.role?.slug === 'hotel_admin');
 
 	const formOk = $derived(form && 'ok' in form ? form.ok : undefined);
 	const formError = $derived(form && 'error' in form ? form.error : undefined);

@@ -277,6 +277,23 @@
 		</div>
 
 		<div>
+			<Label for="heroSubtitle">Hero subtitle</Label>
+			<!-- No shadcn Textarea is installed in this project; native element matches the rest of this form. -->
+			<textarea
+				id="heroSubtitle"
+				name="heroSubtitle"
+				maxlength={280}
+				rows="3"
+				placeholder="Comfort is more than a promise — it's an experience we carefully craft in every stay."
+				class="mt-1 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm"
+				>{data.branding.heroSubtitle ?? ''}</textarea
+			>
+			<p class="mt-1 text-xs text-ink-muted">
+				A short line or two shown under your hero's tagline on your public booking page.
+			</p>
+		</div>
+
+		<div>
 			<Label for="about">About</Label>
 			<!-- No shadcn Textarea is installed in this project; native element matches the rest of this form. -->
 			<textarea
@@ -373,6 +390,48 @@
 				<input type="hidden" name="contactLng" value={contactLng ?? ''} />
 				<div class="mt-2">
 					<LocationPicker bind:lat={contactLat} bind:lng={contactLng} />
+				</div>
+			</div>
+		</div>
+
+		<div class="border-t border-border pt-5">
+			<h2 class="text-sm font-semibold text-ink">Social links</h2>
+			<p class="mt-1 text-xs text-ink-muted">
+				Shown as icons in your site's footer. Leave any of these blank to hide that icon.
+			</p>
+			<div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
+				<div>
+					<Label for="facebookUrl">Facebook</Label>
+					<Input
+						id="facebookUrl"
+						name="facebookUrl"
+						type="url"
+						placeholder="https://facebook.com/yourhotel"
+						value={data.branding.facebookUrl ?? ''}
+						class="mt-1"
+					/>
+				</div>
+				<div>
+					<Label for="instagramUrl">Instagram</Label>
+					<Input
+						id="instagramUrl"
+						name="instagramUrl"
+						type="url"
+						placeholder="https://instagram.com/yourhotel"
+						value={data.branding.instagramUrl ?? ''}
+						class="mt-1"
+					/>
+				</div>
+				<div>
+					<Label for="tiktokUrl">TikTok</Label>
+					<Input
+						id="tiktokUrl"
+						name="tiktokUrl"
+						type="url"
+						placeholder="https://tiktok.com/@yourhotel"
+						value={data.branding.tiktokUrl ?? ''}
+						class="mt-1"
+					/>
 				</div>
 			</div>
 		</div>

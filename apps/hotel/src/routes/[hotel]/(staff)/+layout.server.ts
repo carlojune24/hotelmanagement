@@ -8,18 +8,12 @@ export const load: LayoutServerLoad = async ({ locals, url, depends }) => {
 
 	// Any hotel role (or platform admin) may enter the staff shell; per-area
 	// guards refine this in later phases.
-	requireHotelRole(locals.user, locals.role, [
-		'hotel_admin',
-		'front_desk',
-		'housekeeping',
-		'accountant',
-		'hr',
-		'read_only'
-	]);
+	requireHotelRole(locals.user, locals.role);
 
 	depends('app:guest-messages');
 	const canSeeMessages =
-		locals.user.isPlatformAdmin || (locals.role ? roleCan(locals.role, 'booking:read') : false);
+		locals.user.isPlatformAdmin ||
+		(locals.role ? roleCan(locals.role.capabilities, 'booking:read') : false);
 	const unreadMessageCount = canSeeMessages ? await countUnreadGuestMessages(locals.hotel!.id) : 0;
 
 	return {

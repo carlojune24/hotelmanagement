@@ -20,3 +20,16 @@ export function pesos(centavos: number): string {
 export function businessDateFor(timezone: string): string {
 	return new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date());
 }
+
+/** `HH:MM` (24h, zero-padded) wall-clock time in a hotel's own timezone — same
+ *  string shape a native `<input type="time">` produces, so it compares correctly
+ *  with a stored cutoff via plain string comparison (`runDayClose`'s day-close
+ *  cutoff check). */
+export function currentTimeOfDayFor(timezone: string): string {
+	return new Intl.DateTimeFormat('en-GB', {
+		timeZone: timezone,
+		hour: '2-digit',
+		minute: '2-digit',
+		hourCycle: 'h23'
+	}).format(new Date());
+}

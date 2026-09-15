@@ -39,9 +39,9 @@
 							: 'bg-border'}"
 					>
 						<span
-							class="absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform {j.enabled
-								? 'translate-x-[22px]'
-								: 'translate-x-0.5'}"
+							class="absolute left-0.5 top-0.5 size-5 rounded-full bg-white shadow transition-transform {j.enabled
+								? 'translate-x-5'
+								: 'translate-x-0'}"
 						></span>
 					</button>
 				</form>
@@ -50,7 +50,7 @@
 	</div>
 
 	<p class="mt-4 text-xs text-ink-muted">
-		More automations (posting nightly room charges, applying cancellation fees, closing the
-		business day) will appear here as they're built.
+		More automations (posting nightly room charges, applying cancellation fees) will appear here
+		as they're built.
 	</p>
 </div>

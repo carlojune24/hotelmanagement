@@ -1,11 +1,12 @@
 import 'dotenv/config';
 import { hash } from '@node-rs/argon2';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { ulid } from 'ulid';
 import { seedHotelAmenities } from '../amenities/catalog';
 import { seedFinanceDefaults } from '../finance/seed-defaults';
+import { seedDefaultRoles } from '../auth/roles';
 import * as schema from './schema/index';
 
 const url = process.env.DATABASE_URL;
@@ -316,12 +317,20 @@ async function main() {
 		hotel = row!;
 	}
 
+	await seedDefaultRoles(db, hotel.id);
+	const hotelAdminRole = await db
+		.select({ id: schema.roles.id })
+		.from(schema.roles)
+		.where(and(eq(schema.roles.hotelId, hotel.id), eq(schema.roles.slug, 'hotel_admin')))
+		.then((r) => r.at(0));
+	if (!hotelAdminRole) throw new Error('hotel_admin role was not seeded for the demo hotel');
+
 	await db
 		.insert(schema.memberships)
-		.values({ userId: managerId, hotelId: hotel.id, role: 'hotel_admin' })
+		.values({ userId: managerId, hotelId: hotel.id, roleId: hotelAdminRole.id })
 		.onConflictDoUpdate({
 			target: [schema.memberships.userId, schema.memberships.hotelId],
-			set: { role: 'hotel_admin' }
+			set: { roleId: hotelAdminRole.id }
 		});
 
 	await seedHotelAmenities(db, hotel.id);

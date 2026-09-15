@@ -1,12 +1,21 @@
 <script lang="ts">
 	import StorefrontNav from '$lib/components/storefront/storefront-nav.svelte';
+	import StorefrontFooter from '$lib/components/storefront/storefront-footer.svelte';
+	import StorefrontLightbox from '$lib/components/storefront/storefront-lightbox.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 
 	const menuImages = $derived(data.dining.menuImages ?? []);
 
-	let lightboxSrc = $state<string | null>(null);
+	// One shared lightbox instance for the page — a dining item's own photo (just the
+	// one) and the Menus gallery (many) each load their own set in on click.
+	let lightboxImages = $state<string[]>([]);
+	let lightboxIndex = $state<number | null>(null);
+	function openLightbox(images: string[], index: number) {
+		lightboxImages = images;
+		lightboxIndex = index;
+	}
 	function hidePhoto(e: Event) {
 		(e.currentTarget as HTMLImageElement).style.display = 'none';
 	}
@@ -15,12 +24,6 @@
 <svelte:head>
 	<title>Dining — {data.hotel.name}</title>
 </svelte:head>
-
-<svelte:window
-	onkeydown={(e) => {
-		if (e.key === 'Escape') lightboxSrc = null;
-	}}
-/>
 
 <StorefrontNav
 	hotelSlug={data.hotel.slug}
@@ -50,7 +53,7 @@
 						<button
 							type="button"
 							class="storefront-room-dialog-photo-main"
-							onclick={() => (lightboxSrc = item.photoUrl)}
+							onclick={() => openLightbox([item.photoUrl!], 0)}
 							aria-label="View larger photo"
 						>
 							<img src={item.photoUrl} alt="" onerror={hidePhoto} />
@@ -81,7 +84,7 @@
 					<button
 						type="button"
 						class="storefront-gallery-item {i % 5 === 0 ? 'is-wide' : ''}"
-						onclick={() => (lightboxSrc = url)}
+						onclick={() => openLightbox(menuImages, i)}
 						aria-label="View larger photo"
 					>
 						<img src={url} alt="" loading="lazy" onerror={hidePhoto} />
@@ -92,20 +95,17 @@
 	{/if}
 </div>
 
-{#if lightboxSrc}
-	<div
-		class="storefront-lightbox"
-		role="button"
-		tabindex="0"
-		aria-label="Close photo"
-		onclick={() => (lightboxSrc = null)}
-		onkeydown={(e) => {
-			if (e.key === 'Enter' || e.key === ' ') lightboxSrc = null;
-		}}
-	>
-		<img src={lightboxSrc} alt="" onerror={hidePhoto} />
-		<button type="button" class="storefront-lightbox-close" onclick={() => (lightboxSrc = null)}>
-			Close ✕
-		</button>
-	</div>
-{/if}
+<StorefrontLightbox images={lightboxImages} bind:index={lightboxIndex} />
+
+<StorefrontFooter
+	hotelSlug={data.hotel.slug}
+	hotelName={data.hotel.name}
+	city={data.hotel.city}
+	showAmenities={data.hotelAmenities.length > 0}
+	showFunctionHall={data.functionHalls.length > 0}
+	showDining={true}
+	showReviews={data.reviews.length > 0}
+	facebookUrl={data.branding.facebookUrl}
+	instagramUrl={data.branding.instagramUrl}
+	tiktokUrl={data.branding.tiktokUrl}
+/>

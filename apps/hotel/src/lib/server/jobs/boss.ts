@@ -1,6 +1,12 @@
 import PgBoss from 'pg-boss';
 import { env } from '$env/dynamic/private';
-import { runHoldSweep, runNoShowAutoflag, runRecurringExpenses, type JobRunSummary } from './tasks';
+import {
+	runAutoDayClose,
+	runHoldSweep,
+	runNoShowAutoflag,
+	runRecurringExpenses,
+	type JobRunSummary
+} from './tasks';
 
 /**
  * The background job runner — one `pg-boss` instance per server process, backed
@@ -16,7 +22,11 @@ import { runHoldSweep, runNoShowAutoflag, runRecurringExpenses, type JobRunSumma
 const QUEUES = {
 	hold_sweep: { cron: '*/15 * * * *', run: runHoldSweep },
 	recurring_expenses: { cron: '0 * * * *', run: runRecurringExpenses },
-	no_show_autoflag: { cron: '0 * * * *', run: runNoShowAutoflag }
+	no_show_autoflag: { cron: '0 * * * *', run: runNoShowAutoflag },
+	// Hourly, not once nightly: it only ever targets "yesterday" and no-ops once that
+	// day is closed, so running more often just means a hotel whose shifts close late
+	// gets picked up within the hour instead of waiting for a fixed nightly slot.
+	auto_day_close: { cron: '0 * * * *', run: runAutoDayClose }
 } as const;
 
 let startPromise: Promise<PgBoss> | null = null;

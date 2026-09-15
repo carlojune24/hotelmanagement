@@ -1,6 +1,10 @@
 import { fail } from '@sveltejs/kit';
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { db } from '$lib/server/db/index';
+import { hotels } from '$lib/server/db/schema/index';
 import { requireCap } from '$lib/server/auth/rbac';
+import { writeAudit } from '$lib/server/audit';
 import { DocumentError, birConfigured, getBirSettings, upsertBirSettings } from '$lib/server/finance/documents';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -20,11 +24,43 @@ const dateStr = z
 
 export const load: PageServerLoad = async ({ locals }) => {
 	requireCap(locals.user, locals.role, 'finance:read');
-	const settings = await getBirSettings(locals.hotel!.id);
-	return { settings, configured: birConfigured(settings) };
+	const hotelId = locals.hotel!.id;
+	const [settings, identity] = await Promise.all([
+		getBirSettings(hotelId),
+		db
+			.select({ legalName: hotels.legalName, addressLine: hotels.addressLine, city: hotels.city })
+			.from(hotels)
+			.where(eq(hotels.id, hotelId))
+			.then((r) => r[0]!)
+	]);
+	return { settings, configured: birConfigured(settings), identity };
 };
 
 export const actions: Actions = {
+	saveIdentity: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		const hotelId = event.locals.hotel!.id;
+		const parsed = z
+			.object({
+				legalName: nullableStr(200),
+				addressLine: nullableStr(240),
+				city: nullableStr(120)
+			})
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: 'Check the legal identity fields.' });
+
+		await db.update(hotels).set({ ...parsed.data, updatedAt: new Date() }).where(eq(hotels.id, hotelId));
+		await writeAudit({
+			hotelId,
+			actor: event.locals.user,
+			action: 'hotel.update_identity',
+			entityType: 'hotel',
+			entityId: hotelId,
+			after: parsed.data
+		});
+		return { ok: 'Legal identity saved.' };
+	},
+
 	save: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
 		const parsed = z

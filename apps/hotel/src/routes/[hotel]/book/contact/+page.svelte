@@ -3,6 +3,7 @@
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import MapPinIcon from '@lucide/svelte/icons/map-pin';
 	import StorefrontNav from '$lib/components/storefront/storefront-nav.svelte';
+	import StorefrontFooter from '$lib/components/storefront/storefront-footer.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -79,3 +80,16 @@
 		</div>
 	{/if}
 </div>
+
+<StorefrontFooter
+	hotelSlug={data.hotel.slug}
+	hotelName={data.hotel.name}
+	city={data.hotel.city}
+	showAmenities={data.hotelAmenities.length > 0}
+	showFunctionHall={data.functionHalls.length > 0}
+	showDining={data.diningItems.length > 0 || (data.dining.menuImages ?? []).length > 0}
+	showReviews={data.reviews.length > 0}
+	facebookUrl={data.branding.facebookUrl}
+	instagramUrl={data.branding.instagramUrl}
+	tiktokUrl={data.branding.tiktokUrl}
+/>

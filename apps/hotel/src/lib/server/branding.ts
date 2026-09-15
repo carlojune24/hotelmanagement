@@ -53,6 +53,10 @@ export const brandingSchema = z.object({
 	/** Curated Display-register font (see `$lib/branding.ts`'s `DISPLAY_FONTS`) — unset = Literata, the world's own default. */
 	fontDisplay: z.enum(DISPLAY_FONT_IDS).optional(),
 	tagline: z.string().max(140).optional(),
+	/** A short 1-3 sentence description shown under the hero's tagline — distinct from
+	    `about` (the fuller "About" section body further down the page). Unset = the
+	    hero simply omits that line, never a fabricated blurb. */
+	heroSubtitle: z.string().max(280).optional(),
 	/** Short marketing copy for the storefront's "About" section. */
 	about: z.string().max(1200).optional(),
 	/** Property-wide photos (grounds, lobby, views) shown in the storefront gallery, in addition to each room type's own photos. */
@@ -66,7 +70,12 @@ export const brandingSchema = z.object({
 	contactAddress: z.string().max(300).optional(),
 	/** A precise pin dropped on the staff map picker — when set, the public Contact page embeds this exact coordinate instead of geocoding `contactAddress`. */
 	contactLat: z.number().min(-90).max(90).optional(),
-	contactLng: z.number().min(-180).max(180).optional()
+	contactLng: z.number().min(-180).max(180).optional(),
+	/** Social profile links shown as icons in the storefront footer. Unset = that icon (or the
+	    whole "Follow" column, if none are set) is omitted, never a dead/placeholder link. */
+	facebookUrl: z.string().url('Not a valid URL').max(500).optional(),
+	instagramUrl: z.string().url('Not a valid URL').max(500).optional(),
+	tiktokUrl: z.string().url('Not a valid URL').max(500).optional()
 });
 
 export type HotelBranding = z.infer<typeof brandingSchema>;

@@ -13,6 +13,7 @@
 	import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
 	import type { BedConfigEntry } from '$lib/server/db/schema/inventory';
 	import type { AmenityDetail } from '$lib/server/availability';
+	import StorefrontLightbox from '$lib/components/storefront/storefront-lightbox.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -27,6 +28,9 @@
 
 	const mainPhoto = $derived(rt.photos.find((p) => p.tag === 'cover') ?? rt.photos[0] ?? null);
 	const restPhotos = $derived(mainPhoto ? rt.photos.filter((p) => p.url !== mainPhoto.url) : []);
+	// Main photo first, then the strip — the same order the page shows them in, so a
+	// thumbnail's position in the lightbox matches the one the guest just clicked.
+	const allPhotoUrls = $derived(mainPhoto ? [mainPhoto, ...restPhotos].map((p) => p.url) : []);
 
 	const groupedAmenities = $derived.by(() => {
 		const byCategory = new Map<string, AmenityDetail[]>();
@@ -51,7 +55,7 @@
 			: `../dates?roomTypeId=${rt.id}`
 	);
 
-	let lightboxSrc = $state<string | null>(null);
+	let lightboxIndex = $state<number | null>(null);
 	function hidePhoto(e: Event) {
 		(e.currentTarget as HTMLImageElement).style.display = 'none';
 	}
@@ -60,12 +64,6 @@
 <svelte:head>
 	<title>{rt.name} — {data.hotel.name}</title>
 </svelte:head>
-
-<svelte:window
-	onkeydown={(e) => {
-		if (e.key === 'Escape') lightboxSrc = null;
-	}}
-/>
 
 <div class="storefront-room-page mx-auto max-w-4xl px-4 py-8 sm:px-6">
 	<p class="ledger-label">{data.hotel.name}</p>
@@ -90,18 +88,18 @@
 			<button
 				type="button"
 				class="storefront-room-dialog-photo-main"
-				onclick={() => (lightboxSrc = mainPhoto!.url)}
+				onclick={() => (lightboxIndex = 0)}
 				aria-label="View larger photo"
 			>
 				<img src={mainPhoto.url} alt="" onerror={hidePhoto} />
 			</button>
 			{#if restPhotos.length > 0}
 				<div class="storefront-room-dialog-photo-strip">
-					{#each restPhotos as photo (photo.url)}
+					{#each restPhotos as photo, i (photo.url)}
 						<button
 							type="button"
 							class="storefront-room-dialog-photo-thumb"
-							onclick={() => (lightboxSrc = photo.url)}
+							onclick={() => (lightboxIndex = i + 1)}
 							aria-label="View larger photo"
 						>
 							<img src={photo.url} alt="" loading="lazy" onerror={hidePhoto} />
@@ -207,20 +205,4 @@
 	<Button href={bookNowHref} class="ledger-btn-primary mt-10">Book now</Button>
 </div>
 
-{#if lightboxSrc}
-	<div
-		class="storefront-lightbox"
-		role="button"
-		tabindex="0"
-		aria-label="Close photo"
-		onclick={() => (lightboxSrc = null)}
-		onkeydown={(e) => {
-			if (e.key === 'Enter' || e.key === ' ') lightboxSrc = null;
-		}}
-	>
-		<img src={lightboxSrc} alt="" onerror={hidePhoto} />
-		<button type="button" class="storefront-lightbox-close" onclick={() => (lightboxSrc = null)}>
-			Close ✕
-		</button>
-	</div>
-{/if}
+<StorefrontLightbox images={allPhotoUrls} bind:index={lightboxIndex} />

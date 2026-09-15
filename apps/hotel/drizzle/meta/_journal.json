@@ -239,6 +239,76 @@
       "when": 1789365070270,
       "tag": "0033_sudden_kylun",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1789368990870,
+      "tag": "0034_fat_mattie_franklin",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1789394479136,
+      "tag": "0035_far_hedge_knight",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1789394530828,
+      "tag": "0036_thick_black_widow",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1789399224468,
+      "tag": "0037_lovely_sir_ram",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1789433633995,
+      "tag": "0038_steady_meggan",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1789434932451,
+      "tag": "0039_flat_moon_knight",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1789458175598,
+      "tag": "0040_short_metal_master",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1789460178824,
+      "tag": "0041_marvelous_mindworm",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1789461174022,
+      "tag": "0042_square_hemingway",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1789461293656,
+      "tag": "0043_talented_wrecking_crew",
+      "breakpoints": true
     }
   ]
 }

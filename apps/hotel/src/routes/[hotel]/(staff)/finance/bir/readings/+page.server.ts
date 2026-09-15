@@ -45,7 +45,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
 	const canGenerate =
 		(locals.user?.isPlatformAdmin ?? false) ||
-		(locals.role ? roleCan(locals.role, 'dayclose:run') : false);
+		(locals.role ? roleCan(locals.role.capabilities, 'dayclose:run') : false);
 
 	return { xReading, xDate, zReadings, closedWithoutZ, readiness, canGenerate };
 };

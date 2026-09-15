@@ -6,11 +6,12 @@
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import SidebarCollapseButton from '$lib/components/sidebar-collapse-button.svelte';
-	import { roleCan, type MembershipRole } from '$lib/authz';
+	import { roleCan } from '$lib/authz';
 	import { mode, toggleMode } from 'mode-watcher';
 	import type { LayoutData } from './$types';
 	import LayoutDashboardIcon from '@lucide/svelte/icons/layout-dashboard';
 	import ConciergeBellIcon from '@lucide/svelte/icons/concierge-bell';
+	import ShoppingCartIcon from '@lucide/svelte/icons/shopping-cart';
 	import CalendarCheckIcon from '@lucide/svelte/icons/calendar-check';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
@@ -34,8 +35,8 @@
 
 	const base = $derived(`/${data.hotel?.slug ?? ''}`);
 	const isAdmin = $derived(data.user?.isPlatformAdmin ?? false);
-	const role = $derived(data.role as MembershipRole | null);
-	const roleLabel = $derived(role ?? (isAdmin ? 'platform' : ''));
+	const role = $derived(data.role);
+	const roleLabel = $derived(role?.name ?? (isAdmin ? 'Platform' : ''));
 
 	const initials = $derived(
 		(data.user?.name ?? '')
@@ -47,7 +48,7 @@
 	);
 
 	function can(cap: string): boolean {
-		return isAdmin || (role ? roleCan(role, cap) : false);
+		return isAdmin || (role ? roleCan(role.capabilities, cap) : false);
 	}
 
 	const items = $derived(
@@ -58,6 +59,12 @@
 				label: 'Front desk',
 				icon: ConciergeBellIcon,
 				show: can('booking:read')
+			},
+			{
+				seg: 'quick-sale',
+				label: 'Quick sale',
+				icon: ShoppingCartIcon,
+				show: can('payment:create')
 			},
 			{
 				seg: 'reservations',
@@ -115,7 +122,7 @@
 <form bind:this={logoutForm} method="POST" action="/auth/logout" class="hidden"></form>
 
 <Sidebar.Provider>
-	<Sidebar.Root collapsible="icon">
+	<Sidebar.Root collapsible="icon" class="print:hidden">
 		<Sidebar.Header>
 			<Sidebar.Menu>
 				<Sidebar.MenuItem>
@@ -233,7 +240,7 @@
 	</Sidebar.Root>
 
 	<Sidebar.Inset>
-		<div class="md:hidden">
+		<div class="md:hidden print:hidden">
 			<Sidebar.Trigger class="m-2" />
 		</div>
 		<main class="flex-1">{@render children()}</main>

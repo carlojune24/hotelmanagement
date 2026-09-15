@@ -1,0 +1,1 @@
+ALTER TABLE "hotels" DROP COLUMN "or_series_prefix";

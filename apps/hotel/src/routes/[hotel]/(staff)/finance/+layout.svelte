@@ -9,7 +9,6 @@
 	const tabs = $derived(
 		[
 			{ seg: '', label: 'Dashboard' },
-			{ seg: '/quick-sale', label: 'Quick sale', show: data.finance.canQuickSale },
 			{ seg: '/cash', label: 'Cash' },
 			{
 				seg: '/expenses',
@@ -32,7 +31,7 @@
 </script>
 
 <div class="flex min-h-full flex-col">
-	<nav class="flex gap-1 overflow-x-auto border-b border-border bg-surface-2 px-4 py-2 sm:px-6">
+	<nav class="flex gap-1 overflow-x-auto border-b border-border bg-surface-2 px-4 py-2 sm:px-6 print:hidden">
 		{#each tabs as t (t.seg)}
 			<a
 				href={base + t.seg}

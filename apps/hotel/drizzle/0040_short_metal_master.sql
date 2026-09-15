@@ -1,0 +1,1 @@
+ALTER TABLE "finance_settings" ADD COLUMN "day_close_cutoff_time" text;

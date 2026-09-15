@@ -12,7 +12,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const documents = await listDocuments(locals.hotel!.id, type ? { type } : undefined);
 	const canWrite =
 		(locals.user?.isPlatformAdmin ?? false) ||
-		(locals.role ? roleCan(locals.role, 'finance:write') : false);
+		(locals.role ? roleCan(locals.role.capabilities, 'finance:write') : false);
 	return { documents, type: type ?? 'all', canWrite };
 };
 
