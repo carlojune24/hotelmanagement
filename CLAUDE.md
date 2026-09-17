@@ -16,8 +16,8 @@ Two established design worlds — a route never crosses between them:
 
 | World | Routes | Look | Source |
 |---|---|---|---|
-| **Guest booking** — "Woven Ledger" | `/{slug}/book/...` | Literata / Inter / JetBrains Mono; ruled guest-register aesthetic; hotel accent color spun into a woven pattern | `apps/hotel/DESIGN.md`, `apps/hotel/.impeccable/surfaces/` |
-| **Staff app** — operate mode | `[hotel]/(staff)/...`, `/admin` | Neutral `shadcn-svelte` (bits-ui) + oklch tokens in `apps/hotel/src/app.css` | shadcn primitives under `apps/hotel/src/lib/components/ui/` |
+| **Guest booking** — "Woven Ledger" | `/{slug}/...` (root — the landing page) | Literata / Inter / JetBrains Mono; ruled guest-register aesthetic; hotel accent color spun into a woven pattern | `apps/hotel/DESIGN.md`, `apps/hotel/.impeccable/surfaces/` |
+| **Staff app** — operate mode | `/{slug}/management/...`, `/admin` | Neutral `shadcn-svelte` (bits-ui) + oklch tokens in `apps/hotel/src/app.css` | shadcn primitives under `apps/hotel/src/lib/components/ui/` |
 
 New guest surface → extend the Woven Ledger world. New staff surface → run `impeccable` to
 produce/confirm the operate-mode direction for it, then build.
@@ -27,5 +27,5 @@ produce/confirm the operate-mode direction for it, then build.
 - Money is integer **centavos** everywhere. Dates: every hotel has an IANA `timezone`; business date resolved from it.
 - Server-only code under `src/lib/server/`; DB schema split under `src/lib/server/db/schema/` then re-exported from `index.ts`.
 - Tenant scoping: every tenant table carries `hotel_id`; queries scope by it. RBAC via `requireCap` / `src/lib/authz.ts`.
-- Finance module (`/{slug}/finance`) is deliberately **cash-basis**; `recordCashMovement` is the single cash choke point. Double-entry / `@mm/finance-core` is deferred to Phase 5.
+- Finance module (`/{slug}/management/finance`) is deliberately **cash-basis**; `recordCashMovement` is the single cash choke point. Double-entry / `@mm/finance-core` is deferred to Phase 5.
 - `PRODUCT.md` / `DESIGN.md` in `apps/hotel/` carry impeccable's product + design schema — keep them current when a surface ships.

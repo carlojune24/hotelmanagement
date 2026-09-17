@@ -491,7 +491,8 @@ function labelForMethod(m: PaymentMethod): string {
 			bank_transfer: 'Bank transfer',
 			cheque: 'Cheque',
 			paymongo: 'Online (PayMongo)',
-			house_use: 'House use'
+			house_use: 'House use',
+			security_deposit: 'Security deposit'
 		} as Record<PaymentMethod, string>
 	)[m];
 }

@@ -34,6 +34,7 @@
 				</nav>
 			</div>
 			<form method="POST" action="/auth/logout">
+				<input type="hidden" name="redirectTo" value="/auth/login" />
 				<Button variant="outline" type="submit">Sign out</Button>
 			</form>
 		</div>

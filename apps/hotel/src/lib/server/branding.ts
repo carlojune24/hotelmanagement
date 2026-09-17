@@ -66,7 +66,7 @@ export const brandingSchema = z.object({
 	checkOutPolicy: z.string().max(500).optional(),
 	contactPhone: z.string().max(40).optional(),
 	contactEmail: z.string().email('Not a valid email address').max(200).optional(),
-	/** Free-text street address for `/book/contact`, shown as a row and used as the map's fallback (address-search embed) when no pin has been dropped. */
+	/** Free-text street address for `/contact`, shown as a row and used as the map's fallback (address-search embed) when no pin has been dropped. */
 	contactAddress: z.string().max(300).optional(),
 	/** A precise pin dropped on the staff map picker — when set, the public Contact page embeds this exact coordinate instead of geocoding `contactAddress`. */
 	contactLat: z.number().min(-90).max(90).optional(),

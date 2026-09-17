@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from './db/index';
 import {
 	bookings,
@@ -154,6 +154,88 @@ export async function listReservationLines(hotelId: string): Promise<Reservation
 	return lines.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
+export interface SiblingReservationLine {
+	kind: ReservationKind;
+	id: string;
+	title: string;
+	subtitle: string;
+	status: string;
+}
+
+/**
+ * Every other room/hall line on the same order — a multi-room-type walk-in (or
+ * online order) settled in one payment still becomes one `bookings`/`hallBookings`
+ * row *per line* (see `createWalkInBooking`'s doc comment), so a single order can
+ * span several sibling reservation detail pages. Without this, opening one line
+ * gives no indication the other room(s) staff selected together exist at all.
+ */
+async function siblingLines(
+	orderId: string,
+	excludeKind: ReservationKind,
+	excludeId: string
+): Promise<SiblingReservationLine[]> {
+	const roomRows = await db
+		.select({
+			id: bookings.id,
+			bookingRoomId: bookingRooms.id,
+			roomTypeName: roomTypes.name,
+			ratePlanName: ratePlans.name,
+			status: bookings.status
+		})
+		.from(bookings)
+		.innerJoin(bookingRooms, eq(bookingRooms.bookingId, bookings.id))
+		.innerJoin(roomTypes, eq(roomTypes.id, bookingRooms.roomTypeId))
+		.innerJoin(ratePlans, eq(ratePlans.id, bookingRooms.ratePlanId))
+		.where(eq(bookings.orderId, orderId));
+
+	const bookingRoomIds = roomRows.map((r) => r.bookingRoomId);
+	const roomNumberRows = bookingRoomIds.length
+		? await db
+				.select({ bookingRoomId: roomAssignments.bookingRoomId, roomNumber: rooms.roomNumber })
+				.from(roomAssignments)
+				.innerJoin(rooms, eq(rooms.id, roomAssignments.roomId))
+				.where(inArray(roomAssignments.bookingRoomId, bookingRoomIds))
+		: [];
+	const roomNumbersByBookingRoom = new Map<string, string[]>();
+	for (const r of roomNumberRows) {
+		const list = roomNumbersByBookingRoom.get(r.bookingRoomId) ?? [];
+		list.push(r.roomNumber);
+		roomNumbersByBookingRoom.set(r.bookingRoomId, list);
+	}
+
+	const hallRows = await db
+		.select({
+			id: hallBookings.id,
+			hallName: functionHalls.name,
+			eventType: hallBookings.eventType,
+			status: hallBookings.status
+		})
+		.from(hallBookings)
+		.innerJoin(functionHalls, eq(functionHalls.id, hallBookings.functionHallId))
+		.where(eq(hallBookings.orderId, orderId));
+
+	const lines: SiblingReservationLine[] = [
+		...roomRows.map((r) => {
+			const roomNumbers = roomNumbersByBookingRoom.get(r.bookingRoomId) ?? [];
+			return {
+				kind: 'room' as const,
+				id: r.id,
+				title: roomNumbers.length ? `Room ${roomNumbers.join(', ')}` : r.roomTypeName,
+				subtitle: roomNumbers.length ? r.roomTypeName : r.ratePlanName,
+				status: r.status
+			};
+		}),
+		...hallRows.map((h) => ({
+			kind: 'hall' as const,
+			id: h.id,
+			title: h.hallName,
+			subtitle: h.eventType,
+			status: h.status
+		}))
+	];
+	return lines.filter((l) => !(l.kind === excludeKind && l.id === excludeId));
+}
+
 export async function getRoomBookingDetail(hotelId: string, bookingId: string) {
 	const [row] = await db
 		.select({
@@ -174,7 +256,7 @@ export async function getRoomBookingDetail(hotelId: string, bookingId: string) {
 		.limit(1);
 	if (!row) return null;
 
-	const [history, paymentRows, assignedRooms, confirmationEmails] = await Promise.all([
+	const [history, paymentRows, assignedRooms, confirmationEmails, siblings] = await Promise.all([
 		db
 			.select()
 			.from(bookingStatusHistory)
@@ -190,10 +272,11 @@ export async function getRoomBookingDetail(hotelId: string, bookingId: string) {
 			.from(roomAssignments)
 			.innerJoin(rooms, eq(rooms.id, roomAssignments.roomId))
 			.where(eq(roomAssignments.bookingRoomId, row.bookingRoom.id)),
-		orderEmails(row.order.id)
+		orderEmails(row.order.id),
+		siblingLines(row.order.id, 'room', bookingId)
 	]);
 
-	return { ...row, history, payments: paymentRows, assignedRooms, confirmationEmails };
+	return { ...row, history, payments: paymentRows, assignedRooms, confirmationEmails, siblings };
 }
 
 export async function getHallBookingDetail(hotelId: string, hallBookingId: string) {
@@ -212,7 +295,7 @@ export async function getHallBookingDetail(hotelId: string, hallBookingId: strin
 		.limit(1);
 	if (!row) return null;
 
-	const [history, paymentRows, confirmationEmails] = await Promise.all([
+	const [history, paymentRows, confirmationEmails, siblings] = await Promise.all([
 		db
 			.select()
 			.from(hallBookingStatusHistory)
@@ -223,8 +306,9 @@ export async function getHallBookingDetail(hotelId: string, hallBookingId: strin
 			.from(payments)
 			.where(eq(payments.orderId, row.order.id))
 			.orderBy(desc(payments.createdAt)),
-		orderEmails(row.order.id)
+		orderEmails(row.order.id),
+		siblingLines(row.order.id, 'hall', hallBookingId)
 	]);
 
-	return { ...row, history, payments: paymentRows, confirmationEmails };
+	return { ...row, history, payments: paymentRows, confirmationEmails, siblings };
 }

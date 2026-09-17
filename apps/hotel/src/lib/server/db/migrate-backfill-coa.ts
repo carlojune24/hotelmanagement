@@ -3,9 +3,10 @@
  * setup at all yet, the rest of Finance defaults too) for every hotel that already
  * exists. New hotels get this automatically from `finance/seed-defaults.ts`'s
  * `seedFinanceDefaults` — this script is only for hotels created before the ledger
- * feature shipped. Idempotent: `seedChartOfAccounts`/`seedFinanceDefaults` both skip
- * a hotel that's already seeded. Run once via
- * `tsx src/lib/server/db/migrate-backfill-coa.ts`.
+ * feature shipped — but also safe (and useful) to re-run any time `coa-seed.ts` grows a
+ * new account/category, since `seedChartOfAccounts` only inserts whatever a hotel is
+ * still missing, and `seedFinanceDefaults` skips a hotel that already has cash accounts.
+ * Run via `tsx src/lib/server/db/migrate-backfill-coa.ts`.
  */
 import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/postgres-js';

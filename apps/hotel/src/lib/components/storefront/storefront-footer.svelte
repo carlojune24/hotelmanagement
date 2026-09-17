@@ -28,7 +28,7 @@
 
 	// Same absolute-path convention as storefront-nav.svelte — this footer renders from
 	// several different nesting depths (homepage, dining, meetings-events, contact).
-	const base = `/${hotelSlug}/book`;
+	const base = `/${hotelSlug}`;
 	const year = new Date().getFullYear();
 	const hasSocial = $derived(Boolean(facebookUrl || instagramUrl || tiktokUrl));
 </script>

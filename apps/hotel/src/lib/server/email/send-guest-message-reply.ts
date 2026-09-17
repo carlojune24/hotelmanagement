@@ -8,7 +8,7 @@ import { sendMail, type SendMailResult } from './send';
 
 /**
  * Emails the guest that staff replied to their message/cancellation request on
- * `/book/manage` — the nudge back to a page with no push/polling. Best-effort
+ * `/manage` — the nudge back to a page with no push/polling. Best-effort
  * and never throws; not idempotency-guarded, since each staff reply is its own
  * distinct notice (unlike the confirmation/cancellation emails, there's no
  * single "already sent" state for an ongoing conversation).
@@ -29,7 +29,7 @@ export async function sendGuestMessageReply(
 
 		const branding = parseBranding(hotel.config);
 		const origin = (env.ORIGIN ?? '').replace(/\/$/, '');
-		const manageUrl = `${origin}/${hotel.slug}/book/manage/${order.id}?t=${order.accessToken}`;
+		const manageUrl = `${origin}/${hotel.slug}/manage/${order.id}?t=${order.accessToken}`;
 
 		const data: GuestMessageReplyEmailData = {
 			hotel: {

@@ -3,7 +3,7 @@ import type { RenderedEmail } from './booking-confirmation';
 
 /**
  * Notifies a guest that the hotel replied to their message/cancellation request
- * on `/book/manage` — the guest page has no push/polling, so this is the nudge
+ * on `/manage` — the guest page has no push/polling, so this is the nudge
  * back to it. Woven Ledger email idiom (see `booking-confirmation.ts`), but the
  * plainest variant yet: no ticket, just a quoted reply and one link. Pure;
  * unit-tested.
@@ -21,7 +21,7 @@ export interface GuestMessageReplyEmailData {
 	confirmationCode: string;
 	/** The staff reply body, plain text (no HTML in a guest message). */
 	replyBody: string;
-	/** Absolute URL to `/book/manage/[orderId]?t=...`. */
+	/** Absolute URL to `/manage/[orderId]?t=...`. */
 	manageUrl: string;
 }
 

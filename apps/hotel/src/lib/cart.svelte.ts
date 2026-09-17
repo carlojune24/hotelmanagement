@@ -34,7 +34,7 @@ export type CartItem =
  * The guest's pending selections before checkout — a room stay and/or a
  * function hall reservation, added from the storefront's "Reserve"/"Add to
  * invoice" actions and shown in the floating invoice. One instance lives per
- * page load, created in `book/+layout.svelte` and shared via Svelte context
+ * page load, created in `(guest)/+layout.svelte` and shared via Svelte context
  * (not a module-level singleton — SSR reuses the process across concurrent
  * guests, so module `$state` would leak between them). Persisted to
  * `sessionStorage` so it survives a reload within the same tab/session, but
@@ -67,7 +67,22 @@ export class CartStore {
 		}
 	}
 
+	/** One line per room type + rate plan + date range — re-adding the *same* rate plan
+	 *  (e.g. after changing its own room-count stepper) replaces that line rather than
+	 *  stacking a second one on top of it. A *different* rate plan for the same room
+	 *  type/dates is its own separate line, not merged — a guest can deliberately book
+	 *  several rooms of one type split across different rates. */
 	addRoom(item: Omit<Extract<CartItem, { kind: 'room' }>, 'id' | 'kind'>) {
+		this.items = this.items.filter(
+			(i) =>
+				!(
+					i.kind === 'room' &&
+					i.roomTypeId === item.roomTypeId &&
+					i.ratePlanId === item.ratePlanId &&
+					i.checkIn === item.checkIn &&
+					i.checkOut === item.checkOut
+				)
+		);
 		this.items.push({ kind: 'room', id: crypto.randomUUID(), ...item });
 		this.#persist();
 	}

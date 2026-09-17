@@ -12,7 +12,7 @@ const base: GuestMessageReplyEmailData = {
 	guestName: 'Ana Reyes',
 	confirmationCode: 'ABCD1234',
 	replyBody: 'We can move your check-in to 3pm, no problem.',
-	manageUrl: 'https://book.example/acacia/book/manage/abc?t=tok'
+	manageUrl: 'https://book.example/acacia/manage/abc?t=tok'
 };
 
 describe('renderGuestMessageReply', () => {

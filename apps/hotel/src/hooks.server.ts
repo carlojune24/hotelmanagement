@@ -38,8 +38,8 @@ async function resolveSlugForHostname(hostname: string): Promise<string | null> 
 }
 
 /**
- * Lets a client reach their hotel at their own domain (`mmhotel.com/book`) instead of the
- * platform's `/{slug}/…` path (`platformdomain.com/mmhotel/book`) — invisibly to the browser,
+ * Lets a client reach their hotel at their own domain (`mmhotel.com/`) instead of the
+ * platform's `/{slug}/…` path (`platformdomain.com/mmhotel`) — invisibly to the browser,
  * which keeps showing the custom domain. A hostname with no mapping — including the platform's
  * own domain — falls through untouched.
  *
@@ -99,7 +99,11 @@ export const handle: Handle = async ({ event, resolve }) => {
 		if (!hotel) error(404, 'Hotel not found');
 
 		const user = event.locals.user;
-		if (hotel.status !== 'published') {
+		// The hotel's own staff login must stay reachable before the hotel ever goes
+		// live — otherwise a brand-new draft hotel's staff would have no way in at all
+		// through their hotel-scoped login (see `[hotel]/management/login`).
+		const isManagementLogin = event.route.id === '/[hotel]/management/login';
+		if (hotel.status !== 'published' && !isManagementLogin) {
 			// Drafts/archived are visible only to platform admins and members.
 			const isMember = user
 				? user.isPlatformAdmin || (await getMembershipRole(user.id, hotel.id)) !== null

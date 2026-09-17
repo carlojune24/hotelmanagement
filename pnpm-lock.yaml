@@ -30,8 +30,8 @@ importers:
         specifier: ^3.12.3
         version: 3.12.3
       '@lucide/svelte':
-        specifier: ^1.37.0
-        version: 1.37.0(svelte@5.57.0)
+        specifier: ^1.46.0
+        version: 1.46.0(svelte@5.57.0)
       '@mm/finance-core':
         specifier: github:carlojune24/core#finance-core@0.2.0&path:finance-core
         version: https://codeload.github.com/carlojune24/core/tar.gz/3118bd74e4d804f508c1928f39187e12e6e21092#path:finance-core
@@ -854,8 +854,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@lucide/svelte@1.37.0':
-    resolution: {integrity: sha512-AxaiSxeuErlt4fNmmN28oaL5R7yVoQLsfSeiAONxCEK+l0/SrLAjRktQ0DkTQpomv1oRzOA3hohWY0ZHTZCMmw==}
+  '@lucide/svelte@1.46.0':
+    resolution: {integrity: sha512-Ru8jDjoCVLJ7J7pPRUdY+odSBV2BI6rj68JTmT+ENq/ZwYOPGPAiKVvKz+XLyAoK4HAwlRTzZHpsMvrHfsetqg==}
     peerDependencies:
       svelte: ^5
 
@@ -2734,7 +2734,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
 
-  '@lucide/svelte@1.37.0(svelte@5.57.0)':
+  '@lucide/svelte@1.46.0(svelte@5.57.0)':
     dependencies:
       svelte: 5.57.0
 

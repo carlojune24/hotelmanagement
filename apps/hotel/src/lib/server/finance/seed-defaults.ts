@@ -39,34 +39,39 @@ const STARTER_CATEGORIES: [string, (typeof expenseCategories.$inferInsert)['grou
  * categories already exist for the hotel rather than assuming it just created them,
  * so it works both as part of `seedFinanceDefaults` (called on new-hotel creation)
  * and standalone (called by `db/migrate-backfill-coa.ts` for hotels that already had
- * Finance set up before the ledger feature shipped). Idempotent — a no-op once the
- * hotel already has `chart_of_accounts` rows.
+ * Finance set up before the ledger feature shipped). Idempotent per-row rather than a
+ * blanket skip — inserts only whichever `chart_of_accounts` codes / `cash_category_accounts`
+ * categories this hotel doesn't already have, so it also picks up new accounts/categories
+ * `coa-seed.ts` grows *after* a hotel was first seeded (re-run via `migrate-backfill-coa.ts`).
  */
 export async function seedChartOfAccounts(db: DbLike, hotelId: string): Promise<void> {
-	const existingCoa = await db
-		.select({ id: chartOfAccounts.id })
+	const existingCoaRows = await db
+		.select({ id: chartOfAccounts.id, code: chartOfAccounts.code })
 		.from(chartOfAccounts)
-		.where(eq(chartOfAccounts.hotelId, hotelId))
-		.limit(1);
-	if (existingCoa.length > 0) return;
+		.where(eq(chartOfAccounts.hotelId, hotelId));
+	const existingCodes = new Set(existingCoaRows.map((r) => r.code));
 
-	const coaRows = await db
-		.insert(chartOfAccounts)
-		.values(
-			COA_SEED.map((a) => ({
-				hotelId,
-				accountRef: mintRef('account'),
-				code: a.code,
-				name: a.name,
-				type: a.type,
-				subtype: a.subtype,
-				normalBalance: a.normalBalance,
-				isSystem: a.isSystem ?? false
-			}))
-		)
-		.returning({ id: chartOfAccounts.id, code: chartOfAccounts.code });
+	const missingSeed = COA_SEED.filter((a) => !existingCodes.has(a.code));
+	const insertedRows = missingSeed.length
+		? await db
+				.insert(chartOfAccounts)
+				.values(
+					missingSeed.map((a) => ({
+						hotelId,
+						accountRef: mintRef('account'),
+						code: a.code,
+						name: a.name,
+						type: a.type,
+						subtype: a.subtype,
+						normalBalance: a.normalBalance,
+						isSystem: a.isSystem ?? false
+					}))
+				)
+				.returning({ id: chartOfAccounts.id, code: chartOfAccounts.code })
+		: [];
+	const allCoaRows = [...existingCoaRows, ...insertedRows];
 	const byCode = (code: string): string => {
-		const row = coaRows.find((r) => r.code === code);
+		const row = allCoaRows.find((r) => r.code === code);
 		if (!row) throw new Error(`coa-seed.ts is missing account code ${code}`);
 		return row.id;
 	};
@@ -82,13 +87,19 @@ export async function seedChartOfAccounts(db: DbLike, hotelId: string): Promise<
 		}
 	}
 
-	await db.insert(cashCategoryAccounts).values(
-		(Object.entries(CASH_CATEGORY_TO_COA_CODE) as [CashCategory, string][]).map(([category, code]) => ({
-			hotelId,
-			category,
-			accountId: byCode(code)
-		}))
-	);
+	const existingCategoryMappings = await db
+		.select({ category: cashCategoryAccounts.category })
+		.from(cashCategoryAccounts)
+		.where(eq(cashCategoryAccounts.hotelId, hotelId));
+	const mappedCategories = new Set(existingCategoryMappings.map((r) => r.category));
+	const missingCategoryRows = (
+		Object.entries(CASH_CATEGORY_TO_COA_CODE) as [CashCategory, string][]
+	)
+		.filter(([category]) => !mappedCategories.has(category))
+		.map(([category, code]) => ({ hotelId, category, accountId: byCode(code) }));
+	if (missingCategoryRows.length) {
+		await db.insert(cashCategoryAccounts).values(missingCategoryRows);
+	}
 
 	const existingExpenseCategories = await db
 		.select({ id: expenseCategories.id, group: expenseCategories.group })

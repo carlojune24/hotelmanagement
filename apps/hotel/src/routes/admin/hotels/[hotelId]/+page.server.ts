@@ -7,11 +7,12 @@ import { writeAudit } from '$lib/server/audit';
 import { createInvite, revokeInvite } from '$lib/server/auth/invite';
 import { sendStaffInvite } from '$lib/server/email/send-invite';
 import { requirePlatformAdmin } from '$lib/server/auth/rbac';
+import { slugError } from '$lib/server/tenant';
 import type { Actions, PageServerLoad } from './$types';
 
 /** Platform admin only ever grants/revokes the protected `hotel_admin` role here — every
  *  other role is invited/managed by a hotel's own hotel_admin from inside the hotel
- *  (`[hotel]/(staff)/settings/team`). */
+ *  (`[hotel]/management/settings/team`). */
 const HOTEL_ADMIN_SLUG = 'hotel_admin';
 
 export const load: PageServerLoad = async ({ params }) => {
@@ -109,6 +110,43 @@ export const actions: Actions = {
 			after: { name: d.name, customDomain: d.customDomain || null }
 		});
 		return { ok: 'Configuration saved.' };
+	},
+
+	updateSlug: async (event) => {
+		requirePlatformAdmin(event.locals.user);
+		const parsed = z
+			.object({ slug: z.string().min(3).max(40) })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: 'Enter a slug.' });
+
+		const slug = parsed.data.slug.toLowerCase().trim();
+		const slugErr = slugError(slug);
+		if (slugErr) return fail(400, { error: slugErr });
+
+		const before = await getHotelOr404(event.params.hotelId!);
+		if (slug === before.slug) return { ok: 'Slug unchanged.' };
+
+		try {
+			await db.update(hotels).set({ slug, updatedAt: new Date() }).where(eq(hotels.id, before.id));
+		} catch (e) {
+			if (e instanceof Error && 'code' in e && (e as { code: string }).code === '23505') {
+				return fail(400, { error: `The slug "${slug}" is already taken.` });
+			}
+			throw e;
+		}
+
+		await writeAudit({
+			hotelId: before.id,
+			actor: event.locals.user,
+			action: 'hotel.update_slug',
+			entityType: 'hotel',
+			entityId: before.id,
+			before: { slug: before.slug },
+			after: { slug }
+		});
+		return {
+			ok: `Slug changed to /${slug}. Any links already sent to guests under /${before.slug} (confirmation, manage-booking, reviews) will now 404.`
+		};
 	},
 
 	setStatus: async (event) => {

@@ -35,8 +35,8 @@ const base = (over: Partial<BookingConfirmationData> = {}): BookingConfirmationD
 	feesCentavos: 0,
 	vatCentavos: 108_00,
 	totalCentavos: 1008_00,
-	manageUrl: 'https://book.example/acacia/book/confirmation/abc?t=tok',
-	manageBookingUrl: 'https://book.example/acacia/book/manage/abc?t=tok',
+	manageUrl: 'https://book.example/acacia/confirmation/abc?t=tok',
+	manageBookingUrl: 'https://book.example/acacia/manage/abc?t=tok',
 	...over
 });
 
@@ -66,7 +66,7 @@ describe('renderBookingConfirmation', () => {
 		expect(html).toContain('Maria Santos');
 		expect(html).toContain('₱1,008.00');
 		expect(html).toContain('>3<'); // nights value cell
-		expect(html).toContain('https://book.example/acacia/book/confirmation/abc?t=tok');
+		expect(html).toContain('https://book.example/acacia/confirmation/abc?t=tok');
 		expect(html).toContain('Deluxe Twin — Standard Rate');
 	});
 
@@ -127,7 +127,7 @@ describe('renderBookingConfirmation', () => {
 	it('plain-text alternative carries the URL on its own line', () => {
 		const { text } = renderBookingConfirmation(base());
 		const lines = text.split('\n');
-		expect(lines).toContain('https://book.example/acacia/book/confirmation/abc?t=tok');
+		expect(lines).toContain('https://book.example/acacia/confirmation/abc?t=tok');
 		expect(text).toContain('TOTAL PAID  ₱1,008.00');
 	});
 });

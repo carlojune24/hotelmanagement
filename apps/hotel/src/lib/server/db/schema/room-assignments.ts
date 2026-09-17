@@ -5,13 +5,20 @@ import { bookingRooms } from './bookings';
 import { rooms } from './inventory';
 
 /**
- * A specific physical room assigned to a booking's room line at check-in — the
- * piece that didn't exist before: `booking_rooms` only ever knew a room *type*
- * (e.g. "2 Deluxe Twins"), never which actual room numbers a guest occupies.
- * One row per physical room, so `booking_rooms.quantity > 1` gets several rows
- * here, not one row with a count. `checkIn`/`checkOut` are denormalized from
- * the parent booking at assignment time (booking dates aren't editable today)
- * so overlap checks (`lib/server/front-desk.ts`) are a single-table scan.
+ * A specific physical room assigned to a booking's room line — the piece that
+ * didn't exist before: `booking_rooms` only ever knew a room *type* (e.g. "2
+ * Deluxe Twins"), never which actual room numbers a guest occupies. One row per
+ * physical room, so `booking_rooms.quantity > 1` gets several rows here, not one
+ * row with a count. `checkIn`/`checkOut` are denormalized from the parent
+ * booking at assignment time (booking dates aren't editable today) so overlap
+ * checks (`lib/server/front-desk.ts`) are a single-table scan.
+ *
+ * Usually created at check-in (`checkInBooking`). The front-desk grid's pick
+ * mode is the one exception: clicking a specific physical tile pre-assigns that
+ * exact room immediately in `createWalkInBooking`, before the booking is even
+ * `checked_in` — `checkInBooking` detects and reuses those rows instead of
+ * re-inserting. Code reading this table (`getRoomStatusGrid`, `listEligibleRooms`,
+ * `searchAvailability`) accounts for both origins; see their own doc comments.
  */
 export const roomAssignments = pgTable(
 	'room_assignments',

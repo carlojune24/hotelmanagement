@@ -266,6 +266,42 @@ export async function addAmenityItemCharge(
 	});
 }
 
+/** A free-text, arbitrary-amount charge with no catalog entry behind it — e.g. a
+ *  room-damage line ("Damage: broken lamp — ₱3,000"). Quantity is always 1; the
+ *  amount is whatever staff types, unlike `addAmenityItemCharge`'s catalog price. */
+export async function addAdHocCharge(
+	hotelId: string,
+	target: FolioTarget,
+	input: { description: string; amountCentavos: number; taxable: boolean },
+	actor: SessionUser | null
+): Promise<void> {
+	if (!input.description.trim()) throw new FolioError('Enter a description for this charge.');
+	if (!Number.isInteger(input.amountCentavos) || input.amountCentavos <= 0) {
+		throw new FolioError('Enter a charge amount greater than zero.');
+	}
+
+	await insertCharge(
+		hotelId,
+		target,
+		{
+			description: input.description.trim(),
+			quantity: 1,
+			unitPriceCentavos: input.amountCentavos,
+			taxable: input.taxable
+		},
+		actor
+	);
+
+	await writeAudit({
+		hotelId,
+		actor,
+		action: 'folio.add_adhoc_charge',
+		entityType: target.kind === 'room' ? 'booking' : 'hall_booking',
+		entityId: target.kind === 'room' ? target.bookingId : target.hallBookingId,
+		after: { description: input.description.trim(), amountCentavos: input.amountCentavos }
+	});
+}
+
 export type ExtensionFeeKind = 'late_checkout' | 'early_check_in';
 
 /** One-click charge for the per-hour late-checkout/early-check-in rates set in hotel settings —

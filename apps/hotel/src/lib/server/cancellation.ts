@@ -145,7 +145,7 @@ export function computeCancellationFee(input: CancellationFeeInput): Cancellatio
 
 /** Convert a wall-clock `date` + `time` in `timeZone` to a UTC epoch (ms). PH has no DST;
  *  a single offset pass is exact there and close enough everywhere else this app runs. */
-function wallTimeToUtcMs(dateStr: string, timeStr: string, timeZone: string): number {
+export function wallTimeToUtcMs(dateStr: string, timeStr: string, timeZone: string): number {
 	const [y, mo, d] = dateStr.split('-').map(Number);
 	const [h, mi, s] = timeStr.split(':').map((n) => Number(n) || 0);
 	const guess = Date.UTC(y!, mo! - 1, d!, h!, mi!, s!);
@@ -327,6 +327,10 @@ export interface CancelBookingInput {
 	refundMethod: RefundMethod;
 	reason: string;
 	actor: SessionUser | null;
+	/** Staff-uploaded proof of a *manual* payout (bank transfer confirmation, e-wallet
+	 *  screenshot, etc). Ignored for `refundMethod: 'paymongo'` — that refund's own id
+	 *  and `rawPayload` are already the record. */
+	attachmentUrl?: string | null;
 }
 
 export interface CancelBookingResult {
@@ -548,7 +552,8 @@ export async function cancelBooking(input: CancelBookingInput): Promise<CancelBo
 								cashAccountId,
 								shiftId: shiftId ?? null,
 								recordedByUserId: actor?.id ?? null,
-								paidAt: new Date()
+								paidAt: new Date(),
+								attachmentUrl: input.attachmentUrl ?? null
 							})
 							.returning({ id: payments.id });
 						refundPaymentId = refundRow!.id;

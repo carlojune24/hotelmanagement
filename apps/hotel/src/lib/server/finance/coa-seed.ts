@@ -47,6 +47,13 @@ export const COA_SEED: CoaSeedAccount[] = [
 		normalBalance: 'credit'
 	},
 	{ code: '2040', name: 'Guest Deposits Held', type: 'liability', subtype: 'guest_deposits_held', normalBalance: 'credit' },
+	{
+		code: '2041',
+		name: 'Security Deposits Held (Room Damage)',
+		type: 'liability',
+		subtype: 'guest_deposits_held',
+		normalBalance: 'credit'
+	},
 
 	// Equity
 	{ code: '3010', name: "Owner's Equity", type: 'equity', subtype: 'owners_equity', normalBalance: 'credit' },
@@ -133,7 +140,9 @@ export const CASH_CATEGORY_TO_COA_CODE: Record<CashCategory, string> = {
 	transfer_out: '1091',
 	owner_contribution: '3010',
 	owner_draw: '3020',
-	adjustment: '5990'
+	adjustment: '5990',
+	security_deposit_hold: '2041',
+	security_deposit_refund: '2041'
 };
 
 /** `expense_categories.group` -> seeded COA `code`, for the specific expense-account

@@ -55,7 +55,7 @@
 					<span>Total</span>
 					<span class="ledger-data text-base">{peso(cart.totalCentavos)}</span>
 				</div>
-				<a href="/{hotelSlug}/book/details" class="ledger-btn-primary storefront-invoice-cta">
+				<a href="/{hotelSlug}/details" class="ledger-btn-primary storefront-invoice-cta">
 					Proceed to checkout
 				</a>
 			</div>

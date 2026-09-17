@@ -210,7 +210,9 @@ export const cashCategory = pgEnum('cash_category', [
 	'transfer_out',
 	'owner_contribution',
 	'owner_draw',
-	'adjustment'
+	'adjustment',
+	'security_deposit_hold',
+	'security_deposit_refund'
 ]);
 
 export const cashCounterpartyType = pgEnum('cash_counterparty_type', [
@@ -474,6 +476,61 @@ export const receivables = pgTable(
 	(t) => [index('receivables_hotel_status_idx').on(t.hotelId, t.status)]
 );
 
+export const securityDepositStatus = pgEnum('security_deposit_status', [
+	'held',
+	'settled',
+	'voided'
+]);
+
+/** A refundable room-damage hold collected at check-in (see `front-desk.ts`'s check-in
+ *  action) and settled at checkout via `lib/server/security-deposits.ts` — refunded in
+ *  full if there's no damage, or netted against a damage folio charge otherwise.
+ *  Deliberately distinct from `payments`: a hold is collateral, never folio revenue —
+ *  `getFolioDetail`'s balance math must never see it. */
+export const securityDeposits = pgTable(
+	'security_deposits',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		bookingId: uuid('booking_id').references(() => bookings.id, { onDelete: 'set null' }),
+		/** Snapshot reference, not a live FK — like `receivables.bookingId`'s own convention;
+		 *  a policy edited/deleted later must never retroactively change a past hold's record. */
+		securityDepositPolicyId: uuid('security_deposit_policy_id'),
+		status: securityDepositStatus('status').notNull().default('held'),
+		amountCentavos: bigint('amount_centavos', { mode: 'number' }).notNull(),
+		cashAccountId: uuid('cash_account_id')
+			.notNull()
+			.references(() => cashAccounts.id, { onDelete: 'restrict' }),
+		method: paymentMethod('method').notNull(),
+		referenceNo: text('reference_no'),
+		collectedByUserId: uuid('collected_by_user_id').references(() => users.id, {
+			onDelete: 'set null'
+		}),
+		collectedAt: timestamp('collected_at', { withTimezone: true }).notNull().defaultNow(),
+		forfeitedCentavos: bigint('forfeited_centavos', { mode: 'number' }),
+		refundedCentavos: bigint('refunded_centavos', { mode: 'number' }),
+		settledByUserId: uuid('settled_by_user_id').references(() => users.id, {
+			onDelete: 'set null'
+		}),
+		settledAt: timestamp('settled_at', { withTimezone: true }),
+		voidedByUserId: uuid('voided_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		voidedAt: timestamp('voided_at', { withTimezone: true }),
+		voidReason: text('void_reason'),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [
+		index('security_deposits_hotel_idx').on(t.hotelId),
+		index('security_deposits_booking_idx').on(t.bookingId),
+		// One active hold per booking at a time.
+		uniqueIndex('security_deposits_one_held_per_booking_idx')
+			.on(t.bookingId)
+			.where(sql`${t.status} = 'held'`)
+	]
+);
+
 // ---------------------------------------------------------------------------
 // Day close
 // ---------------------------------------------------------------------------
@@ -606,6 +663,11 @@ export const receivablesRelations = relations(receivables, ({ one }) => ({
 	folio: one(folios, { fields: [receivables.folioId], references: [folios.id] })
 }));
 
+export const securityDepositsRelations = relations(securityDeposits, ({ one }) => ({
+	hotel: one(hotels, { fields: [securityDeposits.hotelId], references: [hotels.id] }),
+	booking: one(bookings, { fields: [securityDeposits.bookingId], references: [bookings.id] })
+}));
+
 export const financeSettingsRelations = relations(financeSettings, ({ one }) => ({
 	hotel: one(hotels, { fields: [financeSettings.hotelId], references: [hotels.id] })
 }));
@@ -626,5 +688,6 @@ export type ExpenseCategory = typeof expenseCategories.$inferSelect;
 export type Vendor = typeof vendors.$inferSelect;
 export type RecurringExpense = typeof recurringExpenses.$inferSelect;
 export type Receivable = typeof receivables.$inferSelect;
+export type SecurityDeposit = typeof securityDeposits.$inferSelect;
 export type DayClose = typeof dayCloses.$inferSelect;
 export type FinanceSettings = typeof financeSettings.$inferSelect;

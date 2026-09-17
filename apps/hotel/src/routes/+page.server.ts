@@ -1,7 +1,5 @@
 import { redirect } from '@sveltejs/kit';
-import { asc, eq } from 'drizzle-orm';
-import { db } from '$lib/server/db/index';
-import { hotels, memberships } from '$lib/server/db/schema/index';
+import { firstHotelSlugForUser } from '$lib/server/auth/login';
 import type { PageServerLoad } from './$types';
 
 /**
@@ -13,14 +11,8 @@ export const load: PageServerLoad = async ({ locals }) => {
 	if (!locals.user) redirect(302, '/auth/login');
 	if (locals.user.isPlatformAdmin) redirect(302, '/admin');
 
-	const memberHotels = await db
-		.select({ slug: hotels.slug })
-		.from(memberships)
-		.innerJoin(hotels, eq(hotels.id, memberships.hotelId))
-		.where(eq(memberships.userId, locals.user.id))
-		.orderBy(asc(hotels.name));
-
-	if (memberHotels.length > 0) redirect(302, `/${memberHotels[0]!.slug}/dashboard`);
+	const slug = await firstHotelSlugForUser(locals.user.id);
+	if (slug) redirect(302, `/${slug}/management/dashboard`);
 
 	// Logged in, but no hotel access and not a platform admin — an incomplete/orphaned
 	// account (e.g. every membership was later removed). Nothing to redirect to.

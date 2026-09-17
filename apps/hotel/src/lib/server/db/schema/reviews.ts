@@ -10,7 +10,7 @@ export const reviewStatus = pgEnum('review_status', ['pending', 'approved', 'rej
 /**
  * A guest review tied to one real room-stay booking — never fabricated, never
  * accepted without a completed stay behind it. Verified via the booking's own
- * order access token (see `book/leave-review/[bookingId]`), not a new auth
+ * order access token (see `leave-review/[bookingId]`), not a new auth
  * system. One review per booking (unique on `bookingId`): a guest doesn't get
  * to resubmit after rejection, and a completed stay carries at most one review.
  * `rating` additionally gets a hand-written `CHECK (rating BETWEEN 1 AND 5)` in

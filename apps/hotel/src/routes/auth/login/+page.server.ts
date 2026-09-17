@@ -1,9 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { db } from '$lib/server/db/index';
-import { users } from '$lib/server/db/schema/index';
-import { verifyPassword } from '$lib/server/auth/password';
+import { firstHotelSlugForUser, verifyCredentials } from '$lib/server/auth/login';
+import { safeNext } from '$lib/server/auth/redirect';
 import { createSession, generateSessionToken, setSessionCookie } from '$lib/server/auth/session';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -13,12 +11,16 @@ const schema = z.object({
 	next: z.string().optional()
 });
 
-function safeNext(next: string | undefined): string {
-	return next && next.startsWith('/') && !next.startsWith('//') ? next : '/';
-}
-
+/** Platform-admin sign-in only — a hotel-staff account is routed to its own hotel's
+ *  `/{slug}/management/login` instead (see the `actions.default` branch below). */
 export const load: PageServerLoad = async ({ locals, url }) => {
-	if (locals.user) redirect(302, safeNext(url.searchParams.get('next') ?? undefined));
+	if (locals.user) {
+		if (!locals.user.isPlatformAdmin) {
+			const slug = await firstHotelSlugForUser(locals.user.id);
+			redirect(302, slug ? `/${slug}/management/dashboard` : '/');
+		}
+		redirect(302, safeNext(url.searchParams.get('next')));
+	}
 	return { next: url.searchParams.get('next') ?? '' };
 };
 
@@ -29,18 +31,17 @@ export const actions: Actions = {
 		if (!parsed.success) return fail(400, { error: 'Enter a valid email and password.' });
 
 		const { email, password, next } = parsed.data;
-		const user = await db
-			.select()
-			.from(users)
-			.where(eq(users.email, email.toLowerCase()))
-			.then((r) => r.at(0));
+		const user = await verifyCredentials(email, password);
+		if (!user) return fail(400, { error: 'Incorrect email or password.' });
 
-		const ok =
-			user?.passwordHash && user.status === 'active'
-				? await verifyPassword(user.passwordHash, password)
-				: false;
-
-		if (!ok || !user) return fail(400, { error: 'Incorrect email or password.' });
+		if (!user.isPlatformAdmin) {
+			// Valid credentials, but this is a hotel-staff account, not a platform admin —
+			// no session is created here at all; send them to sign in at their own hotel's
+			// login instead.
+			const slug = await firstHotelSlugForUser(user.id);
+			if (slug) redirect(302, `/${slug}/management/login`);
+			return fail(403, { error: 'This account has no platform-admin access.' });
+		}
 
 		const token = generateSessionToken();
 		const session = await createSession(token, user.id);

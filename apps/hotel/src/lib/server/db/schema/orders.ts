@@ -34,7 +34,7 @@ export const orders = pgTable(
 		totalCentavos: bigint('total_centavos', { mode: 'number' }).notNull(),
 		/**
 		 * Opaque token required (alongside the row id) on every guest-facing order
-		 * URL (`/book/review/[id]?t=...`, `/book/confirmation/[id]?t=...`) — the
+		 * URL (`/review/[id]?t=...`, `/confirmation/[id]?t=...`) — the
 		 * same IDOR guard `bookings.accessToken` used to provide, moved up a level
 		 * since one token now covers every line under the order.
 		 */

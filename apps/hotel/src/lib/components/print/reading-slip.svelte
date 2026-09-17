@@ -13,7 +13,8 @@
 		bank_transfer: 'Bank transfer',
 		cheque: 'Cheque',
 		paymongo: 'Online (PayMongo)',
-		house_use: 'City ledger'
+		house_use: 'City ledger',
+		security_deposit: 'Security deposit'
 	};
 	const r = $derived(reading);
 	const tenders = $derived(Object.entries(r.tenderBreakdown).sort((a, b) => b[1] - a[1]));

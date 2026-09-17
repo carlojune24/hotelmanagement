@@ -73,6 +73,7 @@
 			<form
 				method="POST"
 				{action}
+				enctype="multipart/form-data"
 				use:enhance={() => {
 					submitting = true;
 					return async ({ update, result }) => {
@@ -169,6 +170,24 @@
 									</p>
 								{/if}
 							</div>
+
+							{#if refundMethod !== 'paymongo'}
+								<div>
+									<Label for="cancel-refund-attachment" class="text-xs">
+										Refund receipt <span class="text-ink-muted">(optional)</span>
+									</Label>
+									<Input
+										id="cancel-refund-attachment"
+										name="refundAttachment"
+										type="file"
+										accept="image/*"
+										class="mt-1"
+									/>
+									<p class="mt-1 text-xs text-ink-muted">
+										A photo of the transfer confirmation or receipt you gave the guest.
+									</p>
+								</div>
+							{/if}
 						{/if}
 					</div>
 				{:else}

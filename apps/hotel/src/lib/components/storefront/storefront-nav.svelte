@@ -44,7 +44,7 @@
 	// nesting depths (homepage, dining, meetings-events, contact, and eventually room detail
 	// pages) and absolute paths can't accidentally resolve one directory short/long the way a
 	// hand-computed `../` chain repeatedly did this session.
-	const base = `/${hotelSlug}/book`;
+	const base = `/${hotelSlug}`;
 </script>
 
 <nav class="storefront-nav" class:is-transparent={transparentOverHero && !scrolled}>

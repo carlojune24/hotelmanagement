@@ -641,7 +641,8 @@ const METHOD_LABEL: Record<string, string> = {
 	bank_transfer: 'Bank transfer',
 	cheque: 'Cheque',
 	paymongo: 'Online (PayMongo)',
-	house_use: 'City ledger'
+	house_use: 'City ledger',
+	security_deposit: 'Applied from security deposit'
 };
 
 /** Everything an Official Receipt needs — the one payment it acknowledges, plus a link to its Invoice. */

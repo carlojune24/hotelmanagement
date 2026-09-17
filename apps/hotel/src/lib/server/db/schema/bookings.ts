@@ -218,7 +218,8 @@ export const paymentMethod = pgEnum('payment_method', [
 	'bank_transfer',
 	'cheque',
 	'paymongo',
-	'house_use'
+	'house_use',
+	'security_deposit'
 ]);
 
 /** What a payment is *for* on the folio — a pre-arrival deposit, a partial/full settlement,
@@ -285,7 +286,12 @@ export const payments = pgTable(
 		/** PayMongo's own refund object id (`ref_...`), set when the refund was actually
 		 *  issued via their Refunds API — lets the webhook match `payment.refund_updated` /
 		 *  `payment.refunded` events back to this row. */
-		paymongoRefundId: text('paymongo_refund_id')
+		paymongoRefundId: text('paymongo_refund_id'),
+		/** Staff-uploaded proof for a *manual* refund payout (e.g. a bank transfer
+		 *  confirmation screenshot) — never set for `paymongo`, whose own refund id +
+		 *  `rawPayload` already is the record. Same `/uploads/...` store as everything
+		 *  else in `uploads.ts`. */
+		attachmentUrl: text('attachment_url')
 	},
 	(t) => [
 		index('payments_order_idx').on(t.orderId),

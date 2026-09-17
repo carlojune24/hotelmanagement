@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, gt, inArray, lt, lte, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, inArray, lt, lte, ne, sql } from 'drizzle-orm';
 import { db } from './db/index';
 import {
 	bookingRooms,
@@ -20,11 +20,13 @@ import {
 } from './db/schema/index';
 import { ACTIVE_BOOKING_STATUSES, getAvailableRoomType } from './availability';
 import { checkHallAvailability } from './hall-availability';
+import { wallTimeToUtcMs } from './cancellation';
 import { FolioError, closeFolio, getFolioDetail } from './folio';
+import { getSecurityDepositForBooking } from './security-deposits';
 import { recordWalkInPayment, resolvePaymentAccount, type PaymentMethod } from './finance/payments';
 import { openReceivable } from './finance/receivables';
 import { getBirSettings, issueInvoice } from './finance/documents';
-import { priceEventHall } from './pricing';
+import { priceEventHall, type PriceBreakdown } from './pricing';
 import { addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
 import { writeAudit } from './audit';
 import type { SessionUser } from './auth/session';
@@ -41,12 +43,18 @@ export class CheckInError extends Error {}
  * active, not out of order, and not already assigned (on an active-status booking) to
  * an overlapping range. Same half-open-interval overlap test `searchAvailability` uses
  * for room-type counts, just scoped to one physical room.
+ *
+ * `excludeBookingId`, when given, leaves that booking's own `room_assignments` out of
+ * the occupied set — needed once a room can be assigned before check-in (front-desk
+ * grid pick mode): without it, a booking's own pre-assigned room would make itself
+ * ineligible in its own picker.
  */
 export async function listEligibleRooms(
 	hotelId: string,
 	roomTypeId: string,
 	checkIn: string,
-	checkOut: string
+	checkOut: string,
+	excludeBookingId?: string
 ) {
 	const candidates = await db
 		.select({ id: rooms.id, roomNumber: rooms.roomNumber, floor: rooms.floor })
@@ -71,7 +79,8 @@ export async function listEligibleRooms(
 			and(
 				inArray(bookings.status, [...ACTIVE_BOOKING_STATUSES]),
 				lt(roomAssignments.checkIn, checkOut),
-				gt(roomAssignments.checkOut, checkIn)
+				gt(roomAssignments.checkOut, checkIn),
+				...(excludeBookingId ? [ne(bookings.id, excludeBookingId)] : [])
 			)
 		);
 	const occupied = new Set(occupiedRows.map((r) => r.roomId));
@@ -83,6 +92,12 @@ export async function listEligibleRooms(
  * Assigns specific physical rooms to a confirmed booking and flips it to
  * `checked_in`. Every condition the UI already filtered for is re-verified here
  * server-side — the form's own options are a convenience, never the real guard.
+ *
+ * `roomIds` may be empty (or simply ignored) when the booking already carries its
+ * own `room_assignments` — the front-desk grid's pick mode now pre-assigns the
+ * exact rooms staff clicked at booking-creation time (see `createWalkInBooking`),
+ * so check-in for those bookings is a confirm, not a re-pick: this reuses the
+ * existing rows instead of requiring (or re-inserting) a fresh selection.
  */
 export async function checkInBooking(
 	hotelId: string,
@@ -93,13 +108,20 @@ export async function checkInBooking(
 	 *  caller (never a raw file upload — the check-in form only offers a camera capture
 	 *  widget). Optional: check-in never blocks on it. */
 	guestIdPhotoUrl?: string | null
-): Promise<void> {
+): Promise<{ roomIds: string[] }> {
 	const uniqueRoomIds = [...new Set(roomIds)];
 	if (uniqueRoomIds.length !== roomIds.length) {
 		throw new CheckInError('Each room can only be assigned once.');
 	}
 
-	await db.transaction(async (tx) => {
+	const finalRoomIds = await db.transaction(async (tx) => {
+		// Serializes concurrent check-in attempts on this same booking (e.g. a
+		// double-submitted form) — the per-room locks below only run on the
+		// "not already pre-assigned" branch, since a pre-assigned room was already
+		// claimed (and locked) by its own creation transaction.
+		await tx.execute(
+			sql`select pg_advisory_xact_lock(hashtext(${hotelId}), hashtext(${'checkin:' + bookingId}))`
+		);
 		for (const roomId of [...uniqueRoomIds].sort()) {
 			await tx.execute(
 				sql`select pg_advisory_xact_lock(hashtext(${hotelId}), hashtext(${'room:' + roomId}))`
@@ -123,52 +145,66 @@ export async function checkInBooking(
 			.where(eq(bookingRooms.bookingId, bookingId))
 			.limit(1);
 		if (!bookingRoom) throw new CheckInError('Booking has no room line.');
-		if (uniqueRoomIds.length !== bookingRoom.quantity) {
-			throw new CheckInError(`Select exactly ${bookingRoom.quantity} room(s).`);
-		}
 
-		const roomRows = await tx
-			.select()
-			.from(rooms)
-			.where(
-				and(
-					inArray(rooms.id, uniqueRoomIds),
-					eq(rooms.hotelId, hotelId),
-					eq(rooms.roomTypeId, bookingRoom.roomTypeId),
-					eq(rooms.isActive, true),
-					eq(rooms.operationalStatus, 'available')
-				)
-			);
-		if (roomRows.length !== uniqueRoomIds.length) {
-			throw new CheckInError('One or more selected rooms are no longer available.');
-		}
-
-		const occupiedRows = await tx
+		const existingAssignments = await tx
 			.select({ roomId: roomAssignments.roomId })
 			.from(roomAssignments)
-			.innerJoin(bookingRooms, eq(bookingRooms.id, roomAssignments.bookingRoomId))
-			.innerJoin(bookings, eq(bookings.id, bookingRooms.bookingId))
-			.where(
-				and(
-					inArray(roomAssignments.roomId, uniqueRoomIds),
-					inArray(bookings.status, [...ACTIVE_BOOKING_STATUSES]),
-					ne(bookings.id, bookingId),
-					lt(roomAssignments.checkIn, booking.checkOut),
-					gt(roomAssignments.checkOut, booking.checkIn)
-				)
-			);
-		if (occupiedRows.length > 0) {
-			throw new CheckInError('One or more selected rooms were just taken — pick again.');
-		}
+			.where(eq(roomAssignments.bookingRoomId, bookingRoom.id));
 
-		await tx.insert(roomAssignments).values(
-			uniqueRoomIds.map((roomId) => ({
-				bookingRoomId: bookingRoom.id,
-				roomId,
-				checkIn: booking.checkIn,
-				checkOut: booking.checkOut
-			}))
-		);
+		let finalRoomIds: string[];
+		if (existingAssignments.length >= bookingRoom.quantity) {
+			// Already pre-assigned (grid pick mode at booking time) — confirm as-is,
+			// nothing left to verify or insert.
+			finalRoomIds = existingAssignments.map((r) => r.roomId);
+		} else {
+			if (uniqueRoomIds.length !== bookingRoom.quantity) {
+				throw new CheckInError(`Select exactly ${bookingRoom.quantity} room(s).`);
+			}
+
+			const roomRows = await tx
+				.select()
+				.from(rooms)
+				.where(
+					and(
+						inArray(rooms.id, uniqueRoomIds),
+						eq(rooms.hotelId, hotelId),
+						eq(rooms.roomTypeId, bookingRoom.roomTypeId),
+						eq(rooms.isActive, true),
+						eq(rooms.operationalStatus, 'available')
+					)
+				);
+			if (roomRows.length !== uniqueRoomIds.length) {
+				throw new CheckInError('One or more selected rooms are no longer available.');
+			}
+
+			const occupiedRows = await tx
+				.select({ roomId: roomAssignments.roomId })
+				.from(roomAssignments)
+				.innerJoin(bookingRooms, eq(bookingRooms.id, roomAssignments.bookingRoomId))
+				.innerJoin(bookings, eq(bookings.id, bookingRooms.bookingId))
+				.where(
+					and(
+						inArray(roomAssignments.roomId, uniqueRoomIds),
+						inArray(bookings.status, [...ACTIVE_BOOKING_STATUSES]),
+						ne(bookings.id, bookingId),
+						lt(roomAssignments.checkIn, booking.checkOut),
+						gt(roomAssignments.checkOut, booking.checkIn)
+					)
+				);
+			if (occupiedRows.length > 0) {
+				throw new CheckInError('One or more selected rooms were just taken — pick again.');
+			}
+
+			await tx.insert(roomAssignments).values(
+				uniqueRoomIds.map((roomId) => ({
+					bookingRoomId: bookingRoom.id,
+					roomId,
+					checkIn: booking.checkIn,
+					checkOut: booking.checkOut
+				}))
+			);
+			finalRoomIds = uniqueRoomIds;
+		}
 
 		await tx
 			.update(bookings)
@@ -185,6 +221,8 @@ export async function checkInBooking(
 			toStatus: 'checked_in',
 			note: guestIdPhotoUrl ? 'ID photo captured at check-in' : null
 		});
+
+		return finalRoomIds;
 	});
 
 	await writeAudit({
@@ -193,8 +231,10 @@ export async function checkInBooking(
 		action: 'booking.check_in',
 		entityType: 'booking',
 		entityId: bookingId,
-		after: { roomIds: uniqueRoomIds, idPhotoCaptured: !!guestIdPhotoUrl }
+		after: { roomIds: finalRoomIds, idPhotoCaptured: !!guestIdPhotoUrl }
 	});
+
+	return { roomIds: finalRoomIds };
 }
 
 /**
@@ -244,9 +284,15 @@ export interface RoomGridOccupant {
 	totalCentavos: number;
 	/** `payments.provider` for the order's paid payment — `'cash'` (walk-in) or `'paymongo'` (booked online). */
 	channel: string;
+	/** The hotel's daily `checkOutTime` policy applied to this room's own checkout
+	 *  date (`checkOut`), resolved to a UTC instant — when the front-desk panel's
+	 *  countdown actually counts down to. Not "midnight of the checkout date". */
+	checkoutAtIso: string;
 }
 
-/** A confirmed booking arriving `businessDate` whose room type has no physical room assigned yet. */
+/** A confirmed booking arriving `businessDate` — either still unassigned (attributed to
+ *  its room type on the grid) or already pre-assigned a specific room (grid pick mode
+ *  at booking time), in which case it's attributed to that one room instead. */
 export interface RoomGridArrival {
 	bookingId: string;
 	guestName: string;
@@ -276,7 +322,9 @@ export interface RoomGridCell {
 	/** `rooms.notes` — only meaningful (and only shown) for `ooo`. */
 	notes: string | null;
 	occupant: RoomGridOccupant | null;
-	/** Non-empty only when `status === 'reserved'` — every unassigned confirmed arrival of this room's type, not specifically this room (see the type's own doc comment). */
+	/** Non-empty only when `status === 'reserved'`. If this exact room was pre-assigned
+	 *  at booking time, just that one arrival; otherwise every unassigned confirmed
+	 *  arrival of this room's type (no specific room known yet). */
 	expectedArrivals: RoomGridArrival[];
 }
 
@@ -286,13 +334,18 @@ export interface RoomGridCell {
  * arrivals/departures lists the side rail's default view uses. Unlike the
  * booking-centric list this replaced, this starts from `rooms` so a genuinely
  * vacant room (no booking at all) still shows up — the whole point of a rack
- * view. A room's "reserved" flag can only ever point at its *room type*, never
- * a specific arrival: `room_assignments` rows don't exist until check-in, so
- * an arriving guest has no physical room yet by definition.
+ * view. A confirmed arrival's "reserved" flag points at its *room type* (every
+ * unassigned arrival of that type) unless the front-desk grid's pick mode
+ * already pre-assigned it a specific `room_assignments` row at booking time —
+ * in that case the exact room shows reserved for that one guest instead.
  */
 export async function getRoomStatusGrid(
 	hotelId: string,
-	businessDate: string
+	businessDate: string,
+	/** The hotel's own daily checkout-time policy + IANA timezone (`hotels.checkOutTime`/
+	 *  `hotels.timezone`) — needed only to resolve each occupied room's `checkoutAtIso`. */
+	checkOutTime: string,
+	timezone: string
 ): Promise<{
 	cells: RoomGridCell[];
 	arrivals: RoomGridArrival[];
@@ -341,7 +394,14 @@ export async function getRoomStatusGrid(
 				eq(bookings.hotelId, hotelId),
 				eq(bookings.status, 'checked_in'),
 				lte(roomAssignments.checkIn, businessDate),
-				gt(roomAssignments.checkOut, businessDate)
+				// `gte`, not `gt` — a room's actual checkout morning (`checkOut ===
+				// businessDate`) must still count as occupied here (then get flagged
+				// "departing" just below) until staff actually run `checkOutBooking`.
+				// A strict `gt` would drop the room out of this set entirely on its own
+				// checkout day, before check-out ever happens — silently reading as
+				// Vacant on the grid despite the guest still being in-house, and making
+				// the "departing" branch just below unreachable dead code.
+				gte(roomAssignments.checkOut, businessDate)
 			)
 		);
 
@@ -352,7 +412,8 @@ export async function getRoomStatusGrid(
 			bookingId: bookings.id,
 			guestName: guests.fullName,
 			orderId: orders.id,
-			assignmentId: roomAssignments.id
+			assignmentId: roomAssignments.id,
+			assignedRoomId: roomAssignments.roomId
 		})
 		.from(bookings)
 		.innerJoin(bookingRooms, eq(bookingRooms.bookingId, bookings.id))
@@ -368,9 +429,16 @@ export async function getRoomStatusGrid(
 			)
 		);
 	const unassignedArrivals = arrivalRows.filter((r) => r.assignmentId == null);
+	// A confirmed arrival whose room was already pre-assigned (grid pick mode at
+	// booking time, not check-in) — attributed to its exact room, not its type.
+	const assignedArrivals = arrivalRows.filter((r) => r.assignmentId != null);
 
 	const orderIds = [
-		...new Set([...occupantRows.map((r) => r.orderId), ...unassignedArrivals.map((r) => r.orderId)])
+		...new Set([
+			...occupantRows.map((r) => r.orderId),
+			...unassignedArrivals.map((r) => r.orderId),
+			...assignedArrivals.map((r) => r.orderId)
+		])
 	];
 	const channelByOrder = new Map<string, string>();
 	if (orderIds.length > 0) {
@@ -396,6 +464,28 @@ export async function getRoomStatusGrid(
 		arrivalsByRoomType.set(r.roomTypeId, list);
 		return arrival;
 	});
+	// Pre-assigned arrivals also feed the flat `arrivals` list (the rail's default
+	// view lists every arrival regardless of whether it has a room yet).
+	for (const r of assignedArrivals) {
+		arrivals.push({
+			bookingId: r.bookingId,
+			guestName: r.guestName,
+			roomTypeName: r.roomTypeName,
+			channel: channelByOrder.get(r.orderId) ?? 'paymongo'
+		});
+	}
+
+	const reservedByRoomId = new Map<string, RoomGridArrival>(
+		assignedArrivals.map((r) => [
+			r.assignedRoomId!,
+			{
+				bookingId: r.bookingId,
+				guestName: r.guestName,
+				roomTypeName: r.roomTypeName,
+				channel: channelByOrder.get(r.orderId) ?? 'paymongo'
+			}
+		])
+	);
 
 	const occupantByRoomId = new Map(occupantRows.map((r) => [r.roomId, r]));
 	const departures: RoomGridDeparture[] = [];
@@ -417,7 +507,10 @@ export async function getRoomStatusGrid(
 				occupancy: occ.occupancy,
 				ratePlanName: occ.ratePlanName,
 				totalCentavos: occ.totalCentavos,
-				channel: channelByOrder.get(occ.orderId) ?? 'paymongo'
+				channel: channelByOrder.get(occ.orderId) ?? 'paymongo',
+				checkoutAtIso: new Date(
+					wallTimeToUtcMs(occ.assignmentCheckOut, checkOutTime, timezone)
+				).toISOString()
 			};
 			status = occ.assignmentCheckOut === businessDate ? 'departing' : 'occupied';
 			if (status === 'departing') {
@@ -431,12 +524,15 @@ export async function getRoomStatusGrid(
 			}
 		} else if (room.operationalStatus !== 'available') {
 			status = 'ooo';
+		} else if (reservedByRoomId.has(room.roomId)) {
+			status = 'reserved';
 		} else if (arrivalsByRoomType.has(room.roomTypeId)) {
 			status = 'reserved';
 		} else {
 			status = 'vacant';
 		}
 
+		const reservedArrival = reservedByRoomId.get(room.roomId);
 		return {
 			roomId: room.roomId,
 			roomNumber: room.roomNumber,
@@ -447,7 +543,12 @@ export async function getRoomStatusGrid(
 			status,
 			notes: room.notes,
 			occupant,
-			expectedArrivals: status === 'reserved' ? (arrivalsByRoomType.get(room.roomTypeId) ?? []) : []
+			expectedArrivals:
+				status !== 'reserved'
+					? []
+					: reservedArrival
+						? [reservedArrival]
+						: (arrivalsByRoomType.get(room.roomTypeId) ?? [])
 		};
 	});
 
@@ -456,14 +557,136 @@ export async function getRoomStatusGrid(
 
 export class WalkInError extends Error {}
 
+/** One room-type/rate-plan line in a walk-in sale — a walk-in cart can carry several
+ *  of these (different room types, different quantities) settled together in one
+ *  payment. Each line keeps its own dates/occupancy so this shape can stand on its
+ *  own (matching `roomItemSchema` in `(guest)/details/+page.server.ts`), even though
+ *  today's front-desk UI only ever submits identical dates/occupancy across lines. */
+export interface WalkInRoomItem {
+	roomTypeId: string;
+	ratePlanId: string;
+	checkIn: string;
+	checkOut: string;
+	occupancy: number;
+	roomCount: number;
+	/** Specific physical rooms staff clicked on the front-desk grid (pick mode),
+	 *  length always equal to `roomCount` when present. `createWalkInBooking`
+	 *  re-verifies each is still free and assigns it immediately — see that
+	 *  function's own doc comment. Absent for lines built from the date-search
+	 *  fallback, where no specific room is known at booking time. */
+	roomIds?: string[];
+}
+
+/** Distinct, sorted advisory-lock keys for every room type — and, for a pre-assigned
+ *  line, every specific room — a walk-in cart touches, sorted so two concurrent sales
+ *  touching the same rooms in a different order can't deadlock each other. Room-only
+ *  mirror of `(guest)/details/+page.server.ts`'s `lockKeysFor` — a walk-in cart never
+ *  carries hall lines (those go through `createWalkInHallBooking`). */
+function lockKeysForRooms(items: WalkInRoomItem[]): string[] {
+	const keys = new Set<string>();
+	for (const item of items) {
+		keys.add(`room:${item.roomTypeId}`);
+		for (const roomId of item.roomIds ?? []) keys.add(`room-id:${roomId}`);
+	}
+	return [...keys].sort();
+}
+
+/** One room the front-desk grid's pick mode is checking — keyed by the client's own
+ *  correlation id (the physical room tile's `roomId`) so results can be matched back
+ *  to the tile that produced them without relying on array order. */
+export interface WalkInAvailabilityCheckItem {
+	key: string;
+	roomTypeId: string;
+	checkIn: string;
+	checkOut: string;
+	occupancy: number;
+	roomCount: number;
+}
+
+export interface WalkInAvailabilityCheckResult {
+	key: string;
+	available: boolean;
+	reason?: string;
+	roomTypeName?: string;
+	availableRooms?: number;
+	extraBedsNeeded?: number;
+	ratePlans?: Array<{
+		id: string;
+		name: string;
+		price: PriceBreakdown;
+		extraBedFeeCentavos: number | null;
+	}>;
+}
+
 /**
- * Creates a guest + order + booking directly as `confirmed`, with a `cash`
- * payment row for the full total — a walk-in is settled at the desk on the
- * spot, not through the guest-facing PayMongo checkout `book/details`'s
- * `createOrder` action drives. Re-verifies availability and re-prices
- * server-side exactly like that action does; deliberately mirrors its
- * lock/verify/insert shape rather than reusing it directly, since a walk-in
- * skips the pending-payment step and cart entirely.
+ * Read-only availability + price check for the front-desk grid's pick mode — a staff
+ * member toggle-selects room tiles before ever choosing a rate plan, so this resolves
+ * "is this room type actually bookable for the dates picked, and what rate plans does
+ * it offer" per selection, without locking or writing anything. Purely a UX preview:
+ * `createWalkInBooking` re-verifies every line again itself inside its own transaction
+ * at submit time, exactly like every other "never trust the preview" check in this app.
+ */
+export async function previewWalkInAvailability(
+	hotelId: string,
+	items: WalkInAvailabilityCheckItem[]
+): Promise<WalkInAvailabilityCheckResult[]> {
+	const results: WalkInAvailabilityCheckResult[] = [];
+	for (const item of items) {
+		if (item.checkIn >= item.checkOut) {
+			results.push({
+				key: item.key,
+				available: false,
+				reason: 'Check-out must be after check-in.'
+			});
+			continue;
+		}
+		const available = await getAvailableRoomType({
+			hotelId,
+			checkIn: item.checkIn,
+			checkOut: item.checkOut,
+			occupancy: item.occupancy,
+			roomCount: item.roomCount,
+			roomTypeId: item.roomTypeId
+		});
+		if (!available || available.ratePlans.length === 0) {
+			results.push({
+				key: item.key,
+				available: false,
+				reason: 'Not available for these dates.'
+			});
+			continue;
+		}
+		results.push({
+			key: item.key,
+			available: true,
+			roomTypeName: available.name,
+			availableRooms: available.availableRooms,
+			extraBedsNeeded: available.extraBedsNeeded,
+			ratePlans: available.ratePlans.map((p) => ({
+				id: p.id,
+				name: p.name,
+				price: p.price,
+				extraBedFeeCentavos: p.extraBedFeeCentavos
+			}))
+		});
+	}
+	return results;
+}
+
+/**
+ * Creates a guest + order + one-or-more bookings directly as `confirmed`, with a
+ * single `cash`/etc. payment row for the combined total — a walk-in is settled at
+ * the desk on the spot, not through the guest-facing PayMongo checkout
+ * `(guest)/details`'s `createOrder` action drives. Re-verifies availability and
+ * re-prices every line server-side exactly like that action does; deliberately
+ * mirrors its lock/verify/insert loop rather than reusing it directly, since a
+ * walk-in skips the pending-payment step and cart entirely and settles in one shot.
+ *
+ * Because `payments` rows are keyed by `orderId` (not per-booking) and
+ * `getFolioDetail` sums every payment on an order against each booking's own
+ * folio, a multi-line walk-in's single combined payment will show as the full
+ * paid amount on *every* line's individual folio — a pre-existing quirk of the
+ * single-payment-per-order design, already present for multi-room online orders.
  */
 export interface WalkInPaymentInput {
 	method: PaymentMethod;
@@ -477,72 +700,137 @@ export async function createWalkInBooking(params: {
 	hotelId: string;
 	businessDate: string;
 	guest: { fullName: string; email: string; phone: string | null; specialRequests: string | null };
-	roomTypeId: string;
-	ratePlanId: string;
-	checkIn: string;
-	checkOut: string;
-	occupancy: number;
-	roomCount: number;
+	rooms: WalkInRoomItem[];
 	/** How the full total is settled at the desk. Defaults to cash. */
 	payment?: WalkInPaymentInput;
 	actor: SessionUser | null;
-}): Promise<{ bookingId: string }> {
-	const {
-		hotelId,
-		businessDate,
-		guest,
-		roomTypeId,
-		ratePlanId,
-		checkIn,
-		checkOut,
-		occupancy,
-		roomCount,
-		actor
-	} = params;
+}): Promise<{ bookingIds: string[] }> {
+	// Destructured as `roomItems`, not `rooms` — this function needs the actual
+	// `rooms` table (physical rooms) for the pre-assignment checks below, and
+	// shadowing it with the cart's room *lines* would silently query the wrong
+	// thing (a real bug this once was, caught by `npm run check`).
+	const { hotelId, businessDate, guest, rooms: roomItems, actor } = params;
 	const payment: WalkInPaymentInput = params.payment ?? { method: 'cash' };
-	if (checkIn >= checkOut) throw new WalkInError('Check-out must be after check-in.');
+	if (roomItems.length === 0) {
+		throw new WalkInError('Add at least one room before creating the booking.');
+	}
+	for (const item of roomItems) {
+		if (item.checkIn >= item.checkOut) throw new WalkInError('Check-out must be after check-in.');
+	}
 
 	// Resolve the receiving account (and open shift for cash) before the tx —
 	// `resolvePaymentAccount` throws a FinanceError the action turns into `walkInError`.
 	const { cashAccountId, shiftId } = await resolvePaymentAccount(hotelId, payment.method);
 
-	const { bookingId, totalPaidCentavos } = await db.transaction(async (tx) => {
-		await tx.execute(
-			sql`select pg_advisory_xact_lock(hashtext(${hotelId}), hashtext(${'room:' + roomTypeId}))`
-		);
+	const { bookingIds, totalPaidCentavos } = await db.transaction(async (tx) => {
+		for (const key of lockKeysForRooms(roomItems)) {
+			await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${hotelId}), hashtext(${key}))`);
+		}
 
-		const available = await getAvailableRoomType({
-			hotelId,
-			checkIn,
-			checkOut,
-			occupancy,
-			roomCount,
-			roomTypeId
-		});
-		const plan = available?.ratePlans.find((p) => p.id === ratePlanId);
-		if (!available || !plan) {
-			throw new WalkInError('That room type/rate is no longer available for these dates.');
+		const [hotelRow] = await tx
+			.select({ vatRateBps: hotels.vatRateBps })
+			.from(hotels)
+			.where(eq(hotels.id, hotelId))
+			.limit(1);
+		const vatRateBps = hotelRow?.vatRateBps ?? 0;
+
+		let subtotalCentavos = 0;
+		let feesCentavos = 0;
+		let vatCentavos = 0;
+		let totalCentavos = 0;
+		const lines: Array<{
+			item: WalkInRoomItem;
+			price: PriceBreakdown;
+			extraBeds: number;
+			roomIds?: string[];
+		}> = [];
+
+		// Re-verify availability and re-price every line server-side, inside the
+		// lock — never trust client-supplied amounts, same posture as the
+		// single-line version this loop replaces.
+		for (const item of roomItems) {
+			const available = await getAvailableRoomType({
+				hotelId,
+				checkIn: item.checkIn,
+				checkOut: item.checkOut,
+				occupancy: item.occupancy,
+				roomCount: item.roomCount,
+				roomTypeId: item.roomTypeId
+			});
+			const plan = available?.ratePlans.find((p) => p.id === item.ratePlanId);
+			if (!available || !plan) {
+				throw new WalkInError('One of the selected rooms is no longer available for these dates.');
+			}
+			// Extra beds needed is re-derived here from the room type's own capacity/policy
+			// (`getAvailableRoomType` already ran the occupancy solver) rather than trusting
+			// anything the client sent — same "never trust the preview" posture the rest of
+			// this file already takes with prices and room selections.
+			const extraBeds = available.extraBedsNeeded;
+			let price = scaleRoomPrice(plan.price, item.roomCount);
+			if (extraBeds > 0 && plan.extraBedFeeCentavos) {
+				price = addFlatFeeCentavos(
+					price,
+					`Extra bed × ${extraBeds}`,
+					extraBeds * plan.extraBedFeeCentavos,
+					vatRateBps
+				);
+			}
+			const lineFees = price.fees.reduce((sum, f) => sum + f.amountCentavos, 0);
+			subtotalCentavos += price.subtotalCentavos;
+			feesCentavos += lineFees;
+			vatCentavos += price.vatCentavos;
+			totalCentavos += price.totalCentavos;
+
+			// A line from the grid's pick mode carries the exact rooms staff clicked —
+			// `getAvailableRoomType` above only confirmed the room *type* has enough
+			// free quantity, so still verify these specific physical rooms are free
+			// (still active/available, not already assigned to another active-status
+			// booking for an overlapping range) before claiming them.
+			let roomIds: string[] | undefined;
+			if (item.roomIds && item.roomIds.length > 0) {
+				const uniqueRoomIds = [...new Set(item.roomIds)];
+				if (
+					uniqueRoomIds.length !== item.roomIds.length ||
+					uniqueRoomIds.length !== item.roomCount
+				) {
+					throw new WalkInError('Selected room count does not match.');
+				}
+				const roomRows = await tx
+					.select({ id: rooms.id })
+					.from(rooms)
+					.where(
+						and(
+							inArray(rooms.id, uniqueRoomIds),
+							eq(rooms.hotelId, hotelId),
+							eq(rooms.roomTypeId, item.roomTypeId),
+							eq(rooms.isActive, true),
+							eq(rooms.operationalStatus, 'available')
+						)
+					);
+				if (roomRows.length !== uniqueRoomIds.length) {
+					throw new WalkInError('One or more selected rooms are no longer available.');
+				}
+				const occupiedRows = await tx
+					.select({ roomId: roomAssignments.roomId })
+					.from(roomAssignments)
+					.innerJoin(bookingRooms, eq(bookingRooms.id, roomAssignments.bookingRoomId))
+					.innerJoin(bookings, eq(bookings.id, bookingRooms.bookingId))
+					.where(
+						and(
+							inArray(roomAssignments.roomId, uniqueRoomIds),
+							inArray(bookings.status, [...ACTIVE_BOOKING_STATUSES]),
+							lt(roomAssignments.checkIn, item.checkOut),
+							gt(roomAssignments.checkOut, item.checkIn)
+						)
+					);
+				if (occupiedRows.length > 0) {
+					throw new WalkInError('One or more selected rooms were just taken — pick again.');
+				}
+				roomIds = uniqueRoomIds;
+			}
+
+			lines.push({ item, price, extraBeds, roomIds });
 		}
-		// Extra beds needed is re-derived here from the room type's own capacity/policy
-		// (`getAvailableRoomType` already ran the occupancy solver) rather than trusting
-		// anything the client sent — same "never trust the preview" posture the rest of
-		// this file already takes with prices and room selections.
-		const extraBeds = available.extraBedsNeeded;
-		let price = scaleRoomPrice(plan.price, roomCount);
-		if (extraBeds > 0 && plan.extraBedFeeCentavos) {
-			const [hotelRow] = await tx
-				.select({ vatRateBps: hotels.vatRateBps })
-				.from(hotels)
-				.where(eq(hotels.id, hotelId))
-				.limit(1);
-			price = addFlatFeeCentavos(
-				price,
-				`Extra bed × ${extraBeds}`,
-				extraBeds * plan.extraBedFeeCentavos,
-				hotelRow?.vatRateBps ?? 0
-			);
-		}
-		const lineFees = price.fees.reduce((sum, f) => sum + f.amountCentavos, 0);
 
 		const [guestRow] = await tx
 			.insert(guests)
@@ -561,10 +849,10 @@ export async function createWalkInBooking(params: {
 				hotelId,
 				guestId: guestRow!.id,
 				status: 'confirmed',
-				subtotalCentavos: price.subtotalCentavos,
-				feesCentavos: lineFees,
-				vatCentavos: price.vatCentavos,
-				totalCentavos: price.totalCentavos,
+				subtotalCentavos,
+				feesCentavos,
+				vatCentavos,
+				totalCentavos,
 				accessToken: randomUUID()
 			})
 			.returning({ id: orders.id });
@@ -576,44 +864,71 @@ export async function createWalkInBooking(params: {
 			note: 'Walk-in — settled at front desk'
 		});
 
-		const [booking] = await tx
-			.insert(bookings)
-			.values({
-				hotelId,
-				orderId: order!.id,
-				checkIn,
-				checkOut,
-				occupancy,
-				status: 'confirmed',
-				subtotalCentavos: price.subtotalCentavos,
-				feesCentavos: lineFees,
-				vatCentavos: price.vatCentavos,
-				totalCentavos: price.totalCentavos
-			})
-			.returning({ id: bookings.id });
+		const bookingIds: string[] = [];
+		for (const { item, price, extraBeds, roomIds } of lines) {
+			const lineFees = price.fees.reduce((sum, f) => sum + f.amountCentavos, 0);
+			const [booking] = await tx
+				.insert(bookings)
+				.values({
+					hotelId,
+					orderId: order!.id,
+					checkIn: item.checkIn,
+					checkOut: item.checkOut,
+					occupancy: item.occupancy,
+					status: 'confirmed',
+					subtotalCentavos: price.subtotalCentavos,
+					feesCentavos: lineFees,
+					vatCentavos: price.vatCentavos,
+					totalCentavos: price.totalCentavos
+				})
+				.returning({ id: bookings.id });
 
-		await tx.insert(bookingRooms).values({
-			bookingId: booking!.id,
-			roomTypeId,
-			ratePlanId,
-			quantity: roomCount,
-			extraBeds
-		});
+			const [bookingRoom] = await tx
+				.insert(bookingRooms)
+				.values({
+					bookingId: booking!.id,
+					roomTypeId: item.roomTypeId,
+					ratePlanId: item.ratePlanId,
+					quantity: item.roomCount,
+					extraBeds
+				})
+				.returning({ id: bookingRooms.id });
 
-		await tx.insert(bookingStatusHistory).values({
-			bookingId: booking!.id,
-			fromStatus: null,
-			toStatus: 'confirmed',
-			note: extraBeds > 0 ? `Walk-in booking — ${extraBeds} extra bed(s) added` : 'Walk-in booking'
-		});
+			// Pre-assign the exact rooms staff clicked on the grid — already verified
+			// free just above, inside this same locked transaction. Unlike every other
+			// `room_assignments` insert in this file (which only happens at check-in),
+			// this one exists from the moment the booking is created; `checkInBooking`
+			// knows to reuse rather than re-insert these.
+			if (roomIds && roomIds.length > 0) {
+				await tx.insert(roomAssignments).values(
+					roomIds.map((roomId) => ({
+						bookingRoomId: bookingRoom!.id,
+						roomId,
+						checkIn: item.checkIn,
+						checkOut: item.checkOut
+					}))
+				);
+			}
 
-		// Full settlement + its cash-ledger movement, in the same transaction.
+			await tx.insert(bookingStatusHistory).values({
+				bookingId: booking!.id,
+				fromStatus: null,
+				toStatus: 'confirmed',
+				note:
+					extraBeds > 0 ? `Walk-in booking — ${extraBeds} extra bed(s) added` : 'Walk-in booking'
+			});
+
+			bookingIds.push(booking!.id);
+		}
+
+		// Full settlement + its cash-ledger movement, in the same transaction — one
+		// payment for the whole sale, attached to the first line's booking/folio.
 		await recordWalkInPayment(tx, {
 			hotelId,
 			orderId: order!.id,
-			target: { kind: 'room', bookingId: booking!.id },
+			target: { kind: 'room', bookingId: bookingIds[0]! },
 			method: payment.method,
-			amountCentavos: price.totalCentavos,
+			amountCentavos: totalCentavos,
 			tenderedCentavos: payment.tenderedCentavos ?? null,
 			referenceNo: payment.referenceNo ?? null,
 			bankName: payment.bankName ?? null,
@@ -625,7 +940,7 @@ export async function createWalkInBooking(params: {
 			actor
 		});
 
-		return { bookingId: booking!.id, totalPaidCentavos: price.totalCentavos };
+		return { bookingIds, totalPaidCentavos: totalCentavos };
 	});
 
 	await writeAudit({
@@ -633,21 +948,17 @@ export async function createWalkInBooking(params: {
 		actor,
 		action: 'booking.walk_in',
 		entityType: 'booking',
-		entityId: bookingId,
+		entityId: bookingIds[0]!,
 		after: {
-			roomTypeId,
-			ratePlanId,
-			checkIn,
-			checkOut,
-			occupancy,
-			roomCount,
+			rooms: roomItems,
+			bookingIds,
 			paymentMethod: payment.method,
 			amountCentavos: totalPaidCentavos,
 			tenderedCentavos: payment.tenderedCentavos ?? null
 		}
 	});
 
-	return { bookingId };
+	return { bookingIds };
 }
 
 export class CheckOutError extends Error {}
@@ -675,6 +986,16 @@ export async function checkOutBooking(
 	actor: SessionUser | null,
 	cityLedger?: CityLedgerHandoff
 ): Promise<void> {
+	// A held deposit must be explicitly settled (released or applied to damage) before
+	// checkout — never silently left open, and never routable to the city ledger, since
+	// it's collateral the hotel is holding, not a charge the guest still owes.
+	const securityDeposit = await getSecurityDepositForBooking(hotelId, bookingId);
+	if (securityDeposit?.status === 'held') {
+		throw new CheckOutError(
+			`Settle the ₱${(securityDeposit.amountCentavos / 100).toFixed(2)} security deposit before checking out.`
+		);
+	}
+
 	let folio;
 	try {
 		folio = await getFolioDetail(hotelId, { kind: 'room', bookingId });

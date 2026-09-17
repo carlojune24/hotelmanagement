@@ -172,6 +172,24 @@ export const cancellationPolicies = pgTable(
 	(t) => [index('cancellation_policies_hotel_idx').on(t.hotelId)]
 );
 
+export const securityDepositPolicies = pgTable(
+	'security_deposit_policies',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		description: text('description'),
+		/** Flat refundable hold collected at check-in for a rate plan using this policy. */
+		amountCentavos: bigint('amount_centavos', { mode: 'number' }).notNull(),
+		createdAt: createdAt(),
+		updatedAt: updatedAt(),
+		deletedAt: deletedAt()
+	},
+	(t) => [index('security_deposit_policies_hotel_idx').on(t.hotelId)]
+);
+
 /**
  * A priced, bookable product for one room type (e.g. "Standard Rate",
  * "Non-refundable Promo"). `basePriceCentavos` is the default nightly price;
@@ -190,6 +208,10 @@ export const ratePlans = pgTable(
 		cancellationPolicyId: uuid('cancellation_policy_id').references(() => cancellationPolicies.id, {
 			onDelete: 'set null'
 		}),
+		securityDepositPolicyId: uuid('security_deposit_policy_id').references(
+			() => securityDepositPolicies.id,
+			{ onDelete: 'set null' }
+		),
 		name: text('name').notNull(),
 		description: text('description'),
 		/** What the price includes beyond the room, e.g. `["Breakfast", "Parking"]`. */
@@ -210,8 +232,6 @@ export const ratePlans = pgTable(
 		childFreeMaxAge: integer('child_free_max_age'),
 		/** Flat charge per rollaway / extra bed added to the room. */
 		extraBedFeeCentavos: bigint('extra_bed_fee_centavos', { mode: 'number' }),
-		/** Flat security deposit collected at booking, if any. */
-		depositCentavos: bigint('deposit_centavos', { mode: 'number' }),
 		/** Stay-length limits for this plan to be bookable. Null = unbounded. */
 		minStayNights: integer('min_stay_nights'),
 		maxStayNights: integer('max_stay_nights'),
@@ -333,12 +353,24 @@ export const cancellationPoliciesRelations = relations(cancellationPolicies, ({ 
 	ratePlans: many(ratePlans)
 }));
 
+export const securityDepositPoliciesRelations = relations(
+	securityDepositPolicies,
+	({ one, many }) => ({
+		hotel: one(hotels, { fields: [securityDepositPolicies.hotelId], references: [hotels.id] }),
+		ratePlans: many(ratePlans)
+	})
+);
+
 export const ratePlansRelations = relations(ratePlans, ({ one, many }) => ({
 	hotel: one(hotels, { fields: [ratePlans.hotelId], references: [hotels.id] }),
 	roomType: one(roomTypes, { fields: [ratePlans.roomTypeId], references: [roomTypes.id] }),
 	cancellationPolicy: one(cancellationPolicies, {
 		fields: [ratePlans.cancellationPolicyId],
 		references: [cancellationPolicies.id]
+	}),
+	securityDepositPolicy: one(securityDepositPolicies, {
+		fields: [ratePlans.securityDepositPolicyId],
+		references: [securityDepositPolicies.id]
 	}),
 	dailyRates: many(dailyRates),
 	seasonalRates: many(seasonalRates)
@@ -363,6 +395,7 @@ export type NewRoomType = typeof roomTypes.$inferInsert;
 export type Room = typeof rooms.$inferSelect;
 export type NewRoom = typeof rooms.$inferInsert;
 export type CancellationPolicy = typeof cancellationPolicies.$inferSelect;
+export type SecurityDepositPolicy = typeof securityDepositPolicies.$inferSelect;
 export type RatePlan = typeof ratePlans.$inferSelect;
 export type NewRatePlan = typeof ratePlans.$inferInsert;
 export type DailyRate = typeof dailyRates.$inferSelect;

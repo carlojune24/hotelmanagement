@@ -6,7 +6,7 @@ import { orders } from './orders';
 import { bookings, hallBookings } from './bookings';
 import { users } from './auth';
 
-/** Who wrote the row. A `guest` row comes from `/book/manage`'s tokenized page (no
+/** Who wrote the row. A `guest` row comes from `/manage`'s tokenized page (no
  *  login); a `staff` row comes from an authenticated reply. */
 export const guestMessageDirection = pgEnum('guest_message_direction', ['guest', 'staff']);
 
@@ -25,7 +25,7 @@ export const guestMessageStatus = pgEnum('guest_message_status', ['open', 'actio
  * planned Mailgun two-way email conversation (docs/TODO.md) is meant to grow
  * into, not a one-off. Deliberately minimal for now: no inbound-email capture,
  * no attachments, no guest accounts — a guest reaches this only via the
- * tokenized `/book/manage` link, the same guard `orders.accessToken` already
+ * tokenized `/manage` link, the same guard `orders.accessToken` already
  * provides elsewhere.
  *
  * `bookingId`/`hallBookingId` name which line a `cancellation_request` is

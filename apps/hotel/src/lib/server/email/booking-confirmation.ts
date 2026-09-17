@@ -53,7 +53,7 @@ export interface BookingConfirmationData {
 	totalCentavos: number;
 	/** Absolute URL of the guest's confirmation page (carries the order token). */
 	manageUrl: string;
-	/** Absolute URL of `/book/manage/[orderId]` — request a cancellation or ask
+	/** Absolute URL of `/manage/[orderId]` — request a cancellation or ask
 	 *  the hotel a question (carries the order token). */
 	manageBookingUrl: string;
 }

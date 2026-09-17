@@ -25,6 +25,16 @@
 			<p class="text-sm text-ink-muted">
 				<code>/{h.slug}</code> · {h.status} · org <code class="text-xs">{h.orgRef}</code>
 			</p>
+			<p class="mt-1 text-sm">
+				<a
+					href="/{h.slug}/management/login"
+					target="_blank"
+					rel="noopener"
+					class="text-brand hover:underline"
+				>
+					Open management sign-in →
+				</a>
+			</p>
 		</div>
 		<Button variant="outline" href="/admin/hotels">← All hotels</Button>
 	</div>
@@ -63,6 +73,28 @@
 					</p>
 				</div>
 				<Button type="submit">Save configuration</Button>
+			</form>
+
+			<Separator class="my-4" />
+			<h2 class="text-sm font-semibold uppercase tracking-wide text-ink-muted">URL slug</h2>
+			<form method="POST" action="?/updateSlug" use:enhance class="mt-3 space-y-3">
+				<div>
+					<Label for="slug">Slug</Label>
+					<Input
+						id="slug"
+						name="slug"
+						value={h.slug}
+						required
+						pattern="[a-z0-9][a-z0-9-]&#123;1,38&#125;[a-z0-9]"
+						class="mt-1"
+					/>
+					<p class="mt-1 text-xs text-danger">
+						Changes this hotel's URL to /{'{new-slug}'} everywhere. Any confirmation,
+						manage-booking, or review links already emailed to guests under <code>/{h.slug}</code> will
+						stop working — rename with care, especially after launch.
+					</p>
+				</div>
+				<Button type="submit" variant="outline">Update slug</Button>
 			</form>
 
 			<Separator class="my-4" />

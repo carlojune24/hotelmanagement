@@ -16,9 +16,9 @@
 
 	/** Editing dates/guests routes back to the Dates step, pre-filled with whatever's known
 	    right now — the only place occupancy can be corrected once past the Dates step, since
-	    `/book/rooms` itself collects room count per card, not occupancy. */
+	    `/rooms` itself collects room count per card, not occupancy. */
 	const editDatesHref = $derived(
-		`/${hotelSlug}/book/dates?${new URLSearchParams({
+		`/${hotelSlug}/dates?${new URLSearchParams({
 			...(checkIn ? { checkIn } : {}),
 			...(checkOut ? { checkOut } : {}),
 			adults,
@@ -79,10 +79,10 @@
 			<span>Total</span>
 			<span class="ledger-data text-base">{peso(cart.totalCentavos)}</span>
 		</div>
-		{#if page.route.id === '/[hotel]/book/rooms'}
+		{#if page.route.id === '/[hotel]/(guest)/rooms'}
 			<!-- Guest Info and Review each already have their own primary action ("Continue to
 			     review", "Pay ₱X") — a second Continue here would be redundant/confusing. -->
-			<a href="/{hotelSlug}/book/details" class="ledger-btn-primary storefront-summary-cta">
+			<a href="/{hotelSlug}/details" class="ledger-btn-primary storefront-summary-cta">
 				Continue
 			</a>
 		{/if}

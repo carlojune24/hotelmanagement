@@ -69,8 +69,8 @@ export async function sendBookingConfirmation(
 			.where(eq(hallBookings.orderId, order.id));
 
 		const origin = (env.ORIGIN ?? '').replace(/\/$/, '');
-		const manageUrl = `${origin}/${hotel.slug}/book/confirmation/${order.id}?t=${order.accessToken}`;
-		const manageBookingUrl = `${origin}/${hotel.slug}/book/manage/${order.id}?t=${order.accessToken}`;
+		const manageUrl = `${origin}/${hotel.slug}/confirmation/${order.id}?t=${order.accessToken}`;
+		const manageBookingUrl = `${origin}/${hotel.slug}/manage/${order.id}?t=${order.accessToken}`;
 
 		let logoUrl: string | null = null;
 		if (branding.logoUrl) {

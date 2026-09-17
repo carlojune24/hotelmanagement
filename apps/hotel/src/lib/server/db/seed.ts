@@ -176,12 +176,23 @@ async function seedInventory(hotelId: string) {
 		})
 		.returning({ id: schema.cancellationPolicies.id });
 
+	const [standardDeposit] = await db
+		.insert(schema.securityDepositPolicies)
+		.values({
+			hotelId,
+			name: 'Standard',
+			description: 'Refundable hold collected at check-in, released if no damage is found.',
+			amountCentavos: 100_000
+		})
+		.returning({ id: schema.securityDepositPolicies.id });
+
 	const [bar] = await db
 		.insert(schema.ratePlans)
 		.values({
 			hotelId,
 			roomTypeId: deluxe!.id,
 			cancellationPolicyId: flexPolicy!.id,
+			securityDepositPolicyId: standardDeposit!.id,
 			name: 'Best Available Rate',
 			description: 'Our standard flexible rate.',
 			inclusions: ['Breakfast'],
@@ -192,7 +203,6 @@ async function seedInventory(hotelId: string) {
 			extraChildFeeCentavos: 40_000,
 			childFreeMaxAge: 5,
 			extraBedFeeCentavos: 60_000,
-			depositCentavos: 100_000,
 			minStayNights: 1,
 			maxStayNights: 14
 		})
