@@ -66,8 +66,14 @@
 
 	{#if method === 'cash' && tendered !== '' && totalCentavos != null}
 		<p class="text-sm font-semibold {changeCentavos < 0 ? 'text-danger' : 'text-ok'}">
-			{changeCentavos < 0 ? 'Short by ' : 'Change due '}{peso(Math.abs(changeCentavos))}
+			{changeCentavos < 0 ? 'Balance still due ' : 'Change due '}{peso(Math.abs(changeCentavos))}
 		</p>
+		{#if changeCentavos < 0}
+			<p class="text-xs text-ink-muted">
+				Only the {peso(tenderedCentavos)} received is recorded as paid; the balance stays on the
+				folio to collect later or move to the city ledger at check-out.
+			</p>
+		{/if}
 	{/if}
 
 	{#if needsReference}

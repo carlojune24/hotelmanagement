@@ -696,6 +696,19 @@ export interface WalkInPaymentInput {
 	chequeDate?: string | null;
 }
 
+/** What a walk-in actually pays at the desk. Cash tendered *below* the total is a partial
+ *  payment — the shortfall stays as a balance due on the folio (settled later, or moved to the
+ *  city ledger at check-out) rather than being silently written off as paid in full. Every other
+ *  method has no "amount received" field, so it settles the full total; cash tendered at or
+ *  above the total settles it too (the difference is change). */
+export function walkInAmountPaid(totalCentavos: number, payment: WalkInPaymentInput): number {
+	if (payment.method !== 'cash' || payment.tenderedCentavos == null) return totalCentavos;
+	if (payment.tenderedCentavos <= 0) {
+		throw new WalkInError('Enter the cash received, or leave it blank to take the full amount.');
+	}
+	return Math.min(totalCentavos, payment.tenderedCentavos);
+}
+
 export async function createWalkInBooking(params: {
 	hotelId: string;
 	businessDate: string;
@@ -928,7 +941,7 @@ export async function createWalkInBooking(params: {
 			orderId: order!.id,
 			target: { kind: 'room', bookingId: bookingIds[0]! },
 			method: payment.method,
-			amountCentavos: totalCentavos,
+			amountCentavos: walkInAmountPaid(totalCentavos, payment),
 			tenderedCentavos: payment.tenderedCentavos ?? null,
 			referenceNo: payment.referenceNo ?? null,
 			bankName: payment.bankName ?? null,
@@ -940,7 +953,7 @@ export async function createWalkInBooking(params: {
 			actor
 		});
 
-		return { bookingIds, totalPaidCentavos: totalCentavos };
+		return { bookingIds, totalPaidCentavos: walkInAmountPaid(totalCentavos, payment) };
 	});
 
 	await writeAudit({
@@ -1314,7 +1327,7 @@ export async function createWalkInHallBooking(params: {
 			orderId: order!.id,
 			target: { kind: 'hall', hallBookingId: hallBooking!.id },
 			method: payment.method,
-			amountCentavos: price.totalCentavos,
+			amountCentavos: walkInAmountPaid(price.totalCentavos, payment),
 			tenderedCentavos: payment.tenderedCentavos ?? null,
 			referenceNo: payment.referenceNo ?? null,
 			bankName: payment.bankName ?? null,
@@ -1326,7 +1339,10 @@ export async function createWalkInHallBooking(params: {
 			actor
 		});
 
-		return { hallBookingId: hallBooking!.id, totalPaidCentavos: price.totalCentavos };
+		return {
+			hallBookingId: hallBooking!.id,
+			totalPaidCentavos: walkInAmountPaid(price.totalCentavos, payment)
+		};
 	});
 
 	await writeAudit({

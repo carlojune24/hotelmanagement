@@ -607,6 +607,23 @@
 	<!-- Payments -->
 	<div class="mt-4 rounded-xl border border-border p-4">
 		<h2 class="mb-2 text-sm font-semibold text-ink">Payments</h2>
+		{#if data.detail.folio}
+			{@const f = data.detail.folio}
+			<div class="mb-3 space-y-1 border-b border-border pb-3 text-sm">
+				<div class="flex justify-between">
+					<span class="text-ink-muted">Charges</span>
+					<span class="text-ink">{peso(f.chargesTotalCentavos)}</span>
+				</div>
+				<div class="flex justify-between">
+					<span class="text-ink-muted">Paid</span>
+					<span class="text-ink">−{peso(f.paidTotalCentavos)}</span>
+				</div>
+				<div class="flex justify-between font-semibold {f.balanceCentavos > 0 ? 'text-danger' : 'text-ink'}">
+					<span>{f.balanceCentavos < 0 ? 'Credit' : 'Balance due'}</span>
+					<span>{peso(Math.abs(f.balanceCentavos))}</span>
+				</div>
+			</div>
+		{/if}
 		{#if data.detail.payments.length === 0}
 			<p class="text-sm text-ink-muted">No payment recorded yet — this order hasn't been paid.</p>
 		{:else}

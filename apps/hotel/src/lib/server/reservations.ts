@@ -1,5 +1,6 @@
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from './db/index';
+import { getFolioDetail } from './folio';
 import {
 	bookings,
 	bookingRooms,
@@ -236,6 +237,23 @@ async function siblingLines(
 	return lines.filter((l) => !(l.kind === excludeKind && l.id === excludeId));
 }
 
+/** Charges / paid / balance for a booking's folio, or `null` when no folio should exist yet —
+ *  `getFolioDetail` creates the folio on first read, so a pending or cancelled booking (never
+ *  settled at the desk) is skipped rather than given an empty one just for being viewed. */
+async function folioSummary(
+	hotelId: string,
+	status: string,
+	target: Parameters<typeof getFolioDetail>[1]
+) {
+	if (!['confirmed', 'checked_in', 'checked_out', 'completed'].includes(status)) return null;
+	const f = await getFolioDetail(hotelId, target);
+	return {
+		chargesTotalCentavos: f.chargesTotalCentavos,
+		paidTotalCentavos: f.paidTotalCentavos,
+		balanceCentavos: f.balanceCentavos
+	};
+}
+
 export async function getRoomBookingDetail(hotelId: string, bookingId: string) {
 	const [row] = await db
 		.select({
@@ -276,7 +294,16 @@ export async function getRoomBookingDetail(hotelId: string, bookingId: string) {
 		siblingLines(row.order.id, 'room', bookingId)
 	]);
 
-	return { ...row, history, payments: paymentRows, assignedRooms, confirmationEmails, siblings };
+	const folio = await folioSummary(hotelId, row.booking.status, { kind: 'room', bookingId });
+	return {
+		...row,
+		history,
+		payments: paymentRows,
+		assignedRooms,
+		confirmationEmails,
+		siblings,
+		folio
+	};
 }
 
 export async function getHallBookingDetail(hotelId: string, hallBookingId: string) {
@@ -310,5 +337,9 @@ export async function getHallBookingDetail(hotelId: string, hallBookingId: strin
 		siblingLines(row.order.id, 'hall', hallBookingId)
 	]);
 
-	return { ...row, history, payments: paymentRows, confirmationEmails, siblings };
+	const folio = await folioSummary(hotelId, row.hallBooking.status, {
+		kind: 'hall',
+		hallBookingId
+	});
+	return { ...row, history, payments: paymentRows, confirmationEmails, siblings, folio };
 }
