@@ -6,6 +6,8 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
+	import { Input } from '$lib/components/ui/input/index.js';
+	import { Label } from '$lib/components/ui/label/index.js';
 	import PaymentFields from '$lib/components/staff/payment-fields.svelte';
 	import type { ActionData, PageData } from './$types';
 
@@ -17,6 +19,8 @@
 
 	let payOpen = $state(false);
 	let refundOpen = $state(false);
+	let ledgerOpen = $state(false);
+	let ledgerSubmitting = $state(false);
 
 	$effect(() => {
 		if (form && 'ok' in form && form.ok) toast.success(form.ok);
@@ -205,6 +209,48 @@
 					</div>
 				{/if}
 			</section>
+
+			{#if data.cityLedger.length > 0}
+				<section>
+					<h2 class="mb-2 text-sm font-semibold text-ink">City ledger</h2>
+					<div class="divide-y divide-border rounded-lg border border-border">
+						{#each data.cityLedger as r (r.id)}
+							<div class="flex items-start justify-between gap-3 px-3 py-2.5 text-sm">
+								<div class="min-w-0">
+									<div class="font-medium text-ink">
+										{r.billToName}{#if r.billToCompany} · {r.billToCompany}{/if}
+									</div>
+									<div class="mt-0.5 text-xs text-ink-muted">
+										{when(r.openedAt)}{#if r.referenceNo} · Ref {r.referenceNo}{/if}
+									</div>
+									<div class="mt-1">
+										<a
+											href="{staffBase}/finance/receivables"
+											class="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
+											>Open in city ledger →</a
+										>
+									</div>
+								</div>
+								<div class="shrink-0 text-right">
+									<div class="tabular-nums text-ink">{peso(r.outstandingCentavos)}</div>
+									<Badge
+										variant="outline"
+										class={r.status === 'settled' || r.status === 'written_off'
+											? 'border-transparent bg-ok/15 text-ok'
+											: 'border-transparent bg-danger/15 text-danger'}
+									>
+										{r.status === 'settled'
+											? 'Collected'
+											: r.status === 'written_off'
+												? 'Written off'
+												: 'Outstanding'}
+									</Badge>
+								</div>
+							</div>
+						{/each}
+					</div>
+				</section>
+			{/if}
 		</div>
 
 		<aside class="space-y-4 lg:sticky lg:top-6">
@@ -242,6 +288,11 @@
 				<div class="flex flex-col gap-2">
 					{#if balance > 0}
 						<Button onclick={() => (payOpen = true)}>Take payment ({peso(balance)} due)</Button>
+						{#if data.canCityLedger}
+							<Button variant="outline" onclick={() => (ledgerOpen = true)}>
+								Move balance to city ledger
+							</Button>
+						{/if}
 					{:else if balance < 0}
 						<Button variant="outline" onclick={() => (refundOpen = true)}>
 							Refund credit ({peso(balance)})
@@ -252,7 +303,7 @@
 			{#if balance > 0}
 				<p class="text-xs text-ink-muted">
 					Every room of a multi-room booking is settled together: a room can check out once
-					this balance is paid, or a hotel admin moves it to the city ledger at check-out.
+					this balance is paid, or a hotel admin moves it to the city ledger.
 				</p>
 			{/if}
 		</aside>
@@ -260,6 +311,56 @@
 </div>
 
 {#if data.carrier}
+	<Dialog.Root bind:open={ledgerOpen}>
+		<Dialog.Content>
+			<Dialog.Header>
+				<Dialog.Title>Move balance to the city ledger</Dialog.Title>
+				<Dialog.Description>
+					{peso(balance)} is outstanding on this booking. It becomes a receivable to collect later,
+					and every room can then check out.
+				</Dialog.Description>
+			</Dialog.Header>
+			<form
+				method="POST"
+				action="?/moveToCityLedger"
+				use:enhance={() => {
+					ledgerSubmitting = true;
+					return async ({ update, result }) => {
+						await update();
+						ledgerSubmitting = false;
+						if (result.type === 'success') ledgerOpen = false;
+					};
+				}}
+				class="space-y-3"
+			>
+				<input type="hidden" name="kind" value={data.carrier.kind} />
+				<input type="hidden" name="id" value={data.carrier.id} />
+				<div>
+					<Label for="cl-name">Bill to</Label>
+					<Input id="cl-name" name="billToName" required maxlength={160} value={data.defaultBillTo} class="mt-1" />
+				</div>
+				<div class="grid grid-cols-2 gap-3">
+					<div>
+						<Label for="cl-company">Company (optional)</Label>
+						<Input id="cl-company" name="billToCompany" maxlength={160} class="mt-1" />
+					</div>
+					<div>
+						<Label for="cl-ref">Reference (optional)</Label>
+						<Input id="cl-ref" name="referenceNo" maxlength={120} class="mt-1" />
+					</div>
+				</div>
+				<div>
+					<Label for="cl-notes">Notes (optional)</Label>
+					<Input id="cl-notes" name="notes" maxlength={500} class="mt-1" />
+				</div>
+				<div class="flex justify-end gap-2 pt-1">
+					<Button type="button" variant="outline" onclick={() => (ledgerOpen = false)}>Cancel</Button>
+					<Button type="submit" disabled={ledgerSubmitting}>Move {peso(balance)} to city ledger</Button>
+				</div>
+			</form>
+		</Dialog.Content>
+	</Dialog.Root>
+
 	<Dialog.Root bind:open={payOpen}>
 		<Dialog.Content>
 			<Dialog.Header>

@@ -1,5 +1,5 @@
 import { error, fail } from '@sveltejs/kit';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, or } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import {
@@ -10,6 +10,7 @@ import {
 	hallBookings,
 	orders,
 	payments,
+	receivables,
 	roomAssignments,
 	roomTypes,
 	rooms
@@ -18,6 +19,7 @@ import { roleCan } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
 import { FinanceError } from '$lib/server/finance/shared';
 import { recordPayment, refundPayment, voidPayment } from '$lib/server/finance/payments';
+import { openReceivable } from '$lib/server/finance/receivables';
 import { getFinanceSettings } from '$lib/server/finance/settings';
 import { getDefaultOpenShift } from '$lib/server/finance/shifts';
 import { FolioError, getOrderIdForTarget, getOrderLedger, type FolioTarget } from '$lib/server/folio';
@@ -96,6 +98,34 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		getDefaultOpenShift(hotel.id)
 	]);
 
+	// City-ledger entries opened against any room/event of this booking.
+	const lineIds = [...roomRows.map((r) => r.id), ...hallRows.map((h) => h.id)];
+	const cityLedger =
+		lineIds.length === 0
+			? []
+			: await db
+					.select({
+						id: receivables.id,
+						billToName: receivables.billToName,
+						billToCompany: receivables.billToCompany,
+						referenceNo: receivables.referenceNo,
+						originalAmountCentavos: receivables.originalAmountCentavos,
+						outstandingCentavos: receivables.outstandingCentavos,
+						status: receivables.status,
+						openedAt: receivables.openedAt
+					})
+					.from(receivables)
+					.where(
+						and(
+							eq(receivables.hotelId, hotel.id),
+							or(
+								inArray(receivables.bookingId, lineIds),
+								inArray(receivables.hallBookingId, lineIds)
+							)
+						)
+					)
+					.orderBy(desc(receivables.openedAt));
+
 	const assigned = await Promise.all(
 		roomRows.map((r) =>
 			db
@@ -138,6 +168,13 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			? roleCan(locals.role.capabilities, 'folio:write')
 			: false;
 
+	// Moving a balance to the city ledger is the manager override (same gate as at check-out).
+	const canCityLedger = locals.user?.isPlatformAdmin
+		? true
+		: locals.role
+			? roleCan(locals.role.capabilities, 'hotel:admin')
+			: false;
+
 	return {
 		order: {
 			id: order.id,
@@ -169,6 +206,9 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		})),
 		carrier: carrier ? { kind: carrier.kind, id: carrier.id } : null,
 		canCollect,
+		canCityLedger,
+		cityLedger: cityLedger.map((r) => ({ ...r, openedAt: r.openedAt.toISOString() })),
+		defaultBillTo: guest?.fullName ?? '',
 		cashier: {
 			requireOpenShiftForCashPayment: financeSettings.requireOpenShiftForCashPayment,
 			hasBankAccount: !!financeSettings.defaultBankAccountId,
@@ -258,6 +298,50 @@ export const actions: Actions = {
 			throw e;
 		}
 		return { ok: 'Payment voided.' };
+	},
+
+	/**
+	 * Charge the booking's whole outstanding balance to the city ledger (a receivable to collect
+	 * later) without waiting for check-out — the manager override, hotel_admin only. The booking is
+	 * squared with a non-cash `house_use` payment, so every room can then check out.
+	 */
+	moveToCityLedger: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		const hotelId = event.locals.hotel!.id;
+		const order = await loadOrder(hotelId, event.params.orderId);
+		const parsed = z
+			.object({
+				kind: z.enum(['room', 'hall']),
+				id: z.string().uuid(),
+				billToName: z.string().trim().min(1, 'Enter who the balance is billed to.').max(160),
+				billToCompany: z.string().max(160).optional(),
+				referenceNo: z.string().max(120).optional(),
+				notes: z.string().max(500).optional()
+			})
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success)
+			return fail(400, { error: parsed.error.issues[0]?.message ?? 'Check the details.' });
+		const d = parsed.data;
+		const target = await targetFor(d.kind, d.id, order.id);
+		if (!target) return fail(400, { error: 'That room is not part of this booking.' });
+
+		try {
+			const res = await openReceivable({
+				hotelId,
+				target,
+				billToName: d.billToName,
+				billToCompany: d.billToCompany?.trim() || null,
+				referenceNo: d.referenceNo?.trim() || null,
+				notes: d.notes?.trim() || null,
+				actor: event.locals.user
+			});
+			return {
+				ok: `₱${(res.amountCentavos / 100).toFixed(2)} moved to the city ledger.`
+			};
+		} catch (e) {
+			if (e instanceof FinanceError || e instanceof FolioError) return fail(400, { error: e.message });
+			throw e;
+		}
 	},
 
 	refundPayment: async (event) => {
