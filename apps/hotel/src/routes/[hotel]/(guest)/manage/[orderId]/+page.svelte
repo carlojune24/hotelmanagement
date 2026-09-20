@@ -59,6 +59,20 @@
 		{data.guestName} · Confirmation <span class="ledger-data">{data.order.confirmationCode}</span>
 	</p>
 
+	{#if data.order.status === 'pending_payment'}
+		<div class="ledger-hairline mt-6 pb-4">
+			<div class="ledger-label">Payment not finished</div>
+			<p class="mt-1 text-sm text-[var(--ledger-ink-muted)]">
+				This booking isn't confirmed until it's paid. Your room is held for a limited time — pick up
+				where you left off.
+			</p>
+			<a
+				href="../review/{data.order.id}?t={data.order.accessToken}"
+				class="ledger-btn-primary mt-3 inline-block">Continue to payment</a
+			>
+		</div>
+	{/if}
+
 	{#if data.payment && data.payment.dueAtHotelCentavos > 0}
 		<div class="ledger-hairline mt-6 flex items-baseline justify-between gap-4 pb-3 text-sm">
 			<span class="ledger-label">Paid</span>

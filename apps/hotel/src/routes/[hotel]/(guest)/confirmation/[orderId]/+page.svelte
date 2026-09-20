@@ -114,6 +114,13 @@
 			></span>
 			Waiting for confirmation…
 		</div>
+		<p class="mt-6 max-w-md text-sm text-[var(--ledger-ink-muted)]">
+			Closed the payment page before paying?
+			<a
+				href="../review/{data.order.id}?t={data.order.accessToken}"
+				class="underline underline-offset-2">Continue to payment</a
+			>
+		</p>
 	{:else}
 		<h1 class="ledger-display text-2xl">This booking isn't confirmed</h1>
 		<p class="mt-2 max-w-md text-sm text-[var(--ledger-ink-muted)]">

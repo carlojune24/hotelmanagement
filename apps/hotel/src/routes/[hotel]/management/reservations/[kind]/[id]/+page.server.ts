@@ -10,6 +10,7 @@ import {
 	todayInTimezone
 } from '$lib/server/front-desk';
 import { sendBookingConfirmation } from '$lib/server/email/send-booking-confirmation';
+import { sendPaymentLink } from '$lib/server/email/send-payment-link';
 import { sendBookingCancellation } from '$lib/server/email/send-booking-cancellation';
 import {
 	CancellationError,
@@ -511,6 +512,23 @@ export const actions: Actions = {
 			if (e instanceof ModifyStayError) return fail(400, { error: e.message });
 			throw e;
 		}
+	},
+
+	/** Emails the guest a link back to the payment step of an unpaid online booking. */
+	sendPaymentLink: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		const hotelId = event.locals.hotel!.id;
+		const detail =
+			event.params.kind === 'room'
+				? await getRoomBookingDetail(hotelId, event.params.id)
+				: await getHallBookingDetail(hotelId, event.params.id);
+		if (!detail) return fail(404, { error: 'Booking not found.' });
+		if (detail.order.status !== 'pending_payment')
+			return fail(400, { error: 'Only a booking waiting for payment can be sent a payment link.' });
+
+		const res = await sendPaymentLink(detail.order.id);
+		if (!res.ok) return fail(502, { error: `Could not send: ${res.error ?? 'unknown error'}` });
+		return { ok: `Payment link emailed to ${detail.guest.email}.` };
 	},
 
 	resendConfirmation: async (event) => {

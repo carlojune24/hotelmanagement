@@ -703,7 +703,23 @@
 	<div class="mt-4 rounded-xl border border-border p-4">
 		<div class="mb-2 flex items-center justify-between gap-3">
 			<h2 class="text-sm font-semibold text-ink">Confirmation email</h2>
-			{#if data.detail.order.status === 'confirmed'}
+			{#if data.detail.order.status === 'pending_payment'}
+				<form
+					method="POST"
+					action="?/sendPaymentLink"
+					use:enhance={() => {
+						resending = true;
+						return async ({ update }) => {
+							await update();
+							resending = false;
+						};
+					}}
+				>
+					<Button type="submit" variant="outline" size="sm" disabled={resending}>
+						{resending ? 'Sending…' : 'Email payment link'}
+					</Button>
+				</form>
+			{:else if data.detail.order.status === 'confirmed'}
 				<form
 					method="POST"
 					action="?/resendConfirmation"

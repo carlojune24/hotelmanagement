@@ -133,7 +133,14 @@
 				href="{base}/print/invoice/for-order/{data.order.id}"
 				target="_blank">Print all invoices</Button
 			>
-			{#if page.url.searchParams.get('roomId')}
+			{#if page.url.searchParams.has('back')}
+				<Button
+					variant="outline"
+					size="sm"
+					href="{staffBase}/transactions{page.url.searchParams.get('back')}"
+					>← Booking transactions</Button
+				>
+			{:else if page.url.searchParams.get('roomId')}
 				<Button
 					variant="outline"
 					size="sm"

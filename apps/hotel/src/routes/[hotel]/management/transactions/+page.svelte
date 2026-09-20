@@ -150,7 +150,7 @@
 						<Table.Row>
 							<Table.Cell>
 								<a
-									href="{base}/transactions/{r.orderId}"
+									href="{base}/transactions/{r.orderId}?back={encodeURIComponent(page.url.search)}"
 									class="font-mono text-sm text-ink underline underline-offset-2 hover:no-underline"
 									>{r.code}</a
 								>

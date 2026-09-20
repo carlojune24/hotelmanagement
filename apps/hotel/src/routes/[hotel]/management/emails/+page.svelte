@@ -28,7 +28,8 @@
 	const TYPE_LABELS: Record<string, string> = {
 		booking_confirmation: 'Booking confirmation',
 		booking_cancelled: 'Cancellation notice',
-		guest_message_reply: 'Message reply notice'
+		guest_message_reply: 'Message reply notice',
+		payment_link: 'Payment link (unpaid booking)'
 	};
 	const typeLabel = (t: string) => TYPE_LABELS[t] ?? t.replace(/_/g, ' ');
 
