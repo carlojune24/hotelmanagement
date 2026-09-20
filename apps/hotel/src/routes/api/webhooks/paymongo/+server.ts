@@ -94,7 +94,8 @@ export async function POST({ request }) {
 					.returning({ id: payments.id });
 
 				const expectedNow = order.amountDueNowCentavos ?? order.totalCentavos;
-				if (amountCentavos !== expectedNow) {
+				// The guest may pay the downpayment OR the whole total (both are offered at checkout).
+				if (amountCentavos !== expectedNow && amountCentavos !== order.totalCentavos) {
 					console.warn(
 						`paymongo webhook: order ${order.id} paid ${amountCentavos}, expected ${expectedNow}`
 					);
