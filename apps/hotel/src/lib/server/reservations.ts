@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from './db/index';
 import { getFolioDetail } from './folio';
+import { orderBalances } from './order-balances';
 import {
 	bookings,
 	bookingRooms,
@@ -50,6 +51,10 @@ export interface ReservationLine {
 	status: string;
 	orderStatus: string;
 	totalCentavos: number;
+	/** What the whole BOOKING (order) still owes, shown on each of its live lines — payments are
+	 *  settled at the parent level, so every room of one booking carries the same figure.
+	 *  Zero for a settled booking or a line that isn't live. See `orderBalances`. */
+	balanceCentavos: number;
 	createdAt: Date;
 	/** An open (unresolved) guest cancellation request against this specific line. */
 	hasOpenCancellationRequest: boolean;
@@ -117,6 +122,12 @@ export async function listReservationLines(hotelId: string): Promise<Reservation
 		openRequests.map((r) => r.hallBookingId).filter((v): v is string => Boolean(v))
 	);
 
+	const balances = await orderBalances(hotelId, [
+		...roomRows.filter((r) => r.status === 'confirmed' || r.status === 'checked_in').map((r) => r.orderId),
+		...hallRows.filter((h) => h.status === 'confirmed').map((h) => h.orderId)
+	]);
+	const liveRoom = (r: { status: string }) => r.status === 'confirmed' || r.status === 'checked_in';
+
 	const lines: ReservationLine[] = [
 		...roomRows.map((r) => ({
 			kind: 'room' as const,
@@ -131,6 +142,7 @@ export async function listReservationLines(hotelId: string): Promise<Reservation
 			status: r.status,
 			orderStatus: r.orderStatus,
 			totalCentavos: r.totalCentavos,
+			balanceCentavos: liveRoom(r) ? Math.max(0, balances.get(r.orderId) ?? 0) : 0,
 			createdAt: r.createdAt,
 			hasOpenCancellationRequest: bookingsWithOpenRequest.has(r.id)
 		})),
@@ -147,6 +159,7 @@ export async function listReservationLines(hotelId: string): Promise<Reservation
 			status: h.status,
 			orderStatus: h.orderStatus,
 			totalCentavos: h.totalCentavos,
+			balanceCentavos: h.status === 'confirmed' ? Math.max(0, balances.get(h.orderId) ?? 0) : 0,
 			createdAt: h.createdAt,
 			hasOpenCancellationRequest: hallBookingsWithOpenRequest.has(h.id)
 		}))
@@ -248,9 +261,13 @@ async function folioSummary(
 	if (!['confirmed', 'checked_in', 'checked_out', 'completed'].includes(status)) return null;
 	const f = await getFolioDetail(hotelId, target);
 	return {
+		/** This room's own charges. */
 		chargesTotalCentavos: f.chargesTotalCentavos,
+		/** Booking-level (the whole order): what has been paid and what is still owed. */
 		paidTotalCentavos: f.paidTotalCentavos,
-		balanceCentavos: f.balanceCentavos
+		balanceCentavos: f.balanceCentavos,
+		orderChargesTotalCentavos: f.orderChargesTotalCentavos,
+		orderLineCount: f.orderLineCount
 	};
 }
 

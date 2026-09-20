@@ -55,6 +55,18 @@
 					<span>Total</span>
 					<span class="ledger-data text-base">{peso(cart.totalCentavos)}</span>
 				</div>
+				{#if cart.downpayment.dueAtHotelCentavos > 0}
+					<div class="mt-2 space-y-1 text-sm">
+						<div class="flex justify-between">
+							<span>Due now</span>
+							<span class="ledger-data">{peso(cart.downpayment.dueNowCentavos)}</span>
+						</div>
+						<div class="flex justify-between text-[var(--ledger-ink-muted)]">
+							<span>Due at the hotel</span>
+							<span class="ledger-data">{peso(cart.downpayment.dueAtHotelCentavos)}</span>
+						</div>
+					</div>
+				{/if}
 				<a href="/{hotelSlug}/details" class="ledger-btn-primary storefront-invoice-cta">
 					Proceed to checkout
 				</a>

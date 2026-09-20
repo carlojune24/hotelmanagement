@@ -51,6 +51,9 @@ export interface BookingConfirmationData {
 	feesCentavos: number;
 	vatCentavos: number;
 	totalCentavos: number;
+	/** Set only for a downpayment order that still owes a balance (see `getOrderPaymentSummary`).
+	 *  Absent/null = paid in full, and the email reads exactly as it always has. */
+	payment?: { paidCentavos: number; dueAtHotelCentavos: number } | null;
 	/** Absolute URL of the guest's confirmation page (carries the order token). */
 	manageUrl: string;
 	/** Absolute URL of `/manage/[orderId]` — request a cancellation or ask
@@ -169,6 +172,8 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 		)
 		.join('');
 
+	const partial = data.payment && data.payment.dueAtHotelCentavos > 0 ? data.payment : null;
+
 	const ticketRows =
 		row('Guest', esc(data.guestName)) +
 		stayRows +
@@ -176,7 +181,10 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 		roomRows +
 		hallRows +
 		ruleRow +
-		row('Total paid', money(data.totalCentavos, currency), { emphasis: true }) +
+		(partial
+			? row('Paid', money(partial.paidCentavos, currency), { emphasis: true }) +
+				row('Due at the hotel', money(partial.dueAtHotelCentavos, currency), { emphasis: true })
+			: row('Total paid', money(data.totalCentavos, currency), { emphasis: true })) +
 		row('Confirmation', esc(data.confirmationCode));
 
 	// ---- price breakdown below the ticket ----
@@ -190,7 +198,11 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 		priceRow('Subtotal', money(data.subtotalCentavos, currency)) +
 		(data.feesCentavos > 0 ? priceRow('Fees', money(data.feesCentavos, currency)) : '') +
 		priceRow('VAT', money(data.vatCentavos, currency)) +
-		priceRow('Total paid', money(data.totalCentavos, currency), { total: true });
+		(partial
+			? priceRow('Total', money(data.totalCentavos, currency), { total: true }) +
+				priceRow('Paid now', money(partial.paidCentavos, currency)) +
+				priceRow('Due at the hotel', money(partial.dueAtHotelCentavos, currency))
+			: priceRow('Total paid', money(data.totalCentavos, currency), { total: true }));
 
 	const logoImg = hotel.logoUrl
 		? `<img src="${esc(hotel.logoUrl)}" alt="${esc(hotel.name)}" height="40" style="display:block;height:40px;width:auto;border:0;margin-bottom:10px;" />`
@@ -226,7 +238,7 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 	<tr><td style="padding:32px 4px 0;">
 		<div style="font-family:${FONT_DISPLAY};font-size:26px;font-weight:500;color:${INK};letter-spacing:-0.01em;">Reservation confirmed</div>
 		<div style="margin-top:10px;font-family:${FONT_DATA};font-size:20px;font-weight:700;letter-spacing:2px;color:${accentDeep};">${esc(data.confirmationCode)}</div>
-		<div style="margin-top:10px;font-family:${FONT_BODY};font-size:14px;line-height:1.55;color:${INK_MUTED};">${esc(data.guestName)}, your stay is booked and paid in full.</div>
+		<div style="margin-top:10px;font-family:${FONT_BODY};font-size:14px;line-height:1.55;color:${INK_MUTED};">${esc(data.guestName)}, your stay is booked${partial ? `. ${esc(money(partial.paidCentavos, currency))} is paid; the remaining ${esc(money(partial.dueAtHotelCentavos, currency))} is due at the hotel` : ' and paid in full'}.</div>
 	</td></tr>
 
 	<!-- the ticket -->
@@ -249,7 +261,7 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 		<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
 			${breakdown}
 		</table>
-		<div style="margin-top:8px;font-family:${FONT_BODY};font-size:12px;color:${INK_MUTED};">Paid in full via PayMongo.</div>
+		<div style="margin-top:8px;font-family:${FONT_BODY};font-size:12px;color:${INK_MUTED};">${partial ? 'Downpayment paid via PayMongo. The balance is paid at the hotel.' : 'Paid in full via PayMongo.'}</div>
 	</td></tr>
 
 	<!-- CTA -->
@@ -300,7 +312,11 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 	tLines.push('');
 	tLines.push('RESERVATION CONFIRMED');
 	tLines.push(`Confirmation code:  ${data.confirmationCode}`);
-	tLines.push(`${data.guestName}, your stay is booked and paid in full.`);
+	tLines.push(
+		partial
+			? `${data.guestName}, your stay is booked. ${money(partial.paidCentavos, currency)} is paid; the remaining ${money(partial.dueAtHotelCentavos, currency)} is due at the hotel.`
+			: `${data.guestName}, your stay is booked and paid in full.`
+	);
 	tLines.push('');
 	tLines.push(rule);
 	if (nights > 0 && firstRoom) {
@@ -321,7 +337,13 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 	tLines.push(`Subtotal    ${money(data.subtotalCentavos, currency)}`);
 	if (data.feesCentavos > 0) tLines.push(`Fees        ${money(data.feesCentavos, currency)}`);
 	tLines.push(`VAT         ${money(data.vatCentavos, currency)}`);
-	tLines.push(`TOTAL PAID  ${money(data.totalCentavos, currency)}   (via PayMongo)`);
+	if (partial) {
+		tLines.push(`TOTAL       ${money(data.totalCentavos, currency)}`);
+		tLines.push(`PAID NOW    ${money(partial.paidCentavos, currency)}   (via PayMongo)`);
+		tLines.push(`DUE AT HOTEL ${money(partial.dueAtHotelCentavos, currency)}`);
+	} else {
+		tLines.push(`TOTAL PAID  ${money(data.totalCentavos, currency)}   (via PayMongo)`);
+	}
 	tLines.push(rule);
 	tLines.push('');
 	tLines.push('View your booking:');

@@ -148,6 +148,11 @@
 								<Badge variant="outline" class={statusVariantClass(line.status)}>
 									{statusLabel(line.status)}
 								</Badge>
+								{#if line.balanceCentavos > 0}
+									<div class="mt-1 text-xs font-medium text-danger">
+										Booking balance {peso(line.balanceCentavos)}
+									</div>
+								{/if}
 								{#if line.status === 'pending_payment' && line.orderStatus === 'cancelled'}
 									<div class="mt-1 text-xs text-danger">Order cancelled</div>
 								{/if}

@@ -52,7 +52,8 @@
 			checkOut: data.checkOut,
 			occupancy: data.adults + data.children,
 			roomCount: count,
-			price
+			price,
+			downpaymentBps: plan.cancellation?.downpaymentBps ?? null
 		});
 	}
 
@@ -220,6 +221,11 @@
 											/>{/if}
 										{cancel.text}
 									</span>
+									{#if plan.cancellation?.downpaymentBps}
+										<p class="ledger-data mt-1 text-xs text-[var(--ledger-ink-muted)]">
+											{plan.cancellation.downpaymentBps / 100}% due at booking · balance at the hotel
+										</p>
+									{/if}
 									{#if roomType.extraBedsNeeded > 0}
 										<p class="mt-0.5 text-xs text-[var(--ledger-ink-muted)]">
 											Includes {roomType.extraBedsNeeded} extra bed{roomType.extraBedsNeeded === 1

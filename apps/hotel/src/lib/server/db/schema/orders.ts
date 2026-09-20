@@ -33,6 +33,12 @@ export const orders = pgTable(
 		vatCentavos: bigint('vat_centavos', { mode: 'number' }).notNull(),
 		totalCentavos: bigint('total_centavos', { mode: 'number' }).notNull(),
 		/**
+		 * What the guest is charged online to confirm (the sum of each line's policy downpayment,
+		 * snapshotted at order creation). Null = the full `totalCentavos` (every order made before
+		 * downpayments existed, and any order whose policies all pay in full).
+		 */
+		amountDueNowCentavos: bigint('amount_due_now_centavos', { mode: 'number' }),
+		/**
 		 * Opaque token required (alongside the row id) on every guest-facing order
 		 * URL (`/review/[id]?t=...`, `/confirmation/[id]?t=...`) — the
 		 * same IDOR guard `bookings.accessToken` used to provide, moved up a level

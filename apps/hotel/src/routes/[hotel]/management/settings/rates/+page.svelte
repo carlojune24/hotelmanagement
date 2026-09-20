@@ -86,6 +86,7 @@
 	);
 	let editPolicyPenaltyPct = $state('');
 	let editPolicyPenaltyValueBps = $state('');
+	let editPolicyDownpaymentPct = $state('');
 
 	function openEditPolicy(c: (typeof data.cancellationPolicies)[number]) {
 		editPolicyId = c.id;
@@ -94,6 +95,7 @@
 		editPolicyPenaltyType = c.penaltyType;
 		editPolicyPenaltyValueBps = c.penaltyValueBps != null ? String(c.penaltyValueBps) : '';
 		editPolicyPenaltyPct = c.penaltyValueBps != null ? String(c.penaltyValueBps / 100) : '';
+		editPolicyDownpaymentPct = c.downpaymentBps != null ? String(c.downpaymentBps / 100) : '';
 		editPolicyOpen = true;
 	}
 
@@ -302,7 +304,10 @@
 									<div class="text-xs text-ink-muted">
 										{c.freeCancelHours != null
 											? `Free up to ${c.freeCancelHours}h before check-in`
-											: 'No free cancellation'} · {penaltyLabel[c.penaltyType]}
+											: 'No free cancellation'} · {penaltyLabel[c.penaltyType]} · {c.downpaymentBps !=
+										null
+											? `${c.downpaymentBps / 100}% due at booking`
+											: 'Paid in full at booking'}
 									</div>
 								</Table.Cell>
 								<Table.Cell class="text-right">
@@ -554,6 +559,22 @@
 					<input type="hidden" id="penaltyValueBps" name="penaltyValueBps" />
 				</div>
 			{/if}
+			<div>
+				<Label for="downpaymentPct">Downpayment due at online booking (%)</Label>
+				<Input
+					id="downpaymentPct"
+					name="downpaymentPct"
+					type="number"
+					min="1"
+					max="100"
+					step="0.01"
+					placeholder="Blank = pay in full"
+					class="mt-1"
+				/>
+				<p class="mt-1 text-xs text-ink-muted">
+					The guest pays this share through PayMongo; the rest is collected at the hotel.
+				</p>
+			</div>
 		</form>
 		<Dialog.Footer>
 			<Button variant="outline" onclick={() => (createPolicyOpen = false)}>Cancel</Button>
@@ -620,6 +641,23 @@
 					<input type="hidden" name="penaltyValueBps" value={editPolicyPenaltyValueBps} />
 				</div>
 			{/if}
+			<div>
+				<Label for="editDownpaymentPct">Downpayment due at online booking (%)</Label>
+				<Input
+					id="editDownpaymentPct"
+					name="downpaymentPct"
+					type="number"
+					min="1"
+					max="100"
+					step="0.01"
+					placeholder="Blank = pay in full"
+					class="mt-1"
+					bind:value={editPolicyDownpaymentPct}
+				/>
+				<p class="mt-1 text-xs text-ink-muted">
+					The guest pays this share through PayMongo; the rest is collected at the hotel.
+				</p>
+			</div>
 		</form>
 		<Dialog.Footer>
 			<Button variant="outline" onclick={() => (editPolicyOpen = false)}>Cancel</Button>

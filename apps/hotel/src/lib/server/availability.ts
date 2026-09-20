@@ -17,6 +17,7 @@ import {
 	type RoomPhoto
 } from './db/schema/index';
 import { nightsBetween, priceStay, type PriceBreakdown } from './pricing';
+import { isPartialDownpayment } from '$lib/downpayment';
 import { resolveOccupancyPlan, type OccupancyPlan } from '$lib/occupancy';
 
 export interface AmenityHighlight {
@@ -36,6 +37,9 @@ export interface AmenityDetail {
 export interface CancellationTerms {
 	freeCancelHours: number | null;
 	penaltyType: 'percentage_of_total' | 'first_night' | 'full_amount';
+	/** Basis points due online at booking; null = pay in full. Only ever a partial value here
+	 *  (1–9999) — a policy that pays in full is normalised to null. */
+	downpaymentBps: number | null;
 }
 
 export interface AvailableRatePlan {
@@ -283,7 +287,8 @@ export async function searchAvailability(params: {
 			.select({
 				ratePlanId: ratePlans.id,
 				freeCancelHours: cancellationPolicies.freeCancelHours,
-				penaltyType: cancellationPolicies.penaltyType
+				penaltyType: cancellationPolicies.penaltyType,
+				downpaymentBps: cancellationPolicies.downpaymentBps
 			})
 			.from(ratePlans)
 			.innerJoin(cancellationPolicies, eq(cancellationPolicies.id, ratePlans.cancellationPolicyId))
@@ -315,7 +320,13 @@ export async function searchAvailability(params: {
 				minStayNights: plan.minStayNights,
 				maxStayNights: plan.maxStayNights,
 				cancellation: cancellation
-					? { freeCancelHours: cancellation.freeCancelHours, penaltyType: cancellation.penaltyType }
+					? {
+							freeCancelHours: cancellation.freeCancelHours,
+							penaltyType: cancellation.penaltyType,
+							downpaymentBps: isPartialDownpayment(cancellation.downpaymentBps)
+								? cancellation.downpaymentBps
+								: null
+						}
 					: null,
 				price,
 				extraBedFeeCentavos: plan.extraBedFeeCentavos ?? null

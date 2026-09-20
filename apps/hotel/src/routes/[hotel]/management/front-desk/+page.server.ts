@@ -778,7 +778,7 @@ export const actions: Actions = {
 			});
 		}
 
-		let bookingId: string;
+		let orderId: string;
 		try {
 			const result = await createWalkInBooking({
 				hotelId: hotel.id,
@@ -793,21 +793,18 @@ export const actions: Actions = {
 				payment: walkInPaymentFrom(d),
 				actor: event.locals.user
 			});
-			bookingId = result.bookingIds[0]!;
+			orderId = result.orderId;
 		} catch (e) {
 			if (e instanceof WalkInError || e instanceof FinanceError)
 				return fail(400, { walkInError: e.message });
 			throw e;
 		}
 
-		// Hands off to the reservation page's own room-assignment/check-in UI — flag
-		// where this came from (and which room tile was selected) so that page's
-		// back link can return here with the same room re-selected, instead of
-		// the full Reservations list.
-		const backQuery = originRoomId
-			? `from=front-desk&roomId=${encodeURIComponent(originRoomId)}`
-			: 'from=front-desk';
-		redirect(303, `/${event.locals.hotel!.slug}/management/reservations/room/${bookingId}?${backQuery}`);
+		// Lands on the booking's Transaction page (the parent view: every room, the payments and the
+		// one balance) rather than the first room's reservation page. Carries the origin room so its
+		// back link can return to the front desk with that same room re-selected.
+		const backQuery = originRoomId ? `?roomId=${encodeURIComponent(originRoomId)}` : '';
+		redirect(303, `/${event.locals.hotel!.slug}/management/transactions/${orderId}${backQuery}`);
 	},
 
 	completeHall: async (event) => {

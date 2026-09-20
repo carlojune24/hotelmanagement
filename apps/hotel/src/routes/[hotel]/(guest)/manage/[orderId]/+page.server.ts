@@ -1,4 +1,5 @@
 import { error, fail } from '@sveltejs/kit';
+import { getOrderPaymentSummary } from '$lib/server/order-payment';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
@@ -101,6 +102,7 @@ export const load: PageServerLoad = async ({ locals, params, url, depends }) => 
 	);
 
 	const thread = await listThread(order.id);
+	const payment = await getOrderPaymentSummary(order);
 
 	return {
 		order: {
@@ -109,6 +111,8 @@ export const load: PageServerLoad = async ({ locals, params, url, depends }) => 
 			status: order.status,
 			confirmationCode: order.id.slice(0, 8).toUpperCase()
 		},
+		// Null for an ordinary pay-in-full order (nothing extra shown).
+		payment,
 		guestName: guest!.fullName,
 		roomLines,
 		hallLines,

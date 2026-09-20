@@ -56,10 +56,23 @@
 								>
 							</tr>
 						{/each}
-						<tr class="ledger-hairline">
-							<td class="ledger-label py-2">Total paid</td>
-							<td class="ledger-data py-2 text-right">{peso(data.order.totalCentavos)}</td>
-						</tr>
+						{#if data.payment && data.payment.dueAtHotelCentavos > 0}
+							<tr class="ledger-hairline">
+								<td class="ledger-label py-2">Paid</td>
+								<td class="ledger-data py-2 text-right">{peso(data.payment.paidCentavos)}</td>
+							</tr>
+							<tr class="ledger-hairline">
+								<td class="ledger-label py-2">Due at the hotel</td>
+								<td class="ledger-data py-2 text-right font-semibold"
+									>{peso(data.payment.dueAtHotelCentavos)}</td
+								>
+							</tr>
+						{:else}
+							<tr class="ledger-hairline">
+								<td class="ledger-label py-2">Total paid</td>
+								<td class="ledger-data py-2 text-right">{peso(data.order.totalCentavos)}</td>
+							</tr>
+						{/if}
 						<tr>
 							<td class="ledger-label py-2">Confirmation code</td>
 							<td class="ledger-data py-2 text-right text-base font-semibold"

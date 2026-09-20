@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gt, inArray, isNull, lt, ne } from 'drizzle-orm';
+import { and, count, desc, eq, gt, inArray, isNull, like, lt, ne } from 'drizzle-orm';
 import { db } from './db/index';
 import {
 	bookingRooms,
@@ -303,31 +303,45 @@ export async function reinstateBooking(input: {
 		.where(target.kind === 'room' ? eq(folios.bookingId, target.bookingId) : eq(folios.hallBookingId, target.hallBookingId))
 		.limit(1);
 	if (folio) {
+		// A cash-side refund (staff-recorded) can be reversed; a PayMongo refund cannot be
+		// un-sent, so it is left alone — only tagged rows for downpayment orders carry a folio
+		// id, and those are deliberately skipped here.
 		const [refundPayment] = await db
 			.select()
 			.from(payments)
-			.where(and(eq(payments.folioId, folio.id), eq(payments.purpose, 'refund'), isNull(payments.voidedAt)))
+			.where(
+				and(
+					eq(payments.folioId, folio.id),
+					eq(payments.purpose, 'refund'),
+					ne(payments.provider, 'paymongo'),
+					isNull(payments.voidedAt)
+				)
+			)
 			.limit(1);
 		if (refundPayment) {
 			await voidPayment(input.hotelId, refundPayment.id, reason, input.actor);
 			refundReversed = true;
+		}
 
-			const [feeCharge] = await db
-				.select()
-				.from(folioCharges)
-				.where(
-					and(
-						eq(folioCharges.folioId, folio.id),
-						eq(folioCharges.isBaseCharge, false),
-						isNull(folioCharges.voidedAt),
-						lt(folioCharges.totalCentavos, 0)
-					)
+		// The cancellation credit on the folio (posted whether or not any money was refunded,
+		// e.g. a fee that keeps the whole downpayment) must come off too, or the reinstated
+		// booking would look paid for.
+		const [feeCharge] = await db
+			.select()
+			.from(folioCharges)
+			.where(
+				and(
+					eq(folioCharges.folioId, folio.id),
+					eq(folioCharges.isBaseCharge, false),
+					isNull(folioCharges.voidedAt),
+					lt(folioCharges.totalCentavos, 0),
+					like(folioCharges.description, 'Cancellation%')
 				)
-				.orderBy(desc(folioCharges.createdAt))
-				.limit(1);
-			if (feeCharge) {
-				await voidFolioCharge(input.hotelId, target, feeCharge.id, reason, input.actor);
-			}
+			)
+			.orderBy(desc(folioCharges.createdAt))
+			.limit(1);
+		if (feeCharge) {
+			await voidFolioCharge(input.hotelId, target, feeCharge.id, reason, input.actor);
 		}
 	}
 

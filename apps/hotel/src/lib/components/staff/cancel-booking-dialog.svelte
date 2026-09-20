@@ -50,7 +50,12 @@
 	const paymongoRefundableCentavos = $derived(quote?.paymongoRefundableCentavos ?? 0);
 	const feeCentavos = $derived(Math.max(0, Math.round(parseFloat(fee || '0') * 100)));
 	const feeOverPaid = $derived(feeCentavos > paidCentavos);
-	const refundCentavos = $derived(Math.max(0, paidCentavos - Math.min(feeCentavos, paidCentavos)));
+	// Refund = what has been paid beyond what the rest of the booking still costs, less the fee kept
+	// (`refundBaseCentavos` = paid on the whole booking minus the other rooms' charges). For a
+	// single-room booking that is simply paid − fee.
+	const refundCentavos = $derived(
+		Math.max(0, (quote?.refundBaseCentavos ?? paidCentavos) - Math.min(feeCentavos, paidCentavos))
+	);
 	const paymongoOverLimit = $derived(
 		refundMethod === 'paymongo' && refundCentavos > paymongoRefundableCentavos
 	);

@@ -14,6 +14,8 @@ import {
 	orderStatusHistory
 } from '$lib/server/db/schema/index';
 import { priceEventHall, priceStay } from '$lib/server/pricing';
+import { computeDownpayment } from '$lib/downpayment';
+import { downpaymentBpsByRatePlan } from '$lib/server/downpayment-lookup';
 import { searchAvailability } from '$lib/server/availability';
 import { checkHallAvailability } from '$lib/server/hall-availability';
 import { MAX_ROOMS_PER_LINE, addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
@@ -213,6 +215,21 @@ export const actions: Actions = {
 				}
 			}
 
+			// What the guest pays online to confirm: each room line's policy downpayment (halls
+			// have no policy, so they pay in full), snapshotted on the order now so a later
+			// policy edit can't change what an already-created order owes.
+			const bpsByPlan = await downpaymentBpsByRatePlan(
+				hotelId,
+				roomLines.map((l) => l.item.ratePlanId)
+			);
+			const { dueNowCentavos } = computeDownpayment([
+				...roomLines.map((l) => ({
+					totalCentavos: l.price.totalCentavos,
+					downpaymentBps: bpsByPlan.get(l.item.ratePlanId) ?? null
+				})),
+				...hallLines.map((l) => ({ totalCentavos: l.price.totalCentavos, downpaymentBps: null }))
+			]);
+
 			const accessToken = randomUUID();
 			const [guest] = await tx
 				.insert(guests)
@@ -234,6 +251,9 @@ export const actions: Actions = {
 					feesCentavos,
 					vatCentavos,
 					totalCentavos,
+					// Null (not the total) when paying in full, so full-pay orders stay
+					// indistinguishable from every order created before downpayments existed.
+					amountDueNowCentavos: dueNowCentavos < totalCentavos ? dueNowCentavos : null,
 					accessToken
 				})
 				.returning({ id: orders.id });

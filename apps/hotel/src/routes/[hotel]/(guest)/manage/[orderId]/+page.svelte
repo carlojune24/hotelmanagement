@@ -59,6 +59,17 @@
 		{data.guestName} · Confirmation <span class="ledger-data">{data.order.confirmationCode}</span>
 	</p>
 
+	{#if data.payment && data.payment.dueAtHotelCentavos > 0}
+		<div class="ledger-hairline mt-6 flex items-baseline justify-between gap-4 pb-3 text-sm">
+			<span class="ledger-label">Paid</span>
+			<span class="ledger-data">{peso(data.payment.paidCentavos)}</span>
+		</div>
+		<div class="ledger-hairline flex items-baseline justify-between gap-4 py-3 text-sm">
+			<span class="ledger-label">Due at the hotel</span>
+			<span class="ledger-data font-semibold">{peso(data.payment.dueAtHotelCentavos)}</span>
+		</div>
+	{/if}
+
 	<!-- Booking lines -->
 	<div class="mt-8">
 		{#each data.roomLines as r (r.id)}

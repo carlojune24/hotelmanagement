@@ -165,6 +165,12 @@ export const cancellationPolicies = pgTable(
 		penaltyType: cancellationPenaltyType('penalty_type').notNull().default('full_amount'),
 		/** Basis points of the booking total; only used when penaltyType = 'percentage_of_total'. */
 		penaltyValueBps: integer('penalty_value_bps'),
+		/**
+		 * Share of the booking total (basis points) the guest pays online to confirm — the rest is
+		 * collected at the hotel. Null or 10000 = pay in full. Not the `taxes_fees` "reservation
+		 * fee" (a priced line added to the bill) nor a security deposit (a check-in hold).
+		 */
+		downpaymentBps: integer('downpayment_bps'),
 		createdAt: createdAt(),
 		updatedAt: updatedAt(),
 		deletedAt: deletedAt()

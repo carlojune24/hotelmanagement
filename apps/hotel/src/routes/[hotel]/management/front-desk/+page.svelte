@@ -331,6 +331,8 @@
 		roomNumber?: string;
 	};
 	let walkInOpen = $state(false);
+	/** The walk-in "Transaction" dialog: guest, payment and the balance-after preview. */
+	let txnOpen = $state(false);
 	let walkInCart = $state<WalkInCartLine[]>([]);
 	// Which entry point built the current cart — lets the sheet hide the date-search
 	// form/results-list entirely when the cart came from picking rooms on the grid
@@ -1369,6 +1371,11 @@
 								{/if}
 								{channelLabel(selectedRoom.occupant.channel)}
 							</Badge>
+							{#if selectedRoom.occupant.balanceCentavos > 0}
+								<Badge variant="outline" class="border-danger/30 bg-danger/10 text-danger">
+									Booking balance {peso(selectedRoom.occupant.balanceCentavos)}
+								</Badge>
+							{/if}
 						{/if}
 					</div>
 
@@ -1571,7 +1578,7 @@
 											: 'border-transparent bg-ok/15 text-ok'}
 									>
 										{formFolio.balanceCentavos > 0
-											? `Balance due ${peso(formFolio.balanceCentavos)}`
+											? `${formFolio.orderLineCount > 1 ? 'Booking balance' : 'Balance'} due ${peso(formFolio.balanceCentavos)}`
 											: 'Settled'}
 									</Badge>
 								</div>
@@ -1612,14 +1619,38 @@
 											</span>
 										</div>
 									{/each}
+									{#if formFolio.orderLineCount > 1}
+										<div class="flex items-center justify-between gap-2 py-1.5">
+											<span class="text-ink-muted"
+												>Whole booking ({formFolio.orderLineCount} rooms/events)</span
+											>
+											<span class="shrink-0 text-ink"
+												>{peso(formFolio.orderChargesTotalCentavos)}</span
+											>
+										</div>
+									{/if}
 									<div class="flex items-center justify-between gap-2 py-1.5">
-										<span class="text-ink-muted">Paid</span>
+										<span class="text-ink-muted"
+											>Paid{formFolio.orderLineCount > 1 ? ' (whole booking)' : ''}</span
+										>
 										<span class="shrink-0 text-ink">−{peso(formFolio.paidTotalCentavos)}</span>
 									</div>
 									<div class="flex items-center justify-between gap-2 py-1.5 font-semibold">
-										<span class="text-ink">Balance</span>
+										<span class="text-ink"
+											>{formFolio.orderLineCount > 1 ? 'Booking balance' : 'Balance'}</span
+										>
 										<span class="shrink-0 text-ink">{peso(formFolio.balanceCentavos)}</span>
 									</div>
+									{#if formFolio.orderLineCount > 1 && formRoomDetail}
+										<div class="py-1.5">
+											<a
+												href="{staffBase}/transactions/{formRoomDetail.order.id}?roomId={selectedRoomId ?? ''}"
+												class="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
+											>
+												Open the booking's transaction →
+											</a>
+										</div>
+									{/if}
 								</div>
 
 								{#if formFolio.balanceCentavos > 0}
@@ -1916,6 +1947,9 @@
 										<div class="text-sm font-medium text-ink">{a.guestName}</div>
 										<div class="text-xs text-ink-muted">
 											{channelLabel(a.channel)}
+											{#if a.balanceCentavos > 0}
+												<span class="font-medium text-danger">· Booking balance {peso(a.balanceCentavos)}</span>
+											{/if}
 											<span class="mx-1 text-ink-muted/40">·</span>
 											<a
 												href="{staffBase}/reservations/room/{a.bookingId}?from=front-desk&roomId={selectedRoomId}"
@@ -2003,6 +2037,9 @@
 											<div class="text-sm font-medium text-ink">{a.guestName}</div>
 											<div class="text-xs text-ink-muted">
 												{a.roomTypeName} · {channelLabel(a.channel)}
+												{#if a.balanceCentavos > 0}
+													<span class="font-medium text-danger">· Booking balance {peso(a.balanceCentavos)}</span>
+												{/if}
 												<span class="mx-1 text-ink-muted/40">·</span>
 												<a
 													href="{staffBase}/reservations/room/{a.bookingId}?from=front-desk"
@@ -2289,59 +2326,99 @@
 			{/if}
 
 			{#if walkInCart.length > 0}
-				<form
-					method="POST"
-					action="?/walkInCreate"
-					use:enhance
-					class="mt-4 space-y-3 border-t border-border pt-4"
-				>
-					<input
-						type="hidden"
-						name="itemsJson"
-						value={JSON.stringify(
-							walkInCart.map((l) => ({
-								roomTypeId: l.roomTypeId,
-								ratePlanId: l.ratePlanId,
-								checkIn: l.checkIn,
-								checkOut: l.checkOut,
-								occupancy: l.occupancy,
-								roomCount: l.roomCount,
-								...(l.roomId ? { roomIds: [l.roomId] } : {})
-							}))
-						)}
-					/>
-					<input type="hidden" name="originRoomId" value={selectedRoomId ?? ''} />
-					<div>
-						<Label for="wiFullName">Full name</Label>
-						<Input id="wiFullName" name="fullName" required maxlength={160} />
-					</div>
-					<div class="grid grid-cols-2 gap-3">
-						<div>
-							<Label for="wiEmail">Email</Label>
-							<Input id="wiEmail" name="email" type="email" required />
-						</div>
-						<div>
-							<Label for="wiPhone">Phone</Label>
-							<Input id="wiPhone" name="phone" maxlength={40} />
-						</div>
-					</div>
-					<div>
-						<Label for="wiSpecialRequests">Special requests</Label>
-						<textarea
-							id="wiSpecialRequests"
-							name="specialRequests"
-							maxlength={1000}
-							rows="2"
-							class="w-full min-w-0 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-						></textarea>
-					</div>
-					<WalkinPaymentFields totalCentavos={walkInCartGrandTotal} cashier={data.cashier} />
-					<Button type="submit" class="w-full">Create &amp; settle booking</Button>
-				</form>
+				<Button type="button" class="mt-4 w-full" onclick={() => (txnOpen = true)}>
+					Continue to transaction
+				</Button>
 			{/if}
 		</div>
 	</Sheet.Content>
 </Sheet.Root>
+
+<Dialog.Root bind:open={txnOpen}>
+	<Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+		<Dialog.Header>
+			<Dialog.Title>Transaction</Dialog.Title>
+			<Dialog.Description>
+				One booking, one payment. Everything below is settled together.
+			</Dialog.Description>
+		</Dialog.Header>
+
+		<div class="rounded-lg border border-border">
+			<div class="divide-y divide-border">
+				{#each walkInCart as line (line.id)}
+					<div class="flex items-start justify-between gap-3 px-3 py-2 text-sm">
+						<div class="min-w-0">
+							<div class="font-medium text-ink">
+								{line.roomNumber ? `Room ${line.roomNumber} · ` : ''}{line.roomTypeName}{line.roomCount >
+								1
+									? ` × ${line.roomCount}`
+									: ''}
+							</div>
+							<div class="text-xs text-ink-muted">
+								{line.ratePlanName} · {line.checkIn} → {line.checkOut}
+							</div>
+						</div>
+						<span class="shrink-0 tabular-nums text-ink">{peso(walkInCartLineTotal(line))}</span>
+					</div>
+				{/each}
+			</div>
+			<div class="flex items-center justify-between border-t border-border px-3 py-2.5">
+				<span class="text-sm font-semibold text-ink">Total</span>
+				<span class="text-sm font-semibold tabular-nums text-ink">{peso(walkInCartGrandTotal)}</span>
+			</div>
+		</div>
+
+			<form
+		method="POST"
+		action="?/walkInCreate"
+		use:enhance
+		class="space-y-3"
+			>
+		<input
+			type="hidden"
+			name="itemsJson"
+			value={JSON.stringify(
+				walkInCart.map((l) => ({
+					roomTypeId: l.roomTypeId,
+					ratePlanId: l.ratePlanId,
+					checkIn: l.checkIn,
+					checkOut: l.checkOut,
+					occupancy: l.occupancy,
+					roomCount: l.roomCount,
+					...(l.roomId ? { roomIds: [l.roomId] } : {})
+				}))
+			)}
+		/>
+		<input type="hidden" name="originRoomId" value={selectedRoomId ?? ''} />
+		<div>
+			<Label for="wiFullName">Full name</Label>
+			<Input id="wiFullName" name="fullName" required maxlength={160} />
+		</div>
+		<div class="grid grid-cols-2 gap-3">
+			<div>
+				<Label for="wiEmail">Email</Label>
+				<Input id="wiEmail" name="email" type="email" required />
+			</div>
+			<div>
+				<Label for="wiPhone">Phone</Label>
+				<Input id="wiPhone" name="phone" maxlength={40} />
+			</div>
+		</div>
+		<div>
+			<Label for="wiSpecialRequests">Special requests</Label>
+			<textarea
+				id="wiSpecialRequests"
+				name="specialRequests"
+				maxlength={1000}
+				rows="2"
+				class="w-full min-w-0 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+			></textarea>
+		</div>
+		<WalkinPaymentFields totalCentavos={walkInCartGrandTotal} cashier={data.cashier} />
+		<Button type="submit" class="w-full">Create booking &amp; record payment</Button>
+			</form>
+	</Dialog.Content>
+</Dialog.Root>
 
 <Dialog.Root bind:open={hallDetailDialogOpen}>
 	<Dialog.Content class="max-h-[85vh] overflow-y-auto sm:max-w-lg">

@@ -82,7 +82,9 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 			subtotalCentavos: order.subtotalCentavos,
 			feesCentavos: order.feesCentavos,
 			vatCentavos: order.vatCentavos,
-			totalCentavos: order.totalCentavos
+			totalCentavos: order.totalCentavos,
+			// What PayMongo will charge now; the rest is paid at the hotel.
+			dueNowCentavos: order.amountDueNowCentavos ?? order.totalCentavos
 		},
 		guest: { fullName: guest!.fullName, email: guest!.email },
 		roomLines,

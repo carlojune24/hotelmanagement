@@ -79,6 +79,18 @@
 			<span>Total</span>
 			<span class="ledger-data text-base">{peso(cart.totalCentavos)}</span>
 		</div>
+		{#if cart.downpayment.dueAtHotelCentavos > 0}
+			<div class="mt-2 space-y-1 text-sm">
+				<div class="flex justify-between">
+					<span>Due now</span>
+					<span class="ledger-data">{peso(cart.downpayment.dueNowCentavos)}</span>
+				</div>
+				<div class="flex justify-between text-[var(--ledger-ink-muted)]">
+					<span>Due at the hotel</span>
+					<span class="ledger-data">{peso(cart.downpayment.dueAtHotelCentavos)}</span>
+				</div>
+			</div>
+		{/if}
 		{#if page.route.id === '/[hotel]/(guest)/rooms'}
 			<!-- Guest Info and Review each already have their own primary action ("Continue to
 			     review", "Pay ₱X") — a second Continue here would be redundant/confusing. -->

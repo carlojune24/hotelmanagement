@@ -11,6 +11,7 @@ import {
 	ratePlans,
 	roomTypes
 } from '$lib/server/db/schema/index';
+import { getOrderPaymentSummary } from '$lib/server/order-payment';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, params, url, depends }) => {
@@ -56,8 +57,12 @@ export const load: PageServerLoad = async ({ locals, params, url, depends }) => 
 		.innerJoin(functionHalls, eq(functionHalls.id, hallBookings.functionHallId))
 		.where(eq(hallBookings.orderId, order.id));
 
+	const payment = await getOrderPaymentSummary(order);
+
 	return {
 		status: order.status,
+		// Null for an ordinary pay-in-full order — the page then keeps saying "Total paid".
+		payment,
 		order: {
 			id: order.id,
 			accessToken: order.accessToken,

@@ -1,5 +1,6 @@
 import { browser } from '$app/environment';
 import type { PriceBreakdown, HallPriceBreakdown } from '$lib/server/pricing';
+import { computeDownpayment } from '$lib/downpayment';
 
 export type CartItem =
 	| {
@@ -16,6 +17,10 @@ export type CartItem =
 			 *  (see `$lib/pricing-utils`'s `scaleRoomPrice`), so cart totals don't need to know. */
 			roomCount: number;
 			price: PriceBreakdown;
+			/** The rate plan's policy downpayment (basis points), for the cart's "due now"
+			 *  preview only — absent on carts saved before this existed, which read as pay in
+			 *  full. The server re-derives it from the policy and never trusts this. */
+			downpaymentBps?: number | null;
 	  }
 	| {
 			kind: 'hall';
@@ -116,5 +121,14 @@ export class CartStore {
 	}
 	get totalCentavos() {
 		return this.items.reduce((sum, i) => sum + i.price.totalCentavos, 0);
+	}
+	/** Preview of what is charged online now vs at the hotel (halls always pay in full). */
+	get downpayment() {
+		return computeDownpayment(
+			this.items.map((i) => ({
+				totalCentavos: i.price.totalCentavos,
+				downpaymentBps: i.kind === 'room' ? (i.downpaymentBps ?? null) : null
+			}))
+		);
 	}
 }

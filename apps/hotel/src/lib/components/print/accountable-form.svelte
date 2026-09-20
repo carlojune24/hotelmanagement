@@ -171,7 +171,7 @@
 					<dd class="af-mono">{peso(t.grossCentavos)}</dd>
 				</div>
 
-				{#if isInvoice}
+				{#if isInvoice && t.lessPaymentsCentavos != null}
 					<div><dt>Less: payments received</dt><dd class="af-mono">{peso(t.lessPaymentsCentavos ?? 0)}</dd></div>
 					<div class="af-total-line">
 						<dt>Balance due</dt>

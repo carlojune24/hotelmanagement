@@ -22,6 +22,7 @@ import { ACTIVE_BOOKING_STATUSES, getAvailableRoomType } from './availability';
 import { checkHallAvailability } from './hall-availability';
 import { wallTimeToUtcMs } from './cancellation';
 import { FolioError, closeFolio, getFolioDetail } from './folio';
+import { orderBalances } from './order-balances';
 import { getSecurityDepositForBooking } from './security-deposits';
 import { recordWalkInPayment, resolvePaymentAccount, type PaymentMethod } from './finance/payments';
 import { openReceivable } from './finance/receivables';
@@ -284,6 +285,8 @@ export interface RoomGridOccupant {
 	totalCentavos: number;
 	/** `payments.provider` for the order's paid payment — `'cash'` (walk-in) or `'paymongo'` (booked online). */
 	channel: string;
+	/** Still owed on the whole booking (the order), not just this room; 0 = settled. */
+	balanceCentavos: number;
 	/** The hotel's daily `checkOutTime` policy applied to this room's own checkout
 	 *  date (`checkOut`), resolved to a UTC instant — when the front-desk panel's
 	 *  countdown actually counts down to. Not "midnight of the checkout date". */
@@ -298,6 +301,8 @@ export interface RoomGridArrival {
 	guestName: string;
 	roomTypeName: string;
 	channel: string;
+	/** Still owed on the whole booking (the order — e.g. the rest of a downpayment). 0 = settled. */
+	balanceCentavos: number;
 }
 
 export interface RoomGridDeparture {
@@ -413,7 +418,8 @@ export async function getRoomStatusGrid(
 			guestName: guests.fullName,
 			orderId: orders.id,
 			assignmentId: roomAssignments.id,
-			assignedRoomId: roomAssignments.roomId
+			assignedRoomId: roomAssignments.roomId,
+			totalCentavos: bookings.totalCentavos
 		})
 		.from(bookings)
 		.innerJoin(bookingRooms, eq(bookingRooms.bookingId, bookings.id))
@@ -451,13 +457,18 @@ export async function getRoomStatusGrid(
 		}
 	}
 
+	const balances = await orderBalances(hotelId, orderIds);
+	// The booking's balance (one figure for every room of the order), never a per-room share.
+	const balanceOf = (orderId: string) => Math.max(0, balances.get(orderId) ?? 0);
+
 	const arrivalsByRoomType = new Map<string, RoomGridArrival[]>();
 	const arrivals: RoomGridArrival[] = unassignedArrivals.map((r) => {
 		const arrival: RoomGridArrival = {
 			bookingId: r.bookingId,
 			guestName: r.guestName,
 			roomTypeName: r.roomTypeName,
-			channel: channelByOrder.get(r.orderId) ?? 'paymongo'
+			channel: channelByOrder.get(r.orderId) ?? 'paymongo',
+			balanceCentavos: balanceOf(r.orderId)
 		};
 		const list = arrivalsByRoomType.get(r.roomTypeId) ?? [];
 		list.push(arrival);
@@ -471,7 +482,8 @@ export async function getRoomStatusGrid(
 			bookingId: r.bookingId,
 			guestName: r.guestName,
 			roomTypeName: r.roomTypeName,
-			channel: channelByOrder.get(r.orderId) ?? 'paymongo'
+			channel: channelByOrder.get(r.orderId) ?? 'paymongo',
+			balanceCentavos: balanceOf(r.orderId)
 		});
 	}
 
@@ -482,7 +494,8 @@ export async function getRoomStatusGrid(
 				bookingId: r.bookingId,
 				guestName: r.guestName,
 				roomTypeName: r.roomTypeName,
-				channel: channelByOrder.get(r.orderId) ?? 'paymongo'
+				channel: channelByOrder.get(r.orderId) ?? 'paymongo',
+				balanceCentavos: balanceOf(r.orderId)
 			}
 		])
 	);
@@ -508,6 +521,7 @@ export async function getRoomStatusGrid(
 				ratePlanName: occ.ratePlanName,
 				totalCentavos: occ.totalCentavos,
 				channel: channelByOrder.get(occ.orderId) ?? 'paymongo',
+				balanceCentavos: balanceOf(occ.orderId),
 				checkoutAtIso: new Date(
 					wallTimeToUtcMs(occ.assignmentCheckOut, checkOutTime, timezone)
 				).toISOString()
@@ -717,7 +731,7 @@ export async function createWalkInBooking(params: {
 	/** How the full total is settled at the desk. Defaults to cash. */
 	payment?: WalkInPaymentInput;
 	actor: SessionUser | null;
-}): Promise<{ bookingIds: string[] }> {
+}): Promise<{ bookingIds: string[]; orderId: string }> {
 	// Destructured as `roomItems`, not `rooms` — this function needs the actual
 	// `rooms` table (physical rooms) for the pre-assignment checks below, and
 	// shadowing it with the cart's room *lines* would silently query the wrong
@@ -735,7 +749,7 @@ export async function createWalkInBooking(params: {
 	// `resolvePaymentAccount` throws a FinanceError the action turns into `walkInError`.
 	const { cashAccountId, shiftId } = await resolvePaymentAccount(hotelId, payment.method);
 
-	const { bookingIds, totalPaidCentavos } = await db.transaction(async (tx) => {
+	const { bookingIds, totalPaidCentavos, orderId } = await db.transaction(async (tx) => {
 		for (const key of lockKeysForRooms(roomItems)) {
 			await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${hotelId}), hashtext(${key}))`);
 		}
@@ -953,7 +967,11 @@ export async function createWalkInBooking(params: {
 			actor
 		});
 
-		return { bookingIds, totalPaidCentavos: walkInAmountPaid(totalCentavos, payment) };
+		return {
+			bookingIds,
+			totalPaidCentavos: walkInAmountPaid(totalCentavos, payment),
+			orderId: order!.id
+		};
 	});
 
 	await writeAudit({
@@ -971,7 +989,7 @@ export async function createWalkInBooking(params: {
 		}
 	});
 
-	return { bookingIds };
+	return { bookingIds, orderId };
 }
 
 export class CheckOutError extends Error {}
@@ -1019,7 +1037,7 @@ export async function checkOutBooking(
 	if (folio.balanceCentavos > 0) {
 		if (!cityLedger) {
 			throw new CheckOutError(
-				`Settle the outstanding balance of ₱${(folio.balanceCentavos / 100).toFixed(2)} before checking out.`
+				`Settle the booking's outstanding balance of ₱${(folio.balanceCentavos / 100).toFixed(2)} before checking out${folio.orderLineCount > 1 ? ' — every room of a multi-room booking is settled together' : ''}.`
 			);
 		}
 		try {

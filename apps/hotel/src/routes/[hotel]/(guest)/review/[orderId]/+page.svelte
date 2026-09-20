@@ -10,6 +10,7 @@
 	const peso = (centavos: number) =>
 		`₱${(centavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 	let submitting = $state(false);
+	const partial = $derived(data.order.dueNowCentavos < data.order.totalCentavos);
 
 	const itemCount = $derived(data.roomLines.length + data.hallLines.length);
 </script>
@@ -96,6 +97,20 @@
 						>{peso(data.order.totalCentavos)}</Table.Cell
 					>
 				</Table.Row>
+				{#if partial}
+					<Table.Row>
+						<Table.Cell class="font-semibold">Due now via PayMongo</Table.Cell>
+						<Table.Cell class="ledger-data text-right font-semibold"
+							>{peso(data.order.dueNowCentavos)}</Table.Cell
+						>
+					</Table.Row>
+					<Table.Row>
+						<Table.Cell class="text-[var(--ledger-ink-muted)]">Due at the hotel</Table.Cell>
+						<Table.Cell class="ledger-data text-right text-[var(--ledger-ink-muted)]"
+							>{peso(data.order.totalCentavos - data.order.dueNowCentavos)}</Table.Cell
+						>
+					</Table.Row>
+				{/if}
 			</Table.Body>
 		</Table.Root>
 	</div>
@@ -103,6 +118,10 @@
 	{#if !data.expired}
 		<p class="mt-4 text-xs text-[var(--ledger-ink-muted)]">
 			You'll be redirected to PayMongo to complete payment securely, then brought back here.
+			{#if partial}
+				The remaining {peso(data.order.totalCentavos - data.order.dueNowCentavos)} is paid at the
+				hotel.
+			{/if}
 		</p>
 
 		{#if form?.error}
@@ -122,7 +141,7 @@
 			class="mt-6"
 		>
 			<Button type="submit" class="ledger-btn-primary" disabled={submitting}>
-				{submitting ? 'Redirecting…' : `Pay ${peso(data.order.totalCentavos)} with PayMongo`}
+				{submitting ? 'Redirecting…' : `Pay ${peso(data.order.dueNowCentavos)} ${partial ? 'now ' : ''}with PayMongo`}
 			</Button>
 		</form>
 	{/if}

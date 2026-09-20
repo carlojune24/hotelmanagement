@@ -78,7 +78,10 @@ export async function POST({ request }) {
 						orderId: order.id,
 						provider: 'paymongo',
 						method: 'paymongo',
-						purpose: 'settlement',
+						// Less than the order total = a downpayment; the balance is settled at
+						// the hotel (a later `recordPayment`). No amount is rejected here — money
+						// PayMongo actually took is always recorded.
+						purpose: amountCentavos < order.totalCentavos ? 'deposit' : 'settlement',
 						paymongoCheckoutSessionId: checkoutSession?.id ?? order.paymongoCheckoutSessionId,
 						paymongoPaymentId: paymentId,
 						paymongoEventId: eventId,
@@ -89,6 +92,13 @@ export async function POST({ request }) {
 						paidAt: new Date()
 					})
 					.returning({ id: payments.id });
+
+				const expectedNow = order.amountDueNowCentavos ?? order.totalCentavos;
+				if (amountCentavos !== expectedNow) {
+					console.warn(
+						`paymongo webhook: order ${order.id} paid ${amountCentavos}, expected ${expectedNow}`
+					);
+				}
 
 				// A payment row now exists regardless of how this closure exits below —
 				// the audit entry (written after commit) must fire for all of them, not

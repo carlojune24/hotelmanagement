@@ -131,3 +131,26 @@ describe('renderBookingConfirmation', () => {
 		expect(text).toContain('TOTAL PAID  ₱1,008.00');
 	});
 });
+
+describe('renderBookingConfirmation — downpayment', () => {
+	const partial = { paidCentavos: 504_00, dueAtHotelCentavos: 504_00 };
+
+	it('says paid + due at the hotel instead of paid in full', () => {
+		const r = renderBookingConfirmation(base({ payment: partial }));
+		expect(r.html).toContain('Due at the hotel');
+		expect(r.html).not.toContain('paid in full');
+		expect(r.html).not.toContain('Total paid');
+		expect(r.text).toContain('DUE AT HOTEL');
+		expect(r.text).toContain('₱504.00');
+		expect(r.text).not.toContain('paid in full');
+	});
+
+	it('is unchanged for a pay-in-full order (no payment summary)', () => {
+		for (const payment of [undefined, null, { paidCentavos: 1008_00, dueAtHotelCentavos: 0 }]) {
+			const r = renderBookingConfirmation(base({ payment }));
+			expect(r.html).toContain('paid in full');
+			expect(r.html).toContain('Total paid');
+			expect(r.html).not.toContain('Due at the hotel');
+		}
+	});
+});

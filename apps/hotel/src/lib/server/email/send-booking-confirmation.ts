@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm';
+import { getOrderPaymentSummary } from '../order-payment';
 import { env } from '$env/dynamic/private';
 import { db } from '../db/index';
 import {
@@ -101,6 +102,7 @@ export async function sendBookingConfirmation(
 			feesCentavos: order.feesCentavos,
 			vatCentavos: order.vatCentavos,
 			totalCentavos: order.totalCentavos,
+			payment: await getOrderPaymentSummary(order),
 			manageUrl,
 			manageBookingUrl
 		};

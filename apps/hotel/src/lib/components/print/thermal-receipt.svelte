@@ -172,7 +172,7 @@
 		<span>{isReceipt ? 'AMOUNT PAID' : 'TOTAL'}</span><span>{peso(t.grossCentavos)}</span>
 	</div>
 
-	{#if isInvoice}
+	{#if isInvoice && t.lessPaymentsCentavos != null}
 		<div class="tr-row"><span>Less: payments</span><span>{peso(t.lessPaymentsCentavos ?? 0)}</span></div>
 		<div class="tr-row tr-total-row"><span>BALANCE DUE</span><span>{peso(t.balanceDueCentavos ?? 0)}</span></div>
 	{/if}

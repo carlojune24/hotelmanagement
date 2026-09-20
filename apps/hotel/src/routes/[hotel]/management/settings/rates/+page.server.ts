@@ -78,8 +78,16 @@ const createPolicySchema = z.object({
 	description: z.string().max(2000).optional(),
 	freeCancelHours: z.coerce.number().int().min(0).max(8760).optional(),
 	penaltyType: z.enum(cancellationPenaltyType.enumValues),
-	penaltyValueBps: z.coerce.number().int().min(0).max(10000).optional()
+	penaltyValueBps: z.coerce.number().int().min(0).max(10000).optional(),
+	/** Percent of the total the guest pays online to confirm (1–100); blank or 100 = pay in full. */
+	downpaymentPct: z.preprocess(
+		(v) => (v === '' || v == null ? undefined : v),
+		z.coerce.number().min(1).max(100).optional()
+	)
 });
+/** Stored as basis points; null means "pay in full" (blank and 100% are the same thing). */
+const downpaymentBpsFrom = (pct: number | undefined) =>
+	pct == null || pct >= 100 ? null : Math.round(pct * 100);
 const updatePolicySchema = createPolicySchema.extend({ id: z.string().uuid() });
 
 const createDepositPolicySchema = z.object({
@@ -133,7 +141,8 @@ export const actions: Actions = {
 				description: parsed.data.description?.trim() || null,
 				freeCancelHours: parsed.data.freeCancelHours ?? null,
 				penaltyType: parsed.data.penaltyType,
-				penaltyValueBps: parsed.data.penaltyValueBps ?? null
+				penaltyValueBps: parsed.data.penaltyValueBps ?? null,
+				downpaymentBps: downpaymentBpsFrom(parsed.data.downpaymentPct)
 			})
 			.returning({ id: cancellationPolicies.id });
 
@@ -174,7 +183,8 @@ export const actions: Actions = {
 				description: parsed.data.description?.trim() || null,
 				freeCancelHours: parsed.data.freeCancelHours ?? null,
 				penaltyType: parsed.data.penaltyType,
-				penaltyValueBps: parsed.data.penaltyValueBps ?? null
+				penaltyValueBps: parsed.data.penaltyValueBps ?? null,
+				downpaymentBps: downpaymentBpsFrom(parsed.data.downpaymentPct)
 			})
 			.where(eq(cancellationPolicies.id, parsed.data.id));
 

@@ -11,7 +11,8 @@ export interface CheckoutLineItem {
  * Creates a PayMongo hosted Checkout Session for an order's already-snapshotted
  * bill. Amounts come straight off `order.*Centavos`/the caller-built `items`
  * (one per room stay or hall reservation under the order) — never recomputed
- * here — so what the guest reviewed is exactly what they're charged.
+ * here — so what the guest reviewed is exactly what they're charged. When the order carries
+ * a downpayment (`amountDueNowCentavos` below the total) the session is one line for that amount.
  */
 export async function createCheckoutSession(params: {
 	order: Order;
@@ -23,22 +24,48 @@ export async function createCheckoutSession(params: {
 }): Promise<{ checkoutSessionId: string; checkoutUrl: string }> {
 	const { order, guest, hotelName, items, successUrl, cancelUrl } = params;
 
-	const lineItems = items.map((i) => ({
-		currency: order.currency,
-		amount: i.amountCentavos,
-		name: i.name,
-		description: i.description,
-		quantity: 1
-	}));
-	const taxesAndFees = order.feesCentavos + order.vatCentavos;
-	if (taxesAndFees > 0) {
-		lineItems.push({
+	const peso = (c: number) => `₱${(c / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+	const dueNow = order.amountDueNowCentavos;
+	const isDownpayment = dueNow != null && dueNow > 0 && dueNow < order.totalCentavos;
+
+	let lineItems: Array<{
+		currency: string;
+		amount: number;
+		name: string;
+		description: string;
+		quantity: number;
+	}>;
+	if (isDownpayment) {
+		// One line for the whole downpayment: the per-line split of a partial amount would
+		// be an arbitrary allocation on PayMongo's side, and the guest sees the full itemised
+		// bill on our review page just before this. The rest is collected at the hotel.
+		lineItems = [
+			{
+				currency: order.currency,
+				amount: dueNow,
+				name: `Downpayment — ${hotelName}`,
+				description: `${peso(dueNow)} of ${peso(order.totalCentavos)} now; the remaining ${peso(order.totalCentavos - dueNow)} is paid at the hotel.`,
+				quantity: 1
+			}
+		];
+	} else {
+		lineItems = items.map((i) => ({
 			currency: order.currency,
-			amount: taxesAndFees,
-			name: 'Taxes & fees',
-			description: 'VAT and applicable hotel fees',
+			amount: i.amountCentavos,
+			name: i.name,
+			description: i.description,
 			quantity: 1
-		});
+		}));
+		const taxesAndFees = order.feesCentavos + order.vatCentavos;
+		if (taxesAndFees > 0) {
+			lineItems.push({
+				currency: order.currency,
+				amount: taxesAndFees,
+				name: 'Taxes & fees',
+				description: 'VAT and applicable hotel fees',
+				quantity: 1
+			});
+		}
 	}
 
 	const session = await getPaymongoClient().createCheckoutSession({

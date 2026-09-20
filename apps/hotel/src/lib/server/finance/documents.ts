@@ -15,7 +15,7 @@ import {
 	users
 } from '../db/schema/index';
 import type { BirSettings, DocumentSeries, IssuedDocument } from '../db/schema/documents';
-import { getFolioDetail, getOrderIdForTarget, type FolioTarget } from '../folio';
+import { getFolioDetail, getOrderIdForTarget, getOrderLedger, type FolioTarget } from '../folio';
 import { writeAudit } from '../audit';
 import { businessDateFor } from './shared';
 import type { SessionUser } from '../auth/session';
@@ -620,8 +620,11 @@ export async function buildInvoiceSnapshot(
 			zeroRatedSalesCentavos: 0,
 			vatCentavos,
 			grossCentavos: gross,
-			lessPaymentsCentavos: folio.paidTotalCentavos,
-			balanceDueCentavos: folio.balanceCentavos,
+			// Payments and balance belong to the whole booking. A multi-room booking's room
+			// invoice is an itemised charge document without them (the Official Receipt proves
+			// what was paid); a single-room invoice is unchanged.
+			lessPaymentsCentavos: folio.orderLineCount > 1 ? null : folio.paidTotalCentavos,
+			balanceDueCentavos: folio.orderLineCount > 1 ? null : folio.balanceCentavos,
 			amountPaidCentavos: null,
 			paymentMethod: null,
 			paymentReferenceNo: null,
@@ -660,21 +663,14 @@ export async function buildReceiptSnapshot(
 	const go = await guestAndOrder(pay.orderId);
 	if (!go || go.order.hotelId !== hotelId) throw new DocumentError('Payment not found.');
 
-	// Balance still owed after this payment, when the payment is tied to a folio.
+	// Balance still owed on the whole booking after this payment (payments settle at the order
+	// level, so this is the booking's balance, not one room's), when the payment is tied to a folio.
 	let balanceCarried: number | null = null;
 	if (pay.folioId) {
-		const [folio] = await db
-			.select({ bookingId: bookings.id })
-			.from(bookings)
-			.where(eq(bookings.orderId, pay.orderId))
-			.limit(1);
-		if (folio) {
-			try {
-				const fd = await getFolioDetail(hotelId, { kind: 'room', bookingId: folio.bookingId });
-				balanceCarried = fd.balanceCentavos;
-			} catch {
-				balanceCarried = null;
-			}
+		try {
+			balanceCarried = (await getOrderLedger(pay.orderId)).balanceCentavos;
+		} catch {
+			balanceCarried = null;
 		}
 	}
 
