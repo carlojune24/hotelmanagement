@@ -107,6 +107,14 @@
 							{r.billToName}
 							{#if r.billToCompany}<span class="block text-xs text-ink-muted">{r.billToCompany}</span>{/if}
 							{#if r.referenceNo}<span class="block text-xs text-ink-muted">Ref {r.referenceNo}</span>{/if}
+							{#if r.orderCode}
+								<a
+									href="/{page.params.hotel}/management/transactions/{r.orderId}"
+									class="block text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
+								>
+									Booking <span class="font-mono">{r.orderCode}</span>{r.roomLabel ? ` · ${r.roomLabel}` : ''}{r.entryCount > 1 ? ` (${r.entryCount} rooms)` : ''} →
+								</a>
+							{/if}
 						</Table.Cell>
 						<Table.Cell class="text-right tabular-nums text-ink-muted">{peso(r.originalAmountCentavos)}</Table.Cell>
 						<Table.Cell class="text-right tabular-nums font-medium text-ink">{peso(r.outstandingCentavos)}</Table.Cell>

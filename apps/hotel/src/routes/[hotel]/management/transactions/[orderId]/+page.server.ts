@@ -13,6 +13,7 @@ import {
 	orders,
 	paymentAllocations,
 	payments,
+	receivableEntries,
 	receivables,
 	roomAssignments,
 	roomTypes,
@@ -102,34 +103,21 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 	const lineIds = [...roomRows.map((r) => r.id), ...hallRows.map((h) => h.id)];
 	const roomLineIds = roomRows.map((r) => r.id);
 
-	// City-ledger entries opened against any room/event of this booking.
-	const cityLedger =
-		lineIds.length === 0
-			? []
-			: await db
-					.select({
-						id: receivables.id,
-						bookingId: receivables.bookingId,
-						hallBookingId: receivables.hallBookingId,
-						billToName: receivables.billToName,
-						billToCompany: receivables.billToCompany,
-						referenceNo: receivables.referenceNo,
-						originalAmountCentavos: receivables.originalAmountCentavos,
-						outstandingCentavos: receivables.outstandingCentavos,
-						status: receivables.status,
-						openedAt: receivables.openedAt
-					})
-					.from(receivables)
-					.where(
-						and(
-							eq(receivables.hotelId, hotel.id),
-							or(
-								inArray(receivables.bookingId, lineIds),
-								inArray(receivables.hallBookingId, lineIds)
-							)
-						)
-					)
-					.orderBy(desc(receivables.openedAt));
+	// The booking's city-ledger ACCOUNT(s) and the per-room entries on them.
+	const accounts = await db
+		.select()
+		.from(receivables)
+		.where(and(eq(receivables.hotelId, hotel.id), eq(receivables.orderId, order.id)))
+		.orderBy(desc(receivables.openedAt));
+	const entryRows = accounts.length
+		? await db
+				.select()
+				.from(receivableEntries)
+				.where(inArray(receivableEntries.receivableId, accounts.map((a) => a.id)))
+				.orderBy(asc(receivableEntries.createdAt))
+		: [];
+	const accountOf = new Map(accounts.map((a) => [a.id, a]));
+	const activeAccount = accounts.find((a) => a.status === 'open' || a.status === 'partial') ?? null;
 
 	// Security deposits are held per ROOM — attach each room's latest one.
 	const depositRows =
@@ -260,18 +248,20 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 						refundedCentavos: dep.refundedCentavos
 					}
 				: null,
-			cityLedger: cityLedger
-				.filter((r) => (r.bookingId ?? r.hallBookingId) === base.id)
-				.map((r) => ({
-					id: r.id,
-					billToName: r.billToName,
-					billToCompany: r.billToCompany,
-					referenceNo: r.referenceNo,
-					originalAmountCentavos: r.originalAmountCentavos,
-					outstandingCentavos: r.outstandingCentavos,
-					status: r.status,
-					openedAt: r.openedAt.toISOString()
-				}))
+			cityLedger: entryRows
+				.filter((e) => (e.bookingId ?? e.hallBookingId) === base.id)
+				.map((e) => {
+					const acct = accountOf.get(e.receivableId)!;
+					return {
+						id: e.id,
+						billToName: acct.billToName,
+						billToCompany: acct.billToCompany,
+						referenceNo: acct.referenceNo,
+						amountCentavos: e.amountCentavos,
+						status: acct.status,
+						openedAt: e.createdAt.toISOString()
+					};
+				})
 		};
 	};
 
@@ -384,6 +374,18 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		canCollect,
 		canCityLedger,
 		defaultBillTo: guest?.fullName ?? '',
+		/** The booking's one city-ledger account, if any: new rooms join it instead of opening another. */
+		cityLedgerAccount: accounts.length
+			? {
+					id: (activeAccount ?? accounts[0]!).id,
+					active: !!activeAccount,
+					billToName: (activeAccount ?? accounts[0]!).billToName,
+					billToCompany: (activeAccount ?? accounts[0]!).billToCompany,
+					originalCentavos: accounts.reduce((sum, a) => sum + a.originalAmountCentavos, 0),
+					outstandingCentavos: accounts.reduce((sum, a) => sum + a.outstandingCentavos, 0),
+					status: (activeAccount ?? accounts[0]!).status
+				}
+			: null,
 		cashier: {
 			requireOpenShiftForCashPayment: financeSettings.requireOpenShiftForCashPayment,
 			hasBankAccount: !!financeSettings.defaultBankAccountId,
@@ -471,7 +473,7 @@ export const actions: Actions = {
 			.object({
 				kind: z.enum(['room', 'hall']),
 				id: z.string().uuid(),
-				billToName: z.string().trim().min(1, 'Enter who the balance is billed to.').max(160),
+				billToName: z.string().trim().max(160).optional(),
 				billToCompany: z.string().max(160).optional(),
 				referenceNo: z.string().max(120).optional(),
 				notes: z.string().max(500).optional(),
@@ -488,7 +490,7 @@ export const actions: Actions = {
 			const res = await openReceivable({
 				hotelId,
 				target,
-				billToName: d.billToName,
+				billToName: d.billToName || undefined,
 				billToCompany: d.billToCompany?.trim() || null,
 				referenceNo: d.referenceNo?.trim() || null,
 				notes: d.notes?.trim() || null,
@@ -496,7 +498,9 @@ export const actions: Actions = {
 				actor: event.locals.user
 			});
 			return {
-				ok: `₱${(res.amountCentavos / 100).toFixed(2)} of this room's bill moved to the city ledger.`
+				ok: res.addedToExisting
+					? `₱${(res.amountCentavos / 100).toFixed(2)} added to this booking's city-ledger account.`
+					: `₱${(res.amountCentavos / 100).toFixed(2)} of this room's bill moved to the city ledger.`
 			};
 		} catch (e) {
 			if (e instanceof FinanceError || e instanceof FolioError)

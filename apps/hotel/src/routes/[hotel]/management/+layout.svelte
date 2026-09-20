@@ -13,6 +13,7 @@
 	import ConciergeBellIcon from '@lucide/svelte/icons/concierge-bell';
 	import ShoppingCartIcon from '@lucide/svelte/icons/shopping-cart';
 	import CalendarCheckIcon from '@lucide/svelte/icons/calendar-check';
+	import ReceiptIcon from '@lucide/svelte/icons/receipt';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
@@ -74,6 +75,12 @@
 				seg: 'reservations',
 				label: 'Reservations',
 				icon: CalendarCheckIcon,
+				show: can('booking:read')
+			},
+			{
+				seg: 'transactions',
+				label: 'Booking transactions',
+				icon: ReceiptIcon,
 				show: can('booking:read')
 			},
 			{ seg: 'emails', label: 'Emails', icon: MailIcon, show: can('booking:read') },

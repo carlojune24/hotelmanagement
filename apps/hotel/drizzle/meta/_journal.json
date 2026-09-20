@@ -351,6 +351,13 @@
       "when": 1789883095170,
       "tag": "0049_perpetual_war_machine",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1789889086201,
+      "tag": "0050_strong_daredevil",
+      "breakpoints": true
     }
   ]
 }

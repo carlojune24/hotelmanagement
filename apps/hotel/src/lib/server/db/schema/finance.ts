@@ -18,6 +18,7 @@ import { hotels } from './hotels';
 import { users } from './auth';
 import { folios } from './folio';
 import { bookings, hallBookings, payments, paymentMethod } from './bookings';
+import { orders } from './orders';
 
 /**
  * Internal, per-hotel Finance (cash-basis). No chart of accounts / journal
@@ -451,6 +452,10 @@ export const receivables = pgTable(
 		hotelId: uuid('hotel_id')
 			.notNull()
 			.references(() => hotels.id, { onDelete: 'cascade' }),
+		/** The booking (order) this ledger ACCOUNT belongs to — one account per booking; each room's
+		 *  bill moved to the ledger is an entry on it (`receivable_entries`). Null only for very old rows. */
+		orderId: uuid('order_id').references(() => orders.id, { onDelete: 'set null' }),
+		/** The FIRST room/hall moved onto the account (kept for old rows); the full list is `receivable_entries`. */
 		folioId: uuid('folio_id').references(() => folios.id, { onDelete: 'set null' }),
 		bookingId: uuid('booking_id').references(() => bookings.id, { onDelete: 'set null' }),
 		hallBookingId: uuid('hall_booking_id').references(() => hallBookings.id, {
@@ -475,6 +480,30 @@ export const receivables = pgTable(
 	},
 	(t) => [index('receivables_hotel_status_idx').on(t.hotelId, t.status)]
 );
+
+/** One room's (or hall's) bill moved onto a city-ledger account. The account total is the sum of its
+ *  entries; each entry's room was squared with its own tagged `house_use` payment. */
+export const receivableEntries = pgTable(
+	'receivable_entries',
+	{
+		id: pk(),
+		receivableId: uuid('receivable_id')
+			.notNull()
+			.references(() => receivables.id, { onDelete: 'cascade' }),
+		bookingId: uuid('booking_id').references(() => bookings.id, { onDelete: 'set null' }),
+		hallBookingId: uuid('hall_booking_id').references(() => hallBookings.id, {
+			onDelete: 'set null'
+		}),
+		folioId: uuid('folio_id').references(() => folios.id, { onDelete: 'set null' }),
+		amountCentavos: bigint('amount_centavos', { mode: 'number' }).notNull(),
+		notes: text('notes'),
+		openedByUserId: uuid('opened_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt()
+	},
+	(t) => [index('receivable_entries_receivable_idx').on(t.receivableId)]
+);
+
+export type ReceivableEntry = typeof receivableEntries.$inferSelect;
 
 export const securityDepositStatus = pgEnum('security_deposit_status', [
 	'held',

@@ -124,6 +124,12 @@
 			<Button
 				variant="outline"
 				size="sm"
+				href="{base}/print/transaction/{data.order.id}"
+				target="_blank">Print transaction</Button
+			>
+			<Button
+				variant="outline"
+				size="sm"
 				href="{base}/print/invoice/for-order/{data.order.id}"
 				target="_blank">Print all invoices</Button
 			>
@@ -217,20 +223,14 @@
 							{#each l.cityLedger as r (r.id)}
 								<div class="flex items-start justify-between gap-3 bg-surface-2 px-3 py-1.5 text-xs">
 									<span class="text-ink-muted">
-										City ledger · {r.billToName}{#if r.billToCompany} · {r.billToCompany}{/if}{#if r.referenceNo}
-											· Ref {r.referenceNo}{/if} ·
+										City ledger account · {r.billToName}{#if r.billToCompany} · {r.billToCompany}{/if} ·
 										<a
 											href="{staffBase}/finance/receivables"
 											class="underline underline-offset-2 hover:text-ink">open</a
 										>
 									</span>
 									<span class="shrink-0 tabular-nums">
-										{peso(r.outstandingCentavos)}
-										{r.status === 'settled'
-											? 'collected'
-											: r.status === 'written_off'
-												? 'written off'
-												: 'outstanding'}
+										{peso(r.amountCentavos)} moved
 									</span>
 								</div>
 							{/each}
@@ -357,6 +357,36 @@
 					</div>
 				{/if}
 			</section>
+
+			{#if data.cityLedgerAccount}
+				<section class="rounded-lg border border-border">
+					<h2 class="border-b border-border px-3 py-2.5 text-sm font-semibold text-ink">
+						City ledger account
+					</h2>
+					<div class="space-y-1 px-3 py-2.5 text-sm">
+						<div class="flex justify-between gap-3">
+							<span class="text-ink-muted">Bill to</span>
+							<span class="text-ink">
+								{data.cityLedgerAccount.billToName}{#if data.cityLedgerAccount.billToCompany}
+									· {data.cityLedgerAccount.billToCompany}{/if}
+							</span>
+						</div>
+						<div class="flex justify-between gap-3">
+							<span class="text-ink-muted">Moved from the rooms</span>
+							<span class="tabular-nums text-ink">{peso(data.cityLedgerAccount.originalCentavos)}</span>
+						</div>
+						<div class="flex justify-between gap-3 font-medium">
+							<span class="text-ink">Still to collect</span>
+							<span class="tabular-nums text-ink">{peso(data.cityLedgerAccount.outstandingCentavos)}</span>
+						</div>
+						<a
+							href="{staffBase}/finance/receivables"
+							class="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
+							>Open in Finance → Receivables →</a
+						>
+					</div>
+				</section>
+			{/if}
 
 			<section class="rounded-lg border border-border">
 				<h2 class="border-b border-border px-3 py-2.5 text-sm font-semibold text-ink">
@@ -520,27 +550,35 @@
 			>
 				<input type="hidden" name="kind" value={ledgerLine.kind} />
 				<input type="hidden" name="id" value={ledgerLine.id} />
-				<div>
-					<Label for="cl-name">Bill to</Label>
-					<Input
-						id="cl-name"
-						name="billToName"
-						required
-						maxlength={160}
-						value={data.defaultBillTo}
-						class="mt-1"
-					/>
-				</div>
-				<div class="grid grid-cols-2 gap-3">
+				{#if data.cityLedgerAccount?.active}
+					<p class="rounded-md bg-surface-2 px-3 py-2 text-sm text-ink-muted">
+						This booking already has a city-ledger account for
+						<span class="font-medium text-ink">{data.cityLedgerAccount.billToName}{#if data.cityLedgerAccount.billToCompany}
+								· {data.cityLedgerAccount.billToCompany}{/if}</span>. This room's bill is added to it.
+					</p>
+				{:else}
 					<div>
-						<Label for="cl-company">Company (optional)</Label>
-						<Input id="cl-company" name="billToCompany" maxlength={160} class="mt-1" />
+						<Label for="cl-name">Bill to</Label>
+						<Input
+							id="cl-name"
+							name="billToName"
+							required
+							maxlength={160}
+							value={data.defaultBillTo}
+							class="mt-1"
+						/>
 					</div>
-					<div>
-						<Label for="cl-ref">Reference (optional)</Label>
-						<Input id="cl-ref" name="referenceNo" maxlength={120} class="mt-1" />
+					<div class="grid grid-cols-2 gap-3">
+						<div>
+							<Label for="cl-company">Company (optional)</Label>
+							<Input id="cl-company" name="billToCompany" maxlength={160} class="mt-1" />
+						</div>
+						<div>
+							<Label for="cl-ref">Reference (optional)</Label>
+							<Input id="cl-ref" name="referenceNo" maxlength={120} class="mt-1" />
+						</div>
 					</div>
-				</div>
+				{/if}
 				<div>
 					<Label for="cl-amount">Amount to move (₱) — up to what this room owes</Label>
 					<Input
