@@ -99,38 +99,72 @@
 
 	<div class="grid gap-6 lg:grid-cols-[1fr_320px] lg:items-start">
 		<div class="min-w-0 space-y-6">
-			<section>
-				<h2 class="mb-2 text-sm font-semibold text-ink">Rooms &amp; events</h2>
-				<Table.Root>
-					<Table.Header>
-						<Table.Row>
-							<Table.Head>Booking</Table.Head>
-							<Table.Head>Status</Table.Head>
-							<Table.Head class="text-right">Charges</Table.Head>
-						</Table.Row>
-					</Table.Header>
-					<Table.Body>
-						{#each data.lines as l (l.id)}
-							<Table.Row>
-								<Table.Cell>
-									<a
-										href={reservationHref(l)}
-										class="font-medium text-ink underline-offset-2 hover:underline"
-									>
-										{l.title}
-									</a>
-									<div class="text-xs text-ink-muted">{l.detail}</div>
-								</Table.Cell>
-								<Table.Cell>
-									<Badge variant="outline" class={statusClass(l.status)}>
-										{statusLabel(l.status)}
-									</Badge>
-								</Table.Cell>
-								<Table.Cell class="text-right tabular-nums">{peso(l.chargesCentavos)}</Table.Cell>
-							</Table.Row>
-						{/each}
-					</Table.Body>
-				</Table.Root>
+			<section class="space-y-3">
+				<h2 class="text-sm font-semibold text-ink">Each room's folio</h2>
+				{#each data.lines as l (l.id)}
+					<div class="rounded-lg border border-border">
+						<div class="flex flex-wrap items-start justify-between gap-2 border-b border-border px-3 py-2.5">
+							<div class="min-w-0">
+								<a
+									href={reservationHref(l)}
+									class="font-medium text-ink underline-offset-2 hover:underline"
+								>
+									{l.title}
+								</a>
+								<div class="text-xs text-ink-muted">{l.detail}</div>
+							</div>
+							<Badge variant="outline" class={statusClass(l.status)}>{statusLabel(l.status)}</Badge>
+						</div>
+
+						<div class="divide-y divide-border text-sm">
+							{#each l.charges as c (c.id)}
+								<div class="flex items-start justify-between gap-3 px-3 py-1.5 {c.voided ? 'opacity-50' : ''}">
+									<div class="min-w-0">
+										<span class="text-ink {c.voided ? 'line-through' : ''}">
+											{c.description}{c.quantity > 1 ? ` × ${c.quantity}` : ''}
+										</span>
+										{#if c.voided}
+											<span class="text-xs text-danger">
+												voided{#if c.voidReason} — {c.voidReason}{/if}
+											</span>
+										{/if}
+									</div>
+									<span class="shrink-0 tabular-nums text-ink {c.voided ? 'line-through' : ''}">
+										{peso(c.totalCentavos)}
+									</span>
+								</div>
+							{/each}
+
+							{#if l.deposit}
+								<div class="flex items-start justify-between gap-3 px-3 py-1.5">
+									<div class="text-ink-muted">
+										Security deposit {peso(l.deposit.amountCentavos)} —
+										{#if l.deposit.status === 'held'}
+											<span class="font-medium text-ink">held</span> (not part of the bill)
+										{:else if l.deposit.status === 'voided'}
+											voided
+										{:else}
+											settled: {peso(l.deposit.forfeitedCentavos ?? 0)} kept for damage, {peso(
+												l.deposit.refundedCentavos ?? 0
+											)} refunded
+										{/if}
+									</div>
+								</div>
+							{/if}
+							{#if l.depositAppliedCentavos > 0}
+								<div class="flex items-start justify-between gap-3 px-3 py-1.5">
+									<span class="text-ink-muted">Less: security deposit applied to damage</span>
+									<span class="shrink-0 tabular-nums text-ink">−{peso(l.depositAppliedCentavos)}</span>
+								</div>
+							{/if}
+						</div>
+
+						<div class="flex items-center justify-between border-t border-border bg-surface-2 px-3 py-2 text-sm font-medium">
+							<span class="text-ink">Room total</span>
+							<span class="tabular-nums text-ink">{peso(l.chargesCentavos - l.depositAppliedCentavos)}</span>
+						</div>
+					</div>
+				{/each}
 			</section>
 
 			<section>
@@ -167,6 +201,7 @@
 										{/if}
 									</div>
 									<div class="mt-0.5 text-xs text-ink-muted">
+										{#if p.lineTitle}<span class="font-medium text-ink">{p.lineTitle}</span> ·{/if}
 										{when(p.paidAt)}
 										{#if p.referenceNo}· Ref {p.referenceNo}{/if}
 										{#if p.tenderedCentavos != null && p.method === 'cash'}
@@ -208,6 +243,42 @@
 						{/each}
 					</div>
 				{/if}
+			</section>
+
+			<section class="rounded-lg border border-border">
+				<h2 class="border-b border-border px-3 py-2.5 text-sm font-semibold text-ink">
+					Whole booking — the complete picture
+				</h2>
+				<dl class="divide-y divide-border text-sm">
+					{#each data.lines as l (l.id)}
+						<div class="flex items-center justify-between gap-3 px-3 py-1.5">
+							<dt class="text-ink-muted">{l.title}</dt>
+							<dd class="tabular-nums text-ink">{peso(l.chargesCentavos)}</dd>
+						</div>
+					{/each}
+					<div class="flex items-center justify-between gap-3 px-3 py-1.5 font-medium">
+						<dt class="text-ink">Total charges</dt>
+						<dd class="tabular-nums text-ink">{peso(data.ledger.chargesTotalCentavos)}</dd>
+					</div>
+					{#if data.ledger.depositAppliedTotalCentavos > 0}
+						<div class="flex items-center justify-between gap-3 px-3 py-1.5">
+							<dt class="text-ink-muted">Less: security deposits applied to damage</dt>
+							<dd class="tabular-nums text-ink">−{peso(data.ledger.depositAppliedTotalCentavos)}</dd>
+						</div>
+					{/if}
+					<div class="flex items-center justify-between gap-3 px-3 py-1.5">
+						<dt class="text-ink-muted">Less: payments received</dt>
+						<dd class="tabular-nums text-ink">−{peso(data.ledger.paymentsReceivedCentavos)}</dd>
+					</div>
+					<div class="flex items-center justify-between gap-3 px-3 py-2.5">
+						<dt class="font-semibold text-ink">
+							{balance < 0 ? 'Credit owed to guest' : settled ? 'Balance' : 'Balance due'}
+						</dt>
+						<dd class="text-lg font-semibold tabular-nums {balance > 0 ? 'text-danger' : 'text-ink'}">
+							{settled ? 'Settled' : peso(balance)}
+						</dd>
+					</div>
+				</dl>
 			</section>
 
 			{#if data.cityLedger.length > 0}
@@ -260,9 +331,15 @@
 						<dt class="text-ink-muted">Charges</dt>
 						<dd class="tabular-nums text-ink">{peso(data.ledger.chargesTotalCentavos)}</dd>
 					</div>
+					{#if data.ledger.depositAppliedTotalCentavos > 0}
+						<div class="flex justify-between">
+							<dt class="text-ink-muted">Deposits applied</dt>
+							<dd class="tabular-nums text-ink">−{peso(data.ledger.depositAppliedTotalCentavos)}</dd>
+						</div>
+					{/if}
 					<div class="flex justify-between">
 						<dt class="text-ink-muted">Paid</dt>
-						<dd class="tabular-nums text-ink">−{peso(data.ledger.paidTotalCentavos)}</dd>
+						<dd class="tabular-nums text-ink">−{peso(data.ledger.paymentsReceivedCentavos)}</dd>
 					</div>
 				</dl>
 				<div class="mt-3 flex items-baseline justify-between border-t border-border pt-3">

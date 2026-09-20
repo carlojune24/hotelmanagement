@@ -5,6 +5,8 @@ import { db } from '$lib/server/db/index';
 import {
 	bookingRooms,
 	bookings,
+	folioCharges,
+	folios,
 	functionHalls,
 	guests,
 	hallBookings,
@@ -13,7 +15,8 @@ import {
 	receivables,
 	roomAssignments,
 	roomTypes,
-	rooms
+	rooms,
+	securityDeposits
 } from '$lib/server/db/schema/index';
 import { roleCan } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
@@ -126,6 +129,75 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 					)
 					.orderBy(desc(receivables.openedAt));
 
+	// Security deposits are held per ROOM (one per booking line, collected at that room's own
+	// check-in) — attach each room's latest deposit so a multi-room booking reads as separate holds.
+	const roomLineIds = roomRows.map((r) => r.id);
+	const depositRows =
+		roomLineIds.length === 0
+			? []
+			: await db
+					.select()
+					.from(securityDeposits)
+					.where(
+						and(eq(securityDeposits.hotelId, hotel.id), inArray(securityDeposits.bookingId, roomLineIds))
+					)
+					.orderBy(desc(securityDeposits.createdAt));
+	const depositByLine = new Map<string, (typeof depositRows)[number]>();
+	for (const d of depositRows) if (d.bookingId && !depositByLine.has(d.bookingId)) depositByLine.set(d.bookingId, d);
+
+	// Which room a folio-tagged payment (desk payment, deposit forfeiture) belongs to.
+	const folioRows =
+		lineIds.length === 0
+			? []
+			: await db
+					.select({ id: folios.id, bookingId: folios.bookingId, hallBookingId: folios.hallBookingId })
+					.from(folios)
+					.where(or(inArray(folios.bookingId, lineIds), inArray(folios.hallBookingId, lineIds)));
+	const lineOfFolio = new Map(folioRows.map((f) => [f.id, (f.bookingId ?? f.hallBookingId)!]));
+
+	// Every room's own folio lines (the stay, extras, damage) so staff can read the whole booking
+	// here instead of opening each room.
+	const chargeRows =
+		folioRows.length === 0
+			? []
+			: await db
+					.select()
+					.from(folioCharges)
+					.where(inArray(folioCharges.folioId, folioRows.map((f) => f.id)))
+					.orderBy(asc(folioCharges.createdAt));
+	const chargesByLine = new Map<string, typeof chargeRows>();
+	for (const c of chargeRows) {
+		const lineId = lineOfFolio.get(c.folioId);
+		if (!lineId) continue;
+		const arr = chargesByLine.get(lineId) ?? [];
+		arr.push(c);
+		chargesByLine.set(lineId, arr);
+	}
+	// Security deposit kept for damage, per room: the `security_deposit`-method payment posted
+	// on that room's folio. It is that room's own credit, not a booking-level payment.
+	const depositAppliedByLine = new Map<string, number>();
+	for (const p of paymentRows) {
+		if (p.method !== 'security_deposit' || p.status !== 'paid' || p.voidedAt || !p.folioId) continue;
+		const lineId = lineOfFolio.get(p.folioId);
+		if (lineId) depositAppliedByLine.set(lineId, (depositAppliedByLine.get(lineId) ?? 0) + p.amountCentavos);
+	}
+	const chargeView = (lineId: string, total: number, stayLabel: string) => {
+		const rows = chargesByLine.get(lineId);
+		if (!rows || rows.length === 0) {
+			// No folio opened yet: the room is just its stay charge.
+			return [{ id: `stay-${lineId}`, description: stayLabel, quantity: 1, totalCentavos: total, isBase: true, voided: false, voidReason: null as string | null }];
+		}
+		return rows.map((c) => ({
+			id: c.id,
+			description: c.description,
+			quantity: c.quantity,
+			totalCentavos: c.totalCentavos,
+			isBase: c.isBaseCharge,
+			voided: !!c.voidedAt,
+			voidReason: c.voidReason
+		}));
+	};
+
 	const assigned = await Promise.all(
 		roomRows.map((r) =>
 			db
@@ -146,7 +218,17 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 				: `${r.roomTypeName}${r.quantity > 1 ? ` × ${r.quantity}` : ''}`,
 			detail: `${r.checkIn} → ${r.checkOut}`,
 			status: r.status,
-			chargesCentavos: chargeOf.get(r.id) ?? 0
+			chargesCentavos: chargeOf.get(r.id) ?? 0,
+			charges: chargeView(r.id, chargeOf.get(r.id) ?? 0, 'Room stay'),
+			depositAppliedCentavos: depositAppliedByLine.get(r.id) ?? 0,
+			deposit: depositByLine.has(r.id)
+				? {
+						status: depositByLine.get(r.id)!.status,
+						amountCentavos: depositByLine.get(r.id)!.amountCentavos,
+						forfeitedCentavos: depositByLine.get(r.id)!.forfeitedCentavos,
+						refundedCentavos: depositByLine.get(r.id)!.refundedCentavos
+					}
+				: null
 		})),
 		...hallRows.map((h) => ({
 			kind: 'hall' as const,
@@ -154,9 +236,13 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			title: h.hallName,
 			detail: `${h.eventType} · ${h.eventDate}`,
 			status: h.status,
-			chargesCentavos: chargeOf.get(h.id) ?? 0
+			chargesCentavos: chargeOf.get(h.id) ?? 0,
+			charges: chargeView(h.id, chargeOf.get(h.id) ?? 0, 'Event'),
+			depositAppliedCentavos: 0,
+			deposit: null
 		}))
 	];
+	const depositAppliedTotal = lines.reduce((sum, l) => sum + l.depositAppliedCentavos, 0);
 
 	// Payments post through one live line's folio (the ledger is the booking's, so which room
 	// carries the row doesn't change any figure) — prefer a room that is still in play.
@@ -188,7 +274,11 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		ledger: {
 			chargesTotalCentavos: ledger.chargesTotalCentavos,
 			paidTotalCentavos: ledger.paidTotalCentavos,
-			balanceCentavos: ledger.balanceCentavos
+			balanceCentavos: ledger.balanceCentavos,
+			/** Security deposits kept for damage across the booking (each is one room's own credit). */
+			depositAppliedTotalCentavos: depositAppliedTotal,
+			/** Payments received, excluding deposit forfeitures. */
+			paymentsReceivedCentavos: ledger.paidTotalCentavos - depositAppliedTotal
 		},
 		payments: paymentRows.map((p) => ({
 			id: p.id,
@@ -202,7 +292,10 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			changeCentavos: p.changeCentavos,
 			paidAt: p.paidAt ? p.paidAt.toISOString() : null,
 			voidedAt: p.voidedAt ? p.voidedAt.toISOString() : null,
-			voidReason: p.voidReason
+			voidReason: p.voidReason,
+			// The room this payment was posted against (folio-tagged payments only) — deposit
+			// forfeitures always name their room.
+			lineTitle: p.folioId ? (lines.find((l) => l.id === lineOfFolio.get(p.folioId!))?.title ?? null) : null
 		})),
 		carrier: carrier ? { kind: carrier.kind, id: carrier.id } : null,
 		canCollect,

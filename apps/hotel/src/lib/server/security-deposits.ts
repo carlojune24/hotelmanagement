@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, ne } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import { db } from './db/index';
 import {
 	bookingRooms,
@@ -8,7 +8,9 @@ import {
 	hotels,
 	orders,
 	payments,
+	roomAssignments,
 	roomTypes,
+	rooms,
 	securityDepositPolicies,
 	securityDeposits,
 	type SecurityDeposit,
@@ -69,6 +71,10 @@ export async function getSecurityDepositForBooking(
 export interface SecurityDepositListRow {
 	id: string;
 	bookingId: string | null;
+	/** The parent booking (order) this room's deposit belongs to. */
+	orderId: string | null;
+	/** Assigned room number(s) of the booking this deposit is held against. */
+	roomNumbers: string[];
 	status: 'held' | 'settled' | 'voided';
 	amountCentavos: number;
 	method: PaymentMethod;
@@ -94,10 +100,11 @@ export async function listSecurityDeposits(
 	const conds = [eq(securityDeposits.hotelId, hotelId)];
 	if (opts.status) conds.push(eq(securityDeposits.status, opts.status));
 
-	return db
+	const rows = await db
 		.select({
 			id: securityDeposits.id,
 			bookingId: securityDeposits.bookingId,
+			orderId: bookings.orderId,
 			status: securityDeposits.status,
 			amountCentavos: securityDeposits.amountCentavos,
 			method: securityDeposits.method,
@@ -121,6 +128,28 @@ export async function listSecurityDeposits(
 		.leftJoin(roomTypes, eq(roomTypes.id, bookingRooms.roomTypeId))
 		.where(and(...conds))
 		.orderBy(desc(securityDeposits.collectedAt));
+
+	// Every deposit belongs to ONE room's booking; say which room, so a booking with several
+	// rooms reads as several separate deposits.
+	const bookingIds = [...new Set(rows.map((r) => r.bookingId).filter((v): v is string => !!v))];
+	const numbersByBooking = new Map<string, string[]>();
+	if (bookingIds.length > 0) {
+		const assigned = await db
+			.select({ bookingId: bookingRooms.bookingId, roomNumber: rooms.roomNumber })
+			.from(roomAssignments)
+			.innerJoin(bookingRooms, eq(bookingRooms.id, roomAssignments.bookingRoomId))
+			.innerJoin(rooms, eq(rooms.id, roomAssignments.roomId))
+			.where(inArray(bookingRooms.bookingId, bookingIds));
+		for (const a of assigned) {
+			const arr = numbersByBooking.get(a.bookingId) ?? [];
+			arr.push(a.roomNumber);
+			numbersByBooking.set(a.bookingId, arr);
+		}
+	}
+	return rows.map((r) => ({
+		...r,
+		roomNumbers: r.bookingId ? (numbersByBooking.get(r.bookingId) ?? []) : []
+	}));
 }
 
 /** Pure netting math, unit-testable without a DB — same extraction pattern as

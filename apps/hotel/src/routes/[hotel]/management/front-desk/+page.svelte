@@ -261,6 +261,19 @@
 
 	const selectedRoom = $derived(data.cells.find((c) => c.roomId === selectedRoomId) ?? null);
 
+	/** The form result is whatever action ran last (possibly another room's), so deposit state is only
+	 *  trusted for the SELECTED room once ITS detail has loaded and the deposit row belongs to it —
+	 *  otherwise settling one room made every other room's panel look settled. */
+	const selectedBookingId = $derived(selectedRoom?.occupant?.bookingId ?? null);
+	const roomDetailReady = $derived(
+		!!selectedBookingId && formRoomDetail?.booking.id === selectedBookingId
+	);
+	const roomDeposit = $derived(
+		roomDetailReady && formSecurityDeposit && formSecurityDeposit.bookingId === selectedBookingId
+			? formSecurityDeposit
+			: undefined
+	);
+
 	function statusCardClass(status: string): string {
 		switch (status) {
 			case 'occupied':
@@ -1458,9 +1471,9 @@
 								it to the folio below before checking out.
 							</p>
 						{/if}
-						{#if formSecurityDeposit?.status === 'held' && (selectedRoom.status === 'departing' || selectedRoom.status === 'occupied')}
+						{#if roomDeposit?.status === 'held' && (selectedRoom.status === 'departing' || selectedRoom.status === 'occupied')}
 							<p class="mb-2 text-xs text-danger">
-								Settle the ₱{(formSecurityDeposit.amountCentavos / 100).toFixed(
+								Settle the ₱{(roomDeposit.amountCentavos / 100).toFixed(
 									2
 								)} security deposit below before checking out.
 							</p>
@@ -1472,7 +1485,7 @@
 									<Button
 										type="submit"
 										class="w-full"
-										disabled={formSecurityDeposit?.status === 'held'}
+										disabled={!roomDetailReady || roomDeposit?.status === 'held'}
 									>
 										{selectedRoom.status === 'departing' ? 'Check out' : 'Check out early'}
 									</Button>
@@ -1776,13 +1789,13 @@
 									</div>
 								{/if}
 
-								{#if formSecurityDeposit?.status === 'held'}
+								{#if roomDeposit?.status === 'held'}
 									<div class="mt-4 border-t border-border pt-3">
 										<h4 class="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">
 											Security deposit
 										</h4>
 										<p class="text-sm text-ink">
-											Held: {peso(formSecurityDeposit.amountCentavos)}
+											Held: {peso(roomDeposit.amountCentavos)}
 										</p>
 										<form
 											method="POST"
@@ -1818,16 +1831,16 @@
 											<Button type="submit" size="sm" class="w-full">Settle deposit</Button>
 										</form>
 									</div>
-								{:else if formSecurityDeposit?.status === 'settled'}
+								{:else if roomDeposit?.status === 'settled'}
 									<div class="mt-4 border-t border-border pt-3">
 										<h4 class="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">
 											Security deposit
 										</h4>
 										<p class="text-sm text-ink-muted">
-											Settled — {formSecurityDeposit.forfeitedCentavos
-												? `₱${(formSecurityDeposit.forfeitedCentavos / 100).toFixed(2)} kept for damage, `
-												: ''}₱{((formSecurityDeposit.refundedCentavos ?? 0) / 100).toFixed(2)} refunded.
-											{#if formSecurityDeposit.forfeitedCentavos && formFolio && formFolio.balanceCentavos > 0}
+											Settled — {roomDeposit.forfeitedCentavos
+												? `₱${(roomDeposit.forfeitedCentavos / 100).toFixed(2)} kept for damage, `
+												: ''}₱{((roomDeposit.refundedCentavos ?? 0) / 100).toFixed(2)} refunded.
+											{#if roomDeposit.forfeitedCentavos && formFolio && formFolio.balanceCentavos > 0}
 												<span class="font-medium text-danger"
 													>₱{(formFolio.balanceCentavos / 100).toFixed(2)} of the damage is still due.</span
 												>

@@ -66,8 +66,15 @@
 							{r.guestName ?? '—'}
 							{#if r.roomTypeName}
 								<span class="block text-xs text-ink-muted">
-									{r.roomTypeName} · {r.checkIn} → {r.checkOut}
+									{r.roomNumbers.length ? `Room ${r.roomNumbers.join(', ')} · ` : ''}{r.roomTypeName} · {r.checkIn} → {r.checkOut}
 								</span>
+							{/if}
+							{#if r.orderId}
+								<a
+									href="/{page.params.hotel}/management/transactions/{r.orderId}"
+									class="block text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
+									>Open booking →</a
+								>
 							{/if}
 						</Table.Cell>
 						<Table.Cell class="text-right tabular-nums text-ink">{peso(r.amountCentavos)}</Table.Cell>
