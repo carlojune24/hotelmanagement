@@ -21,12 +21,15 @@ export async function createCheckoutSession(params: {
 	items: CheckoutLineItem[];
 	successUrl: string;
 	cancelUrl: string;
+	/** The guest chose to pay the whole bill now instead of just the policy's downpayment. */
+	payInFull?: boolean;
 }): Promise<{ checkoutSessionId: string; checkoutUrl: string }> {
-	const { order, guest, hotelName, items, successUrl, cancelUrl } = params;
+	const { order, guest, hotelName, items, successUrl, cancelUrl, payInFull } = params;
 
 	const peso = (c: number) => `₱${(c / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 	const dueNow = order.amountDueNowCentavos;
-	const isDownpayment = dueNow != null && dueNow > 0 && dueNow < order.totalCentavos;
+	const isDownpayment =
+		!payInFull && dueNow != null && dueNow > 0 && dueNow < order.totalCentavos;
 
 	let lineItems: Array<{
 		currency: string;

@@ -137,7 +137,9 @@ export const actions: Actions = {
 			hotelName: event.locals.hotel!.name,
 			items,
 			successUrl,
-			cancelUrl
+			cancelUrl,
+			// Only meaningful when the order has a downpayment; a pay-in-full order ignores it.
+			payInFull: (await event.request.formData()).get('option') === 'full'
 		});
 
 		await db

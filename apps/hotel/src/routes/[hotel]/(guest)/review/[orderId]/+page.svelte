@@ -11,6 +11,11 @@
 		`₱${(centavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 	let submitting = $state(false);
 	const partial = $derived(data.order.dueNowCentavos < data.order.totalCentavos);
+	/** With a downpayment policy the guest picks: just the downpayment, or the whole bill now. */
+	let payOption = $state<'partial' | 'full'>('partial');
+	const chargeNow = $derived(
+		partial && payOption === 'full' ? data.order.totalCentavos : data.order.dueNowCentavos
+	);
 
 	const itemCount = $derived(data.roomLines.length + data.hallLines.length);
 </script>
@@ -118,7 +123,7 @@
 	{#if !data.expired}
 		<p class="mt-4 text-xs text-[var(--ledger-ink-muted)]">
 			You'll be redirected to PayMongo to complete payment securely, then brought back here.
-			{#if partial}
+			{#if partial && payOption === 'partial'}
 				The remaining {peso(data.order.totalCentavos - data.order.dueNowCentavos)} is paid at the
 				hotel.
 			{/if}
@@ -140,8 +145,27 @@
 			}}
 			class="mt-6"
 		>
+			{#if partial}
+				<fieldset class="mb-4 space-y-2">
+					<legend class="ledger-label mb-1">How much would you like to pay now?</legend>
+					<label class="ledger-hairline flex cursor-pointer items-baseline justify-between gap-4 py-2">
+						<span class="flex items-baseline gap-2">
+							<input type="radio" name="option" value="partial" bind:group={payOption} />
+							<span>Downpayment — the rest at the hotel</span>
+						</span>
+						<span class="ledger-data">{peso(data.order.dueNowCentavos)}</span>
+					</label>
+					<label class="ledger-hairline flex cursor-pointer items-baseline justify-between gap-4 py-2">
+						<span class="flex items-baseline gap-2">
+							<input type="radio" name="option" value="full" bind:group={payOption} />
+							<span>Pay in full — nothing left to pay at the hotel</span>
+						</span>
+						<span class="ledger-data">{peso(data.order.totalCentavos)}</span>
+					</label>
+				</fieldset>
+			{/if}
 			<Button type="submit" class="ledger-btn-primary" disabled={submitting}>
-				{submitting ? 'Redirecting…' : `Pay ${peso(data.order.dueNowCentavos)} ${partial ? 'now ' : ''}with PayMongo`}
+				{submitting ? 'Redirecting…' : `Pay ${peso(chargeNow)} ${partial && payOption === 'partial' ? 'now ' : ''}with PayMongo`}
 			</Button>
 		</form>
 	{/if}
