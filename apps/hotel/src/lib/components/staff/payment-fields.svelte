@@ -72,10 +72,24 @@
 			!(method === 'cash' && mode === 'payment' && tendered !== '' && changeCentavos < 0)
 	);
 
+	/** While true, the amount applied follows the cash actually received (up to the balance) — the
+	 *  Full / 50% buttons only *suggest* an amount, they don't fix it. Typing in the Amount box
+	 *  itself is the explicit override (e.g. take less than what the guest handed over). */
+	let amountAuto = $state(true);
+	$effect(() => {
+		if (mode !== 'payment' || method !== 'cash' || !amountAuto || tendered === '') return;
+		const applied = Math.min(Math.max(0, tenderedCentavos), balanceCentavos);
+		if (applied > 0) amount = (applied / 100).toFixed(2);
+	});
+
 	function setFull() {
+		tendered = '';
+		amountAuto = true;
 		amount = (balanceCentavos / 100).toFixed(2);
 	}
 	function setHalf() {
+		tendered = '';
+		amountAuto = true;
 		amount = (Math.round(balanceCentavos / 2) / 100).toFixed(2);
 	}
 	function addTender(n: number) {
@@ -114,7 +128,15 @@
 		</div>
 		<div>
 			<Label class="text-xs">{mode === 'refund' ? 'Refund amount' : 'Amount'} (₱)</Label>
-			<Input name="amount" type="number" min="0.01" step="0.01" bind:value={amount} class="mt-1" />
+			<Input
+				name="amount"
+				type="number"
+				min="0.01"
+				step="0.01"
+				bind:value={amount}
+				oninput={() => (amountAuto = false)}
+				class="mt-1"
+			/>
 		</div>
 	</div>
 
@@ -170,6 +192,11 @@
 			{#if tendered !== ''}
 				<p class="mt-1.5 text-sm font-semibold {changeCentavos < 0 ? 'text-danger' : 'text-ok'}">
 					{changeCentavos < 0 ? 'Short by ' : 'Change due '}{peso(Math.abs(changeCentavos))}
+				</p>
+				<p class="text-xs text-ink-muted">
+					Applies {peso(amountCentavos)} to the booking{balanceCentavos - amountCentavos > 0
+						? ` — ${peso(balanceCentavos - amountCentavos)} still due after this`
+						: ' — settles the balance'}.
 				</p>
 			{/if}
 		</div>
