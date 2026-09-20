@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Version comes from the root package.json `packageManager` field.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Typecheck (svelte-check + tsc across every workspace package).
+      - run: pnpm check
+
+      # Unit tests. None of them touch Postgres, so no service container is needed;
+      # DATABASE_URL is a dummy only so modules that read it at import time don't throw.
+      - run: pnpm test
+        env:
+          DATABASE_URL: postgres://ci:ci@localhost:5432/ci
