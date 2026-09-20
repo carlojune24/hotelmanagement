@@ -30,6 +30,7 @@ import { openReceivable } from '$lib/server/finance/receivables';
 import { getFinanceSettings } from '$lib/server/finance/settings';
 import { getDefaultOpenShift } from '$lib/server/finance/shifts';
 import { FolioError, getOrderIdForTarget, getOrderLedger, type FolioTarget } from '$lib/server/folio';
+import { summariseRefund } from '$lib/refund-status';
 import type { Actions, PageServerLoad } from './$types';
 
 const PAYMENT_METHODS = ['cash', 'card', 'gcash', 'maya', 'bank_transfer', 'cheque'] as const;
@@ -201,6 +202,25 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			cityLedgerByLine.set(lineId, (cityLedgerByLine.get(lineId) ?? 0) + p.amountCentavos);
 	}
 
+	// Refund rows tagged to each room (cancellation refunds), for the cancelled rooms' refund status.
+	const refundsByLine = new Map<
+		string,
+		{ amountCentavos: number; status: 'paid' | 'pending' | 'failed'; method: string; when: string | null }[]
+	>();
+	for (const p of paymentRows) {
+		if (p.purpose !== 'refund' || p.voidedAt || !p.folioId) continue;
+		const lineId = lineOfFolio.get(p.folioId);
+		if (!lineId) continue;
+		const arr = refundsByLine.get(lineId) ?? [];
+		arr.push({
+			amountCentavos: p.amountCentavos,
+			status: p.status as 'paid' | 'pending' | 'failed',
+			method: p.method,
+			when: (p.paidAt ?? p.createdAt).toISOString()
+		});
+		refundsByLine.set(lineId, arr);
+	}
+
 	const chargeView = (lineId: string, total: number, stayLabel: string) => {
 		const rows = chargesByLine.get(lineId);
 		if (!rows || rows.length === 0) {
@@ -263,6 +283,15 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			/** What this room has been paid in real money (deposit kept and city-ledger moves shown apart). */
 			paymentsCentavos: paid - depositApplied - cityLedgerMoved,
 			balanceCentavos: l?.balanceCentavos ?? 0,
+			cancelled: base.status === 'cancelled' || base.status === 'no_show',
+			/** For a cancelled room: the fee it kept (its remaining charges) and how its refund stands. */
+			feeKeptCentavos:
+				base.status === 'cancelled' || base.status === 'no_show' ? (l?.chargesCentavos ?? 0) : 0,
+			refund:
+				base.status === 'cancelled' || base.status === 'no_show'
+					? summariseRefund(refundsByLine.get(base.id) ?? [], l?.balanceCentavos ?? 0)
+					: null,
+			refundLines: refundsByLine.get(base.id) ?? [],
 			deposit: dep
 				? {
 						status: dep.status,
@@ -340,6 +369,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			? roleCan(locals.role.capabilities, 'hotel:admin')
 			: false;
 
+	const cancelledCount = lines.filter((l) => l.cancelled).length;
 	const depositAppliedTotal = lines.reduce((sum, l) => sum + l.depositAppliedCentavos, 0);
 	const cityLedgerTotal = lines.reduce((sum, l) => sum + l.cityLedgerMovedCentavos, 0);
 	const carrier = lines.find((l) => l.kind === 'room' && LIVE.has(l.status)) ?? lines[0] ?? null;
@@ -358,6 +388,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			phone: guest?.phone ?? null
 		},
 		lines,
+		cancelledCount,
 		ledger: {
 			chargesTotalCentavos: ledger.chargesTotalCentavos,
 			paidTotalCentavos: ledger.paidTotalCentavos,

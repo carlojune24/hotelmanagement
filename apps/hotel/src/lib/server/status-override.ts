@@ -11,6 +11,7 @@ import {
 	orders,
 	orderStatusHistory,
 	payments,
+	roomAssignments,
 	rooms
 } from './db/schema/index';
 import { writeAudit } from './audit';
@@ -248,19 +249,40 @@ export async function reinstateBooking(input: {
 				)
 			);
 		const totalRooms = totalRow?.n ?? 0;
-		const bookedRows = await db
-			.select({ quantity: bookingRooms.quantity })
-			.from(bookingRooms)
-			.innerJoin(bookings, eq(bookings.id, bookingRooms.bookingId))
-			.where(
-				and(
-					eq(bookingRooms.roomTypeId, roomTypeId),
-					inArray(bookings.status, [...ACTIVE_BOOKING_STATUSES]),
-					lt(bookings.checkIn, checkOut),
-					gt(bookings.checkOut, checkIn)
+		// Same split `searchAvailability` uses, so this never disagrees with what the front desk sees:
+		// - not yet checked in (pending / confirmed): blocked by the booking's OWN dates, `quantity` rooms;
+		// - checked in / out: blocked by each room's ASSIGNMENT dates (one row per room held), so an
+		//   early checkout genuinely frees the room instead of blocking it through the old date.
+		const [preAssigned, assigned] = await Promise.all([
+			db
+				.select({ quantity: bookingRooms.quantity })
+				.from(bookingRooms)
+				.innerJoin(bookings, eq(bookings.id, bookingRooms.bookingId))
+				.where(
+					and(
+						eq(bookings.hotelId, input.hotelId),
+						eq(bookingRooms.roomTypeId, roomTypeId),
+						inArray(bookings.status, ['pending_payment', 'confirmed']),
+						lt(bookings.checkIn, checkOut),
+						gt(bookings.checkOut, checkIn)
+					)
+				),
+			db
+				.select({ id: roomAssignments.id })
+				.from(roomAssignments)
+				.innerJoin(bookingRooms, eq(bookingRooms.id, roomAssignments.bookingRoomId))
+				.innerJoin(bookings, eq(bookings.id, bookingRooms.bookingId))
+				.where(
+					and(
+						eq(bookings.hotelId, input.hotelId),
+						eq(bookingRooms.roomTypeId, roomTypeId),
+						inArray(bookings.status, ['checked_in', 'checked_out']),
+						lt(roomAssignments.checkIn, checkOut),
+						gt(roomAssignments.checkOut, checkIn)
+					)
 				)
-			);
-		const booked = bookedRows.reduce((sum, r) => sum + r.quantity, 0);
+		]);
+		const booked = preAssigned.reduce((sum, r) => sum + r.quantity, 0) + assigned.length;
 		if (totalRooms - booked < quantity) {
 			throw new StatusOverrideError('No rooms of this type are free for these dates anymore.');
 		}

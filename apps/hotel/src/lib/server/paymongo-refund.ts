@@ -124,8 +124,12 @@ export async function refundOrderViaPaymongo(params: {
 	amountCentavos: number;
 	notes: string;
 	actor: SessionUser | null;
+	/** The cancelled room's folio. Tagging each refund row to it makes the refund lower ONLY that room's
+	 *  paid amount — an untagged row would be shared across every room of the booking by price. */
+	folioId?: string | null;
 }): Promise<RefundOrderViaPaymongoResult> {
 	const { hotelId, orderId, amountCentavos, notes, actor } = params;
+	const refundFolioId = params.folioId ?? null;
 	if (amountCentavos <= 0) return { refundedCentavos: 0, refundPaymentIds: [] };
 
 	const origins = await eligibleOriginPayments(hotelId, orderId);
@@ -197,6 +201,7 @@ export async function refundOrderViaPaymongo(params: {
 				status: 'failed',
 				amountCentavos: -chunk,
 				refundsPaymentId: origin.id,
+				folioId: refundFolioId,
 				paymongoRefundId: refund.id,
 				rawPayload: { data: refund },
 				recordedByUserId: actor?.id ?? null
@@ -222,6 +227,7 @@ export async function refundOrderViaPaymongo(params: {
 					status: viaQrPh ? 'pending' : 'paid',
 					amountCentavos: -chunk,
 					refundsPaymentId: origin.id,
+					folioId: refundFolioId,
 					paymongoRefundId: refund.id,
 					rawPayload: { data: refund },
 					recordedByUserId: actor?.id ?? null,

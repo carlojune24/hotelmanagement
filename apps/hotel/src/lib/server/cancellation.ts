@@ -435,7 +435,9 @@ export async function cancelBooking(input: CancelBookingInput): Promise<CancelBo
 						orderId,
 						amountCentavos: refundNow,
 						notes: reason,
-						actor
+						actor,
+						// Tag the refund to THIS room so it lowers only this room's paid amount.
+						folioId: await db.transaction((tx) => ensureFolio(tx, hotelId, target))
 					});
 				} catch (e) {
 					if (e instanceof FinanceError) throw new CancellationError(e.message);

@@ -25,6 +25,15 @@
 		paymentsCentavos: number;
 		cityLedgerMovedCentavos: number;
 		balanceCentavos: number;
+		cancelled: boolean;
+		feeKeptCentavos: number;
+		refund: {
+			state: string;
+			refundedCentavos: number;
+			pendingCentavos: number;
+			failedCentavos: number;
+			owedCentavos: number;
+		} | null;
 	}
 	interface Payment {
 		id: string;
@@ -80,6 +89,15 @@
 	const when = (iso: string | null) =>
 		iso ? new Date(iso).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 	const balance = $derived(d.ledger.balanceCentavos);
+	const refundText = (l: Line) => {
+		const r = l.refund;
+		if (!r) return '';
+		if (r.state === 'refunded') return `Refunded ${peso(r.refundedCentavos)}`;
+		if (r.state === 'pending') return `Refund pending ${peso(r.pendingCentavos)} (waiting for the guest to claim it)`;
+		if (r.state === 'failed') return `Refund FAILED — ${peso(r.failedCentavos)} not returned`;
+		if (r.state === 'owed') return `Refund still owed ${peso(r.owedCentavos)}`;
+		return 'No refund — fee kept';
+	};
 </script>
 
 <div class="ts-page">
@@ -114,6 +132,9 @@
 					<strong>{l.title}</strong>
 					<span class="ts-soft">{l.detail} · {label(l.status)}</span>
 				</div>
+				{#if l.cancelled}
+					<div class="ts-note-line"><strong>CANCELLED</strong> — fee kept {peso(l.feeKeptCentavos)} · {refundText(l)}</div>
+				{/if}
 				<table>
 					<tbody>
 						{#each l.charges as c (c.id)}
@@ -202,11 +223,14 @@
 		<div class="ts-label">Whole booking</div>
 		<table class="ts-sum">
 			<tbody>
-				{#each d.lines as l (l.id)}
+				{#each d.lines.filter((x) => !x.cancelled) as l (l.id)}
 					<tr>
 						<td>{l.title}</td>
 						<td class="ts-num">{peso(l.chargesCentavos)}</td>
 					</tr>
+				{/each}
+				{#each d.lines.filter((x) => x.cancelled) as l (l.id)}
+					<tr><td>{l.title} — cancelled ({refundText(l)})</td><td class="ts-num">{peso(l.feeKeptCentavos)}</td></tr>
 				{/each}
 				<tr class="ts-sub"><td>Total charges</td><td class="ts-num">{peso(d.ledger.chargesTotalCentavos)}</td></tr>
 				{#if d.ledger.depositAppliedTotalCentavos > 0}
@@ -317,6 +341,10 @@
 	.ts-room {
 		margin-bottom: 3mm;
 		break-inside: avoid;
+	}
+	.ts-note-line {
+		font-size: 8.5pt;
+		padding-bottom: 1mm;
 	}
 	.ts-room-head {
 		display: flex;

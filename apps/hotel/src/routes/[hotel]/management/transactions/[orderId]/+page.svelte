@@ -89,6 +89,19 @@
 		iso ? new Date(iso).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 	const reservationHref = (l: { kind: 'room' | 'hall'; id: string }) =>
 		`${staffBase}/reservations/${l.kind}/${l.id}`;
+	const refundBadge = (l: Line) => {
+		const r = l.refund;
+		if (!r) return null;
+		if (r.state === 'refunded')
+			return { text: `Refunded ${peso(r.refundedCentavos)}`, cls: 'border-transparent bg-ok/15 text-ok' };
+		if (r.state === 'pending')
+			return { text: `Refund pending ${peso(r.pendingCentavos)} — waiting for the guest to claim it`, cls: 'border-transparent bg-warning/15 text-warning' };
+		if (r.state === 'failed')
+			return { text: `Refund failed — ${peso(r.failedCentavos)} not returned`, cls: 'border-transparent bg-danger/15 text-danger' };
+		if (r.state === 'owed')
+			return { text: `Refund still owed ${peso(r.owedCentavos)}`, cls: 'border-transparent bg-danger/15 text-danger' };
+		return { text: 'No refund — fee kept', cls: 'border-border bg-surface-2 text-ink-muted' };
+	};
 	const canResplit = (p: PageData['payments'][number]) =>
 		data.canCollect &&
 		multiRoom &&
@@ -116,6 +129,11 @@
 				{#if data.order.amountDueNowCentavos != null}
 					<Badge variant="outline" class="border-border bg-surface-2 text-ink-muted">
 						Online downpayment
+					</Badge>
+				{/if}
+				{#if data.cancelledCount > 0}
+					<Badge variant="outline" class="border-transparent bg-danger/15 text-danger">
+						{data.cancelledCount} of {data.lines.length} room{data.lines.length === 1 ? '' : 's'} cancelled
 					</Badge>
 				{/if}
 			</div>
@@ -173,6 +191,21 @@
 							</div>
 							<Badge variant="outline" class={statusClass(l.status)}>{statusLabel(l.status)}</Badge>
 						</div>
+
+						{#if l.cancelled}
+							{@const rb = refundBadge(l)}
+							<div class="space-y-1 border-b border-border bg-surface-2 px-3 py-2 text-sm">
+								<div class="flex flex-wrap items-center gap-2">
+									<span class="text-ink">Cancelled — fee kept {peso(l.feeKeptCentavos)}</span>
+									{#if rb}<Badge variant="outline" class={rb.cls}>{rb.text}</Badge>{/if}
+								</div>
+								{#each l.refundLines as r, i (i)}
+									<div class="text-xs text-ink-muted">
+										{when(r.when)} · {methodLabel[r.method] ?? r.method} refund {peso(r.amountCentavos)} · {r.status}
+									</div>
+								{/each}
+							</div>
+						{/if}
 
 						<div class="divide-y divide-border text-sm">
 							{#each l.charges as c (c.id)}
@@ -412,7 +445,7 @@
 					Whole booking — the complete picture
 				</h2>
 				<dl class="divide-y divide-border text-sm">
-					{#each data.lines as l (l.id)}
+					{#each data.lines.filter((x) => !x.cancelled) as l (l.id)}
 						<div class="flex items-center justify-between gap-3 px-3 py-1.5">
 							<dt class="text-ink-muted">{l.title}</dt>
 							<dd class="tabular-nums">
@@ -424,6 +457,19 @@
 										? 'settled'
 										: `${l.balanceCentavos < 0 ? 'credit' : 'owes'} ${peso(l.balanceCentavos)}`}
 								</span>
+							</dd>
+						</div>
+					{/each}
+					{#each data.lines.filter((x) => x.cancelled) as l (l.id)}
+						{@const rb = refundBadge(l)}
+						<div class="flex items-center justify-between gap-3 px-3 py-1.5">
+							<dt class="text-ink-muted">
+								{l.title}
+								<span class="text-danger">— cancelled</span>{#if rb}<span class="block text-xs">{rb.text}</span>{/if}
+							</dt>
+							<dd class="tabular-nums text-ink">
+								{peso(l.feeKeptCentavos)}
+								<span class="ml-1 text-xs text-ink-muted">fee kept</span>
 							</dd>
 						</div>
 					{/each}

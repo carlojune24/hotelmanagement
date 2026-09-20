@@ -165,6 +165,9 @@
 							</Table.Cell>
 							<Table.Cell>
 								<Badge variant="outline" class={statusClass(r.status)}>{statusLabel[r.status]}</Badge>
+								{#if r.cancelledCount > 0 && r.status !== 'cancelled'}
+									<span class="mt-1 block text-xs text-danger">{r.cancelledCount} of {r.lineCount} cancelled</span>
+								{/if}
 							</Table.Cell>
 							<Table.Cell class="text-right tabular-nums text-ink">{peso(r.chargesCentavos)}</Table.Cell>
 							<Table.Cell class="text-right tabular-nums text-ink-muted">{peso(r.paidCentavos)}</Table.Cell>

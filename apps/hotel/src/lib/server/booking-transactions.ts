@@ -15,6 +15,8 @@ import { loadOrderLedgers } from './folio';
 
 export interface BookingTransactionRow {
 	orderId: string;
+	/** When the booking was made — the list is newest first by this. */
+	createdAt: string;
 	code: string;
 	guestName: string;
 	guestEmail: string;
@@ -25,6 +27,8 @@ export interface BookingTransactionRow {
 	checkOut: string;
 	lineCount: number;
 	status: 'confirmed' | 'in_house' | 'checked_out' | 'cancelled';
+	/** How many of the booking's rooms/events are cancelled (a partly cancelled booking keeps its live status). */
+	cancelledCount: number;
 	chargesCentavos: number;
 	paidCentavos: number;
 	balanceCentavos: number;
@@ -82,6 +86,7 @@ export async function listBookingTransactions(
 		db
 			.select({
 				id: orders.id,
+				createdAt: orders.createdAt,
 				guestName: guests.fullName,
 				guestEmail: guests.email
 			})
@@ -154,6 +159,7 @@ export async function listBookingTransactions(
 		const ledger = ledgers.get(o.id);
 		out.push({
 			orderId: o.id,
+			createdAt: o.createdAt.toISOString(),
 			code,
 			guestName: o.guestName,
 			guestEmail: o.guestEmail,
@@ -162,10 +168,14 @@ export async function listBookingTransactions(
 			checkOut: ends[ends.length - 1] ?? '',
 			lineCount: rl.length + hl.length,
 			status: summariseStatus([...rl.map((l) => l.status), ...hl.map((l) => l.status)]),
+			cancelledCount: [...rl.map((l) => l.status), ...hl.map((l) => l.status)].filter(
+				(x) => x === 'cancelled' || x === 'no_show'
+			).length,
 			chargesCentavos: ledger?.chargesTotalCentavos ?? 0,
 			paidCentavos: ledger?.paidTotalCentavos ?? 0,
 			balanceCentavos: ledger?.balanceCentavos ?? 0
 		});
 	}
-	return out.sort((a, b) => (a.checkIn < b.checkIn ? 1 : a.checkIn > b.checkIn ? -1 : 0));
+	// Newest booking first.
+	return out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
 }
