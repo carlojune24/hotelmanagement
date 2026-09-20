@@ -7,6 +7,9 @@ declare global {
 		interface Error {
 			message: string;
 			code?: string;
+			/** Short reference ID minted by `handleError` for an unexpected (5xx) failure, so a
+			 *  visitor can quote it and staff can find the matching server log line. */
+			ref?: string;
 		}
 
 		interface Locals {

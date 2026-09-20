@@ -1,4 +1,4 @@
-import { error, type Handle, type Reroute } from '@sveltejs/kit';
+import { error, type Handle, type HandleServerError, type Reroute } from '@sveltejs/kit';
 import {
 	SESSION_COOKIE,
 	deleteSessionCookie,
@@ -117,4 +117,19 @@ export const handle: Handle = async ({ event, resolve }) => {
 	}
 
 	return resolve(event);
+};
+
+/** Unexpected failures only — a deliberate `error(4xx, …)` never reaches here. Mints a short
+ *  reference ID, logs the full error against it, and hands the page a generic message so a
+ *  stack trace or SQL error never leaves the server. */
+export const handleError: HandleServerError = ({ error: err, event, status, message }) => {
+	if (status < 500) return { message };
+
+	const ref = crypto.randomUUID().slice(0, 8).toUpperCase();
+	console.error(
+		`[error ${ref}] ${event.request.method} ${event.url.pathname}`,
+		`route=${event.route.id ?? '-'} user=${event.locals.user?.id ?? '-'} hotel=${event.locals.hotel?.id ?? '-'}`,
+		err
+	);
+	return { message: 'Something went wrong on our side.', ref };
 };
