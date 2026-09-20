@@ -611,30 +611,23 @@
 			{@const f = data.detail.folio}
 			{@const multi = f.orderLineCount > 1}
 			<div class="mb-3 space-y-1 border-b border-border pb-3 text-sm">
-				{#if multi}
-					<div class="flex justify-between">
-						<span class="text-ink-muted">This {data.kind === 'room' ? 'room' : 'event'}</span>
-						<span class="text-ink">{peso(f.chargesTotalCentavos)}</span>
-					</div>
-					<div class="flex justify-between">
-						<span class="text-ink-muted">Whole booking ({f.orderLineCount} rooms/events)</span>
-						<span class="text-ink">{peso(f.orderChargesTotalCentavos)}</span>
-					</div>
-				{:else}
-					<div class="flex justify-between">
-						<span class="text-ink-muted">Charges</span>
-						<span class="text-ink">{peso(f.chargesTotalCentavos)}</span>
-					</div>
-				{/if}
 				<div class="flex justify-between">
-					<span class="text-ink-muted">Paid{multi ? ' (whole booking)' : ''}</span>
+					<span class="text-ink-muted">Charges{multi ? ` (this ${data.kind === 'room' ? 'room' : 'event'})` : ''}</span>
+					<span class="text-ink">{peso(f.chargesTotalCentavos)}</span>
+				</div>
+				<div class="flex justify-between">
+					<span class="text-ink-muted">Paid{multi ? ' on this room' : ''}</span>
 					<span class="text-ink">−{peso(f.paidTotalCentavos)}</span>
 				</div>
 				<div class="flex justify-between font-semibold {f.balanceCentavos > 0 ? 'text-danger' : 'text-ink'}">
-					<span>{f.balanceCentavos < 0 ? 'Credit' : multi ? 'Booking balance due' : 'Balance due'}</span>
+					<span>{f.balanceCentavos < 0 ? 'Room credit' : 'Room balance due'}</span>
 					<span>{peso(Math.abs(f.balanceCentavos))}</span>
 				</div>
 				{#if multi}
+					<div class="flex justify-between pt-1 text-xs text-ink-muted">
+						<span>Whole booking ({f.orderLineCount} rooms/events): {peso(f.orderChargesTotalCentavos)}</span>
+						<span>{f.orderBalanceCentavos > 0 ? `owes ${peso(f.orderBalanceCentavos)}` : 'settled'}</span>
+					</div>
 					<div class="pt-1">
 						<Button variant="outline" size="sm" href="{staffBase}/transactions/{data.detail.order.id}">
 							Open transaction

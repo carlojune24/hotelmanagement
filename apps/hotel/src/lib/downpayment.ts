@@ -35,3 +35,28 @@ export function computeDownpayment(lines: DownpaymentLine[]): DownpaymentSplit {
 	due = Math.min(Math.max(due, 0), total);
 	return { dueNowCentavos: due, dueAtHotelCentavos: total - due };
 }
+
+/** Splits an order-level payment across the order's lines in proportion to each line's total,
+ *  largest-remainder so the shares add up to exactly `paidCentavos`. Deterministic: ties go to
+ *  the earlier line. A negative `paidCentavos` (a refund row) allocates the same way, mirrored. */
+export function allocateOrderPayment(paidCentavos: number, lineTotals: number[]): number[] {
+	const sum = lineTotals.reduce((a, b) => a + b, 0);
+	if (lineTotals.length === 0) return [];
+	if (sum <= 0) return lineTotals.map((_, i) => (i === 0 ? paidCentavos : 0));
+
+	const sign = paidCentavos < 0 ? -1 : 1;
+	const amount = Math.abs(paidCentavos);
+	const exact = lineTotals.map((t) => (amount * t) / sum);
+	const shares = exact.map(Math.floor);
+	let remainder = amount - shares.reduce((a, b) => a + b, 0);
+
+	const order = exact
+		.map((e, i) => ({ i, frac: e - Math.floor(e) }))
+		.sort((a, b) => b.frac - a.frac || a.i - b.i);
+	for (const { i } of order) {
+		if (remainder <= 0) break;
+		shares[i]! += 1;
+		remainder -= 1;
+	}
+	return shares.map((s) => sign * s);
+}

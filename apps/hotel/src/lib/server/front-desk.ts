@@ -22,7 +22,8 @@ import { ACTIVE_BOOKING_STATUSES, getAvailableRoomType } from './availability';
 import { checkHallAvailability } from './hall-availability';
 import { wallTimeToUtcMs } from './cancellation';
 import { FolioError, closeFolio, getFolioDetail } from './folio';
-import { orderBalances } from './order-balances';
+import { planInRoomOrder } from '$lib/allocation';
+import { lineBalances } from './order-balances';
 import { getSecurityDepositForBooking } from './security-deposits';
 import { recordWalkInPayment, resolvePaymentAccount, type PaymentMethod } from './finance/payments';
 import { openReceivable } from './finance/receivables';
@@ -285,7 +286,7 @@ export interface RoomGridOccupant {
 	totalCentavos: number;
 	/** `payments.provider` for the order's paid payment — `'cash'` (walk-in) or `'paymongo'` (booked online). */
 	channel: string;
-	/** Still owed on the whole booking (the order), not just this room; 0 = settled. */
+	/** Still owed on this room; 0 = settled. */
 	balanceCentavos: number;
 	/** The hotel's daily `checkOutTime` policy applied to this room's own checkout
 	 *  date (`checkOut`), resolved to a UTC instant — when the front-desk panel's
@@ -301,7 +302,7 @@ export interface RoomGridArrival {
 	guestName: string;
 	roomTypeName: string;
 	channel: string;
-	/** Still owed on the whole booking (the order — e.g. the rest of a downpayment). 0 = settled. */
+	/** Still owed on THIS room (e.g. the rest of a downpayment). 0 = settled. */
 	balanceCentavos: number;
 }
 
@@ -339,7 +340,7 @@ export interface RoomGridCell {
  * arrivals/departures lists the side rail's default view uses. Unlike the
  * booking-centric list this replaced, this starts from `rooms` so a genuinely
  * vacant room (no booking at all) still shows up — the whole point of a rack
- * view. A confirmed arrival's "reserved" flag points at its *room type* (every
+ * view. A confirmed arrival's "reserved" flag points at its *room type* (only as many of the type's free rooms as it needs, the first in grid order — not every
  * unassigned arrival of that type) unless the front-desk grid's pick mode
  * already pre-assigned it a specific `room_assignments` row at booking time —
  * in that case the exact room shows reserved for that one guest instead.
@@ -419,7 +420,8 @@ export async function getRoomStatusGrid(
 			orderId: orders.id,
 			assignmentId: roomAssignments.id,
 			assignedRoomId: roomAssignments.roomId,
-			totalCentavos: bookings.totalCentavos
+			totalCentavos: bookings.totalCentavos,
+			quantity: bookingRooms.quantity
 		})
 		.from(bookings)
 		.innerJoin(bookingRooms, eq(bookingRooms.bookingId, bookings.id))
@@ -457,9 +459,9 @@ export async function getRoomStatusGrid(
 		}
 	}
 
-	const balances = await orderBalances(hotelId, orderIds);
-	// The booking's balance (one figure for every room of the order), never a per-room share.
-	const balanceOf = (orderId: string) => Math.max(0, balances.get(orderId) ?? 0);
+	const balances = await lineBalances(hotelId, orderIds);
+	// Each room's own balance (charges minus what that room has been paid).
+	const balanceOf = (bookingId: string) => Math.max(0, balances.get(bookingId) ?? 0);
 
 	const arrivalsByRoomType = new Map<string, RoomGridArrival[]>();
 	const arrivals: RoomGridArrival[] = unassignedArrivals.map((r) => {
@@ -468,7 +470,7 @@ export async function getRoomStatusGrid(
 			guestName: r.guestName,
 			roomTypeName: r.roomTypeName,
 			channel: channelByOrder.get(r.orderId) ?? 'paymongo',
-			balanceCentavos: balanceOf(r.orderId)
+			balanceCentavos: balanceOf(r.bookingId)
 		};
 		const list = arrivalsByRoomType.get(r.roomTypeId) ?? [];
 		list.push(arrival);
@@ -483,7 +485,7 @@ export async function getRoomStatusGrid(
 			guestName: r.guestName,
 			roomTypeName: r.roomTypeName,
 			channel: channelByOrder.get(r.orderId) ?? 'paymongo',
-			balanceCentavos: balanceOf(r.orderId)
+			balanceCentavos: balanceOf(r.bookingId)
 		});
 	}
 
@@ -495,13 +497,21 @@ export async function getRoomStatusGrid(
 				guestName: r.guestName,
 				roomTypeName: r.roomTypeName,
 				channel: channelByOrder.get(r.orderId) ?? 'paymongo',
-				balanceCentavos: balanceOf(r.orderId)
+				balanceCentavos: balanceOf(r.bookingId)
 			}
 		])
 	);
 
 	const occupantByRoomId = new Map(occupantRows.map((r) => [r.roomId, r]));
 	const departures: RoomGridDeparture[] = [];
+
+	// An arrival with no room picked yet needs `quantity` rooms of its TYPE — not every room of the
+	// type. Reserve only that many of the type's free rooms (the first ones in grid order); the rest
+	// stay vacant and bookable. Which physical room the guest gets is still decided at check-in.
+	const unassignedSlots = new Map<string, number>();
+	for (const r of unassignedArrivals) {
+		unassignedSlots.set(r.roomTypeId, (unassignedSlots.get(r.roomTypeId) ?? 0) + r.quantity);
+	}
 
 	const cells: RoomGridCell[] = roomRows.map((room) => {
 		const occ = occupantByRoomId.get(room.roomId);
@@ -521,7 +531,7 @@ export async function getRoomStatusGrid(
 				ratePlanName: occ.ratePlanName,
 				totalCentavos: occ.totalCentavos,
 				channel: channelByOrder.get(occ.orderId) ?? 'paymongo',
-				balanceCentavos: balanceOf(occ.orderId),
+				balanceCentavos: balanceOf(occ.bookingId),
 				checkoutAtIso: new Date(
 					wallTimeToUtcMs(occ.assignmentCheckOut, checkOutTime, timezone)
 				).toISOString()
@@ -540,8 +550,9 @@ export async function getRoomStatusGrid(
 			status = 'ooo';
 		} else if (reservedByRoomId.has(room.roomId)) {
 			status = 'reserved';
-		} else if (arrivalsByRoomType.has(room.roomTypeId)) {
+		} else if ((unassignedSlots.get(room.roomTypeId) ?? 0) > 0) {
 			status = 'reserved';
+			unassignedSlots.set(room.roomTypeId, unassignedSlots.get(room.roomTypeId)! - 1);
 		} else {
 			status = 'vacant';
 		}
@@ -703,6 +714,9 @@ export async function previewWalkInAvailability(
  * single-payment-per-order design, already present for multi-room online orders.
  */
 export interface WalkInPaymentInput {
+	/** Optional per-room split of the amount paid, one entry per cart line in cart order (centavos).
+	 *  Absent = filled in room order, first room fully first. */
+	allocationsCentavos?: number[];
 	method: PaymentMethod;
 	tenderedCentavos?: number | null;
 	referenceNo?: string | null;
@@ -721,6 +735,37 @@ export function walkInAmountPaid(totalCentavos: number, payment: WalkInPaymentIn
 		throw new WalkInError('Enter the cash received, or leave it blank to take the full amount.');
 	}
 	return Math.min(totalCentavos, payment.tenderedCentavos);
+}
+
+/** The per-room split of a walk-in payment: the caller's own amounts when given (validated to add up
+ *  and not exceed any room's bill), otherwise room order — the first room fully first. */
+function walkInAllocations(
+	bookingIds: string[],
+	roomTotals: number[],
+	amountPaid: number,
+	requested: number[] | undefined
+): { bookingId: string; amountCentavos: number }[] {
+	if (requested) {
+		if (requested.length !== bookingIds.length)
+			throw new WalkInError('Assign the payment to every room.');
+		const sum = requested.reduce((a, b) => a + b, 0);
+		if (requested.some((n) => !Number.isInteger(n) || n < 0))
+			throw new WalkInError("Each room's amount must be zero or more.");
+		if (requested.some((n, i) => n > roomTotals[i]!))
+			throw new WalkInError('A room was given more than its bill.');
+		if (sum !== amountPaid)
+			throw new WalkInError(
+				sum < amountPaid
+					? 'Some of the payment is not assigned to a room yet.'
+					: 'More than the payment was assigned to the rooms.'
+			);
+		return bookingIds.map((bookingId, i) => ({ bookingId, amountCentavos: requested[i]! }));
+	}
+	const plan = planInRoomOrder(
+		amountPaid,
+		bookingIds.map((id, i) => ({ id, balanceCentavos: roomTotals[i]! }))
+	);
+	return plan.allocations.map((a) => ({ bookingId: a.id, amountCentavos: a.amountCentavos }));
 }
 
 export async function createWalkInBooking(params: {
@@ -964,7 +1009,18 @@ export async function createWalkInBooking(params: {
 			shiftId,
 			businessDate,
 			guestName: guest.fullName.trim(),
-			actor
+			actor,
+			// One payment, split across the rooms so each room keeps its own record. A single-room
+			// booking needs no split.
+			allocations:
+				bookingIds.length > 1
+					? walkInAllocations(
+							bookingIds,
+							lines.map((l) => l.price.totalCentavos),
+							walkInAmountPaid(totalCentavos, payment),
+							payment.allocationsCentavos
+						)
+					: undefined
 		});
 
 		return {
@@ -1037,7 +1093,7 @@ export async function checkOutBooking(
 	if (folio.balanceCentavos > 0) {
 		if (!cityLedger) {
 			throw new CheckOutError(
-				`Settle the booking's outstanding balance of ₱${(folio.balanceCentavos / 100).toFixed(2)} before checking out${folio.orderLineCount > 1 ? ' — every room of a multi-room booking is settled together' : ''}.`
+				`Settle this room's outstanding balance of ₱${(folio.balanceCentavos / 100).toFixed(2)} before checking out.`
 			);
 		}
 		try {

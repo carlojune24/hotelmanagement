@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm';
-import { lineChargesCentavos, orderLedgerTotals, type OrderLedgerTotals } from '$lib/ledger';
+import { lineChargesCentavos, type OrderLedgerTotals } from '$lib/ledger';
+import { roomPaidCentavos, type RoomPayRow } from '$lib/allocation';
 import { db } from './db/index';
 import {
 	amenityItems,
@@ -10,6 +11,7 @@ import {
 	hallBookings,
 	hotels,
 	orders,
+	paymentAllocations,
 	payments
 } from './db/schema/index';
 import { writeAudit } from './audit';
@@ -51,34 +53,70 @@ export async function getOrderIdForTarget(target: FolioTarget): Promise<string |
 
 
 /**
- * The booking's parent-level ledger. An `orders` row is the parent of its room / hall lines:
- * charges are summed over every line's folio, payments over the whole order, and the balance is
- * one number for the booking — never a per-room share of a payment. Read-only: a line that has
- * no folio yet is counted from its own total (see `lineChargesCentavos`), never given one.
+ * Per-room money for a booking. Every room keeps its own charges, payments and balance; the order
+ * is the parent only for viewing (the booking totals are just the sum of its rooms) and for taking
+ * one payment across several rooms (`payment_allocations`). A room's paid amount follows
+ * `roomPaidCentavos` in `$lib/allocation`. Read-only: a room with no folio yet is counted from its
+ * own total (see `lineChargesCentavos`), never given one.
  */
-export interface OrderLedger extends OrderLedgerTotals {
-	lines: { kind: 'room' | 'hall'; id: string; status: string; chargesCentavos: number }[];
+export interface OrderLedgerLine {
+	kind: 'room' | 'hall';
+	id: string;
+	status: string;
+	/** This room's / hall's own charges. */
+	chargesCentavos: number;
+	/** What this room has been paid (its share of every payment, refunds subtracted). */
+	paidCentavos: number;
+	/** Charges − paid: positive = this room still owes, negative = in credit. */
+	balanceCentavos: number;
 }
 
-export async function getOrderLedger(orderId: string): Promise<OrderLedger> {
+export interface OrderLedger extends OrderLedgerTotals {
+	lines: OrderLedgerLine[];
+}
+
+const emptyLedger = (): OrderLedger => ({
+	chargesTotalCentavos: 0,
+	paidTotalCentavos: 0,
+	balanceCentavos: 0,
+	lines: []
+});
+
+/** Batched: the per-room ledger of many orders at once (lists and grids never query per row). */
+export async function loadOrderLedgers(orderIds: string[]): Promise<Map<string, OrderLedger>> {
+	const out = new Map<string, OrderLedger>();
+	const ids = [...new Set(orderIds)];
+	if (ids.length === 0) return out;
+
 	const [roomLines, hallLines, payRows] = await Promise.all([
 		db
-			.select({ id: bookings.id, status: bookings.status, total: bookings.totalCentavos })
+			.select({
+				id: bookings.id,
+				orderId: bookings.orderId,
+				status: bookings.status,
+				total: bookings.totalCentavos
+			})
 			.from(bookings)
-			.where(eq(bookings.orderId, orderId)),
+			.where(inArray(bookings.orderId, ids)),
 		db
 			.select({
 				id: hallBookings.id,
+				orderId: hallBookings.orderId,
 				status: hallBookings.status,
 				total: hallBookings.totalCentavos
 			})
 			.from(hallBookings)
-			.where(eq(hallBookings.orderId, orderId)),
+			.where(inArray(hallBookings.orderId, ids)),
 		db
-			.select({ amountCentavos: payments.amountCentavos })
+			.select({
+				id: payments.id,
+				orderId: payments.orderId,
+				amountCentavos: payments.amountCentavos,
+				folioId: payments.folioId
+			})
 			.from(payments)
 			.where(
-				and(eq(payments.orderId, orderId), eq(payments.status, 'paid'), isNull(payments.voidedAt))
+				and(inArray(payments.orderId, ids), eq(payments.status, 'paid'), isNull(payments.voidedAt))
 			)
 	]);
 
@@ -103,33 +141,77 @@ export async function getOrderLedger(orderId: string): Promise<OrderLedger> {
 		}
 	}
 
-	const toLine = (kind: 'room' | 'hall', l: { id: string; status: string; total: number }) => {
-		const folioId = folioByLine.get(l.id);
-		const folioChargesCentavos = folioId ? (chargesByFolio.get(folioId) ?? 0) : null;
-		return {
-			kind,
-			id: l.id,
-			status: l.status,
-			ledger: { folioChargesCentavos, totalCentavos: l.total, status: l.status }
-		};
-	};
-	const all = [
-		...roomLines.map((l) => toLine('room', l)),
-		...hallLines.map((l) => toLine('hall', l))
-	];
-	const paid = payRows.reduce((sum, p) => sum + p.amountCentavos, 0);
-	return {
-		...orderLedgerTotals(
-			all.map((l) => l.ledger),
-			paid
-		),
-		lines: all.map((l) => ({
-			kind: l.kind,
-			id: l.id,
-			status: l.status,
-			chargesCentavos: lineChargesCentavos(l.ledger)
-		}))
-	};
+	const allocByPayment = new Map<string, { lineId: string; amountCentavos: number }[]>();
+	if (payRows.length > 0) {
+		const allocRows = await db
+			.select({
+				paymentId: paymentAllocations.paymentId,
+				bookingId: paymentAllocations.bookingId,
+				hallBookingId: paymentAllocations.hallBookingId,
+				amountCentavos: paymentAllocations.amountCentavos
+			})
+			.from(paymentAllocations)
+			.where(inArray(paymentAllocations.paymentId, payRows.map((p) => p.id)));
+		for (const a of allocRows) {
+			const arr = allocByPayment.get(a.paymentId) ?? [];
+			arr.push({ lineId: (a.bookingId ?? a.hallBookingId)!, amountCentavos: a.amountCentavos });
+			allocByPayment.set(a.paymentId, arr);
+		}
+	}
+
+	type L = { key: string; kind: 'room' | 'hall'; id: string; orderId: string; status: string; total: number };
+	const linesByOrder = new Map<string, L[]>();
+	for (const l of roomLines) {
+		const arr = linesByOrder.get(l.orderId) ?? [];
+		arr.push({ key: `a:${l.id}`, kind: 'room', id: l.id, orderId: l.orderId, status: l.status, total: l.total });
+		linesByOrder.set(l.orderId, arr);
+	}
+	for (const l of hallLines) {
+		const arr = linesByOrder.get(l.orderId) ?? [];
+		arr.push({ key: `b:${l.id}`, kind: 'hall', id: l.id, orderId: l.orderId, status: l.status, total: l.total });
+		linesByOrder.set(l.orderId, arr);
+	}
+
+	for (const orderId of ids) {
+		// One stable order (rooms then halls, by id) so every caller computes the identical split.
+		const lines = (linesByOrder.get(orderId) ?? []).sort((x, y) => (x.key < y.key ? -1 : 1));
+		const rows: RoomPayRow[] = payRows
+			.filter((p) => p.orderId === orderId)
+			.map((p) => ({
+				amountCentavos: p.amountCentavos,
+				folioId: p.folioId,
+				allocations: allocByPayment.get(p.id) ?? []
+			}));
+		const splitLines = lines.map((l) => ({ id: l.id, total: l.total }));
+		const ledgerLines: OrderLedgerLine[] = lines.map((l) => {
+			const folioId = folioByLine.get(l.id) ?? null;
+			const charges = lineChargesCentavos({
+				folioChargesCentavos: folioId ? (chargesByFolio.get(folioId) ?? 0) : null,
+				totalCentavos: l.total,
+				status: l.status
+			});
+			const paid = roomPaidCentavos({ rows, folioId, lineId: l.id, lines: splitLines });
+			return {
+				kind: l.kind,
+				id: l.id,
+				status: l.status,
+				chargesCentavos: charges,
+				paidCentavos: paid,
+				balanceCentavos: charges - paid
+			};
+		});
+		out.set(orderId, {
+			chargesTotalCentavos: ledgerLines.reduce((sum, l) => sum + l.chargesCentavos, 0),
+			paidTotalCentavos: ledgerLines.reduce((sum, l) => sum + l.paidCentavos, 0),
+			balanceCentavos: ledgerLines.reduce((sum, l) => sum + l.balanceCentavos, 0),
+			lines: ledgerLines
+		});
+	}
+	return out;
+}
+
+export async function getOrderLedger(orderId: string): Promise<OrderLedger> {
+	return (await loadOrderLedgers([orderId])).get(orderId) ?? emptyLedger();
 }
 
 /**
@@ -213,12 +295,14 @@ export interface FolioDetail {
 	charges: FolioChargeLine[];
 	/** THIS room's / hall's own charges. */
 	chargesTotalCentavos: number;
-	/** BOOKING-level: net paid on the whole order (see `getOrderLedger`). Equal to this
-	 *  folio's own figure for a single-room order. */
+	/** What THIS room has been paid (its share of every payment — see `roomPaidCentavos`). */
 	paidTotalCentavos: number;
-	/** BOOKING-level: still owed on the whole order; zero or less = settled. Every consumer
-	 *  that gates on "is this settled?" (payment cap, check-out, city ledger) wants this. */
+	/** What THIS room still owes; zero or less = settled. Every consumer that gates on "is this
+	 *  room settled?" (payment cap, check-out, city ledger) wants this. */
 	balanceCentavos: number;
+	/** The whole booking's totals, for context (each is the sum of its rooms). */
+	orderPaidTotalCentavos: number;
+	orderBalanceCentavos: number;
 	/** Charges across every line of the order. */
 	orderChargesTotalCentavos: number;
 	/** How many room / hall lines the order has — more than one means a multi-room booking. */
@@ -236,11 +320,13 @@ export async function getFolioDetail(hotelId: string, target: FolioTarget): Prom
 		.where(eq(folioCharges.folioId, folioId))
 		.orderBy(asc(folioCharges.createdAt));
 
-	// The balance is the booking's, not the room's: payments belong to the order, so they are set
-	// against the charges of every room on it (`getOrderLedger`). A `refund`-purpose payment is
-	// negative, so it correctly raises the balance.
+	// Per-room: this room's own charges against what THIS room has been paid (its share of the
+	// order's payments, `getOrderLedger`). A `refund`-purpose payment is negative, so it raises
+	// the balance.
 	const orderId = await getOrderIdForTarget(target);
 	const ledger = orderId ? await getOrderLedger(orderId) : null;
+	const thisLineId = target.kind === 'room' ? target.bookingId : target.hallBookingId;
+	const thisLine = ledger?.lines.find((l) => l.id === thisLineId) ?? null;
 
 	// Voided lines stay in the ledger for the audit trail (see the schema's own doc comment)
 	// but never count toward what's actually owed.
@@ -264,8 +350,10 @@ export async function getFolioDetail(hotelId: string, target: FolioTarget): Prom
 			createdAt: c.createdAt
 		})),
 		chargesTotalCentavos,
-		paidTotalCentavos: ledger?.paidTotalCentavos ?? 0,
-		balanceCentavos: ledger ? ledger.balanceCentavos : chargesTotalCentavos,
+		paidTotalCentavos: thisLine?.paidCentavos ?? 0,
+		balanceCentavos: chargesTotalCentavos - (thisLine?.paidCentavos ?? 0),
+		orderPaidTotalCentavos: ledger?.paidTotalCentavos ?? 0,
+		orderBalanceCentavos: ledger?.balanceCentavos ?? chargesTotalCentavos,
 		orderChargesTotalCentavos: ledger?.chargesTotalCentavos ?? chargesTotalCentavos,
 		orderLineCount: ledger?.lines.length ?? 1
 	};

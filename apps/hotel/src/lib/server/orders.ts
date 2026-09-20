@@ -1,13 +1,15 @@
-import { and, eq, inArray, lte } from 'drizzle-orm';
+import { and, eq, gt, inArray, lt, lte } from 'drizzle-orm';
 import { env } from '$env/dynamic/private';
 import { db } from './db/index';
 import {
+	bookingRooms,
 	bookings,
 	bookingStatusHistory,
 	hallBookings,
 	hallBookingStatusHistory,
 	orders,
-	orderStatusHistory
+	orderStatusHistory,
+	roomTypes
 } from './db/schema/index';
 import { writeAudit } from './audit';
 import { expireCheckoutSession } from './paymongo/checkout';
@@ -25,6 +27,58 @@ export const PENDING_ORDER_TTL_MINUTES = (() => {
 	const raw = Number(env.PENDING_ORDER_TTL_MINUTES);
 	return Number.isFinite(raw) && raw >= 5 ? Math.floor(raw) : 60;
 })();
+
+export interface UnpaidHold {
+	roomTypeName: string;
+	rooms: number;
+	checkIn: string;
+	checkOut: string;
+	/** When the hold lapses on its own if the guest never pays. */
+	expiresAtIso: string;
+}
+
+/**
+ * Rooms held by an online checkout that has not been paid yet (`pending_payment`) for any night in
+ * `[checkIn, checkOut)`. They count as booked until paid or expired, which is why a walk-in
+ * "check availability" can come back empty right after a guest starts an online booking — this
+ * names those holds and when each releases itself.
+ */
+export async function listUnpaidHolds(
+	hotelId: string,
+	checkIn: string,
+	checkOut: string
+): Promise<UnpaidHold[]> {
+	const rows = await db
+		.select({
+			roomTypeName: roomTypes.name,
+			quantity: bookingRooms.quantity,
+			checkIn: bookings.checkIn,
+			checkOut: bookings.checkOut,
+			orderCreatedAt: orders.createdAt
+		})
+		.from(bookings)
+		.innerJoin(orders, eq(orders.id, bookings.orderId))
+		.innerJoin(bookingRooms, eq(bookingRooms.bookingId, bookings.id))
+		.innerJoin(roomTypes, eq(roomTypes.id, bookingRooms.roomTypeId))
+		.where(
+			and(
+				eq(bookings.hotelId, hotelId),
+				eq(bookings.status, 'pending_payment'),
+				eq(orders.status, 'pending_payment'),
+				lt(bookings.checkIn, checkOut),
+				gt(bookings.checkOut, checkIn)
+			)
+		);
+	return rows
+		.map((r) => ({
+			roomTypeName: r.roomTypeName,
+			rooms: r.quantity,
+			checkIn: r.checkIn,
+			checkOut: r.checkOut,
+			expiresAtIso: new Date(r.orderCreatedAt.getTime() + PENDING_ORDER_TTL_MINUTES * 60_000).toISOString()
+		}))
+		.sort((a, b) => a.expiresAtIso.localeCompare(b.expiresAtIso));
+}
 
 type ExpiryCandidate = { id: string; status: string; createdAt: Date };
 

@@ -6,11 +6,13 @@ import {
 	bookings,
 	documentSeries,
 	documents,
+	folios,
 	functionHalls,
 	guests,
 	hallBookings,
 	hotels,
 	orders,
+	paymentAllocations,
 	payments,
 	users
 } from '../db/schema/index';
@@ -620,11 +622,10 @@ export async function buildInvoiceSnapshot(
 			zeroRatedSalesCentavos: 0,
 			vatCentavos,
 			grossCentavos: gross,
-			// Payments and balance belong to the whole booking. A multi-room booking's room
-			// invoice is an itemised charge document without them (the Official Receipt proves
-			// what was paid); a single-room invoice is unchanged.
-			lessPaymentsCentavos: folio.orderLineCount > 1 ? null : folio.paidTotalCentavos,
-			balanceDueCentavos: folio.orderLineCount > 1 ? null : folio.balanceCentavos,
+			// Every room keeps its own payments and balance, so a room's invoice states what THAT
+			// room has been paid and still owes.
+			lessPaymentsCentavos: folio.paidTotalCentavos,
+			balanceDueCentavos: folio.balanceCentavos,
 			amountPaidCentavos: null,
 			paymentMethod: null,
 			paymentReferenceNo: null,
@@ -663,15 +664,31 @@ export async function buildReceiptSnapshot(
 	const go = await guestAndOrder(pay.orderId);
 	if (!go || go.order.hotelId !== hotelId) throw new DocumentError('Payment not found.');
 
-	// Balance still owed on the whole booking after this payment (payments settle at the order
-	// level, so this is the booking's balance, not one room's), when the payment is tied to a folio.
+	// Balance still owed after this payment: the room it was posted on, or — for a payment split
+	// across rooms — the rooms it paid toward.
 	let balanceCarried: number | null = null;
-	if (pay.folioId) {
-		try {
-			balanceCarried = (await getOrderLedger(pay.orderId)).balanceCentavos;
-		} catch {
-			balanceCarried = null;
+	try {
+		const ledger = await getOrderLedger(pay.orderId);
+		const allocs = await db
+			.select({ bookingId: paymentAllocations.bookingId, hallBookingId: paymentAllocations.hallBookingId })
+			.from(paymentAllocations)
+			.where(eq(paymentAllocations.paymentId, pay.id));
+		if (allocs.length > 0) {
+			const ids = new Set(allocs.map((a) => (a.bookingId ?? a.hallBookingId)!));
+			balanceCarried = ledger.lines
+				.filter((l) => ids.has(l.id))
+				.reduce((sum, l) => sum + l.balanceCentavos, 0);
+		} else if (pay.folioId) {
+			const [f] = await db
+				.select({ bookingId: folios.bookingId, hallBookingId: folios.hallBookingId })
+				.from(folios)
+				.where(eq(folios.id, pay.folioId))
+				.limit(1);
+			const lineId = f?.bookingId ?? f?.hallBookingId;
+			balanceCarried = ledger.lines.find((l) => l.id === lineId)?.balanceCentavos ?? null;
 		}
+	} catch {
+		balanceCarried = null;
 	}
 
 	const isRefund = pay.amountCentavos < 0;

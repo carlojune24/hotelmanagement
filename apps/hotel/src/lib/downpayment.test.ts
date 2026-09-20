@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeDownpayment, isPartialDownpayment } from './downpayment';
+import { allocateOrderPayment, computeDownpayment, isPartialDownpayment } from './downpayment';
 
 describe('isPartialDownpayment', () => {
 	it('only 1..9999 bps is partial', () => {
@@ -44,5 +44,26 @@ describe('computeDownpayment', () => {
 	});
 	it('empty order', () => {
 		expect(computeDownpayment([])).toEqual({ dueNowCentavos: 0, dueAtHotelCentavos: 0 });
+	});
+});
+
+describe('allocateOrderPayment', () => {
+	it('pro-rata by line total and sums exactly', () => {
+		expect(allocateOrderPayment(500_000, [600_000, 400_000])).toEqual([300_000, 200_000]);
+	});
+	it('largest remainder keeps the exact total on awkward splits', () => {
+		const shares = allocateOrderPayment(100, [1, 1, 1]);
+		expect(shares.reduce((a, b) => a + b, 0)).toBe(100);
+		expect(shares).toEqual([34, 33, 33]);
+	});
+	it('a single line takes the whole payment; empty and zero-total are safe', () => {
+		expect(allocateOrderPayment(777, [1_000])).toEqual([777]);
+		expect(allocateOrderPayment(50, [0, 0])).toEqual([50, 0]);
+		expect(allocateOrderPayment(50, [])).toEqual([]);
+	});
+	it('allocates a refund (negative) mirrored', () => {
+		const shares = allocateOrderPayment(-101, [1, 1]);
+		expect(shares.reduce((a, b) => a + b, 0)).toBe(-101);
+		expect(shares).toEqual([-51, -50]);
 	});
 });

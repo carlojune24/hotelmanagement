@@ -19,7 +19,7 @@ export async function getOrderPaymentSummary(order: {
 	status: string;
 }): Promise<OrderPaymentSummary | null> {
 	if (order.amountDueNowCentavos == null) return null;
-	// The booking's ledger: paid across the whole order, and what it still owes (every room).
+	// The booking's totals are the sum of its rooms: paid across the order, and what its rooms still owe.
 	const ledger = await getOrderLedger(order.id);
 	return {
 		paidCentavos: ledger.paidTotalCentavos,

@@ -4,23 +4,30 @@
 	import { toast } from 'svelte-sonner';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
-	import * as Dialog from '$lib/components/ui/dialog/index.js';
-	import * as Table from '$lib/components/ui/table/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
+	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import PaymentFields from '$lib/components/staff/payment-fields.svelte';
+	import OrderPaymentForm from '$lib/components/staff/order-payment-form.svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
 	const base = $derived(`/${page.params.hotel}`);
 	const staffBase = $derived(`${base}/management`);
-	const peso = (c: number) => `₱${(Math.abs(c) / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+	const peso = (c: number) =>
+		`₱${(Math.abs(c) / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+	const toCentavos = (v: string) => Math.max(0, Math.round(parseFloat(v || '0') * 100));
 
+	type Line = PageData['lines'][number];
 	let payOpen = $state(false);
-	let refundOpen = $state(false);
-	let ledgerOpen = $state(false);
+	let ledgerLine = $state<Line | null>(null);
+	let ledgerAmount = $state('');
 	let ledgerSubmitting = $state(false);
+	let refundLine = $state<Line | null>(null);
+	let splitPayment = $state<PageData['payments'][number] | null>(null);
+	let splitRows = $state<Record<string, string>>({});
+	let splitSubmitting = $state(false);
 
 	$effect(() => {
 		if (form && 'ok' in form && form.ok) toast.success(form.ok);
@@ -28,7 +35,36 @@
 	});
 
 	const balance = $derived(data.ledger.balanceCentavos);
-	const settled = $derived(balance === 0);
+	const owedRooms = $derived(data.payableLines.filter((l) => l.balanceCentavos > 0));
+	const canTakePayment = $derived(data.canCollect && owedRooms.length > 0);
+	const multiRoom = $derived(data.lines.length > 1);
+
+	function openLedger(l: Line) {
+		ledgerLine = l;
+		ledgerAmount = (l.balanceCentavos / 100).toFixed(2);
+	}
+	function openSplit(p: PageData['payments'][number]) {
+		splitPayment = p;
+		const init: Record<string, string> = {};
+		for (const l of data.payableLines) {
+			const a = p.allocations.find((x) => x.lineId === l.id);
+			init[l.id] = a ? (a.amountCentavos / 100).toFixed(2) : '';
+		}
+		// A payment with no explicit split yet: start with the whole amount on its own room.
+		if (p.allocations.length === 0) {
+			const own = data.payableLines.find((l) => l.title === p.lineTitle) ?? data.payableLines[0];
+			if (own) init[own.id] = (p.amountCentavos / 100).toFixed(2);
+		}
+		splitRows = init;
+	}
+	const splitTotal = $derived(Object.values(splitRows).reduce((sum, v) => sum + toCentavos(v), 0));
+	const splitJson = $derived(
+		JSON.stringify(
+			data.payableLines
+				.map((l) => ({ kind: l.kind, id: l.id, amount: toCentavos(splitRows[l.id] ?? '') / 100 }))
+				.filter((a) => a.amount > 0)
+		)
+	);
 
 	const statusLabel = (s: string) => s.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 	function statusClass(status: string): string {
@@ -50,11 +86,18 @@
 		security_deposit: 'Security deposit'
 	};
 	const when = (iso: string | null) =>
-		iso
-			? new Date(iso).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
-			: '—';
+		iso ? new Date(iso).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 	const reservationHref = (l: { kind: 'room' | 'hall'; id: string }) =>
 		`${staffBase}/reservations/${l.kind}/${l.id}`;
+	const canResplit = (p: PageData['payments'][number]) =>
+		data.canCollect &&
+		multiRoom &&
+		!p.voidedAt &&
+		p.status === 'paid' &&
+		p.amountCentavos > 0 &&
+		p.provider !== 'paymongo' &&
+		p.method !== 'house_use' &&
+		p.method !== 'security_deposit';
 </script>
 
 <div class="mx-auto max-w-5xl space-y-6 p-6">
@@ -103,7 +146,9 @@
 				<h2 class="text-sm font-semibold text-ink">Each room's folio</h2>
 				{#each data.lines as l (l.id)}
 					<div class="rounded-lg border border-border">
-						<div class="flex flex-wrap items-start justify-between gap-2 border-b border-border px-3 py-2.5">
+						<div
+							class="flex flex-wrap items-start justify-between gap-2 border-b border-border px-3 py-2.5"
+						>
 							<div class="min-w-0">
 								<a
 									href={reservationHref(l)}
@@ -118,15 +163,19 @@
 
 						<div class="divide-y divide-border text-sm">
 							{#each l.charges as c (c.id)}
-								<div class="flex items-start justify-between gap-3 px-3 py-1.5 {c.voided ? 'opacity-50' : ''}">
+								<div
+									class="flex items-start justify-between gap-3 px-3 py-1.5 {c.voided
+										? 'opacity-50'
+										: ''}"
+								>
 									<div class="min-w-0">
 										<span class="text-ink {c.voided ? 'line-through' : ''}">
 											{c.description}{c.quantity > 1 ? ` × ${c.quantity}` : ''}
 										</span>
 										{#if c.voided}
-											<span class="text-xs text-danger">
-												voided{#if c.voidReason} — {c.voidReason}{/if}
-											</span>
+											<span class="text-xs text-danger"
+												>voided{#if c.voidReason} — {c.voidReason}{/if}</span
+											>
 										{/if}
 									</div>
 									<span class="shrink-0 tabular-nums text-ink {c.voided ? 'line-through' : ''}">
@@ -136,19 +185,17 @@
 							{/each}
 
 							{#if l.deposit}
-								<div class="flex items-start justify-between gap-3 px-3 py-1.5">
-									<div class="text-ink-muted">
-										Security deposit {peso(l.deposit.amountCentavos)} —
-										{#if l.deposit.status === 'held'}
-											<span class="font-medium text-ink">held</span> (not part of the bill)
-										{:else if l.deposit.status === 'voided'}
-											voided
-										{:else}
-											settled: {peso(l.deposit.forfeitedCentavos ?? 0)} kept for damage, {peso(
-												l.deposit.refundedCentavos ?? 0
-											)} refunded
-										{/if}
-									</div>
+								<div class="px-3 py-1.5 text-ink-muted">
+									Security deposit {peso(l.deposit.amountCentavos)} —
+									{#if l.deposit.status === 'held'}
+										<span class="font-medium text-ink">held</span> (not part of the bill)
+									{:else if l.deposit.status === 'voided'}
+										voided
+									{:else}
+										settled: {peso(l.deposit.forfeitedCentavos ?? 0)} kept for damage, {peso(
+											l.deposit.refundedCentavos ?? 0
+										)} refunded
+									{/if}
 								</div>
 							{/if}
 							{#if l.depositAppliedCentavos > 0}
@@ -157,11 +204,59 @@
 									<span class="shrink-0 tabular-nums text-ink">−{peso(l.depositAppliedCentavos)}</span>
 								</div>
 							{/if}
+							<div class="flex items-start justify-between gap-3 px-3 py-1.5">
+								<span class="text-ink-muted">Less: payments received on this room</span>
+								<span class="shrink-0 tabular-nums text-ink">−{peso(l.paymentsCentavos)}</span>
+							</div>
+							{#if l.cityLedgerMovedCentavos > 0}
+								<div class="flex items-start justify-between gap-3 px-3 py-1.5">
+									<span class="text-ink-muted">Less: moved to the city ledger</span>
+									<span class="shrink-0 tabular-nums text-ink">−{peso(l.cityLedgerMovedCentavos)}</span>
+								</div>
+							{/if}
+							{#each l.cityLedger as r (r.id)}
+								<div class="flex items-start justify-between gap-3 bg-surface-2 px-3 py-1.5 text-xs">
+									<span class="text-ink-muted">
+										City ledger · {r.billToName}{#if r.billToCompany} · {r.billToCompany}{/if}{#if r.referenceNo}
+											· Ref {r.referenceNo}{/if} ·
+										<a
+											href="{staffBase}/finance/receivables"
+											class="underline underline-offset-2 hover:text-ink">open</a
+										>
+									</span>
+									<span class="shrink-0 tabular-nums">
+										{peso(r.outstandingCentavos)}
+										{r.status === 'settled'
+											? 'collected'
+											: r.status === 'written_off'
+												? 'written off'
+												: 'outstanding'}
+									</span>
+								</div>
+							{/each}
 						</div>
 
-						<div class="flex items-center justify-between border-t border-border bg-surface-2 px-3 py-2 text-sm font-medium">
-							<span class="text-ink">Room total</span>
-							<span class="tabular-nums text-ink">{peso(l.chargesCentavos - l.depositAppliedCentavos)}</span>
+						<div
+							class="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-surface-2 px-3 py-2 text-sm"
+						>
+							<div class="flex items-center gap-2 font-medium">
+								<span class="text-ink">{l.balanceCentavos < 0 ? 'Room credit' : 'Room balance'}</span>
+								<span class="tabular-nums {l.balanceCentavos > 0 ? 'text-danger' : 'text-ink'}">
+									{l.balanceCentavos === 0 ? 'Settled' : peso(l.balanceCentavos)}
+								</span>
+							</div>
+							<div class="flex items-center gap-1.5">
+								{#if data.canCityLedger && l.balanceCentavos > 0}
+									<Button variant="outline" size="xs" onclick={() => openLedger(l)}>
+										Move to city ledger
+									</Button>
+								{/if}
+								{#if data.canCollect && l.balanceCentavos < 0}
+									<Button variant="outline" size="xs" onclick={() => (refundLine = l)}>
+										Refund credit
+									</Button>
+								{/if}
+							</div>
 						</div>
 					</div>
 				{/each}
@@ -208,12 +303,25 @@
 											· tendered {peso(p.tenderedCentavos)}, change {peso(p.changeCentavos ?? 0)}
 										{/if}
 									</div>
+									{#if p.allocations.length > 0}
+										<div class="mt-0.5 text-xs text-ink-muted">
+											Split:
+											{#each p.allocations as a, i (a.lineId)}
+												{i > 0 ? ' · ' : ' '}<span class="text-ink">{a.title}</span>
+												{peso(a.amountCentavos)}
+											{/each}
+										</div>
+									{:else if !p.lineTitle && p.provider === 'paymongo' && multiRoom}
+										<div class="mt-0.5 text-xs text-ink-muted">
+											Online payment — shared across the rooms by price.
+										</div>
+									{/if}
 									{#if p.voidedAt}
 										<div class="mt-0.5 text-xs text-danger">
 											Voided{#if p.voidReason} — {p.voidReason}{/if}
 										</div>
 									{/if}
-									<div class="mt-1.5 flex items-center gap-1.5">
+									<div class="mt-1.5 flex flex-wrap items-center gap-1.5">
 										{#if !p.voidedAt && p.amountCentavos > 0}
 											<Button
 												variant="outline"
@@ -221,6 +329,11 @@
 												href="{base}/print/receipt/{p.id}"
 												target="_blank">Receipt</Button
 											>
+										{/if}
+										{#if canResplit(p)}
+											<Button variant="outline" size="xs" onclick={() => openSplit(p)}>
+												Re-split across rooms
+											</Button>
 										{/if}
 										{#if data.canCollect && !p.voidedAt && p.status === 'paid' && p.provider !== 'paymongo' && p.method !== 'house_use' && p.method !== 'security_deposit'}
 											<form method="POST" action="?/voidPayment" use:enhance>
@@ -253,7 +366,16 @@
 					{#each data.lines as l (l.id)}
 						<div class="flex items-center justify-between gap-3 px-3 py-1.5">
 							<dt class="text-ink-muted">{l.title}</dt>
-							<dd class="tabular-nums text-ink">{peso(l.chargesCentavos)}</dd>
+							<dd class="tabular-nums">
+								<span class="text-ink">{peso(l.chargesCentavos)}</span>
+								<span
+									class="ml-2 text-xs {l.balanceCentavos > 0 ? 'text-danger' : 'text-ink-muted'}"
+								>
+									{l.balanceCentavos === 0
+										? 'settled'
+										: `${l.balanceCentavos < 0 ? 'credit' : 'owes'} ${peso(l.balanceCentavos)}`}
+								</span>
+							</dd>
 						</div>
 					{/each}
 					<div class="flex items-center justify-between gap-3 px-3 py-1.5 font-medium">
@@ -270,58 +392,28 @@
 						<dt class="text-ink-muted">Less: payments received</dt>
 						<dd class="tabular-nums text-ink">−{peso(data.ledger.paymentsReceivedCentavos)}</dd>
 					</div>
+					{#if data.ledger.cityLedgerTotalCentavos > 0}
+						<div class="flex items-center justify-between gap-3 px-3 py-1.5">
+							<dt class="text-ink-muted">Less: moved to the city ledger</dt>
+							<dd class="tabular-nums text-ink">−{peso(data.ledger.cityLedgerTotalCentavos)}</dd>
+						</div>
+					{/if}
 					<div class="flex items-center justify-between gap-3 px-3 py-2.5">
 						<dt class="font-semibold text-ink">
-							{balance < 0 ? 'Credit owed to guest' : settled ? 'Balance' : 'Balance due'}
+							{balance < 0
+								? 'Credit owed to guest'
+								: balance === 0
+									? 'Balance'
+									: 'Still owed by the guest'}
 						</dt>
-						<dd class="text-lg font-semibold tabular-nums {balance > 0 ? 'text-danger' : 'text-ink'}">
-							{settled ? 'Settled' : peso(balance)}
+						<dd
+							class="text-lg font-semibold tabular-nums {balance > 0 ? 'text-danger' : 'text-ink'}"
+						>
+							{balance === 0 ? 'Settled' : peso(balance)}
 						</dd>
 					</div>
 				</dl>
 			</section>
-
-			{#if data.cityLedger.length > 0}
-				<section>
-					<h2 class="mb-2 text-sm font-semibold text-ink">City ledger</h2>
-					<div class="divide-y divide-border rounded-lg border border-border">
-						{#each data.cityLedger as r (r.id)}
-							<div class="flex items-start justify-between gap-3 px-3 py-2.5 text-sm">
-								<div class="min-w-0">
-									<div class="font-medium text-ink">
-										{r.billToName}{#if r.billToCompany} · {r.billToCompany}{/if}
-									</div>
-									<div class="mt-0.5 text-xs text-ink-muted">
-										{when(r.openedAt)}{#if r.referenceNo} · Ref {r.referenceNo}{/if}
-									</div>
-									<div class="mt-1">
-										<a
-											href="{staffBase}/finance/receivables"
-											class="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
-											>Open in city ledger →</a
-										>
-									</div>
-								</div>
-								<div class="shrink-0 text-right">
-									<div class="tabular-nums text-ink">{peso(r.outstandingCentavos)}</div>
-									<Badge
-										variant="outline"
-										class={r.status === 'settled' || r.status === 'written_off'
-											? 'border-transparent bg-ok/15 text-ok'
-											: 'border-transparent bg-danger/15 text-danger'}
-									>
-										{r.status === 'settled'
-											? 'Collected'
-											: r.status === 'written_off'
-												? 'Written off'
-												: 'Outstanding'}
-									</Badge>
-								</div>
-							</div>
-						{/each}
-					</div>
-				</section>
-			{/if}
 		</div>
 
 		<aside class="space-y-4 lg:sticky lg:top-6">
@@ -341,17 +433,21 @@
 						<dt class="text-ink-muted">Paid</dt>
 						<dd class="tabular-nums text-ink">−{peso(data.ledger.paymentsReceivedCentavos)}</dd>
 					</div>
+					{#if data.ledger.cityLedgerTotalCentavos > 0}
+						<div class="flex justify-between">
+							<dt class="text-ink-muted">City ledger</dt>
+							<dd class="tabular-nums text-ink">−{peso(data.ledger.cityLedgerTotalCentavos)}</dd>
+						</div>
+					{/if}
 				</dl>
 				<div class="mt-3 flex items-baseline justify-between border-t border-border pt-3">
 					<span class="text-sm font-semibold text-ink">
-						{balance < 0 ? 'Credit' : settled ? 'Balance' : 'Balance due'}
+						{balance < 0 ? 'Credit' : balance === 0 ? 'Balance' : 'Balance due'}
 					</span>
 					<span
-						class="text-2xl font-semibold tabular-nums {balance > 0
-							? 'text-danger'
-							: 'text-ink'}"
+						class="text-2xl font-semibold tabular-nums {balance > 0 ? 'text-danger' : 'text-ink'}"
 					>
-						{settled ? 'Settled' : peso(balance)}
+						{balance === 0 ? 'Settled' : peso(balance)}
 					</span>
 				</div>
 				{#if data.order.amountDueNowCentavos != null && balance > 0}
@@ -361,40 +457,52 @@
 				{/if}
 			</div>
 
-			{#if data.canCollect && data.carrier}
-				<div class="flex flex-col gap-2">
-					{#if balance > 0}
-						<Button onclick={() => (payOpen = true)}>Take payment ({peso(balance)} due)</Button>
-						{#if data.canCityLedger}
-							<Button variant="outline" onclick={() => (ledgerOpen = true)}>
-								Move balance to city ledger
-							</Button>
-						{/if}
-					{:else if balance < 0}
-						<Button variant="outline" onclick={() => (refundOpen = true)}>
-							Refund credit ({peso(balance)})
-						</Button>
-					{/if}
-				</div>
+			{#if canTakePayment}
+				<Button class="w-full" onclick={() => (payOpen = true)}>
+					Take payment ({peso(owedRooms.reduce((s, r) => s + r.balanceCentavos, 0))} owed)
+				</Button>
 			{/if}
-			{#if balance > 0}
-				<p class="text-xs text-ink-muted">
-					Every room of a multi-room booking is settled together: a room can check out once
-					this balance is paid, or a hotel admin moves it to the city ledger.
-				</p>
-			{/if}
+			<p class="text-xs text-ink-muted">
+				Every room keeps its own payments, deposit and balance. A payment is split across the
+				rooms it pays, and a hotel admin can move any one room's bill to the city ledger — the
+				others are paid separately.
+			</p>
 		</aside>
 	</div>
 </div>
 
-{#if data.carrier}
-	<Dialog.Root bind:open={ledgerOpen}>
-		<Dialog.Content>
+<Dialog.Root bind:open={payOpen}>
+	<Dialog.Content class="max-h-[90vh] overflow-y-auto">
+		<Dialog.Header>
+			<Dialog.Title>Take payment</Dialog.Title>
+			<Dialog.Description>
+				Enter what was received, then say which room each part pays.
+			</Dialog.Description>
+		</Dialog.Header>
+		{#if payOpen}
+			<OrderPaymentForm
+				action="?/takePayment"
+				rooms={data.payableLines}
+				cashier={data.cashier}
+				onDone={() => (payOpen = false)}
+			/>
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root
+	open={ledgerLine != null}
+	onOpenChange={(o) => {
+		if (!o) ledgerLine = null;
+	}}
+>
+	<Dialog.Content>
+		{#if ledgerLine}
 			<Dialog.Header>
-				<Dialog.Title>Move balance to the city ledger</Dialog.Title>
+				<Dialog.Title>Move {ledgerLine.title} to the city ledger</Dialog.Title>
 				<Dialog.Description>
-					{peso(balance)} is outstanding on this booking. It becomes a receivable to collect later,
-					and every room can then check out.
+					This room owes {peso(ledgerLine.balanceCentavos)}. Only this room's bill moves — the other
+					rooms of the booking are untouched and are paid separately.
 				</Dialog.Description>
 			</Dialog.Header>
 			<form
@@ -405,16 +513,23 @@
 					return async ({ update, result }) => {
 						await update();
 						ledgerSubmitting = false;
-						if (result.type === 'success') ledgerOpen = false;
+						if (result.type === 'success') ledgerLine = null;
 					};
 				}}
 				class="space-y-3"
 			>
-				<input type="hidden" name="kind" value={data.carrier.kind} />
-				<input type="hidden" name="id" value={data.carrier.id} />
+				<input type="hidden" name="kind" value={ledgerLine.kind} />
+				<input type="hidden" name="id" value={ledgerLine.id} />
 				<div>
 					<Label for="cl-name">Bill to</Label>
-					<Input id="cl-name" name="billToName" required maxlength={160} value={data.defaultBillTo} class="mt-1" />
+					<Input
+						id="cl-name"
+						name="billToName"
+						required
+						maxlength={160}
+						value={data.defaultBillTo}
+						class="mt-1"
+					/>
 				</div>
 				<div class="grid grid-cols-2 gap-3">
 					<div>
@@ -427,61 +542,128 @@
 					</div>
 				</div>
 				<div>
+					<Label for="cl-amount">Amount to move (₱) — up to what this room owes</Label>
+					<Input
+						id="cl-amount"
+						name="amount"
+						type="number"
+						min="0.01"
+						step="0.01"
+						max={(ledgerLine.balanceCentavos / 100).toFixed(2)}
+						bind:value={ledgerAmount}
+						class="mt-1"
+					/>
+				</div>
+				<div>
 					<Label for="cl-notes">Notes (optional)</Label>
 					<Input id="cl-notes" name="notes" maxlength={500} class="mt-1" />
 				</div>
 				<div class="flex justify-end gap-2 pt-1">
-					<Button type="button" variant="outline" onclick={() => (ledgerOpen = false)}>Cancel</Button>
-					<Button type="submit" disabled={ledgerSubmitting}>Move {peso(balance)} to city ledger</Button>
+					<Button type="button" variant="outline" onclick={() => (ledgerLine = null)}>Cancel</Button>
+					<Button type="submit" disabled={ledgerSubmitting}>Move to city ledger</Button>
 				</div>
 			</form>
-		</Dialog.Content>
-	</Dialog.Root>
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>
 
-	<Dialog.Root bind:open={payOpen}>
-		<Dialog.Content>
+<Dialog.Root
+	open={refundLine != null}
+	onOpenChange={(o) => {
+		if (!o) refundLine = null;
+	}}
+>
+	<Dialog.Content>
+		{#if refundLine}
 			<Dialog.Header>
-				<Dialog.Title>Take payment</Dialog.Title>
+				<Dialog.Title>Refund credit — {refundLine.title}</Dialog.Title>
 				<Dialog.Description>
-					One payment for the whole booking — {peso(balance)} is due across every room.
-				</Dialog.Description>
-			</Dialog.Header>
-			<PaymentFields
-				action="?/recordPayment"
-				kind={data.carrier.kind}
-				id={data.carrier.id}
-				balanceCentavos={balance}
-				cashier={{
-					requireOpenShiftForCashPayment: data.cashier.requireOpenShiftForCashPayment,
-					hasBankAccount: data.cashier.hasBankAccount,
-					openShift: data.cashier.openShift
-				}}
-				onDone={() => (payOpen = false)}
-			/>
-		</Dialog.Content>
-	</Dialog.Root>
-
-	<Dialog.Root bind:open={refundOpen}>
-		<Dialog.Content>
-			<Dialog.Header>
-				<Dialog.Title>Refund credit</Dialog.Title>
-				<Dialog.Description>
-					The booking is overpaid by {peso(balance)}. Record the refund handed back to the guest.
+					This room is overpaid by {peso(refundLine.balanceCentavos)}. Record the refund handed back.
 				</Dialog.Description>
 			</Dialog.Header>
 			<PaymentFields
 				action="?/refundPayment"
-				kind={data.carrier.kind}
-				id={data.carrier.id}
-				balanceCentavos={-balance}
+				kind={refundLine.kind}
+				id={refundLine.id}
+				balanceCentavos={-refundLine.balanceCentavos}
 				cashier={{
 					requireOpenShiftForCashPayment: data.cashier.requireOpenShiftForCashPayment,
 					hasBankAccount: data.cashier.hasBankAccount,
 					openShift: data.cashier.openShift
 				}}
 				mode="refund"
-				onDone={() => (refundOpen = false)}
+				onDone={() => (refundLine = null)}
 			/>
-		</Dialog.Content>
-	</Dialog.Root>
-{/if}
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root
+	open={splitPayment != null}
+	onOpenChange={(o) => {
+		if (!o) splitPayment = null;
+	}}
+>
+	<Dialog.Content>
+		{#if splitPayment}
+			<Dialog.Header>
+				<Dialog.Title>Re-split this payment</Dialog.Title>
+				<Dialog.Description>
+					{methodLabel[splitPayment.method] ?? splitPayment.method}
+					{peso(splitPayment.amountCentavos)} — choose which room each part pays. The money and its
+					receipt do not change.
+				</Dialog.Description>
+			</Dialog.Header>
+			<form
+				method="POST"
+				action="?/reallocatePayment"
+				use:enhance={() => {
+					splitSubmitting = true;
+					return async ({ update, result }) => {
+						await update();
+						splitSubmitting = false;
+						if (result.type === 'success') splitPayment = null;
+					};
+				}}
+				class="space-y-3"
+			>
+				<input type="hidden" name="paymentId" value={splitPayment.id} />
+				<input type="hidden" name="allocationsJson" value={splitJson} />
+				<div class="divide-y divide-border rounded-md border border-border">
+					{#each data.payableLines as l (l.id)}
+						<div class="flex items-center justify-between gap-3 px-2.5 py-1.5 text-sm">
+							<div class="min-w-0">
+								<div class="truncate text-ink">{l.title}</div>
+								<div class="text-xs text-ink-muted">
+									{l.balanceCentavos > 0 ? `owes ${peso(l.balanceCentavos)}` : 'settled'}
+								</div>
+							</div>
+							<Input
+								type="number"
+								min="0"
+								step="0.01"
+								bind:value={splitRows[l.id]}
+								class="h-8 w-28 text-right"
+							/>
+						</div>
+					{/each}
+				</div>
+				<p
+					class="text-xs {splitTotal === splitPayment.amountCentavos
+						? 'text-ink-muted'
+						: 'text-danger'}"
+				>
+					Assigned {peso(splitTotal)} of {peso(splitPayment.amountCentavos)}
+				</p>
+				<div class="flex justify-end gap-2">
+					<Button type="button" variant="outline" onclick={() => (splitPayment = null)}>Cancel</Button>
+					<Button
+						type="submit"
+						disabled={splitSubmitting || splitTotal !== splitPayment.amountCentavos}
+						>Save split</Button
+					>
+				</div>
+			</form>
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>

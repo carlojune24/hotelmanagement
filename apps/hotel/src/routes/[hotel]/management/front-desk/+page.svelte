@@ -64,6 +64,11 @@
 	const formAvailableRoomTypes = $derived(
 		form && 'availableRoomTypes' in form ? form.availableRoomTypes : undefined
 	);
+	const formUnpaidHolds = $derived(
+		form && 'unpaidHolds' in form ? (form.unpaidHolds ?? []) : []
+	);
+	const holdTime = (iso: string) =>
+		new Date(iso).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' });
 	const formSuggestedRoomCount = $derived(
 		form && 'suggestedRoomCount' in form ? form.suggestedRoomCount : null
 	);
@@ -1391,7 +1396,7 @@
 							</Badge>
 							{#if selectedRoom.occupant.balanceCentavos > 0}
 								<Badge variant="outline" class="border-danger/30 bg-danger/10 text-danger">
-									Booking balance {peso(selectedRoom.occupant.balanceCentavos)}
+									Room balance {peso(selectedRoom.occupant.balanceCentavos)}
 								</Badge>
 							{/if}
 						{/if}
@@ -1596,7 +1601,7 @@
 											: 'border-transparent bg-ok/15 text-ok'}
 									>
 										{formFolio.balanceCentavos > 0
-											? `${formFolio.orderLineCount > 1 ? 'Booking balance' : 'Balance'} due ${peso(formFolio.balanceCentavos)}`
+											? `Room balance due ${peso(formFolio.balanceCentavos)}`
 											: 'Settled'}
 									</Badge>
 								</div>
@@ -1637,34 +1642,20 @@
 											</span>
 										</div>
 									{/each}
-									{#if formFolio.orderLineCount > 1}
-										<div class="flex items-center justify-between gap-2 py-1.5">
-											<span class="text-ink-muted"
-												>Whole booking ({formFolio.orderLineCount} rooms/events)</span
-											>
-											<span class="shrink-0 text-ink"
-												>{peso(formFolio.orderChargesTotalCentavos)}</span
-											>
-										</div>
-									{/if}
+									<div class="flex items-center justify-between gap-2 py-1.5">
+										<span class="text-ink-muted">Paid on this room</span>
+										<span class="shrink-0 text-ink"
+											>−{peso(formFolio.paidTotalCentavos - depositAppliedCentavos)}</span
+										>
+									</div>
 									{#if depositAppliedCentavos > 0}
 										<div class="flex items-center justify-between gap-2 py-1.5">
 											<span class="text-ink-muted">Security deposit applied to damage</span>
 											<span class="shrink-0 text-ink">−{peso(depositAppliedCentavos)}</span>
 										</div>
 									{/if}
-									<div class="flex items-center justify-between gap-2 py-1.5">
-										<span class="text-ink-muted"
-											>Paid{formFolio.orderLineCount > 1 ? ' (whole booking)' : ''}</span
-										>
-										<span class="shrink-0 text-ink"
-											>−{peso(formFolio.paidTotalCentavos - depositAppliedCentavos)}</span
-										>
-									</div>
 									<div class="flex items-center justify-between gap-2 py-1.5 font-semibold">
-										<span class="text-ink"
-											>{formFolio.orderLineCount > 1 ? 'Booking balance' : 'Balance'}</span
-										>
+										<span class="text-ink">Room balance</span>
 										<span class="shrink-0 text-ink">{peso(formFolio.balanceCentavos)}</span>
 									</div>
 									{#if formFolio.orderLineCount > 1 && formRoomDetail}
@@ -1673,7 +1664,7 @@
 												href="{staffBase}/transactions/{formRoomDetail.order.id}?roomId={selectedRoomId ?? ''}"
 												class="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
 											>
-												Open the booking's transaction →
+												Open the booking's transaction (all rooms) →
 											</a>
 										</div>
 									{/if}
@@ -1979,7 +1970,7 @@
 										<div class="text-xs text-ink-muted">
 											{channelLabel(a.channel)}
 											{#if a.balanceCentavos > 0}
-												<span class="font-medium text-danger">· Booking balance {peso(a.balanceCentavos)}</span>
+												<span class="font-medium text-danger">· Room balance {peso(a.balanceCentavos)}</span>
 											{/if}
 											<span class="mx-1 text-ink-muted/40">·</span>
 											<a
@@ -2069,7 +2060,7 @@
 											<div class="text-xs text-ink-muted">
 												{a.roomTypeName} · {channelLabel(a.channel)}
 												{#if a.balanceCentavos > 0}
-													<span class="font-medium text-danger">· Booking balance {peso(a.balanceCentavos)}</span>
+													<span class="font-medium text-danger">· Room balance {peso(a.balanceCentavos)}</span>
 												{/if}
 												<span class="mx-1 text-ink-muted/40">·</span>
 												<a
@@ -2192,6 +2183,21 @@
 					{#if formAvailableRoomTypes.length === 0}
 						<div class="mt-4 rounded-lg border border-dashed border-border p-3">
 							<p class="text-sm text-ink-muted">No rooms available for these dates/occupancy.</p>
+							{#if formUnpaidHolds.length > 0}
+								<div class="mt-2 rounded-md bg-surface-2 px-3 py-2 text-xs text-ink-muted">
+									<p class="font-medium text-ink">
+										Held by an online booking waiting for payment:
+									</p>
+									<ul class="mt-1 space-y-0.5">
+										{#each formUnpaidHolds as h, i (i)}
+											<li>
+												{h.rooms} × {h.roomTypeName}, {h.checkIn} → {h.checkOut} — released
+												automatically at {holdTime(h.expiresAtIso)} if not paid.
+											</li>
+										{/each}
+									</ul>
+								</div>
+							{/if}
 							{#if formSuggestedRoomCount}
 								<p class="mt-1.5 text-xs text-ink-muted">
 									No room type fits {formWalkInSearch?.occupancy} guests in {formWalkInSearch?.roomCount}
@@ -2403,7 +2409,14 @@
 								class="w-full min-w-0 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
 							></textarea>
 						</div>
-						<WalkinPaymentFields totalCentavos={walkInCartGrandTotal} cashier={data.cashier} />
+						<WalkinPaymentFields
+						totalCentavos={walkInCartGrandTotal}
+						cashier={data.cashier}
+						rooms={walkInCart.map((l) => ({
+							label: `${l.roomNumber ? `Room ${l.roomNumber} · ` : ''}${l.roomTypeName}${l.roomCount > 1 ? ` × ${l.roomCount}` : ''}`,
+							totalCentavos: walkInCartLineTotal(l)
+						}))}
+					/>
 						<Button type="submit" class="w-full">Create booking &amp; record payment</Button>
 							</form>
 			{/if}

@@ -187,7 +187,8 @@ export interface CancellationQuote {
 	/** Net paid on the whole booking (order). */
 	paidCentavos: number;
 	/** `paid` less what the booking's OTHER rooms still cost: the most that can come back before the
-	 *  retained fee. Refund = max(0, refundBaseCentavos − fee). Equals `paid` for a single-room booking. */
+	 *  retained fee. Refund = max(0, refundBaseCentavos − fee). Each room settles on its own, so this
+	 *  is simply what THIS room has been paid. */
 	refundBaseCentavos: number;
 	/** How much of `paidCentavos` could be refunded back through PayMongo (vs. manually
 	 *  recorded) — 0 when nothing was paid online, or the online portion is smaller than
@@ -197,10 +198,10 @@ export interface CancellationQuote {
 	fee: CancellationFeeResult;
 }
 
-// Money for a cancellation is settled against the whole BOOKING (`getOrderLedger` in folio.ts),
-// not against a per-room share of a payment: the cancelled room's charge is replaced by the fee
-// it keeps, and the guest is refunded only what they have paid beyond what the booking still owes
-// (`cancellationRefundCentavos`). So cancelling one of two rooms can't refund the other room's money.
+// Money for a cancellation is settled against THIS room only (its own line in `getOrderLedger`):
+// the room's charge is replaced by the fee it keeps, and the guest is refunded what THIS room has
+// been paid beyond that fee (`cancellationRefundCentavos`). Every room keeps its own record of
+// payments, so cancelling one room never touches another room's money.
 
 /** Everything the cancel dialog needs: the line, the policy in effect, and the suggested fee/refund. */
 export async function getCancellationQuote(
@@ -237,11 +238,9 @@ export async function getCancellationQuote(
 
 		const nights = nightsBetween(row.booking.checkIn, row.booking.checkOut).length;
 		const ledger = row.order.status === 'confirmed' ? await getOrderLedger(row.order.id) : null;
-		const paid = ledger?.paidTotalCentavos ?? 0;
-		const lineCharges =
-			ledger?.lines.find((l) => l.kind === 'room' && l.id === row.booking.id)?.chargesCentavos ??
-			row.booking.totalCentavos;
-		const refundBase = ledger ? paid - (ledger.chargesTotalCentavos - lineCharges) : 0;
+		const thisLine = ledger?.lines.find((l) => l.kind === 'room' && l.id === row.booking.id);
+		const paid = thisLine?.paidCentavos ?? 0;
+		const refundBase = paid;
 		const paymongoRefundable =
 			paid > 0 ? await getPaymongoRefundableCentavos(hotelId, row.order.id) : 0;
 		const hoursUntilCheckIn =
@@ -296,11 +295,9 @@ export async function getCancellationQuote(
 	if (!row) return null;
 
 	const ledger = row.order.status === 'confirmed' ? await getOrderLedger(row.order.id) : null;
-	const paid = ledger?.paidTotalCentavos ?? 0;
-	const lineCharges =
-		ledger?.lines.find((l) => l.kind === 'hall' && l.id === row.hallBooking.id)?.chargesCentavos ??
-		row.hallBooking.totalCentavos;
-	const refundBase = ledger ? paid - (ledger.chargesTotalCentavos - lineCharges) : 0;
+	const thisLine = ledger?.lines.find((l) => l.kind === 'hall' && l.id === row.hallBooking.id);
+	const paid = thisLine?.paidCentavos ?? 0;
+	const refundBase = paid;
 	const paymongoRefundable = paid > 0 ? await getPaymongoRefundableCentavos(hotelId, row.order.id) : 0;
 	const hoursUntilCheckIn =
 		(wallTimeToUtcMs(row.hallBooking.eventDate, row.hallBooking.startTime, hotel.timezone) - now) /
@@ -416,16 +413,16 @@ export async function cancelBooking(input: CancelBookingInput): Promise<CancelBo
 			if (lineTotalCentavos == null) throw new CancellationError('Booking not found.');
 
 			const ledgerNow = await getOrderLedger(orderId);
-			const paidNow = ledgerNow.paidTotalCentavos;
-			const lineNow =
-				ledgerNow.lines.find((l) => l.id === lineId)?.chargesCentavos ?? lineTotalCentavos;
+			const thisNow = ledgerNow.lines.find((l) => l.id === lineId);
+			const paidNow = thisNow?.paidCentavos ?? 0;
+			const lineNow = thisNow?.chargesCentavos ?? lineTotalCentavos;
 			const feeNow = Math.min(
 				Math.max(0, Math.round(input.feeCentavos)),
 				Math.max(0, paidNow),
 				Math.max(0, lineNow)
 			);
 			const refundNow = cancellationRefundCentavos({
-				orderChargesCentavos: ledgerNow.chargesTotalCentavos,
+				orderChargesCentavos: lineNow,
 				orderPaidCentavos: paidNow,
 				lineChargesCentavos: lineNow,
 				feeCentavos: feeNow
@@ -523,9 +520,9 @@ export async function cancelBooking(input: CancelBookingInput): Promise<CancelBo
 
 			if (order.status === 'confirmed') {
 				const ledger = await getOrderLedger(orderId);
-				const paid = ledger.paidTotalCentavos;
-				const lineCharges =
-					ledger.lines.find((l) => l.id === lineId)?.chargesCentavos ?? lineTotalCentavos;
+				const thisLine = ledger.lines.find((l) => l.id === lineId);
+				const paid = thisLine?.paidCentavos ?? 0;
+				const lineCharges = thisLine?.chargesCentavos ?? lineTotalCentavos;
 				feeCentavos = Math.min(
 					Math.max(0, Math.round(input.feeCentavos)),
 					Math.max(0, paid),
@@ -559,7 +556,7 @@ export async function cancelBooking(input: CancelBookingInput): Promise<CancelBo
 					}
 				} else {
 					refundCentavos = cancellationRefundCentavos({
-						orderChargesCentavos: ledger.chargesTotalCentavos,
+						orderChargesCentavos: lineCharges,
 						orderPaidCentavos: paid,
 						lineChargesCentavos: lineCharges,
 						feeCentavos

@@ -30,12 +30,21 @@ export async function openReceivable(input: {
 	billToCompany?: string | null;
 	referenceNo?: string | null;
 	notes?: string | null;
+	/** How much of THIS room's bill to move; defaults to everything it still owes. */
+	amountCentavos?: number;
 	actor: SessionUser | null;
 }): Promise<{ receivableId: string; amountCentavos: number }> {
+	// The room's own balance (charges minus what THIS room has been paid) — never the booking's.
 	const folio = await getFolioDetail(input.hotelId, input.target);
 	if (folio.balanceCentavos <= 0)
-		throw new FinanceError('This folio has nothing outstanding to move to the city ledger.');
-	const amount = folio.balanceCentavos;
+		throw new FinanceError('This room has nothing outstanding to move to the city ledger.');
+	const amount = input.amountCentavos ?? folio.balanceCentavos;
+	if (!Number.isInteger(amount) || amount <= 0)
+		throw new FinanceError('Enter an amount greater than zero to move to the city ledger.');
+	if (amount > folio.balanceCentavos)
+		throw new FinanceError(
+			`This room only owes ${pesos(folio.balanceCentavos)} — that is the most that can move to the city ledger.`
+		);
 
 	const orderId = await getOrderIdForTarget(input.target);
 	if (!orderId) throw new FinanceError('Booking not found.');

@@ -2,7 +2,7 @@ import { relations, sql } from 'drizzle-orm';
 import { bigint, boolean, check, index, integer, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, deletedAt, pk, updatedAt } from './_shared';
 import { hotels } from './hotels';
-import { bookings, hallBookings } from './bookings';
+import { bookings, hallBookings, payments } from './bookings';
 import { users } from './auth';
 
 /**
@@ -129,3 +129,37 @@ export type AmenityItem = typeof amenityItems.$inferSelect;
 export type NewAmenityItem = typeof amenityItems.$inferInsert;
 export type Folio = typeof folios.$inferSelect;
 export type FolioCharge = typeof folioCharges.$inferSelect;
+
+/**
+ * How one payment is split across the rooms of a booking. A single tender (one `payments` row,
+ * one cash movement, one Official Receipt) can pay several rooms; each row here is that payment's
+ * share for ONE room, so every room keeps its own record of what it has been paid. A payment with
+ * no rows here falls back to its `folioId` (a per-room desk payment) or, for an untagged online
+ * payment, a pro-rata split by room price — see `roomPaidCentavos` in `$lib/ledger`.
+ */
+export const paymentAllocations = pgTable(
+	'payment_allocations',
+	{
+		id: pk(),
+		paymentId: uuid('payment_id')
+			.notNull()
+			.references(() => payments.id, { onDelete: 'cascade' }),
+		bookingId: uuid('booking_id').references(() => bookings.id, { onDelete: 'cascade' }),
+		hallBookingId: uuid('hall_booking_id').references(() => hallBookings.id, {
+			onDelete: 'cascade'
+		}),
+		amountCentavos: bigint('amount_centavos', { mode: 'number' }).notNull(),
+		createdAt: createdAt()
+	},
+	(t) => [
+		index('payment_allocations_payment_idx').on(t.paymentId),
+		index('payment_allocations_booking_idx').on(t.bookingId),
+		index('payment_allocations_hall_booking_idx').on(t.hallBookingId),
+		check(
+			'payment_allocations_exactly_one_target',
+			sql`(${t.bookingId} is not null) <> (${t.hallBookingId} is not null)`
+		)
+	]
+);
+
+export type PaymentAllocation = typeof paymentAllocations.$inferSelect;

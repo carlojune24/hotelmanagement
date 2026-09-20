@@ -6,6 +6,7 @@ import {
 	guests,
 	hotels,
 	orders,
+	paymentAllocations,
 	payments,
 	type Payment
 } from '../db/schema/index';
@@ -16,8 +17,10 @@ import {
 	ensureFolio,
 	getFolioDetail,
 	getOrderIdForTarget,
+	getOrderLedger,
 	type FolioTarget
 } from '../folio';
+import { validateAllocations } from '$lib/allocation';
 import { FinanceError, businessDateFor, pesos, type Tx } from './shared';
 import { recordCashMovement } from './cash';
 import { getFinanceSettings } from './settings';
@@ -229,6 +232,162 @@ export async function recordPayment(input: RecordPaymentInput): Promise<RecordPa
 	};
 }
 
+export interface RecordOrderPaymentInput {
+	hotelId: string;
+	orderId: string;
+	method: PaymentMethod;
+	tenderedCentavos?: number | null;
+	referenceNo?: string | null;
+	bankName?: string | null;
+	chequeDate?: string | null;
+	cashAccountId?: string | null;
+	/** How much of THIS payment goes to each room (booking / hall line). The payment is their sum. */
+	allocations: { target: FolioTarget; amountCentavos: number }[];
+	actor: SessionUser | null;
+}
+
+/**
+ * One payment that covers several rooms of a booking — the guest hands over a single amount and
+ * the desk decides which room each part pays. Writes ONE `payments` row (one cash movement, one
+ * Official Receipt) plus one `payment_allocations` row per room, so every room keeps its own
+ * record of what it has been paid. Each room can take at most what it still owes; cash may be
+ * over-tendered (change returned), every other method must be the exact amount applied.
+ */
+export async function recordOrderPayment(
+	input: RecordOrderPaymentInput
+): Promise<{ paymentId: string; appliedCentavos: number; changeCentavos: number }> {
+	const parts = input.allocations.filter((a) => a.amountCentavos > 0);
+	const amount = parts.reduce((sum, a) => sum + a.amountCentavos, 0);
+	if (!Number.isInteger(amount) || amount <= 0)
+		throw new FinanceError('Enter a payment amount greater than zero.');
+
+	const [order] = await db
+		.select({ id: orders.id })
+		.from(orders)
+		.where(and(eq(orders.id, input.orderId), eq(orders.hotelId, input.hotelId)))
+		.limit(1);
+	if (!order) throw new FinanceError('Booking not found.');
+
+	// Every room must belong to this booking, and none may be given more than it still owes.
+	const ledger = await getOrderLedger(input.orderId);
+	const lineId = (t: FolioTarget) => (t.kind === 'room' ? t.bookingId : t.hallBookingId);
+	const complaint = validateAllocations(
+		parts.map((a) => ({ id: lineId(a.target), amountCentavos: a.amountCentavos })),
+		ledger.lines.map((l) => ({ id: l.id, balanceCentavos: l.balanceCentavos })),
+		amount
+	);
+	if (complaint) throw new FinanceError(complaint);
+
+	const isCash = input.method === 'cash';
+	let tendered: number | null = null;
+	let change = 0;
+	if (isCash) {
+		tendered = input.tenderedCentavos ?? amount;
+		if (!Number.isInteger(tendered) || tendered < amount)
+			throw new FinanceError('Cash tendered must be at least the amount being paid.');
+		change = tendered - amount;
+	} else if (['card', 'gcash', 'maya', 'bank_transfer', 'cheque'].includes(input.method)) {
+		if (!input.referenceNo?.trim())
+			throw new FinanceError('Enter the reference / approval number for a non-cash payment.');
+	}
+
+	const [hotel] = await db
+		.select({ timezone: hotels.timezone })
+		.from(hotels)
+		.where(eq(hotels.id, input.hotelId))
+		.limit(1);
+	const businessDate = businessDateFor(hotel?.timezone ?? 'Asia/Manila');
+	const resolved = await resolvePaymentAccount(input.hotelId, input.method);
+	const cashAccountId = input.cashAccountId ?? resolved.cashAccountId;
+	const shiftId = input.cashAccountId ? null : resolved.shiftId;
+
+	const owedBefore = ledger.lines.reduce((sum, l) => sum + Math.max(0, l.balanceCentavos), 0);
+	const purpose: PaymentPurpose = amount < owedBefore ? 'deposit' : 'settlement';
+	const allHalls = parts.every((a) => a.target.kind === 'hall');
+	const category = purpose === 'deposit' ? 'deposit' : allHalls ? 'hall_revenue' : 'room_revenue';
+	const guestName = await guestNameForOrder(input.orderId);
+
+	const paymentId = await db.transaction(async (tx: Tx) => {
+		for (const a of parts) await ensureFolio(tx, input.hotelId, a.target);
+
+		const [row] = await tx
+			.insert(payments)
+			.values({
+				orderId: input.orderId,
+				provider: 'cash',
+				method: input.method,
+				purpose,
+				status: 'paid',
+				amountCentavos: amount,
+				cashAccountId,
+				shiftId,
+				tenderedCentavos: tendered,
+				changeCentavos: change,
+				referenceNo: input.referenceNo?.trim() || null,
+				bankName: input.bankName?.trim() || null,
+				chequeDate: input.chequeDate || null,
+				recordedByUserId: input.actor?.id ?? null,
+				paidAt: new Date()
+			})
+			.returning({ id: payments.id });
+
+		await tx.insert(paymentAllocations).values(
+			parts.map((a) => ({
+				paymentId: row!.id,
+				bookingId: a.target.kind === 'room' ? a.target.bookingId : null,
+				hallBookingId: a.target.kind === 'hall' ? a.target.hallBookingId : null,
+				amountCentavos: a.amountCentavos
+			}))
+		);
+
+		await recordCashMovement(
+			{
+				hotelId: input.hotelId,
+				businessDate,
+				direction: 'in',
+				category,
+				cashAccountId: cashAccountId!,
+				amountCentavos: amount,
+				counterpartyType: 'guest',
+				counterpartyName: guestName,
+				sourceType: 'payment',
+				sourceId: row!.id,
+				paymentId: row!.id,
+				shiftId,
+				memo: `${labelForMethod(input.method)} — booking payment across ${parts.length} room${parts.length === 1 ? '' : 's'}`,
+				actor: input.actor
+			},
+			tx
+		);
+		return row!.id;
+	});
+
+	await writeAudit({
+		hotelId: input.hotelId,
+		actor: input.actor,
+		action: 'order.record_payment',
+		entityType: 'order',
+		entityId: input.orderId,
+		after: {
+			method: input.method,
+			amountCentavos: amount,
+			changeCentavos: change,
+			purpose,
+			allocations: parts.map((a) => ({ line: lineId(a.target), amountCentavos: a.amountCentavos }))
+		}
+	});
+
+	const s = await getBirSettings(input.hotelId).catch(() => null);
+	if (s?.autoIssueReceiptOnPayment) {
+		try {
+			await issueOfficialReceipt(input.hotelId, paymentId, input.actor);
+		} catch (e) {
+			console.warn('recordOrderPayment: could not issue official receipt', paymentId, e);
+		}
+	}
+	return { paymentId, appliedCentavos: amount, changeCentavos: change };
+}
+
 /** Soft-void a payment and reverse its cash movement. Refuses on a `paymongo` row
  *  (those are reconciled through the webhook, not the desk) or an already-void row. */
 export async function voidPayment(
@@ -429,6 +588,10 @@ export async function recordWalkInPayment(
 		businessDate: string;
 		guestName?: string | null;
 		actor: SessionUser | null;
+		/** How this one payment is split across the booking's rooms (bookingId → centavos). When
+		 *  present, each room keeps its own record of what it was paid; when absent the payment stays
+		 *  on `target`'s room, as it always has. */
+		allocations?: { bookingId: string; amountCentavos: number }[];
 	}
 ): Promise<string> {
 	const isCash = input.method === 'cash';
@@ -457,6 +620,17 @@ export async function recordWalkInPayment(
 			paidAt: new Date()
 		})
 		.returning({ id: payments.id });
+
+	const allocs = (input.allocations ?? []).filter((a) => a.amountCentavos > 0);
+	if (allocs.length > 0) {
+		await tx.insert(paymentAllocations).values(
+			allocs.map((a) => ({
+				paymentId: row!.id,
+				bookingId: a.bookingId,
+				amountCentavos: a.amountCentavos
+			}))
+		);
+	}
 
 	await recordCashMovement(
 		{

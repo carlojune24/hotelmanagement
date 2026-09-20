@@ -49,7 +49,7 @@ import { getFinanceSettings } from '$lib/server/finance/settings';
 import { getDefaultOpenShift } from '$lib/server/finance/shifts';
 import { openShift as openShiftFn } from '$lib/server/finance/shifts';
 import { MAX_ROOMS_PER_LINE } from '$lib/pricing-utils';
-import { expirePendingOrders } from '$lib/server/orders';
+import { expirePendingOrders, listUnpaidHolds } from '$lib/server/orders';
 import type { Actions, PageServerLoad } from './$types';
 
 const PAYMENT_METHODS = ['cash', 'card', 'gcash', 'maya', 'bank_transfer', 'cheque'] as const;
@@ -247,8 +247,19 @@ const hallCreateSchema = z
 
 const centavos = (pesos: number | undefined) => (pesos == null ? null : Math.round(pesos * 100));
 
-function walkInPaymentFrom(d: z.infer<typeof paymentFieldsSchema>) {
+function walkInPaymentFrom(d: z.infer<typeof paymentFieldsSchema>, allocationsJson?: unknown) {
+	// Optional per-room split from the walk-in form (pesos, one per cart line in cart order).
+	let allocationsCentavos: number[] | undefined;
+	if (typeof allocationsJson === 'string' && allocationsJson) {
+		try {
+			const arr = z.array(z.coerce.number().min(0)).parse(JSON.parse(allocationsJson));
+			allocationsCentavos = arr.map((n) => Math.round(n * 100));
+		} catch {
+			allocationsCentavos = undefined;
+		}
+	}
 	return {
+		allocationsCentavos,
 		method: d.method,
 		tenderedCentavos: centavos(d.tendered),
 		referenceNo: d.referenceNo || null,
@@ -778,7 +789,12 @@ export const actions: Actions = {
 			availableRoomTypes.length === 0
 				? await suggestRoomCountForOccupancy(hotelId, search.occupancy, search.roomCount)
 				: null;
-		return { walkInSearch: search, availableRoomTypes, suggestedRoomCount };
+		// Nothing came back: say if unpaid online checkouts are the reason (they hold rooms until paid or expired).
+		const unpaidHolds =
+			availableRoomTypes.length === 0
+				? await listUnpaidHolds(hotelId, search.checkIn, search.checkOut)
+				: [];
+		return { walkInSearch: search, availableRoomTypes, suggestedRoomCount, unpaidHolds };
 	},
 
 	walkInCreate: async (event) => {
@@ -816,7 +832,7 @@ export const actions: Actions = {
 					specialRequests: d.specialRequests ?? null
 				},
 				rooms: items,
-				payment: walkInPaymentFrom(d),
+				payment: walkInPaymentFrom(d, raw.allocationsJson),
 				actor: event.locals.user
 			});
 			orderId = result.orderId;
