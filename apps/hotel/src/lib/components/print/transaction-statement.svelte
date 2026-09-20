@@ -55,6 +55,8 @@
 			billToCompany: string | null;
 			originalCentavos: number;
 			outstandingCentavos: number;
+			collectedCentavos: number;
+			collections: { id: string; date: string; amountCentavos: number; memo: string | null }[];
 		} | null;
 	}
 
@@ -174,8 +176,26 @@
 			<div class="ts-label">City ledger account</div>
 			<p>
 				Bill to <strong>{d.cityLedgerAccount.billToName}</strong>{d.cityLedgerAccount.billToCompany ? ` · ${d.cityLedgerAccount.billToCompany}` : ''}
-				— moved from the rooms {peso(d.cityLedgerAccount.originalCentavos)}, still to collect
-				<strong>{peso(d.cityLedgerAccount.outstandingCentavos)}</strong>.
+				— moved from the rooms {peso(d.cityLedgerAccount.originalCentavos)}.
+			</p>
+			{#if d.cityLedgerAccount.collections.length}
+				<table class="ts-pay">
+					<tbody>
+						{#each d.cityLedgerAccount.collections as c (c.id)}
+							<tr>
+								<td>Collected {c.date}{c.memo ? ` · ${c.memo}` : ''}</td>
+								<td class="ts-num">−{peso(c.amountCentavos)}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			{/if}
+			<p>
+				{#if d.cityLedgerAccount.outstandingCentavos === 0}
+					<strong>Collected in full — nothing left to collect.</strong>
+				{:else}
+					Still to collect <strong>{peso(d.cityLedgerAccount.outstandingCentavos)}</strong>.
+				{/if}
 			</p>
 		{/if}
 

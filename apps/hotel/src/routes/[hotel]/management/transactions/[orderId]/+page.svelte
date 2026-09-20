@@ -382,8 +382,20 @@
 							<span class="text-ink-muted">Moved from the rooms</span>
 							<span class="tabular-nums text-ink">{peso(data.cityLedgerAccount.originalCentavos)}</span>
 						</div>
+						{#each data.cityLedgerAccount.collections as c (c.id)}
+							<div class="flex justify-between gap-3 text-xs">
+								<span class="text-ink-muted">
+									Collected {c.date}{#if c.memo} · {c.memo}{/if}
+								</span>
+								<span class="shrink-0 tabular-nums text-ink">−{peso(c.amountCentavos)}</span>
+							</div>
+						{/each}
 						<div class="flex justify-between gap-3 font-medium">
-							<span class="text-ink">Still to collect</span>
+							<span class="text-ink">
+								{data.cityLedgerAccount.outstandingCentavos === 0
+									? 'Collected in full — nothing left to collect'
+									: 'Still to collect'}
+							</span>
 							<span class="tabular-nums text-ink">{peso(data.cityLedgerAccount.outstandingCentavos)}</span>
 						</div>
 						<a
@@ -434,6 +446,21 @@
 							<dt class="text-ink-muted">Less: moved to the city ledger</dt>
 							<dd class="tabular-nums text-ink">−{peso(data.ledger.cityLedgerTotalCentavos)}</dd>
 						</div>
+						{#if data.cityLedgerAccount}
+							<div class="flex items-center justify-between gap-3 px-3 py-1.5 text-xs">
+								<dt class="text-ink-muted">
+									… of which collected by the hotel later ({data.cityLedgerAccount.collections.length}
+									collection{data.cityLedgerAccount.collections.length === 1 ? '' : 's'})
+								</dt>
+								<dd class="tabular-nums text-ink">{peso(data.cityLedgerAccount.collectedCentavos)}</dd>
+							</div>
+							<div class="flex items-center justify-between gap-3 px-3 py-1.5 text-xs">
+								<dt class="text-ink-muted">… city ledger still to collect</dt>
+								<dd class="tabular-nums {data.cityLedgerAccount.outstandingCentavos > 0 ? 'text-danger' : 'text-ink'}">
+									{data.cityLedgerAccount.outstandingCentavos === 0 ? 'nothing' : peso(data.cityLedgerAccount.outstandingCentavos)}
+								</dd>
+							</div>
+						{/if}
 					{/if}
 					<div class="flex items-center justify-between gap-3 px-3 py-2.5">
 						<dt class="font-semibold text-ink">

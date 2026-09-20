@@ -1,10 +1,11 @@
 import { error, fail } from '@sveltejs/kit';
-import { and, asc, desc, eq, inArray, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import {
 	bookingRooms,
 	bookings,
+	cashMovements,
 	folioCharges,
 	folios,
 	functionHalls,
@@ -117,6 +118,28 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 				.orderBy(asc(receivableEntries.createdAt))
 		: [];
 	const accountOf = new Map(accounts.map((a) => [a.id, a]));
+	// Money collected later against the account (Finance → Receivables → collect): the record that
+	// the city-ledger bill was actually paid, with when and how.
+	const collections = accounts.length
+		? await db
+				.select({
+					id: cashMovements.id,
+					receivableId: cashMovements.sourceId,
+					businessDate: cashMovements.businessDate,
+					amountCentavos: cashMovements.amountCentavos,
+					memo: cashMovements.memo
+				})
+				.from(cashMovements)
+				.where(
+					and(
+						eq(cashMovements.hotelId, hotel.id),
+						eq(cashMovements.sourceType, 'receivable_settlement'),
+						inArray(cashMovements.sourceId, accounts.map((a) => a.id)),
+						isNull(cashMovements.voidedAt)
+					)
+				)
+				.orderBy(asc(cashMovements.businessDate))
+		: [];
 	const activeAccount = accounts.find((a) => a.status === 'open' || a.status === 'partial') ?? null;
 
 	// Security deposits are held per ROOM — attach each room's latest one.
@@ -383,6 +406,13 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 					billToCompany: (activeAccount ?? accounts[0]!).billToCompany,
 					originalCentavos: accounts.reduce((sum, a) => sum + a.originalAmountCentavos, 0),
 					outstandingCentavos: accounts.reduce((sum, a) => sum + a.outstandingCentavos, 0),
+					collectedCentavos: collections.reduce((sum, c) => sum + c.amountCentavos, 0),
+					collections: collections.map((c) => ({
+						id: c.id,
+						date: c.businessDate,
+						amountCentavos: c.amountCentavos,
+						memo: c.memo
+					})),
 					status: (activeAccount ?? accounts[0]!).status
 				}
 			: null,
