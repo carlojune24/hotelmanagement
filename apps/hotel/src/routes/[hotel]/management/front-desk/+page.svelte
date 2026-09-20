@@ -83,6 +83,13 @@
 		form && 'securityDeposit' in form ? form.securityDeposit : undefined
 	);
 	const formDepositOk = $derived(form && 'depositOk' in form ? form.depositOk : undefined);
+	/** Part of the folio's payments that is really the security deposit kept for damage (a
+	 *  `security_deposit`-method row) — shown as its own line, not folded into "Paid". */
+	const depositAppliedCentavos = $derived(
+		(formRoomDetail?.payments ?? [])
+			.filter((p: { method: string; status: string; voidedAt: unknown }) => p.method === 'security_deposit' && p.status === 'paid' && !p.voidedAt)
+			.reduce((sum: number, p: { amountCentavos: number }) => sum + p.amountCentavos, 0)
+	);
 	const formHallBookingDetail = $derived(
 		form && 'hallBookingDetail' in form ? form.hallBookingDetail : undefined
 	);
@@ -1629,11 +1636,19 @@
 											>
 										</div>
 									{/if}
+									{#if depositAppliedCentavos > 0}
+										<div class="flex items-center justify-between gap-2 py-1.5">
+											<span class="text-ink-muted">Security deposit applied to damage</span>
+											<span class="shrink-0 text-ink">−{peso(depositAppliedCentavos)}</span>
+										</div>
+									{/if}
 									<div class="flex items-center justify-between gap-2 py-1.5">
 										<span class="text-ink-muted"
 											>Paid{formFolio.orderLineCount > 1 ? ' (whole booking)' : ''}</span
 										>
-										<span class="shrink-0 text-ink">−{peso(formFolio.paidTotalCentavos)}</span>
+										<span class="shrink-0 text-ink"
+											>−{peso(formFolio.paidTotalCentavos - depositAppliedCentavos)}</span
+										>
 									</div>
 									<div class="flex items-center justify-between gap-2 py-1.5 font-semibold">
 										<span class="text-ink"
@@ -1810,8 +1825,13 @@
 										</h4>
 										<p class="text-sm text-ink-muted">
 											Settled — {formSecurityDeposit.forfeitedCentavos
-												? `₱${(formSecurityDeposit.forfeitedCentavos / 100).toFixed(2)} forfeited, `
+												? `₱${(formSecurityDeposit.forfeitedCentavos / 100).toFixed(2)} kept for damage, `
 												: ''}₱{((formSecurityDeposit.refundedCentavos ?? 0) / 100).toFixed(2)} refunded.
+											{#if formSecurityDeposit.forfeitedCentavos && formFolio && formFolio.balanceCentavos > 0}
+												<span class="font-medium text-danger"
+													>₱{(formFolio.balanceCentavos / 100).toFixed(2)} of the damage is still due.</span
+												>
+											{/if}
 										</p>
 									</div>
 								{/if}

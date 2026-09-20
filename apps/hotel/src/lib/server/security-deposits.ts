@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNull, ne } from 'drizzle-orm';
 import { db } from './db/index';
 import {
 	bookingRooms,
@@ -300,7 +300,13 @@ export async function settleSecurityDeposit(
 		.select({ amountCentavos: payments.amountCentavos })
 		.from(payments)
 		.where(
-			and(eq(payments.folioId, folio.folioId), eq(payments.status, 'paid'), isNull(payments.voidedAt))
+			and(
+				eq(payments.folioId, folio.folioId),
+				eq(payments.status, 'paid'),
+				isNull(payments.voidedAt),
+				// The deposit's own forfeiture row is not a payment toward the damage.
+				ne(payments.method, 'security_deposit')
+			)
 		);
 	const directFolioPaymentsCentavos = directPaymentRows.reduce((sum, p) => sum + p.amountCentavos, 0);
 	const excessPaymentCentavos = Math.max(0, directFolioPaymentsCentavos - baseChargesCentavos);
@@ -410,6 +416,160 @@ export async function settleSecurityDeposit(
 		// checkout on a *different* sibling's unpaid charge.
 		remainingFolioBalanceCentavos: Math.max(0, damageOwedCentavos - forfeitedCentavos)
 	};
+}
+
+/**
+ * Re-checks a SETTLED deposit against the damage still on the folio, and releases whatever
+ * is no longer justified back to the guest. Called after a damage charge is voided: a deposit
+ * is forfeited only for damage that actually stands, so voiding the charge must undo (or shrink)
+ * the forfeiture instead of leaving the guest short and the folio in credit.
+ *
+ * Forfeiture only ever shrinks here (voiding removes damage; it never adds any). In one
+ * transaction: soft-void the old `security_deposit` payment row and the matching `other_revenue`
+ * cash movement (`voidCashMovement` also posts the reversing journal entry, and lowering the
+ * account balance IS the cash handed back), then — if some damage still stands — record the smaller
+ * forfeiture the same way `settleSecurityDeposit` does, and update the deposit row.
+ * A no-op (returns 0) when there is no settled deposit or nothing to release.
+ */
+export async function reconcileSettledDeposit(
+	hotelId: string,
+	bookingId: string,
+	reason: string | null,
+	actor: SessionUser | null
+): Promise<{ releasedCentavos: number; forfeitedCentavos: number }> {
+	const deposit = await getSecurityDepositForBooking(hotelId, bookingId);
+	const oldForfeited = deposit?.forfeitedCentavos ?? 0;
+	if (!deposit || deposit.status !== 'settled' || oldForfeited <= 0) {
+		return { releasedCentavos: 0, forfeitedCentavos: oldForfeited };
+	}
+
+	const folio = await getFolioDetail(hotelId, { kind: 'room', bookingId });
+	const baseCharges = folio.charges
+		.filter((c) => c.isBaseCharge && !c.voidedAt)
+		.reduce((sum, c) => sum + c.totalCentavos, 0);
+	const damageCharges = folio.charges
+		.filter((c) => !c.isBaseCharge && !c.voidedAt)
+		.reduce((sum, c) => sum + c.totalCentavos, 0);
+	const directPayments = await db
+		.select({ amountCentavos: payments.amountCentavos })
+		.from(payments)
+		.where(
+			and(
+				eq(payments.folioId, folio.folioId),
+				eq(payments.status, 'paid'),
+				isNull(payments.voidedAt),
+				ne(payments.method, 'security_deposit')
+			)
+		);
+	const excess = Math.max(
+		0,
+		directPayments.reduce((sum, p) => sum + p.amountCentavos, 0) - baseCharges
+	);
+	const damageOwed = Math.max(0, damageCharges - excess);
+	const newForfeited = Math.min(deposit.amountCentavos, damageOwed);
+	if (newForfeited >= oldForfeited) return { releasedCentavos: 0, forfeitedCentavos: oldForfeited };
+
+	const [hotel] = await db
+		.select({ timezone: hotels.timezone })
+		.from(hotels)
+		.where(eq(hotels.id, hotelId))
+		.limit(1);
+	const businessDate = businessDateFor(hotel?.timezone ?? 'Asia/Manila');
+
+	// Reverse the old forfeiture's revenue movement first: it refuses inside a locked day-close,
+	// and nothing else has been touched yet if it does.
+	const revenueMovements = await db
+		.select({ id: cashMovements.id })
+		.from(cashMovements)
+		.where(
+			and(
+				eq(cashMovements.sourceType, 'security_deposit'),
+				eq(cashMovements.sourceId, deposit.id),
+				eq(cashMovements.category, 'other_revenue'),
+				isNull(cashMovements.voidedAt)
+			)
+		);
+	for (const m of revenueMovements) {
+		await voidCashMovement(hotelId, m.id, reason ?? 'Damage charge voided — deposit released', actor);
+	}
+
+	await db.transaction(async (tx: Tx) => {
+		await tx
+			.update(payments)
+			.set({
+				voidedAt: new Date(),
+				voidedByUserId: actor?.id ?? null,
+				voidReason: reason?.trim() || 'Damage charge voided — deposit released'
+			})
+			.where(
+				and(
+					eq(payments.folioId, folio.folioId),
+					eq(payments.method, 'security_deposit'),
+					isNull(payments.voidedAt)
+				)
+			);
+
+		if (newForfeited > 0) {
+			const [order] = await tx
+				.select({ orderId: bookings.orderId })
+				.from(bookings)
+				.where(eq(bookings.id, bookingId))
+				.limit(1);
+			if (!order) throw new SecurityDepositError('Booking not found.');
+			await tx.insert(payments).values({
+				orderId: order.orderId,
+				provider: 'cash',
+				method: 'security_deposit',
+				purpose: 'settlement',
+				status: 'paid',
+				amountCentavos: newForfeited,
+				folioId: folio.folioId,
+				recordedByUserId: actor?.id ?? null,
+				paidAt: new Date()
+			});
+			await recordCashMovement(
+				{
+					hotelId,
+					businessDate,
+					direction: 'in',
+					category: 'other_revenue',
+					cashAccountId: deposit.cashAccountId,
+					amountCentavos: newForfeited,
+					counterpartyType: 'guest',
+					sourceType: 'security_deposit',
+					sourceId: deposit.id,
+					memo: 'Security deposit forfeited for damage (adjusted after a charge was voided)',
+					actor
+				},
+				tx
+			);
+		}
+
+		await tx
+			.update(securityDeposits)
+			.set({
+				forfeitedCentavos: newForfeited,
+				refundedCentavos: deposit.amountCentavos - newForfeited,
+				updatedAt: new Date()
+			})
+			.where(eq(securityDeposits.id, deposit.id));
+	});
+
+	await writeAudit({
+		hotelId,
+		actor,
+		action: 'security_deposit.forfeiture_reduced',
+		entityType: 'booking',
+		entityId: bookingId,
+		after: {
+			securityDepositId: deposit.id,
+			previousForfeitedCentavos: oldForfeited,
+			forfeitedCentavos: newForfeited,
+			releasedCentavos: oldForfeited - newForfeited
+		}
+	});
+
+	return { releasedCentavos: oldForfeited - newForfeited, forfeitedCentavos: newForfeited };
 }
 
 /** Voids a mistakenly-collected hold before it's ever settled — reverses the cash

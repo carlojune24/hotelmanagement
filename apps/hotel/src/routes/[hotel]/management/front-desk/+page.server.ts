@@ -40,6 +40,7 @@ import { FinanceError } from '$lib/server/finance/shared';
 import { recordPayment, refundPayment, voidPayment } from '$lib/server/finance/payments';
 import { sendBookingReviewRequest } from '$lib/server/email/send-booking-review-request';
 import {
+	reconcileSettledDeposit,
 	SecurityDepositError,
 	getSecurityDepositForBooking,
 	settleSecurityDeposit
@@ -612,7 +613,32 @@ export const actions: Actions = {
 			}
 			throw e;
 		}
-		return loadRoomDetailPayload(hotelId, parsed.data.bookingId);
+		// A deposit already settled against this damage is only kept for damage that stands —
+		// voiding the charge releases the now-unjustified part back to the guest.
+		let depositOk: string | undefined;
+		try {
+			const r = await reconcileSettledDeposit(
+				hotelId,
+				parsed.data.bookingId,
+				parsed.data.reason ?? null,
+				event.locals.user
+			);
+			if (r.releasedCentavos > 0) {
+				depositOk =
+					r.forfeitedCentavos > 0
+						? `Charge voided — ₱${(r.releasedCentavos / 100).toFixed(2)} of the deposit released back to the guest (₱${(r.forfeitedCentavos / 100).toFixed(2)} still forfeited).`
+						: `Charge voided — the ₱${(r.releasedCentavos / 100).toFixed(2)} forfeited deposit is released back to the guest.`;
+			}
+		} catch (e) {
+			if (e instanceof SecurityDepositError || e instanceof FinanceError) {
+				return fail(400, {
+					...(await loadRoomDetailPayload(hotelId, parsed.data.bookingId)),
+					folioError: `The charge was voided, but the security deposit could not be adjusted: ${e.message}`
+				});
+			}
+			throw e;
+		}
+		return { ...(await loadRoomDetailPayload(hotelId, parsed.data.bookingId)), depositOk };
 	},
 
 	openShift: async (event) => {
