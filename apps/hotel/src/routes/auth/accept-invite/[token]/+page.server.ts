@@ -1,6 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { acceptInvite, getUsableInvite } from '$lib/server/auth/invite';
+import { inviteByIp, tooManyMessage } from '$lib/server/auth/rate-limit';
 import { createSession, generateSessionToken, setSessionCookie } from '$lib/server/auth/session';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -32,11 +33,18 @@ export const actions: Actions = {
 			return fail(400, { error: parsed.error.issues[0]?.message ?? 'Check the form.' });
 		}
 
+		const ip = event.getClientAddress();
+		const wait = inviteByIp.retryAfter(ip);
+		if (wait) return fail(429, { error: tooManyMessage(wait) });
+
 		const result = await acceptInvite(event.params.token!, {
 			name: parsed.data.name,
 			password: parsed.data.password
 		});
-		if ('error' in result) return fail(400, { error: result.error });
+		if ('error' in result) {
+			inviteByIp.recordFailure(ip);
+			return fail(400, { error: result.error });
+		}
 
 		const token = generateSessionToken();
 		const session = await createSession(token, result.userId);

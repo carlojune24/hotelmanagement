@@ -1,6 +1,12 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { firstHotelSlugForUser, verifyCredentials } from '$lib/server/auth/login';
+import {
+	loginFailed,
+	loginRetryAfter,
+	loginSucceeded,
+	tooManyMessage
+} from '$lib/server/auth/rate-limit';
 import { safeNext } from '$lib/server/auth/redirect';
 import { createSession, generateSessionToken, setSessionCookie } from '$lib/server/auth/session';
 import type { Actions, PageServerLoad } from './$types';
@@ -31,8 +37,16 @@ export const actions: Actions = {
 		if (!parsed.success) return fail(400, { error: 'Enter a valid email and password.' });
 
 		const { email, password, next } = parsed.data;
+		const ip = event.getClientAddress();
+		const wait = loginRetryAfter(ip, email);
+		if (wait) return fail(429, { error: tooManyMessage(wait) });
+
 		const user = await verifyCredentials(email, password);
-		if (!user) return fail(400, { error: 'Incorrect email or password.' });
+		if (!user) {
+			loginFailed(ip, email);
+			return fail(400, { error: 'Incorrect email or password.' });
+		}
+		loginSucceeded(ip, email);
 
 		if (!user.isPlatformAdmin) {
 			// Valid credentials, but this is a hotel-staff account, not a platform admin —

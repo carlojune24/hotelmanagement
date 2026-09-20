@@ -17,7 +17,10 @@ export const load: LayoutServerLoad = async ({ locals, url, route, params, depen
 	}
 
 	if (!locals.user) {
-		redirect(302, `/${params.hotel}/management/login?next=${encodeURIComponent(url.pathname)}`);
+		// On a hotel's custom domain `reroute` maps `/management/...` back to `/{slug}/management/...`
+		// internally, so the redirect stays slug-free and the slug never shows in the URL bar.
+		const prefix = locals.isCustomDomain ? '' : `/${params.hotel}`;
+		redirect(302, `${prefix}/management/login?next=${encodeURIComponent(url.pathname)}`);
 	}
 
 	// Any hotel role (or platform admin) may enter the staff shell; per-area

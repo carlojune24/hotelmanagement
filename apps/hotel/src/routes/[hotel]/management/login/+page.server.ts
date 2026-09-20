@@ -1,6 +1,12 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { verifyCredentials } from '$lib/server/auth/login';
+import {
+	loginFailed,
+	loginRetryAfter,
+	loginSucceeded,
+	tooManyMessage
+} from '$lib/server/auth/rate-limit';
 import { safeNext } from '$lib/server/auth/redirect';
 import { createSession, generateSessionToken, setSessionCookie } from '$lib/server/auth/session';
 import { getMembershipRole } from '$lib/server/tenant';
@@ -15,7 +21,7 @@ const schema = z.object({
 export const load: PageServerLoad = async ({ locals, url }) => {
 	const hotel = locals.hotel;
 	if (!hotel) error(404, 'Hotel not found');
-	const base = `/${hotel.slug}/management`;
+	const base = `${locals.isCustomDomain ? '' : `/${hotel.slug}`}/management`;
 
 	if (locals.user) redirect(302, safeNext(url.searchParams.get('next'), `${base}/dashboard`));
 
@@ -26,15 +32,23 @@ export const actions: Actions = {
 	default: async (event) => {
 		const hotel = event.locals.hotel;
 		if (!hotel) error(404, 'Hotel not found');
-		const base = `/${hotel.slug}/management`;
+		const base = `${event.locals.isCustomDomain ? '' : `/${hotel.slug}`}/management`;
 
 		const form = Object.fromEntries(await event.request.formData());
 		const parsed = schema.safeParse(form);
 		if (!parsed.success) return fail(400, { error: 'Enter a valid email and password.' });
 
 		const { email, password, next } = parsed.data;
+		const ip = event.getClientAddress();
+		const wait = loginRetryAfter(ip, email);
+		if (wait) return fail(429, { error: tooManyMessage(wait) });
+
 		const user = await verifyCredentials(email, password);
-		if (!user) return fail(400, { error: 'Incorrect email or password.' });
+		if (!user) {
+			loginFailed(ip, email);
+			return fail(400, { error: 'Incorrect email or password.' });
+		}
+		loginSucceeded(ip, email);
 
 		const hasAccess =
 			user.isPlatformAdmin || (await getMembershipRole(user.id, hotel.id)) !== null;
