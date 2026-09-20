@@ -23,6 +23,7 @@ import { checkHallAvailability } from './hall-availability';
 import { wallTimeToUtcMs } from './cancellation';
 import { FolioError, closeFolio, getFolioDetail } from './folio';
 import { planInRoomOrder } from '$lib/allocation';
+import { splitRoomLine } from '$lib/room-split';
 import { lineBalances } from './order-balances';
 import { getSecurityDepositForBooking } from './security-deposits';
 import { recordWalkInPayment, resolvePaymentAccount, type PaymentMethod } from './finance/payments';
@@ -743,8 +744,25 @@ function walkInAllocations(
 	bookingIds: string[],
 	roomTotals: number[],
 	amountPaid: number,
-	requested: number[] | undefined
+	requestedPerLine: number[] | undefined,
+	lineOfBooking: number[]
 ): { bookingId: string; amountCentavos: number }[] {
+	// The desk splits the payment per CART LINE; a line of several rooms fills its rooms in order.
+	let requested: number[] | undefined;
+	if (requestedPerLine) {
+		const lineCount = Math.max(...lineOfBooking) + 1;
+		if (requestedPerLine.length !== lineCount)
+			throw new WalkInError('Assign the payment to every room.');
+		requested = [];
+		for (let line = 0; line < lineCount; line++) {
+			const idx = lineOfBooking.map((l, i) => (l === line ? i : -1)).filter((i) => i >= 0);
+			const plan = planInRoomOrder(
+				requestedPerLine[line]!,
+				idx.map((i) => ({ id: String(i), balanceCentavos: roomTotals[i]! }))
+			);
+			idx.forEach((bookingIdx, k) => (requested![bookingIdx] = plan.allocations[k]!.amountCentavos));
+		}
+	}
 	if (requested) {
 		if (requested.length !== bookingIds.length)
 			throw new WalkInError('Assign the payment to every room.');
@@ -937,60 +955,78 @@ export async function createWalkInBooking(params: {
 		});
 
 		const bookingIds: string[] = [];
-		for (const { item, price, extraBeds, roomIds } of lines) {
+		/** Each created booking's own total and which cart line it came from (for the payment split). */
+		const bookingTotals: number[] = [];
+		const lineOfBooking: number[] = [];
+		// One booking PER ROOM, not one per cart line, so every room has its own folio, security
+		// deposit and charges; the line's price, guests and extra beds are split exactly across them.
+		for (const [lineIndex, { item, price, extraBeds, roomIds }] of lines.entries()) {
 			const lineFees = price.fees.reduce((sum, f) => sum + f.amountCentavos, 0);
-			const [booking] = await tx
-				.insert(bookings)
-				.values({
-					hotelId,
-					orderId: order!.id,
-					checkIn: item.checkIn,
-					checkOut: item.checkOut,
-					occupancy: item.occupancy,
-					status: 'confirmed',
+			const shares = splitRoomLine(
+				{
 					subtotalCentavos: price.subtotalCentavos,
 					feesCentavos: lineFees,
 					vatCentavos: price.vatCentavos,
 					totalCentavos: price.totalCentavos
-				})
-				.returning({ id: bookings.id });
+				},
+				item.occupancy,
+				extraBeds,
+				item.roomCount
+			);
+			for (const [i, share] of shares.entries()) {
+				const [booking] = await tx
+					.insert(bookings)
+					.values({
+						hotelId,
+						orderId: order!.id,
+						checkIn: item.checkIn,
+						checkOut: item.checkOut,
+						occupancy: share.occupancy,
+						status: 'confirmed',
+						subtotalCentavos: share.subtotalCentavos,
+						feesCentavos: share.feesCentavos,
+						vatCentavos: share.vatCentavos,
+						totalCentavos: share.totalCentavos
+					})
+					.returning({ id: bookings.id });
 
-			const [bookingRoom] = await tx
-				.insert(bookingRooms)
-				.values({
-					bookingId: booking!.id,
-					roomTypeId: item.roomTypeId,
-					ratePlanId: item.ratePlanId,
-					quantity: item.roomCount,
-					extraBeds
-				})
-				.returning({ id: bookingRooms.id });
+				const [bookingRoom] = await tx
+					.insert(bookingRooms)
+					.values({
+						bookingId: booking!.id,
+						roomTypeId: item.roomTypeId,
+						ratePlanId: item.ratePlanId,
+						quantity: 1,
+						extraBeds: share.extraBeds
+					})
+					.returning({ id: bookingRooms.id });
 
-			// Pre-assign the exact rooms staff clicked on the grid — already verified
-			// free just above, inside this same locked transaction. Unlike every other
-			// `room_assignments` insert in this file (which only happens at check-in),
-			// this one exists from the moment the booking is created; `checkInBooking`
-			// knows to reuse rather than re-insert these.
-			if (roomIds && roomIds.length > 0) {
-				await tx.insert(roomAssignments).values(
-					roomIds.map((roomId) => ({
+				// Pre-assign the exact room staff clicked on the grid — already verified free just
+				// above, inside this same locked transaction. `checkInBooking` reuses it.
+				const roomId = roomIds?.[i];
+				if (roomId) {
+					await tx.insert(roomAssignments).values({
 						bookingRoomId: bookingRoom!.id,
 						roomId,
 						checkIn: item.checkIn,
 						checkOut: item.checkOut
-					}))
-				);
+					});
+				}
+
+				await tx.insert(bookingStatusHistory).values({
+					bookingId: booking!.id,
+					fromStatus: null,
+					toStatus: 'confirmed',
+					note:
+						share.extraBeds > 0
+							? `Walk-in booking — ${share.extraBeds} extra bed(s) added`
+							: 'Walk-in booking'
+				});
+
+				bookingIds.push(booking!.id);
+				bookingTotals.push(share.totalCentavos);
+				lineOfBooking.push(lineIndex);
 			}
-
-			await tx.insert(bookingStatusHistory).values({
-				bookingId: booking!.id,
-				fromStatus: null,
-				toStatus: 'confirmed',
-				note:
-					extraBeds > 0 ? `Walk-in booking — ${extraBeds} extra bed(s) added` : 'Walk-in booking'
-			});
-
-			bookingIds.push(booking!.id);
 		}
 
 		// Full settlement + its cash-ledger movement, in the same transaction — one
@@ -1016,9 +1052,10 @@ export async function createWalkInBooking(params: {
 				bookingIds.length > 1
 					? walkInAllocations(
 							bookingIds,
-							lines.map((l) => l.price.totalCentavos),
+							bookingTotals,
 							walkInAmountPaid(totalCentavos, payment),
-							payment.allocationsCentavos
+							payment.allocationsCentavos,
+							lineOfBooking
 						)
 					: undefined
 		});

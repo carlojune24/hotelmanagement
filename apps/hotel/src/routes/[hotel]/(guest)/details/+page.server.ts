@@ -15,6 +15,7 @@ import {
 } from '$lib/server/db/schema/index';
 import { priceEventHall, priceStay } from '$lib/server/pricing';
 import { computeDownpayment } from '$lib/downpayment';
+import { splitRoomLine } from '$lib/room-split';
 import { downpaymentBpsByRatePlan } from '$lib/server/downpayment-lookup';
 import { searchAvailability } from '$lib/server/availability';
 import { checkHallAvailability } from '$lib/server/hall-availability';
@@ -265,37 +266,56 @@ export const actions: Actions = {
 				note: 'Order created'
 			});
 
+			// One booking PER ROOM, not one per cart line: "2 × Deluxe" becomes two bookings so each room
+			// has its own folio, security deposit and charges. The line's price, guests and extra beds
+			// are split exactly across them.
 			for (const { item, price, extraBeds } of roomLines) {
 				const lineFees = price.fees.reduce((sum, f) => sum + f.amountCentavos, 0);
-				const [booking] = await tx
-					.insert(bookings)
-					.values({
-						hotelId,
-						orderId: order!.id,
-						checkIn: item.checkIn,
-						checkOut: item.checkOut,
-						occupancy: item.occupancy,
-						status: 'pending_payment',
+				const shares = splitRoomLine(
+					{
 						subtotalCentavos: price.subtotalCentavos,
 						feesCentavos: lineFees,
 						vatCentavos: price.vatCentavos,
 						totalCentavos: price.totalCentavos
-					})
-					.returning({ id: bookings.id });
+					},
+					item.occupancy,
+					extraBeds,
+					item.roomCount
+				);
+				for (const share of shares) {
+					const [booking] = await tx
+						.insert(bookings)
+						.values({
+							hotelId,
+							orderId: order!.id,
+							checkIn: item.checkIn,
+							checkOut: item.checkOut,
+							occupancy: share.occupancy,
+							status: 'pending_payment',
+							subtotalCentavos: share.subtotalCentavos,
+							feesCentavos: share.feesCentavos,
+							vatCentavos: share.vatCentavos,
+							totalCentavos: share.totalCentavos
+						})
+						.returning({ id: bookings.id });
 
-				await tx.insert(bookingRooms).values({
-					bookingId: booking!.id,
-					roomTypeId: item.roomTypeId,
-					ratePlanId: item.ratePlanId,
-					quantity: item.roomCount,
-					extraBeds
-				});
-				await tx.insert(bookingStatusHistory).values({
-					bookingId: booking!.id,
-					fromStatus: null,
-					toStatus: 'pending_payment',
-					note: extraBeds > 0 ? `Booking created — ${extraBeds} extra bed(s) added` : 'Booking created'
-				});
+					await tx.insert(bookingRooms).values({
+						bookingId: booking!.id,
+						roomTypeId: item.roomTypeId,
+						ratePlanId: item.ratePlanId,
+						quantity: 1,
+						extraBeds: share.extraBeds
+					});
+					await tx.insert(bookingStatusHistory).values({
+						bookingId: booking!.id,
+						fromStatus: null,
+						toStatus: 'pending_payment',
+						note:
+							share.extraBeds > 0
+								? `Booking created — ${share.extraBeds} extra bed(s) added`
+								: 'Booking created'
+					});
+				}
 			}
 
 			for (const { item, price } of hallLines) {

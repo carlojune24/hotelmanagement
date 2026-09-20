@@ -628,12 +628,12 @@
 						<span>Whole booking ({f.orderLineCount} rooms/events): {peso(f.orderChargesTotalCentavos)}</span>
 						<span>{f.orderBalanceCentavos > 0 ? `owes ${peso(f.orderBalanceCentavos)}` : 'settled'}</span>
 					</div>
-					<div class="pt-1">
+				{/if}
+				<div class="pt-1">
 						<Button variant="outline" size="sm" href="{staffBase}/transactions/{data.detail.order.id}">
 							Open transaction
 						</Button>
 					</div>
-				{/if}
 			</div>
 		{/if}
 		{#if data.detail.payments.length === 0}

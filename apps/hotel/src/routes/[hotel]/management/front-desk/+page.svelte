@@ -1658,13 +1658,13 @@
 										<span class="text-ink">Room balance</span>
 										<span class="shrink-0 text-ink">{peso(formFolio.balanceCentavos)}</span>
 									</div>
-									{#if formFolio.orderLineCount > 1 && formRoomDetail}
+									{#if formRoomDetail}
 										<div class="py-1.5">
 											<a
 												href="{staffBase}/transactions/{formRoomDetail.order.id}?roomId={selectedRoomId ?? ''}"
 												class="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
 											>
-												Open the booking's transaction (all rooms) →
+												Open booking transaction →
 											</a>
 										</div>
 									{/if}
