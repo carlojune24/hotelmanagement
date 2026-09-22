@@ -32,6 +32,7 @@
 	import XIcon from '@lucide/svelte/icons/x';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
+	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import type { ActionData, PageData } from './$types';
 	import type {
 		HallGridCell,
@@ -265,6 +266,16 @@
 	});
 
 	const selectedRoom = $derived(data.cells.find((c) => c.roomId === selectedRoomId) ?? null);
+
+	/** Cleanliness status + pending damage reports per room — only rooms ever flagged for
+	 *  housekeeping appear here (see `getRoomHousekeepingOverlay`); a room absent from this
+	 *  map has never been flagged and shows no housekeeping icon or note anywhere below. */
+	const housekeepingByRoom = $derived(
+		new Map(data.housekeeping.map((h) => [h.roomId, h]))
+	);
+	const selectedHousekeeping = $derived(
+		selectedRoom ? (housekeepingByRoom.get(selectedRoom.roomId) ?? null) : null
+	);
 
 	/** The form result is whatever action ran last (possibly another room's), so deposit state is only
 	 *  trusted for the SELECTED room once ITS detail has loaded and the deposit row belongs to it —
@@ -1133,6 +1144,13 @@
 									{:else if c.status === 'reserved'}
 										<span class="absolute top-2 right-2 size-1.5 rounded-full bg-brand"></span>
 									{/if}
+									{#if housekeepingByRoom.get(c.roomId)?.status === 'dirty' || housekeepingByRoom.get(c.roomId)?.status === 'in_progress'}
+										<SparklesIcon
+											class="absolute right-1.5 bottom-1.5 size-3 text-danger"
+										/>
+									{:else if housekeepingByRoom.get(c.roomId)?.status === 'clean' && c.status === 'vacant'}
+										<CheckIcon class="absolute right-1.5 bottom-1.5 size-3 text-ok" />
+									{/if}
 									<div
 										class="text-base font-bold tabular-nums {c.roomTypeColor ? '' : 'text-ink'}"
 										style={c.roomTypeColor ? `color: ${c.roomTypeColor}` : undefined}
@@ -1402,6 +1420,64 @@
 						{/if}
 					</div>
 
+					{#if selectedHousekeeping && selectedHousekeeping.pendingDamageReports.length > 0}
+						<div class="mb-4 space-y-2">
+							<h4 class="text-xs font-semibold tracking-wide text-ink-muted uppercase">
+								Housekeeping-reported damage
+							</h4>
+							{#each selectedHousekeeping.pendingDamageReports as r (r.id)}
+								<div class="rounded-md border border-danger/30 bg-danger/5 p-3">
+									<img
+										src={r.photoUrl}
+										alt="Reported damage"
+										class="mb-2 max-h-32 rounded-md object-cover"
+									/>
+									<p class="text-sm text-ink">{r.description}</p>
+									{#if r.bookingId}
+										<form
+											method="POST"
+											action="?/resolveHousekeepingDamage"
+											use:enhance
+											class="mt-2 flex items-end gap-2"
+										>
+											<input type="hidden" name="damageReportId" value={r.id} />
+											<input type="hidden" name="bookingId" value={r.bookingId} />
+											<Input
+												name="amount"
+												type="number"
+												min="0.01"
+												step="0.01"
+												placeholder="₱ amount"
+												required
+												class="h-8 w-28 text-sm"
+											/>
+											<Button type="submit" size="sm" variant="outline">Charge damage</Button>
+										</form>
+									{:else}
+										<p class="mt-2 text-xs text-ink-muted">
+											No booking on file for this room — charge it manually elsewhere if needed.
+										</p>
+									{/if}
+									<form
+										method="POST"
+										action="?/dismissHousekeepingDamage"
+										use:enhance
+										class="mt-1"
+									>
+										<input type="hidden" name="damageReportId" value={r.id} />
+										<input type="hidden" name="bookingId" value={r.bookingId ?? ''} />
+										<button
+											type="submit"
+											class="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
+										>
+											Dismiss — not chargeable
+										</button>
+									</form>
+								</div>
+							{/each}
+						</div>
+					{/if}
+
 					{#if selectedRoom.occupant}
 						{@const o = selectedRoom.occupant}
 						{@const deadline = checkoutDeadline(o.checkoutAtIso, nowMs, data.timezone)}
@@ -1481,6 +1557,12 @@
 								)} security deposit below before checking out.
 							</p>
 						{/if}
+						{#if selectedRoom.status === 'departing' && (selectedHousekeeping?.status === 'dirty' || selectedHousekeeping?.status === 'in_progress')}
+							<p class="mb-2 text-xs text-ink-muted">
+								This room wasn't marked clean by Housekeeping before this stay — checking out
+								anyway.
+							</p>
+						{/if}
 						<div class="flex gap-2">
 							{#if selectedRoom.status === 'departing' || selectedRoom.status === 'occupied'}
 								<form method="POST" action="?/checkOut" use:enhance class="flex-1">
@@ -1522,6 +1604,16 @@
 								View full details
 							</Button>
 						</div>
+						{#if selectedRoom.status === 'occupied'}
+							<form method="POST" action="?/flagForHousekeeping" use:enhance class="mt-2">
+								<input type="hidden" name="bookingId" value={o.bookingId} />
+								<input type="hidden" name="roomId" value={selectedRoomId} />
+								<Button type="submit" variant="outline" size="sm" class="w-full gap-1.5">
+									<SparklesIcon class="size-3.5" />
+									Flag for housekeeping
+								</Button>
+							</form>
+						{/if}
 
 						<!-- Fetches automatically whenever a new occupied room is selected — see the
 						     $effect above. Never shown to the staff; it just keeps `formRoomDetail`/
@@ -1810,6 +1902,11 @@
 											/>
 											<Button type="submit" size="sm" variant="outline">Add damage charge</Button>
 										</form>
+										{#if !selectedHousekeeping || selectedHousekeeping.pendingDamageReports.length === 0}
+											<p class="mt-1 text-xs text-ink-muted">
+												Charging directly — no Housekeeping report on file for this.
+											</p>
+										{/if}
 										<p class="mt-2 text-xs text-ink-muted">
 											Leave a damage charge unpaid — "Settle deposit" applies it from the hold and
 											refunds the rest. Taking payment for it separately first means there's

@@ -370,8 +370,8 @@ async function insertCharge(
 		amenityItemId?: string;
 	},
 	actor: SessionUser | null
-): Promise<void> {
-	await db.transaction(async (tx) => {
+): Promise<{ chargeId: string }> {
+	return await db.transaction(async (tx) => {
 		const folioId = await ensureFolio(tx, hotelId, target);
 		const [hotel] = await tx
 			.select({ vatRateBps: hotels.vatRateBps })
@@ -384,16 +384,22 @@ async function insertCharge(
 			? Math.round((subtotalCentavos * (hotel?.vatRateBps ?? 0)) / 10000)
 			: 0;
 
-		await tx.insert(folioCharges).values({
-			folioId,
-			amenityItemId: input.amenityItemId ?? null,
-			description: input.description,
-			quantity: input.quantity,
-			unitPriceCentavos: input.unitPriceCentavos,
-			taxCentavos,
-			totalCentavos: subtotalCentavos + taxCentavos,
-			addedByUserId: actor?.id ?? null
-		});
+		const [charge] = await tx
+			.insert(folioCharges)
+			.values({
+				folioId,
+				amenityItemId: input.amenityItemId ?? null,
+				description: input.description,
+				quantity: input.quantity,
+				unitPriceCentavos: input.unitPriceCentavos,
+				taxCentavos,
+				totalCentavos: subtotalCentavos + taxCentavos,
+				addedByUserId: actor?.id ?? null
+			})
+			.returning({ id: folioCharges.id });
+		if (!charge) throw new FolioError('Could not post the charge.');
+
+		return { chargeId: charge.id };
 	});
 }
 
@@ -449,13 +455,13 @@ export async function addAdHocCharge(
 	target: FolioTarget,
 	input: { description: string; amountCentavos: number; taxable: boolean },
 	actor: SessionUser | null
-): Promise<void> {
+): Promise<{ chargeId: string }> {
 	if (!input.description.trim()) throw new FolioError('Enter a description for this charge.');
 	if (!Number.isInteger(input.amountCentavos) || input.amountCentavos <= 0) {
 		throw new FolioError('Enter a charge amount greater than zero.');
 	}
 
-	await insertCharge(
+	const { chargeId } = await insertCharge(
 		hotelId,
 		target,
 		{
@@ -475,6 +481,8 @@ export async function addAdHocCharge(
 		entityId: target.kind === 'room' ? target.bookingId : target.hallBookingId,
 		after: { description: input.description.trim(), amountCentavos: input.amountCentavos }
 	});
+
+	return { chargeId };
 }
 
 export type ExtensionFeeKind = 'late_checkout' | 'early_check_in';

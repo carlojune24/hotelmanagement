@@ -144,7 +144,12 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 	{ cap: 'reports:read', label: 'View reports', section: 'Reports' },
 	{ cap: 'reports:*', label: 'View and export all reports', section: 'Reports' },
 
-	{ cap: 'housekeeping:*', label: 'Manage housekeeping tasks', section: 'Housekeeping' },
+	{ cap: 'housekeeping:read', label: 'View the housekeeping board', section: 'Housekeeping' },
+	{
+		cap: 'housekeeping:write',
+		label: 'Update room/hall cleanliness and report damage',
+		section: 'Housekeeping'
+	},
 	{ cap: 'room:read', label: 'View room status', section: 'Housekeeping' },
 
 	{ cap: 'finance:read', label: 'View the Finance dashboard', section: 'Finance' },

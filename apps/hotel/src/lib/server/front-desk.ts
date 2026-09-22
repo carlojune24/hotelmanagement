@@ -32,6 +32,7 @@ import { getBirSettings, issueInvoice } from './finance/documents';
 import { priceEventHall, type PriceBreakdown } from './pricing';
 import { addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
 import { writeAudit } from './audit';
+import { flagHallForHousekeeping, flagRoomForHousekeeping } from './housekeeping';
 import type { SessionUser } from './auth/session';
 
 /** Today's date (`YYYY-MM-DD`) in a hotel's own timezone — the front desk's "business date". */
@@ -1204,6 +1205,26 @@ export async function checkOutBooking(
 		entityId: bookingId
 	});
 
+	// Flag every room this booking occupied for housekeeping — best-effort, never blocks
+	// checkout. A turnover always needs cleaning before the next guest, regardless of
+	// whether Housekeeping is ever actually used.
+	const [bookingRoom] = await db
+		.select({ id: bookingRooms.id })
+		.from(bookingRooms)
+		.where(eq(bookingRooms.bookingId, bookingId))
+		.limit(1);
+	if (bookingRoom) {
+		const assignedRooms = await db
+			.select({ roomId: roomAssignments.roomId })
+			.from(roomAssignments)
+			.where(eq(roomAssignments.bookingRoomId, bookingRoom.id));
+		for (const { roomId } of assignedRooms) {
+			void flagRoomForHousekeeping(hotelId, roomId, 'checkout', bookingId, actor).catch((e) =>
+				console.error('checkOutBooking: flagRoomForHousekeeping failed', roomId, e)
+			);
+		}
+	}
+
 	await closeFolio(hotelId, bookingId);
 
 	// Issue the guest's Invoice on check-out. Non-fatal: a missing/exhausted BIR
@@ -1486,9 +1507,14 @@ export async function completeHallBooking(
 	hallBookingId: string,
 	actor: SessionUser | null
 ): Promise<void> {
+	let functionHallId: string | undefined;
 	await db.transaction(async (tx) => {
 		const [row] = await tx
-			.select({ id: hallBookings.id, status: hallBookings.status })
+			.select({
+				id: hallBookings.id,
+				status: hallBookings.status,
+				functionHallId: hallBookings.functionHallId
+			})
 			.from(hallBookings)
 			.innerJoin(orders, eq(orders.id, hallBookings.orderId))
 			.where(and(eq(hallBookings.id, hallBookingId), eq(orders.hotelId, hotelId)))
@@ -1497,6 +1523,7 @@ export async function completeHallBooking(
 		if (row.status !== 'confirmed') {
 			throw new HallCompleteError('Only a confirmed event can be marked completed.');
 		}
+		functionHallId = row.functionHallId;
 
 		await tx
 			.update(hallBookings)
@@ -1518,4 +1545,11 @@ export async function completeHallBooking(
 		entityType: 'hall_booking',
 		entityId: hallBookingId
 	});
+
+	// Flag the hall for housekeeping turnover — best-effort, never blocks completion.
+	if (functionHallId) {
+		void flagHallForHousekeeping(hotelId, functionHallId, 'completed', hallBookingId, actor).catch((e) =>
+			console.error('completeHallBooking: flagHallForHousekeeping failed', functionHallId, e)
+		);
+	}
 }

@@ -36,6 +36,14 @@ import {
 	todayInTimezone
 } from '$lib/server/front-desk';
 import { saveUpload } from '$lib/server/uploads';
+import {
+	HousekeepingError,
+	dismissDamageReport,
+	flagRoomForHousekeeping,
+	getDamageReportById,
+	getRoomHousekeepingOverlay,
+	markDamageReportCharged
+} from '$lib/server/housekeeping';
 import { FinanceError } from '$lib/server/finance/shared';
 import { recordPayment, refundPayment, voidPayment } from '$lib/server/finance/payments';
 import { sendBookingReviewRequest } from '$lib/server/email/send-booking-review-request';
@@ -123,6 +131,17 @@ export const load: PageServerLoad = async ({ locals }) => {
 		])
 	);
 
+	// Housekeeping overlay for the room grid — only rooms ever flagged appear here; a
+	// room absent from this list has never been flagged and shows no icon at all.
+	const housekeepingOverlay = await getRoomHousekeepingOverlay(
+		hotel.id,
+		grid.cells.map((c) => c.roomId)
+	);
+	const housekeeping = [...housekeepingOverlay.entries()].map(([roomId, o]) => ({
+		roomId,
+		...o
+	}));
+
 	return {
 		businessDate,
 		timezone: hotel.timezone,
@@ -134,6 +153,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 		amenityItemOptions,
 		hallGrid,
 		roomTypePolicies,
+		housekeeping,
 		role: locals.role,
 		cashier: {
 			requireOpenShiftForCashPayment: financeSettings.requireOpenShiftForCashPayment,
@@ -454,6 +474,111 @@ export const actions: Actions = {
 			throw e;
 		}
 		return { ...(await loadRoomDetailPayload(hotelId, parsed.data.bookingId)), depositOk };
+	},
+
+	/** Manual, ad-hoc flag for a mid-stay/occupied room — the automatic flag happens on
+	 *  checkout itself (see `checkOutBooking`); this covers "housekeeping needed now,
+	 *  guest is still in the room" without waiting for checkout. */
+	flagForHousekeeping: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		const hotelId = event.locals.hotel!.id;
+		const raw = Object.fromEntries(await event.request.formData());
+		const parsed = z
+			.object({ bookingId: z.string().uuid(), roomId: z.string().uuid() })
+			.safeParse(raw);
+		if (!parsed.success) return fail(400, { error: 'Missing booking or room.' });
+
+		await flagRoomForHousekeeping(
+			hotelId,
+			parsed.data.roomId,
+			'manual',
+			parsed.data.bookingId,
+			event.locals.user
+		);
+		return {
+			...(await loadRoomDetailPayload(hotelId, parsed.data.bookingId)),
+			housekeepingOk: 'Flagged for housekeeping.'
+		};
+	},
+
+	/** Front desk assigns a peso amount to a Housekeeping-reported damage — posts the same
+	 *  folio charge `addDamageCharge` posts, then links the report to it. The charge
+	 *  description is re-derived from the report's own record, never trusted from the
+	 *  client, so what gets charged always matches what Housekeeping actually reported. */
+	resolveHousekeepingDamage: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		const hotelId = event.locals.hotel!.id;
+		const raw = Object.fromEntries(await event.request.formData());
+		const parsed = z
+			.object({
+				damageReportId: z.string().uuid(),
+				bookingId: z.string().uuid(),
+				amount: z.coerce.number().positive()
+			})
+			.safeParse(raw);
+		if (!parsed.success) return fail(400, { folioError: 'Enter a valid amount.' });
+
+		const report = await getDamageReportById(hotelId, parsed.data.damageReportId);
+		if (!report || report.status !== 'pending' || report.bookingId !== parsed.data.bookingId) {
+			return fail(400, {
+				...(await loadRoomDetailPayload(hotelId, parsed.data.bookingId)),
+				folioError: 'That damage report is no longer pending.'
+			});
+		}
+
+		try {
+			const { chargeId } = await addAdHocCharge(
+				hotelId,
+				{ kind: 'room', bookingId: parsed.data.bookingId },
+				{
+					description: `Damage (reported by Housekeeping): ${report.description}`,
+					amountCentavos: Math.round(parsed.data.amount * 100),
+					taxable: false
+				},
+				event.locals.user
+			);
+			await markDamageReportCharged(hotelId, report.id, chargeId, event.locals.user);
+		} catch (e) {
+			if (e instanceof FolioError || e instanceof HousekeepingError) {
+				return fail(400, {
+					...(await loadRoomDetailPayload(hotelId, parsed.data.bookingId)),
+					folioError: e.message
+				});
+			}
+			throw e;
+		}
+		return {
+			...(await loadRoomDetailPayload(hotelId, parsed.data.bookingId)),
+			depositOk: 'Damage charged.'
+		};
+	},
+
+	dismissHousekeepingDamage: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		const hotelId = event.locals.hotel!.id;
+		const raw = Object.fromEntries(await event.request.formData());
+		const parsed = z
+			.object({
+				damageReportId: z.string().uuid(),
+				// A report on a room with no booking history has no bookingId — still dismissable.
+				bookingId: z.string().uuid().optional().or(z.literal(''))
+			})
+			.safeParse(raw);
+		if (!parsed.success) return fail(400, { folioError: 'Missing report.' });
+		const bookingId = parsed.data.bookingId || null;
+
+		try {
+			await dismissDamageReport(hotelId, parsed.data.damageReportId, event.locals.user);
+		} catch (e) {
+			if (e instanceof HousekeepingError) {
+				return fail(400, {
+					...(bookingId ? await loadRoomDetailPayload(hotelId, bookingId) : {}),
+					folioError: e.message
+				});
+			}
+			throw e;
+		}
+		return bookingId ? loadRoomDetailPayload(hotelId, bookingId) : { housekeepingOk: 'Dismissed.' };
 	},
 
 	/** Take a payment against a room or hall folio — deposit, partial, or full. */

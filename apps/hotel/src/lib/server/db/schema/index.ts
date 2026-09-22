@@ -14,6 +14,7 @@ export * from './dining';
 export * from './orders';
 export * from './bookings';
 export * from './room-assignments';
+export * from './housekeeping';
 export * from './reviews';
 export * from './folio';
 export * from './finance';
