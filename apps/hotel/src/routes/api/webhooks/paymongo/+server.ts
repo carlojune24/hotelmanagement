@@ -15,6 +15,7 @@ import {
 	payments
 } from '$lib/server/db/schema/index';
 import { recordCashMovement } from '$lib/server/finance/cash';
+import { getBirSettings, issueOfficialReceipt } from '$lib/server/finance/documents';
 import { businessDateFor } from '$lib/server/finance/shared';
 import { sendBookingConfirmation } from '$lib/server/email/send-booking-confirmation';
 import { writeAudit } from '$lib/server/audit';
@@ -252,6 +253,21 @@ export async function POST({ request }) {
 						confirmedOrder: confirmedNow
 					}
 				});
+			}
+
+			// Official Receipt for the online payment, same as a front-desk `recordPayment`
+			// — issued before the confirmation email so the email can attach it. Never fail
+			// the webhook over a document post (e.g. no active OR series): the OR still
+			// issues on first print from the staff side.
+			if (auditInfo) {
+				const bir = await getBirSettings(auditInfo.hotelId).catch(() => null);
+				if (bir?.autoIssueReceiptOnPayment) {
+					try {
+						await issueOfficialReceipt(auditInfo.hotelId, auditInfo.paymentId, null);
+					} catch (e) {
+						console.warn('paymongo webhook: could not issue official receipt', auditInfo.paymentId, e);
+					}
+				}
 			}
 
 			// Guest confirmation email — after the tx commits, only on the delivery

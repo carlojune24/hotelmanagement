@@ -1,10 +1,11 @@
-import { eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { getOrderPaymentSummary } from '../order-payment';
 import { env } from '$env/dynamic/private';
 import { db } from '../db/index';
 import {
 	bookingRooms,
 	bookings,
+	documents,
 	functionHalls,
 	guests,
 	hallBookings,
@@ -15,7 +16,8 @@ import {
 } from '../db/schema/index';
 import { DEFAULT_ACCENT_COLOR, DEFAULT_PAPER_COLOR, parseBranding } from '../branding';
 import { renderBookingConfirmation, type BookingConfirmationData } from './booking-confirmation';
-import { alreadySent, sendMail, type SendMailResult } from './send';
+import { renderPdf } from '../pdf/render';
+import { alreadySent, sendMail, type MailAttachment, type SendMailResult } from './send';
 
 /**
  * Gathers an order's data and sends the guest their booking-confirmation email.
@@ -116,11 +118,53 @@ export async function sendBookingConfirmation(
 			to: guest.email,
 			subject,
 			html,
-			text
+			text,
+			attachments: await receiptAttachments(hotel.slug, order.id, order.accessToken)
 		});
 	} catch (e) {
 		const error = e instanceof Error ? e.message : String(e);
 		console.error('[email] sendBookingConfirmation failed', orderId, error);
 		return { ok: false, error };
 	}
+}
+
+/**
+ * PDFs of every Official Receipt already issued against the order (normally the one
+ * the PayMongo webhook just issued). Rendered through the guest-token print route, so
+ * the attachment is byte-for-byte the document the guest can reopen from their link.
+ * Best-effort: a render failure drops that attachment, never the email.
+ */
+async function receiptAttachments(
+	slug: string,
+	orderId: string,
+	accessToken: string
+): Promise<MailAttachment[]> {
+	const receipts = await db
+		.select({ id: documents.id, formattedNo: documents.formattedNo })
+		.from(documents)
+		.where(
+			and(
+				eq(documents.orderId, orderId),
+				eq(documents.type, 'official_receipt'),
+				eq(documents.status, 'issued')
+			)
+		)
+		.orderBy(asc(documents.serialNo));
+
+	const attachments: MailAttachment[] = [];
+	for (const r of receipts) {
+		try {
+			const content = await renderPdf(
+				`/${slug}/print/receipt/${r.id}?t=${encodeURIComponent(accessToken)}&format=a4`
+			);
+			attachments.push({
+				filename: `Official-Receipt-${r.formattedNo}.pdf`,
+				content,
+				contentType: 'application/pdf'
+			});
+		} catch (e) {
+			console.error('[email] could not render receipt PDF', r.id, e);
+		}
+	}
+	return attachments;
 }

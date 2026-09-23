@@ -13,6 +13,13 @@ export interface SendMailInput {
 	subject: string;
 	html: string;
 	text: string;
+	attachments?: MailAttachment[];
+}
+
+export interface MailAttachment {
+	filename: string;
+	content: Buffer;
+	contentType: string;
 }
 
 export interface SendMailResult {
@@ -34,7 +41,8 @@ export async function sendMail(input: SendMailInput): Promise<SendMailResult> {
 			to: input.to,
 			subject: input.subject,
 			html: input.html,
-			text: input.text
+			text: input.text,
+			attachments: input.attachments
 		});
 
 		if (!isEmailConfigured()) {
@@ -42,6 +50,9 @@ export async function sendMail(input: SendMailInput): Promise<SendMailResult> {
 				`\n[email] SMTP not configured — not delivered.\n` +
 					`  to:      ${input.to}\n` +
 					`  subject: ${input.subject}\n` +
+					(input.attachments?.length
+						? `  attach:  ${input.attachments.map((a) => `${a.filename} (${a.content.length} B)`).join(', ')}\n`
+						: '') +
 					`${input.text.replace(/^/gm, '  | ')}\n`
 			);
 		}
