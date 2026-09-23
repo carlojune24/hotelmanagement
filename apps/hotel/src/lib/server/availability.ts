@@ -1,4 +1,4 @@
-import { and, asc, eq, count, gt, inArray, lt } from 'drizzle-orm';
+import { and, asc, eq, count, gt, inArray, lt, sql } from 'drizzle-orm';
 import { db } from './db/index';
 import {
 	amenities,
@@ -7,6 +7,7 @@ import {
 	cancellationPolicies,
 	guests,
 	hotelAmenities,
+	hotels,
 	orders,
 	ratePlans,
 	roomAssignments,
@@ -140,6 +141,32 @@ async function loadAllAmenitiesByType(hotelId: string): Promise<Map<string, Amen
 	return byType;
 }
 
+/** Tomorrow's date in the booking's own hotel timezone ("through tonight"). */
+const hotelTomorrow = sql`(select (now() at time zone h.timezone)::date + 1 from ${hotels} h where h.id = ${bookings.hotelId})`;
+
+/**
+ * When a room assignment releases its room — use in place of `roomAssignments.checkOut` in
+ * overlap checks (`gt(…, checkIn)`). Two flavours, because a guest still `checked_in` after
+ * their checkout date (nobody ran check-out) must never be silently ignored — before these,
+ * such a stay stopped blocking its room and the front desk put a second guest in it — but a
+ * guest merely on their normal checkout day must not freeze tonight's inventory either.
+ * Both need `bookings` joined (every room-overlap query already does). Neither is open-ended:
+ * a still-in-house guest holds tonight, not every future date.
+ *
+ * `roomHeldUntil` — the PHYSICAL room (room picker, check-in, walk-in, extending a stay): a
+ * checked-in guest holds their room through tonight until actually checked out, checkout day
+ * included. The room is not vacant until check-out.
+ */
+export const roomHeldUntil = sql`(case when ${bookings.status} = 'checked_in' then greatest(${roomAssignments.checkOut}, ${hotelTomorrow}) else ${roomAssignments.checkOut} end)`;
+
+/**
+ * `inventoryHeldUntil` — room-TYPE counts (online search, availability, reinstating): a room
+ * departing today is still sellable for tonight, as hotels normally do (the guest leaves by
+ * checkout time); only an OVERDUE stay — checkout date already past, still checked in —
+ * holds its room back from tonight's inventory.
+ */
+export const inventoryHeldUntil = sql`(case when ${bookings.status} = 'checked_in' and ${roomAssignments.checkOut} < ${hotelTomorrow} - 1 then ${hotelTomorrow} else ${roomAssignments.checkOut} end)`;
+
 /** Booking statuses that occupy a room for its date range (exclude cancelled/no_show).
  *  Exported for `lib/server/front-desk.ts`'s physical-room overlap check — same
  *  definition of "occupies the room," just scoped to one room instead of a type count. */
@@ -258,7 +285,7 @@ export async function searchAvailability(params: {
 					eq(bookings.hotelId, hotelId),
 					inArray(bookings.status, ['checked_in', 'checked_out']),
 					lt(roomAssignments.checkIn, checkOut),
-					gt(roomAssignments.checkOut, checkIn)
+					gt(inventoryHeldUntil, checkIn)
 				)
 			)
 	]);

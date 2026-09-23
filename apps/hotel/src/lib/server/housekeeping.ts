@@ -454,7 +454,9 @@ export async function markHallClean(
 }
 
 /** Finds the booking to attribute a new damage report to: the room's currently checked-in
- *  booking if one exists, else its most recently checked-out booking, else null. */
+ *  booking if one exists, else its most recently checked-out booking, else null. With more
+ *  than one checked-in stay on the room (an overdue stay nobody checked out, plus the new
+ *  guest), the latest-starting stay wins — the guest actually in the room now. */
 export async function resolveBookingForRoomDamage(
 	hotelId: string,
 	roomId: string
@@ -467,6 +469,7 @@ export async function resolveBookingForRoomDamage(
 		.where(
 			and(eq(roomAssignments.roomId, roomId), eq(bookings.hotelId, hotelId), eq(bookings.status, 'checked_in'))
 		)
+		.orderBy(desc(roomAssignments.checkIn), desc(bookings.createdAt))
 		.limit(1);
 	if (current) return current.bookingId;
 

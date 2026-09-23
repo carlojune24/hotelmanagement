@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, gt, gte, inArray, lt, lte, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, lt, lte, ne, sql } from 'drizzle-orm';
 import { db } from './db/index';
 import {
 	bookingRooms,
@@ -18,7 +18,7 @@ import {
 	rooms,
 	roomAssignments
 } from './db/schema/index';
-import { ACTIVE_BOOKING_STATUSES, getAvailableRoomType } from './availability';
+import { ACTIVE_BOOKING_STATUSES, getAvailableRoomType, roomHeldUntil } from './availability';
 import { checkHallAvailability } from './hall-availability';
 import { wallTimeToUtcMs } from './cancellation';
 import { FolioError, closeFolio, getFolioDetail } from './folio';
@@ -83,7 +83,7 @@ export async function listEligibleRooms(
 			and(
 				inArray(bookings.status, [...ACTIVE_BOOKING_STATUSES]),
 				lt(roomAssignments.checkIn, checkOut),
-				gt(roomAssignments.checkOut, checkIn),
+				gt(roomHeldUntil, checkIn),
 				...(excludeBookingId ? [ne(bookings.id, excludeBookingId)] : [])
 			)
 		);
@@ -192,7 +192,7 @@ export async function checkInBooking(
 						inArray(bookings.status, [...ACTIVE_BOOKING_STATUSES]),
 						ne(bookings.id, bookingId),
 						lt(roomAssignments.checkIn, booking.checkOut),
-						gt(roomAssignments.checkOut, booking.checkIn)
+						gt(roomHeldUntil, booking.checkIn)
 					)
 				);
 			if (occupiedRows.length > 0) {
@@ -294,6 +294,13 @@ export interface RoomGridOccupant {
 	 *  date (`checkOut`), resolved to a UTC instant — when the front-desk panel's
 	 *  countdown actually counts down to. Not "midnight of the checkout date". */
 	checkoutAtIso: string;
+	/** The hotel's `checkInTime` policy on this room's own check-in date, as a UTC instant —
+	 *  what an early check-in is measured against. */
+	checkInDueIso: string;
+	/** When staff actually ran check-in (the `checked_in` status-history row), or null for a
+	 *  stay with no such row. Together with `checkInDueIso` it pre-fills the early check-in
+	 *  fee's hours; `checkoutAtIso` + the clock pre-fills the late checkout fee's. */
+	checkedInAtIso: string | null;
 }
 
 /** A confirmed booking arriving `businessDate` — either still unassigned (attributed to
@@ -353,7 +360,9 @@ export async function getRoomStatusGrid(
 	/** The hotel's own daily checkout-time policy + IANA timezone (`hotels.checkOutTime`/
 	 *  `hotels.timezone`) — needed only to resolve each occupied room's `checkoutAtIso`. */
 	checkOutTime: string,
-	timezone: string
+	timezone: string,
+	/** `hotels.checkInTime` — resolves each occupied room's `checkInDueIso`. */
+	checkInTime: string
 ): Promise<{
 	cells: RoomGridCell[];
 	arrivals: RoomGridArrival[];
@@ -401,17 +410,19 @@ export async function getRoomStatusGrid(
 			and(
 				eq(bookings.hotelId, hotelId),
 				eq(bookings.status, 'checked_in'),
-				lte(roomAssignments.checkIn, businessDate),
-				// `gte`, not `gt` — a room's actual checkout morning (`checkOut ===
-				// businessDate`) must still count as occupied here (then get flagged
-				// "departing" just below) until staff actually run `checkOutBooking`.
-				// A strict `gt` would drop the room out of this set entirely on its own
-				// checkout day, before check-out ever happens — silently reading as
-				// Vacant on the grid despite the guest still being in-house, and making
-				// the "departing" branch just below unreachable dead code.
-				gte(roomAssignments.checkOut, businessDate)
+				// No lower bound on the assignment's checkOut: a checked-in guest is in-house
+				// until staff actually run `checkOutBooking` — on their checkout morning AND
+				// after it, if nobody checked them out (an overstay). Bounding it (as this once
+				// did, `checkOut >= businessDate`) made an overdue stay vanish from the grid the
+				// next day, so the room read Vacant and could be sold to a second guest. Such a
+				// stay is flagged "departing" just below, so it surfaces in the departures list.
+				lte(roomAssignments.checkIn, businessDate)
 			)
-		);
+		)
+		// Oldest first, so when a room somehow holds two checked-in stays the map below keeps
+		// the LATEST one for the cell (the guest actually there now); the older, overdue one
+		// still lands in `departures`, which is built from every row.
+		.orderBy(asc(roomAssignments.checkIn), asc(bookings.createdAt));
 
 	const arrivalRows = await db
 		.select({
@@ -505,7 +516,40 @@ export async function getRoomStatusGrid(
 	);
 
 	const occupantByRoomId = new Map(occupantRows.map((r) => [r.roomId, r]));
-	const departures: RoomGridDeparture[] = [];
+
+	// When each in-house stay was actually checked in — the latest `→ checked_in` history row
+	// (a reinstated stay may have more than one).
+	const checkedInAtByBooking = new Map<string, Date>();
+	if (occupantRows.length > 0) {
+		const historyRows = await db
+			.select({ bookingId: bookingStatusHistory.bookingId, at: bookingStatusHistory.createdAt })
+			.from(bookingStatusHistory)
+			.where(
+				and(
+					inArray(
+						bookingStatusHistory.bookingId,
+						occupantRows.map((r) => r.bookingId)
+					),
+					eq(bookingStatusHistory.toStatus, 'checked_in')
+				)
+			);
+		for (const h of historyRows) {
+			const prev = checkedInAtByBooking.get(h.bookingId);
+			if (!prev || h.at > prev) checkedInAtByBooking.set(h.bookingId, h.at);
+		}
+	}
+	// Due out today OR overdue (checkout date already passed, never checked out) — every such
+	// stay, including one hidden behind a newer guest in the same room's cell.
+	const roomById = new Map(roomRows.map((r) => [r.roomId, r]));
+	const departures: RoomGridDeparture[] = occupantRows
+		.filter((r) => r.assignmentCheckOut <= businessDate)
+		.map((r) => ({
+			bookingId: r.bookingId,
+			guestName: r.guestName,
+			roomId: r.roomId,
+			roomNumber: roomById.get(r.roomId)?.roomNumber ?? '',
+			roomTypeName: roomById.get(r.roomId)?.roomTypeName ?? ''
+		}));
 
 	// An arrival with no room picked yet needs `quantity` rooms of its TYPE — not every room of the
 	// type. Reserve only that many of the type's free rooms (the first ones in grid order); the rest
@@ -536,18 +580,13 @@ export async function getRoomStatusGrid(
 				balanceCentavos: balanceOf(occ.bookingId),
 				checkoutAtIso: new Date(
 					wallTimeToUtcMs(occ.assignmentCheckOut, checkOutTime, timezone)
-				).toISOString()
+				).toISOString(),
+				checkInDueIso: new Date(
+					wallTimeToUtcMs(occ.assignmentCheckIn, checkInTime, timezone)
+				).toISOString(),
+				checkedInAtIso: checkedInAtByBooking.get(occ.bookingId)?.toISOString() ?? null
 			};
-			status = occ.assignmentCheckOut === businessDate ? 'departing' : 'occupied';
-			if (status === 'departing') {
-				departures.push({
-					bookingId: occ.bookingId,
-					guestName: occ.guestName,
-					roomId: room.roomId,
-					roomNumber: room.roomNumber,
-					roomTypeName: room.roomTypeName
-				});
-			}
+			status = occ.assignmentCheckOut <= businessDate ? 'departing' : 'occupied';
 		} else if (room.operationalStatus !== 'available') {
 			status = 'ooo';
 		} else if (reservedByRoomId.has(room.roomId)) {
@@ -911,7 +950,7 @@ export async function createWalkInBooking(params: {
 							inArray(roomAssignments.roomId, uniqueRoomIds),
 							inArray(bookings.status, [...ACTIVE_BOOKING_STATUSES]),
 							lt(roomAssignments.checkIn, item.checkOut),
-							gt(roomAssignments.checkOut, item.checkIn)
+							gt(roomHeldUntil, item.checkIn)
 						)
 					);
 				if (occupiedRows.length > 0) {

@@ -44,6 +44,7 @@
 	import type { PriceBreakdown } from '$lib/server/pricing';
 	import { MAX_ROOMS_PER_LINE, addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
 	import { resolveOccupancyPlan } from '$lib/occupancy';
+	import { suggestedExtensionHours } from '$lib/extension-hours';
 	import { AMENITY_CATEGORY_LABELS, AMENITY_CATEGORY_ORDER } from '$lib/amenity-categories';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -153,7 +154,11 @@
 			loadedRoomDetailFor = null;
 			return;
 		}
-		if (bookingId !== loadedRoomDetailFor) {
+		// Also refetch when the last action handed back ANOTHER booking's folio (e.g. charging a
+		// damage report filed against an earlier stay in this room) — otherwise the panel waits
+		// forever on "Loading folio…" because the selection itself never changed.
+		const shownFor = formRoomDetail?.booking.id ?? null;
+		if (bookingId !== loadedRoomDetailFor || (shownFor !== null && shownFor !== bookingId)) {
 			loadedRoomDetailFor = bookingId;
 			roomDetailBookingId = bookingId;
 			idCaptureOpen = false;
@@ -266,6 +271,35 @@
 	});
 
 	const selectedRoom = $derived(data.cells.find((c) => c.roomId === selectedRoomId) ?? null);
+
+	// Late checkout / early check-in fee hours, pre-filled from the clock but always editable.
+	// Late = checkout deadline → now (live); early = actual check-in → check-in time (fixed).
+	// Filled once per selected stay — never re-written under staff as the clock ticks; the
+	// "use Nh (clock)" link re-applies the live figure on demand.
+	const selectedOccupant = $derived(selectedRoom?.occupant ?? null);
+	const lateHoursFromClock = $derived(
+		selectedOccupant ? suggestedExtensionHours(Date.parse(selectedOccupant.checkoutAtIso), nowMs) : 0
+	);
+	const earlyHoursFromClock = $derived(
+		selectedOccupant?.checkedInAtIso
+			? suggestedExtensionHours(
+					Date.parse(selectedOccupant.checkedInAtIso),
+					Date.parse(selectedOccupant.checkInDueIso)
+				)
+			: 0
+	);
+	let lateFeeHours = $state<number>(1);
+	let earlyFeeHours = $state<number>(1);
+	let feeHoursFilledFor = $state<string | null>(null);
+	$effect(() => {
+		const bookingId = selectedOccupant?.bookingId ?? null;
+		if (!bookingId || bookingId === feeHoursFilledFor) return;
+		feeHoursFilledFor = bookingId;
+		untrack(() => {
+			lateFeeHours = lateHoursFromClock || 1;
+			earlyFeeHours = earlyHoursFromClock || 1;
+		});
+	});
 
 	/** Cleanliness status + pending damage reports per room — only rooms ever flagged for
 	 *  housekeeping appear here (see `getRoomHousekeepingOverlay`); a room absent from this
@@ -1433,6 +1467,12 @@
 										class="mb-2 max-h-32 rounded-md object-cover"
 									/>
 									<p class="text-sm text-ink">{r.description}</p>
+									{#if r.bookingId && selectedBookingId && r.bookingId !== selectedBookingId}
+										<p class="mt-1 text-xs text-danger">
+											Reported against an earlier stay in this room, not the current guest — charging
+											posts to that stay's folio.
+										</p>
+									{/if}
 									{#if r.bookingId}
 										<form
 											method="POST"
@@ -1543,7 +1583,16 @@
 								{o.specialRequests}
 							</p>
 						{/if}
-						{#if selectedRoom.status === 'departing' && data.lateCheckoutFeePerHourCentavos > 0}
+						{#if selectedRoom.status === 'departing' && o.checkOut < data.businessDate}
+							<p class="mb-3 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
+								<strong>Overdue</strong> — was due out {o.checkOut} at {data.checkOutTime.slice(0, 5)} and
+								never checked out. The room stays blocked until you check this guest out.
+								{#if data.lateCheckoutFeePerHourCentavos > 0}
+									Add the late checkout fee ({peso(data.lateCheckoutFeePerHourCentavos)}/hour) to the
+									folio below first.
+								{/if}
+							</p>
+						{:else if selectedRoom.status === 'departing' && data.lateCheckoutFeePerHourCentavos > 0}
 							<p class="mb-3 rounded-md bg-surface-2 px-3 py-2 text-xs text-ink-muted">
 								Wants to keep the room past {data.checkOutTime.slice(0, 5)}? Late checkout fee:
 								<strong class="text-ink">{peso(data.lateCheckoutFeePerHourCentavos)}/hour</strong> — add
@@ -1985,12 +2034,20 @@
 														type="number"
 														min="0.5"
 														step="0.5"
-														value="1"
+														bind:value={lateFeeHours}
 														class="w-16"
 													/>
 													<Button type="submit" size="sm" variant="outline"
 														>+ Late checkout fee</Button
 													>
+													{#if lateHoursFromClock > 0 && lateHoursFromClock !== lateFeeHours}
+														<button
+															type="button"
+															class="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
+															onclick={() => (lateFeeHours = lateHoursFromClock)}
+															>use {lateHoursFromClock}h (clock)</button
+														>
+													{/if}
 												</form>
 											{/if}
 											{#if data.earlyCheckInFeePerHourCentavos > 0}
@@ -2007,12 +2064,20 @@
 														type="number"
 														min="0.5"
 														step="0.5"
-														value="1"
+														bind:value={earlyFeeHours}
 														class="w-16"
 													/>
 													<Button type="submit" size="sm" variant="outline"
 														>+ Early check-in fee</Button
 													>
+													{#if earlyHoursFromClock > 0 && earlyHoursFromClock !== earlyFeeHours}
+														<button
+															type="button"
+															class="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
+															onclick={() => (earlyFeeHours = earlyHoursFromClock)}
+															>use {earlyHoursFromClock}h (clock)</button
+														>
+													{/if}
 												</form>
 											{/if}
 										</div>

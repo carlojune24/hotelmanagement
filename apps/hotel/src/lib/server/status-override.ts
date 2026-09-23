@@ -15,7 +15,7 @@ import {
 	rooms
 } from './db/schema/index';
 import { writeAudit } from './audit';
-import { ACTIVE_BOOKING_STATUSES } from './availability';
+import { ACTIVE_BOOKING_STATUSES, inventoryHeldUntil } from './availability';
 import { checkHallAvailability } from './hall-availability';
 import { getOrderIdForTarget, voidFolioCharge, type FolioTarget } from './folio';
 import { recordPayment, voidPayment, type PaymentMethod } from './finance/payments';
@@ -278,7 +278,7 @@ export async function reinstateBooking(input: {
 						eq(bookingRooms.roomTypeId, roomTypeId),
 						inArray(bookings.status, ['checked_in', 'checked_out']),
 						lt(roomAssignments.checkIn, checkOut),
-						gt(roomAssignments.checkOut, checkIn)
+						gt(inventoryHeldUntil, checkIn)
 					)
 				)
 		]);
@@ -347,7 +347,8 @@ export async function reinstateBooking(input: {
 
 		// The cancellation credit on the folio (posted whether or not any money was refunded,
 		// e.g. a fee that keeps the whole downpayment) must come off too, or the reinstated
-		// booking would look paid for.
+		// booking would look paid for. Same for a no-show's "keep what was paid" adjustment
+		// (`markNoShow` — usually a write-off, occasionally a positive forfeit line).
 		const [feeCharge] = await db
 			.select()
 			.from(folioCharges)
@@ -356,8 +357,9 @@ export async function reinstateBooking(input: {
 					eq(folioCharges.folioId, folio.id),
 					eq(folioCharges.isBaseCharge, false),
 					isNull(folioCharges.voidedAt),
-					lt(folioCharges.totalCentavos, 0),
-					like(folioCharges.description, 'Cancellation%')
+					fromStatus === 'no_show'
+						? like(folioCharges.description, 'No-show%')
+						: and(lt(folioCharges.totalCentavos, 0), like(folioCharges.description, 'Cancellation%'))
 				)
 			)
 			.orderBy(desc(folioCharges.createdAt))

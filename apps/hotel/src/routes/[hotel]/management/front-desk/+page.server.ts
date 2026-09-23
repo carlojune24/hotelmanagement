@@ -79,7 +79,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 		drawers,
 		roomTypePolicyRows
 	] = await Promise.all([
-		getRoomStatusGrid(hotel.id, businessDate, hotel.checkOutTime, hotel.timezone),
+		getRoomStatusGrid(hotel.id, businessDate, hotel.checkOutTime, hotel.timezone, hotel.checkInTime),
 		getHallStatusBoard(hotel.id, businessDate),
 		db
 			.select({

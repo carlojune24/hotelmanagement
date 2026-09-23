@@ -14,7 +14,7 @@ import {
 	rooms,
 	seasonalRates
 } from './db/schema/index';
-import { ACTIVE_BOOKING_STATUSES } from './availability';
+import { ACTIVE_BOOKING_STATUSES, inventoryHeldUntil, roomHeldUntil } from './availability';
 import { ensureFolio } from './folio';
 import { writeAudit } from './audit';
 import type { SessionUser } from './auth/session';
@@ -203,7 +203,7 @@ async function roomTypeCapacityFor(
 					eq(bookingRooms.roomTypeId, roomTypeId),
 					inArray(bookings.status, ['checked_in', 'checked_out']),
 					lt(roomAssignments.checkIn, checkOut),
-					gt(roomAssignments.checkOut, checkIn)
+					gt(inventoryHeldUntil, checkIn)
 				)
 			)
 	]);
@@ -240,7 +240,7 @@ async function findRoomConflict(
 					ne(bookingRooms.id, bookingRoomId),
 					inArray(bookings.status, [...ACTIVE_BOOKING_STATUSES]),
 					lt(roomAssignments.checkIn, checkOut),
-					gt(roomAssignments.checkOut, checkIn)
+					gt(roomHeldUntil, checkIn)
 				)
 			)
 			.limit(1);
