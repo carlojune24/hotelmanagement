@@ -1,4 +1,11 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
+import {
+	RESERVATION_VIEWS,
+	RESERVATIONS_PAGE_SIZE,
+	VIEW_STATUSES,
+	type ReservationListParams,
+	type ReservationView
+} from '$lib/reservation-views';
 import { db } from './db/index';
 import { getFolioDetail } from './folio';
 import { lineBalances } from './order-balances';
@@ -42,10 +49,14 @@ export interface ReservationLine {
 	kind: ReservationKind;
 	id: string;
 	orderId: string;
+	/** First 8 of the order id, upper-case — the code staff and guests quote. */
+	bookingCode: string;
 	guestName: string;
 	guestEmail: string;
 	title: string;
 	subtitle: string;
+	/** Assigned room number(s), e.g. "101, 102"; null until a room is assigned (or for a hall). */
+	roomNumbers: string | null;
 	startDate: string;
 	endDate: string | null;
 	status: string;
@@ -59,112 +70,154 @@ export interface ReservationLine {
 	hasOpenCancellationRequest: boolean;
 }
 
-/** Every booking line for a hotel, newest first — verification list, not a dated calendar view. */
-export async function listReservationLines(hotelId: string): Promise<ReservationLine[]> {
-	const roomRows = await db
-		.select({
-			id: bookings.id,
-			orderId: bookings.orderId,
-			guestName: guests.fullName,
-			guestEmail: guests.email,
-			roomTypeName: roomTypes.name,
-			ratePlanName: ratePlans.name,
-			checkIn: bookings.checkIn,
-			checkOut: bookings.checkOut,
-			status: bookings.status,
-			orderStatus: orders.status,
-			totalCentavos: bookings.totalCentavos,
-			createdAt: bookings.createdAt
-		})
-		.from(bookings)
-		.innerJoin(orders, eq(orders.id, bookings.orderId))
-		.innerJoin(guests, eq(guests.id, orders.guestId))
-		.innerJoin(bookingRooms, eq(bookingRooms.bookingId, bookings.id))
-		.innerJoin(roomTypes, eq(roomTypes.id, bookingRooms.roomTypeId))
-		.innerJoin(ratePlans, eq(ratePlans.id, bookingRooms.ratePlanId))
-		.where(eq(bookings.hotelId, hotelId));
+/**
+ * One page of the staff Reservations list — room stays and hall events together, filtered by
+ * tab (see `$lib/reservation-views`), type and search, ordered the way each tab is read, and
+ * paged in the database (the list used to load every booking the hotel ever had). Also
+ * returns each tab's count under the same type + search, for the tab badges.
+ */
+export async function listReservationPage(
+	hotelId: string,
+	params: ReservationListParams
+): Promise<{ lines: ReservationLine[]; total: number; counts: Record<ReservationView, number> }> {
+	const q = params.q.toLowerCase();
+	// Escape LIKE's own wildcards so a search for "50%" or "a_b" matches literally.
+	const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
-	const hallRows = await db
-		.select({
-			id: hallBookings.id,
-			orderId: hallBookings.orderId,
-			guestName: guests.fullName,
-			guestEmail: guests.email,
-			hallName: functionHalls.name,
-			eventType: hallBookings.eventType,
-			eventDate: hallBookings.eventDate,
-			status: hallBookings.status,
-			orderStatus: orders.status,
-			totalCentavos: hallBookings.totalCentavos,
-			createdAt: hallBookings.createdAt
-		})
-		.from(hallBookings)
-		.innerJoin(orders, eq(orders.id, hallBookings.orderId))
-		.innerJoin(guests, eq(guests.id, orders.guestId))
-		.innerJoin(functionHalls, eq(functionHalls.id, hallBookings.functionHallId))
-		.where(eq(orders.hotelId, hotelId));
+	// Every room stay + hall event as one row shape.
+	const linesCte = sql`
+		with lines as (
+			select 'room'::text as kind, b.id, b.order_id, g.full_name as guest_name, g.email as guest_email,
+				rt.name as title, rp.name as subtitle, b.check_in::text as start_date, b.check_out::text as end_date,
+				b.status::text as status, o.status::text as order_status, b.total_centavos, b.created_at,
+				(select string_agg(r.room_number, ', ' order by r.room_number)
+					from ${roomAssignments} ra join ${rooms} r on r.id = ra.room_id
+					where ra.booking_room_id = br.id) as room_numbers
+			from ${bookings} b
+			join ${orders} o on o.id = b.order_id
+			join ${guests} g on g.id = o.guest_id
+			join ${bookingRooms} br on br.booking_id = b.id
+			join ${roomTypes} rt on rt.id = br.room_type_id
+			join ${ratePlans} rp on rp.id = br.rate_plan_id
+			where b.hotel_id = ${hotelId}
+			union all
+			select 'hall'::text, h.id, h.order_id, g.full_name, g.email, fh.name, h.event_type,
+				h.event_date::text, null, h.status::text, o.status::text, h.total_centavos, h.created_at, null
+			from ${hallBookings} h
+			join ${orders} o on o.id = h.order_id
+			join ${guests} g on g.id = o.guest_id
+			join ${functionHalls} fh on fh.id = h.function_hall_id
+			where o.hotel_id = ${hotelId}
+		),
+		filtered as (
+			select * from lines
+			where (${params.type} = 'all' or kind = ${params.type})
+			and (${q} = ''
+				or lower(guest_name) like ${like}
+				or lower(guest_email) like ${like}
+				or lower(left(order_id::text, 8)) like ${like}
+				or lower(coalesce(room_numbers, '')) like ${like})
+		)`;
 
-	const openRequests = await db
-		.select({ bookingId: guestMessages.bookingId, hallBookingId: guestMessages.hallBookingId })
-		.from(guestMessages)
-		.where(
-			and(
-				eq(guestMessages.hotelId, hotelId),
-				eq(guestMessages.kind, 'cancellation_request'),
-				eq(guestMessages.status, 'open')
-			)
-		);
-	const bookingsWithOpenRequest = new Set(
-		openRequests.map((r) => r.bookingId).filter((v): v is string => Boolean(v))
-	);
-	const hallBookingsWithOpenRequest = new Set(
-		openRequests.map((r) => r.hallBookingId).filter((v): v is string => Boolean(v))
-	);
+	const inView = (view: ReservationView) =>
+		view === 'all'
+			? sql`true`
+			: sql`status in (${sql.join(
+					VIEW_STATUSES[view].map((st) => sql`${st}`),
+					sql`, `
+				)})`;
+	const orderBy: Record<ReservationView, ReturnType<typeof sql>> = {
+		upcoming: sql`start_date asc, created_at asc`,
+		'in-house': sql`end_date asc nulls last, start_date asc`,
+		past: sql`coalesce(end_date, start_date) desc, created_at desc`,
+		cancelled: sql`created_at desc`,
+		all: sql`created_at desc`
+	};
 
-	const balances = await lineBalances(hotelId, [
-		...roomRows.filter((r) => r.status === 'confirmed' || r.status === 'checked_in').map((r) => r.orderId),
-		...hallRows.filter((h) => h.status === 'confirmed').map((h) => h.orderId)
+	const offset = (params.page - 1) * RESERVATIONS_PAGE_SIZE;
+	type Row = {
+		kind: ReservationKind;
+		id: string;
+		order_id: string;
+		guest_name: string;
+		guest_email: string;
+		title: string;
+		subtitle: string;
+		start_date: string;
+		end_date: string | null;
+		status: string;
+		order_status: string;
+		total_centavos: string | number;
+		created_at: string | Date;
+		room_numbers: string | null;
+	};
+	const [rows, countRows] = await Promise.all([
+		db.execute<Row>(sql`${linesCte}
+			select * from filtered where ${inView(params.view)}
+			order by ${orderBy[params.view]}
+			limit ${RESERVATIONS_PAGE_SIZE} offset ${offset}`),
+		db.execute<Record<string, string | number>>(sql`${linesCte}
+			select count(*) as "all",
+				${sql.join(
+					(Object.keys(VIEW_STATUSES) as Exclude<ReservationView, 'all'>[]).map(
+						(v) => sql`count(*) filter (where ${inView(v)}) as ${sql.identifier(v)}`
+					),
+					sql`, `
+				)}
+			from filtered`)
 	]);
-	const liveRoom = (r: { status: string }) => r.status === 'confirmed' || r.status === 'checked_in';
 
-	const lines: ReservationLine[] = [
-		...roomRows.map((r) => ({
-			kind: 'room' as const,
-			id: r.id,
-			orderId: r.orderId,
-			guestName: r.guestName,
-			guestEmail: r.guestEmail,
-			title: r.roomTypeName,
-			subtitle: r.ratePlanName,
-			startDate: r.checkIn,
-			endDate: r.checkOut,
-			status: r.status,
-			orderStatus: r.orderStatus,
-			totalCentavos: r.totalCentavos,
-			balanceCentavos: liveRoom(r) ? Math.max(0, balances.get(r.id) ?? 0) : 0,
-			createdAt: r.createdAt,
-			hasOpenCancellationRequest: bookingsWithOpenRequest.has(r.id)
-		})),
-		...hallRows.map((h) => ({
-			kind: 'hall' as const,
-			id: h.id,
-			orderId: h.orderId,
-			guestName: h.guestName,
-			guestEmail: h.guestEmail,
-			title: h.hallName,
-			subtitle: h.eventType,
-			startDate: h.eventDate,
-			endDate: null,
-			status: h.status,
-			orderStatus: h.orderStatus,
-			totalCentavos: h.totalCentavos,
-			balanceCentavos: h.status === 'confirmed' ? Math.max(0, balances.get(h.id) ?? 0) : 0,
-			createdAt: h.createdAt,
-			hasOpenCancellationRequest: hallBookingsWithOpenRequest.has(h.id)
-		}))
-	];
+	const c = countRows[0] ?? {};
+	const counts = Object.fromEntries(
+		RESERVATION_VIEWS.map((v) => [v.key, Number(c[v.key] ?? 0)])
+	) as Record<ReservationView, number>;
 
-	return lines.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+	// Balance owed + open cancellation requests — only for the rows on this page.
+	const live = (r: Row) =>
+		r.status === 'confirmed' || (r.kind === 'room' && r.status === 'checked_in');
+	const balances = await lineBalances(
+		hotelId,
+		rows.filter(live).map((r) => r.order_id)
+	);
+	const ids = rows.map((r) => r.id);
+	const openRequests = ids.length
+		? await db
+				.select({ bookingId: guestMessages.bookingId, hallBookingId: guestMessages.hallBookingId })
+				.from(guestMessages)
+				.where(
+					and(
+						eq(guestMessages.hotelId, hotelId),
+						eq(guestMessages.kind, 'cancellation_request'),
+						eq(guestMessages.status, 'open'),
+						or(inArray(guestMessages.bookingId, ids), inArray(guestMessages.hallBookingId, ids))
+					)
+				)
+		: [];
+	const withRequest = new Set(
+		openRequests.flatMap((r) => [r.bookingId, r.hallBookingId]).filter((v): v is string => !!v)
+	);
+
+	const lines: ReservationLine[] = rows.map((r) => ({
+		kind: r.kind,
+		id: r.id,
+		orderId: r.order_id,
+		bookingCode: r.order_id.slice(0, 8).toUpperCase(),
+		guestName: r.guest_name,
+		guestEmail: r.guest_email,
+		title: r.title,
+		subtitle: r.subtitle,
+		roomNumbers: r.room_numbers,
+		startDate: r.start_date,
+		endDate: r.end_date,
+		status: r.status,
+		orderStatus: r.order_status,
+		totalCentavos: Number(r.total_centavos),
+		balanceCentavos: live(r) ? Math.max(0, balances.get(r.id) ?? 0) : 0,
+		createdAt: new Date(r.created_at),
+		hasOpenCancellationRequest: withRequest.has(r.id)
+	}));
+
+	return { lines, total: counts[params.view], counts };
 }
 
 export interface SiblingReservationLine {
