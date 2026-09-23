@@ -169,6 +169,27 @@
 	</section>
 
 	<section class="rounded-xl border border-border p-5">
+		<h2 class="mb-3 text-sm font-semibold text-ink">Discounts</h2>
+		<div class="max-w-[10rem]">
+			<Label class="text-xs" for="scPwdDiscountPct">Senior Citizen / PWD discount (%)</Label>
+			<Input
+				id="scPwdDiscountPct"
+				name="scPwdDiscountPct"
+				type="number"
+				min="0"
+				max="100"
+				step="0.01"
+				value={(s?.scPwdDiscountBps ?? 2000) / 100}
+			/>
+		</div>
+		<p class="mt-2 text-xs text-ink-muted">
+			The rate applied when front desk flags a guest as a Senior Citizen (RA 9994) or PWD
+			(RA 10754) at check-in — computed on the VAT-exclusive room charge, which then becomes
+			VAT-exempt. Defaults to the legally mandated 20%.
+		</p>
+	</section>
+
+	<section class="rounded-xl border border-border p-5">
 		<h2 class="mb-3 text-sm font-semibold text-ink">Printing</h2>
 		<div class="max-w-xs">
 			<Label class="text-xs" for="thermalPaperWidthMm">Receipt printer paper width</Label>

@@ -18,6 +18,7 @@ import {
 } from '../db/schema/index';
 import type { BirSettings, DocumentSeries, IssuedDocument } from '../db/schema/documents';
 import { getFolioDetail, getOrderIdForTarget, getOrderLedger, type FolioTarget } from '../folio';
+import { getActiveScPwdClaim } from '../sc-pwd-discount';
 import { writeAudit } from '../audit';
 import { businessDateFor } from './shared';
 import type { SessionUser } from '../auth/session';
@@ -218,6 +219,8 @@ export interface BirSettingsInput {
 	footerNote: string | null;
 	/** 58 or 80 — app-validated, not a DB constraint. See the schema column's own comment. */
 	thermalPaperWidthMm: number;
+	/** RA 9994 / RA 10754 discount rate, in basis points (2000 = 20%). */
+	scPwdDiscountBps: number;
 }
 
 export async function upsertBirSettings(
@@ -232,6 +235,7 @@ export async function upsertBirSettings(
 		orPrefix: input.orPrefix.trim() || 'OR',
 		serialPadWidth: Math.min(12, Math.max(1, Math.round(input.serialPadWidth || 6))),
 		thermalPaperWidthMm: input.thermalPaperWidthMm === 58 ? 58 : 80,
+		scPwdDiscountBps: Math.min(10000, Math.max(0, Math.round(input.scPwdDiscountBps ?? 2000))),
 		updatedAt: new Date()
 	};
 	await db
@@ -536,6 +540,12 @@ export async function buildInvoiceSnapshot(
 		}
 	}
 
+	// A room whose base charge carries an active Senior Citizen/PWD claim is a VAT-exempt
+	// sale in full (not "VATable minus a discount") — see lib/sc-pwd-discount.ts. Halls have
+	// no check-in step, so no claim can exist for one.
+	const activeScPwdClaim =
+		target.kind === 'room' ? await getActiveScPwdClaim(hotelId, target.bookingId) : null;
+
 	const nonVoid = folio.charges.filter((c) => !c.voidedAt);
 	const lines: DocumentSnapshotLine[] = nonVoid.map((c) => {
 		const net = c.quantity * c.unitPriceCentavos;
@@ -544,7 +554,7 @@ export async function buildInvoiceSnapshot(
 			quantity: c.quantity,
 			unitPriceCentavos: c.unitPriceCentavos,
 			amountCentavos: c.isBaseCharge ? c.totalCentavos : net,
-			vatable: isVat && (c.isBaseCharge || c.taxCentavos > 0)
+			vatable: isVat && !activeScPwdClaim && (c.isBaseCharge || c.taxCentavos > 0)
 		};
 	});
 
@@ -554,6 +564,9 @@ export async function buildInvoiceSnapshot(
 	if (isVat) {
 		for (const c of nonVoid) {
 			if (c.isBaseCharge) {
+				// A discounted base charge contributes nothing here — its full (already
+				// discounted) amount falls into `vatExemptSales` via the remainder formula below.
+				if (activeScPwdClaim) continue;
 				// The seeded line already bundles VAT — recover it from the booking/hall breakdown.
 				if (target.kind === 'room') {
 					const [b] = await db

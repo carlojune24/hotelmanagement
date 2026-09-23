@@ -23,6 +23,7 @@ export * from './api-keys';
 export * from './jobs';
 export * from './standalone-sales';
 export * from './documents';
+export * from './sc-pwd';
 export * from './email-log';
 export * from './guest-messages';
 export * from './hr';

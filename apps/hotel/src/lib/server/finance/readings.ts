@@ -1,6 +1,6 @@
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/index';
-import { documents, hotels, orders, payments, zReadings } from '../db/schema/index';
+import { documents, hotels, orders, payments, scPwdDiscounts, zReadings } from '../db/schema/index';
 import type { ZReading } from '../db/schema/documents';
 import type { SessionUser } from '../auth/session';
 import { writeAudit } from '../audit';
@@ -142,7 +142,21 @@ export async function computeReadingData(hotelId: string, businessDate: string):
 		serialSpan(hotelId, 'official_receipt', businessDate)
 	]);
 
-	const scPwd = 0;
+	// Discounts actually applied that day — reversed claims never count, regardless of when
+	// they were reversed (same "just don't count it" posture the rest of this file takes for
+	// voided/cancelled rows). Same timestamp-range convention as the `cancelled` documents
+	// query above: `sc_pwd_discounts` has no stored `businessDate` column of its own.
+	const [scPwdRow] = await db
+		.select({ sum: sql<number>`coalesce(sum(${scPwdDiscounts.discountCentavos}), 0)::int` })
+		.from(scPwdDiscounts)
+		.where(
+			and(
+				eq(scPwdDiscounts.hotelId, hotelId),
+				isNull(scPwdDiscounts.reversedAt),
+				sql`${scPwdDiscounts.appliedAt} >= ${businessDate}::date and ${scPwdDiscounts.appliedAt} < (${businessDate}::date + 1)`
+			)
+		);
+	const scPwd = scPwdRow?.sum ?? 0;
 	const otherDisc = 0;
 	const netSales = gross - scPwd - otherDisc;
 

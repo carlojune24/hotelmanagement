@@ -26,6 +26,11 @@
 			depositMethod === 'cash' ? `DEP-${crypto.randomUUID().slice(0, 8).toUpperCase()}` : '';
 	});
 
+	let scPwdFlagged = $state(false);
+	let scPwdClaimantType = $state('senior_citizen');
+	let scPwdIdNumber = $state('');
+	let scPwdClaimantName = $state(data.kind === 'room' ? data.detail.guest.fullName : '');
+
 	let cancelOpen = $state(data.autoOpen === 'cancel');
 	let confirmingNoShow = $state(data.autoOpen === 'no-show');
 	let decliningRequest = $state(false);
@@ -409,6 +414,43 @@
 					</div>
 				{/if}
 			{/snippet}
+			{#snippet scPwdFields()}
+				<div class="mt-3 space-y-2 rounded-md border border-border p-3">
+					<label class="flex items-center gap-2 text-sm">
+						<input type="checkbox" name="scPwdFlagged" bind:checked={scPwdFlagged} class="size-4" />
+						Guest is a Senior Citizen or PWD (BIR discount)
+					</label>
+					{#if scPwdFlagged}
+						<div class="flex flex-wrap items-end gap-2">
+							<div>
+								<Label for="scPwdClaimantType" class="text-xs">Type</Label>
+								<select
+									id="scPwdClaimantType"
+									name="scPwdClaimantType"
+									bind:value={scPwdClaimantType}
+									class="mt-1 rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm"
+								>
+									<option value="senior_citizen">Senior Citizen</option>
+									<option value="pwd">PWD</option>
+								</select>
+							</div>
+							<div>
+								<Label for="scPwdIdNumber" class="text-xs">OSCA / PWD ID no.</Label>
+								<Input id="scPwdIdNumber" name="scPwdIdNumber" bind:value={scPwdIdNumber} class="w-36" />
+							</div>
+							<div>
+								<Label for="scPwdClaimantName" class="text-xs">Claimant name</Label>
+								<Input
+									id="scPwdClaimantName"
+									name="scPwdClaimantName"
+									bind:value={scPwdClaimantName}
+									class="w-44"
+								/>
+							</div>
+						</div>
+					{/if}
+				</div>
+			{/snippet}
 			<div class="mb-2 flex items-center justify-between gap-3">
 				<h2 class="text-sm font-semibold text-ink">Stay</h2>
 				{#if data.canModifyStay}
@@ -451,6 +493,15 @@
 							Security deposit held: ₱{(data.securityDeposit.amountCentavos / 100).toFixed(2)}
 						</div>
 					{/if}
+					{#if data.scPwdClaim}
+						<div class="mt-2 text-xs text-ink-muted">
+							{data.scPwdClaim.claimantType === 'pwd' ? 'PWD' : 'Senior Citizen'} discount applied —
+							{data.scPwdClaim.claimantName}, ID {data.scPwdClaim.idNumber} (−₱{(
+								(data.scPwdClaim.vatRemovedCentavos + data.scPwdClaim.discountCentavos) /
+								100
+							).toFixed(2)}). Reverse or re-flag from the front-desk occupant panel.
+						</div>
+					{/if}
 				</div>
 			{:else if data.detail.booking.status === 'confirmed'}
 				<form
@@ -478,6 +529,7 @@
 							<IdCameraCapture />
 						</div>
 						{@render securityDepositFields()}
+						{@render scPwdFields()}
 						<div class="mt-3">
 							<Button type="submit" size="sm">Check in</Button>
 						</div>
@@ -508,6 +560,7 @@
 								<IdCameraCapture />
 							</div>
 							{@render securityDepositFields()}
+						{@render scPwdFields()}
 							<div class="mt-3">
 								<Button type="submit" size="sm">Check in</Button>
 							</div>

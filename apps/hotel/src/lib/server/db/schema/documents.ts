@@ -89,6 +89,9 @@ export const birSettings = pgTable('bir_settings', {
 	 *  do I print this today" preference, not a compliance fact. A4 stays available as a
 	 *  toggle on the same routes via `accountable-form.svelte`. */
 	thermalPaperWidthMm: integer('thermal_paper_width_mm').notNull().default(80),
+	/** RA 9994 (Senior Citizen) / RA 10754 (PWD) discount rate, in basis points — defaults to
+	 *  the legally mandated 20% but editable per hotel. See `sc_pwd_discounts` / `lib/server/sc-pwd-discount.ts`. */
+	scPwdDiscountBps: integer('sc_pwd_discount_bps').notNull().default(2000),
 	createdAt: createdAt(),
 	updatedAt: updatedAt()
 });

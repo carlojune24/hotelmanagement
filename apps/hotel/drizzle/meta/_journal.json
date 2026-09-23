@@ -379,6 +379,13 @@
       "when": 1790145588952,
       "tag": "0053_smart_blob",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1790169457369,
+      "tag": "0054_ordinary_wallow",
+      "breakpoints": true
     }
   ]
 }

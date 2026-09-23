@@ -53,6 +53,12 @@ import {
 	getSecurityDepositForBooking,
 	settleSecurityDeposit
 } from '$lib/server/security-deposits';
+import {
+	ScPwdDiscountError,
+	applyScPwdDiscount,
+	getActiveScPwdClaim,
+	reverseScPwdDiscount
+} from '$lib/server/sc-pwd-discount';
 import { getFinanceSettings } from '$lib/server/finance/settings';
 import { getDefaultOpenShift } from '$lib/server/finance/shifts';
 import { openShift as openShiftFn } from '$lib/server/finance/shifts';
@@ -180,7 +186,8 @@ async function loadRoomDetailPayload(hotelId: string, bookingId: string) {
 	if (!detail) error(404, 'Booking not found');
 	const folio = await getFolioDetail(hotelId, { kind: 'room', bookingId });
 	const securityDeposit = await getSecurityDepositForBooking(hotelId, bookingId);
-	return { roomDetail: detail, folio, securityDeposit };
+	const scPwdClaim = await getActiveScPwdClaim(hotelId, bookingId);
+	return { roomDetail: detail, folio, securityDeposit, scPwdClaim };
 }
 
 /** Same idea as `loadRoomDetailPayload`, for a function hall booking's dialog. */
@@ -339,6 +346,51 @@ export const actions: Actions = {
 		}
 
 		return { ...(await loadRoomDetailPayload(hotelId, bookingId)), idPhotoOk: true };
+	},
+
+	flagScPwd: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		const hotelId = event.locals.hotel!.id;
+		const raw = await event.request.formData();
+		const bookingId = raw.get('bookingId');
+		if (typeof bookingId !== 'string') return fail(400, { scPwdError: 'Missing booking.' });
+
+		try {
+			await applyScPwdDiscount({
+				hotelId,
+				bookingId,
+				claimantType: raw.get('scPwdClaimantType') === 'pwd' ? 'pwd' : 'senior_citizen',
+				claimantName: (raw.get('scPwdClaimantName') as string) || '',
+				idNumber: (raw.get('scPwdIdNumber') as string) || '',
+				actor: event.locals.user
+			});
+		} catch (e) {
+			if (e instanceof ScPwdDiscountError) {
+				return fail(400, { ...(await loadRoomDetailPayload(hotelId, bookingId)), scPwdError: e.message });
+			}
+			throw e;
+		}
+
+		return { ...(await loadRoomDetailPayload(hotelId, bookingId)), scPwdOk: true };
+	},
+
+	reverseScPwd: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		const hotelId = event.locals.hotel!.id;
+		const raw = await event.request.formData();
+		const bookingId = raw.get('bookingId');
+		if (typeof bookingId !== 'string') return fail(400, { scPwdError: 'Missing booking.' });
+
+		try {
+			await reverseScPwdDiscount(hotelId, bookingId, (raw.get('reason') as string) || null, event.locals.user);
+		} catch (e) {
+			if (e instanceof ScPwdDiscountError) {
+				return fail(400, { ...(await loadRoomDetailPayload(hotelId, bookingId)), scPwdError: e.message });
+			}
+			throw e;
+		}
+
+		return { ...(await loadRoomDetailPayload(hotelId, bookingId)), scPwdOk: true };
 	},
 
 	addItemCharge: async (event) => {

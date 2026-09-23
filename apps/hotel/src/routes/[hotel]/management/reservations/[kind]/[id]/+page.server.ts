@@ -45,6 +45,11 @@ import {
 	getSecurityDepositForBooking,
 	getSecurityDepositPolicy
 } from '$lib/server/security-deposits';
+import {
+	ScPwdDiscountError,
+	applyScPwdDiscount,
+	getActiveScPwdClaim
+} from '$lib/server/sc-pwd-discount';
 import type { PaymentMethod } from '$lib/server/finance/payments';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -95,14 +100,16 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 				? await listRoomTypeOptionsForModify(hotelId)
 				: [];
 
-		const [thread, openRequest, securityDepositPolicy, securityDeposit] = await Promise.all([
-			listThread(detail.order.id),
-			getOpenRequest({ kind: 'room', bookingId: params.id }),
-			detail.ratePlan.securityDepositPolicyId
-				? getSecurityDepositPolicy(hotelId, detail.ratePlan.securityDepositPolicyId)
-				: null,
-			getSecurityDepositForBooking(hotelId, params.id)
-		]);
+		const [thread, openRequest, securityDepositPolicy, securityDeposit, scPwdClaim] =
+			await Promise.all([
+				listThread(detail.order.id),
+				getOpenRequest({ kind: 'room', bookingId: params.id }),
+				detail.ratePlan.securityDepositPolicyId
+					? getSecurityDepositPolicy(hotelId, detail.ratePlan.securityDepositPolicyId)
+					: null,
+				getSecurityDepositForBooking(hotelId, params.id),
+				getActiveScPwdClaim(hotelId, params.id)
+			]);
 		await markThreadReadByStaff(detail.order.id);
 
 		return {
@@ -118,6 +125,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 			openRequest,
 			securityDepositPolicy,
 			securityDeposit,
+			scPwdClaim,
 			autoOpen:
 				actionHint === 'cancel' && cancelQuote
 					? 'cancel'
@@ -224,6 +232,29 @@ export const actions: Actions = {
 						console.error('checkIn: could not collect security deposit', event.params.id, e.message);
 					} else {
 						console.error('checkIn: could not collect security deposit', event.params.id, e);
+					}
+				}
+			}
+
+			// Optional — BIR Senior Citizen / PWD discount, flagged from the same form. Never
+			// blocks check-in: it already committed above, so a bad ID field here is logged
+			// and surfaced as a toast on the next page instead of failing the whole action.
+			const scPwdFlagged = raw.get('scPwdFlagged');
+			if (scPwdFlagged === 'on') {
+				try {
+					await applyScPwdDiscount({
+						hotelId,
+						bookingId: event.params.id,
+						claimantType: raw.get('scPwdClaimantType') === 'pwd' ? 'pwd' : 'senior_citizen',
+						claimantName: (raw.get('scPwdClaimantName') as string) || '',
+						idNumber: (raw.get('scPwdIdNumber') as string) || '',
+						actor: event.locals.user
+					});
+				} catch (e) {
+					if (e instanceof ScPwdDiscountError) {
+						console.error('checkIn: could not apply SC/PWD discount', event.params.id, e.message);
+					} else {
+						console.error('checkIn: could not apply SC/PWD discount', event.params.id, e);
 					}
 				}
 			}

@@ -86,6 +86,9 @@
 	);
 	const formFolio = $derived(form && 'folio' in form ? form.folio : undefined);
 	const formFolioError = $derived(form && 'folioError' in form ? form.folioError : undefined);
+	const formScPwdClaim = $derived(
+		form && 'scPwdClaim' in form ? form.scPwdClaim : undefined
+	);
 	const formSecurityDeposit = $derived(
 		form && 'securityDeposit' in form ? form.securityDeposit : undefined
 	);
@@ -107,6 +110,8 @@
 	const formHallWalkInOk = $derived(form && 'hallWalkInOk' in form ? form.hallWalkInOk : undefined);
 	const formIdPhotoOk = $derived(form && 'idPhotoOk' in form ? form.idPhotoOk : undefined);
 	const formIdPhotoError = $derived(form && 'idPhotoError' in form ? form.idPhotoError : undefined);
+	const formScPwdOk = $derived(form && 'scPwdOk' in form ? form.scPwdOk : undefined);
+	const formScPwdError = $derived(form && 'scPwdError' in form ? form.scPwdError : undefined);
 
 	$effect(() => {
 		if (formOk) toast.success(formOk);
@@ -133,6 +138,11 @@
 		}
 		if (formDepositOk) toast.success(formDepositOk);
 		if (formIdPhotoError) toast.error(formIdPhotoError);
+		if (formScPwdOk) {
+			toast.success('Senior Citizen/PWD discount updated.');
+			scPwdToggleOpen = false;
+		}
+		if (formScPwdError) toast.error(formScPwdError);
 		// Check-out ends the in-house view — deselect the room instead of leaving the
 		// rail showing a folio for a booking that's no longer checked in.
 		if (form && 'checkedOut' in form) {
@@ -162,6 +172,7 @@
 			loadedRoomDetailFor = bookingId;
 			roomDetailBookingId = bookingId;
 			idCaptureOpen = false;
+			scPwdToggleOpen = false;
 			tick().then(() => roomDetailFormEl?.requestSubmit());
 		}
 	});
@@ -170,6 +181,10 @@
 	let roomPayOpen = $state(false);
 	let roomRefundOpen = $state(false);
 	let idCaptureOpen = $state(false);
+	let scPwdToggleOpen = $state(false);
+	let scPwdClaimantTypeInput = $state('senior_citizen');
+	let scPwdIdNumberInput = $state('');
+	let scPwdClaimantNameInput = $state('');
 	let hallPayOpen = $state(false);
 	let hallRefundOpen = $state(false);
 	let checkoutCityLedger = $state(false);
@@ -1728,6 +1743,85 @@
 										onclick={() => (idCaptureOpen = true)}
 									>
 										Capture ID photo
+									</Button>
+								{/if}
+							</div>
+
+							<div class="mt-4 rounded-lg border border-border p-3">
+								<div class="mb-2 flex items-center justify-between">
+									<h4 class="text-sm font-semibold text-ink">Senior Citizen / PWD discount</h4>
+								</div>
+								{#if formScPwdClaim}
+									<p class="text-xs text-ink-muted">
+										{formScPwdClaim.claimantType === 'pwd' ? 'PWD' : 'Senior Citizen'} —
+										{formScPwdClaim.claimantName}, ID {formScPwdClaim.idNumber}
+										(−₱{(
+											(formScPwdClaim.vatRemovedCentavos +
+												formScPwdClaim.discountCentavos) /
+											100
+										).toFixed(2)})
+									</p>
+									<form method="POST" action="?/reverseScPwd" use:enhance class="mt-2">
+										<input type="hidden" name="bookingId" value={o.bookingId} />
+										<Button type="submit" size="sm" variant="outline">Reverse</Button>
+									</form>
+								{:else if scPwdToggleOpen}
+									<form method="POST" action="?/flagScPwd" use:enhance class="space-y-2">
+										<input type="hidden" name="bookingId" value={o.bookingId} />
+										<div class="flex flex-wrap items-end gap-2">
+											<div>
+												<Label for="scPwdClaimantTypeInput" class="text-xs">Type</Label>
+												<select
+													id="scPwdClaimantTypeInput"
+													name="scPwdClaimantType"
+													bind:value={scPwdClaimantTypeInput}
+													class="mt-1 rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm"
+												>
+													<option value="senior_citizen">Senior Citizen</option>
+													<option value="pwd">PWD</option>
+												</select>
+											</div>
+											<div>
+												<Label for="scPwdIdNumberInput" class="text-xs">ID no.</Label>
+												<Input
+													id="scPwdIdNumberInput"
+													name="scPwdIdNumber"
+													bind:value={scPwdIdNumberInput}
+													class="w-32"
+												/>
+											</div>
+											<div>
+												<Label for="scPwdClaimantNameInput" class="text-xs">Claimant name</Label>
+												<Input
+													id="scPwdClaimantNameInput"
+													name="scPwdClaimantName"
+													bind:value={scPwdClaimantNameInput}
+													class="w-40"
+												/>
+											</div>
+										</div>
+										<div class="flex gap-2">
+											<Button type="submit" size="sm">Apply discount</Button>
+											<button
+												type="button"
+												onclick={() => (scPwdToggleOpen = false)}
+												class="text-xs text-ink-muted underline underline-offset-2"
+											>
+												Cancel
+											</button>
+										</div>
+									</form>
+								{:else}
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										onclick={() => {
+											scPwdClaimantNameInput = formRoomDetail?.guest.fullName ?? '';
+											scPwdToggleOpen = true;
+										}}
+									>
+										Flag Senior Citizen / PWD
 									</Button>
 								{/if}
 							</div>
