@@ -970,7 +970,11 @@ export const actions: Actions = {
 		// Lands on the booking's Transaction page (the parent view: every room, the payments and the
 		// one balance) rather than the first room's reservation page. Carries the origin room so its
 		// back link can return to the front desk with that same room re-selected.
-		const backQuery = originRoomId ? `?roomId=${encodeURIComponent(originRoomId)}` : '';
+		// No tile selected (the "Walk-in" button) still returns to the front desk, never to the
+		// reservations list.
+		const backQuery = originRoomId
+			? `?roomId=${encodeURIComponent(originRoomId)}`
+			: '?from=front-desk';
 		redirect(303, `/${event.locals.hotel!.slug}/management/transactions/${orderId}${backQuery}`);
 	},
 

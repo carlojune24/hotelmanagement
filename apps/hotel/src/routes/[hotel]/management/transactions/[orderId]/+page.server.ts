@@ -24,7 +24,7 @@ import {
 import { roleCan } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
-import { FinanceError } from '$lib/server/finance/shared';
+import { businessDateFor, FinanceError } from '$lib/server/finance/shared';
 import { recordOrderPayment, refundPayment, voidPayment } from '$lib/server/finance/payments';
 import { openReceivable } from '$lib/server/finance/receivables';
 import { getFinanceSettings } from '$lib/server/finance/settings';
@@ -259,7 +259,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 	const ledgerOf = new Map(ledger.lines.map((l) => [l.id, l]));
 
 	const buildLine = (
-		base: { id: string; status: string },
+		base: { id: string; status: string; checkIn?: string; checkOut?: string },
 		kind: 'room' | 'hall',
 		title: string,
 		detail: string,
@@ -273,6 +273,9 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		return {
 			kind,
 			id: base.id,
+			/** Room stays only — drives the "Check in" button for a room due today. */
+			checkIn: base.checkIn ?? null,
+			checkOut: base.checkOut ?? null,
 			title,
 			detail,
 			status: base.status,
@@ -368,6 +371,12 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		: locals.role
 			? roleCan(locals.role.capabilities, 'hotel:admin')
 			: false;
+	// Same cap the reservation page's check-in action requires.
+	const canCheckIn = locals.user?.isPlatformAdmin
+		? true
+		: locals.role
+			? roleCan(locals.role.capabilities, 'booking:write')
+			: false;
 
 	const cancelledCount = lines.filter((l) => l.cancelled).length;
 	const depositAppliedTotal = lines.reduce((sum, l) => sum + l.depositAppliedCentavos, 0);
@@ -427,6 +436,9 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		carrier: carrier ? { kind: carrier.kind, id: carrier.id } : null,
 		canCollect,
 		canCityLedger,
+		canCheckIn,
+		/** The hotel's business date — which rooms are due to check in today. */
+		today: businessDateFor(hotel.timezone),
 		defaultBillTo: guest?.fullName ?? '',
 		/** The booking's one city-ledger account, if any: new rooms join it instead of opening another. */
 		cityLedgerAccount: accounts.length

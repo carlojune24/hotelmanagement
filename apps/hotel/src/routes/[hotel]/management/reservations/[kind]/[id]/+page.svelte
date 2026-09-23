@@ -281,6 +281,12 @@
 				<Button variant="outline" href="{staffBase}/front-desk{roomId ? `?roomId=${roomId}` : ''}"
 					>← Front desk</Button
 				>
+			{:else if page.url.searchParams.get('from') === 'transaction' && page.url.searchParams.get('orderId')}
+				<Button
+					variant="outline"
+					href="{staffBase}/transactions/{page.url.searchParams.get('orderId')}?from=front-desk"
+					>← Booking transaction</Button
+				>
 			{:else}
 				<Button variant="outline" href="{staffBase}/reservations">← Reservations</Button>
 			{/if}
@@ -448,11 +454,12 @@
 				</div>
 			{:else if data.detail.booking.status === 'confirmed'}
 				<form
+					id="check-in"
 					method="POST"
 					action="?/checkIn"
 					enctype="multipart/form-data"
 					use:enhance
-					class="mt-4 border-t border-border pt-4"
+					class="mt-4 scroll-mt-6 border-t border-border pt-4"
 				>
 					{#if data.detail.assignedRooms.length > 0}
 						<!-- Front-desk grid pick mode already claimed the exact room(s) for this

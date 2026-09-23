@@ -89,6 +89,16 @@
 		iso ? new Date(iso).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 	const reservationHref = (l: { kind: 'room' | 'hall'; id: string }) =>
 		`${staffBase}/reservations/${l.kind}/${l.id}`;
+	/** A paid room stay that can be checked in right now: confirmed, and today falls inside it. */
+	const dueForCheckIn = (l: Line) =>
+		data.canCheckIn &&
+		data.order.status === 'confirmed' &&
+		l.kind === 'room' &&
+		l.status === 'confirmed' &&
+		!!l.checkIn &&
+		!!l.checkOut &&
+		l.checkIn <= data.today &&
+		data.today < l.checkOut;
 	const refundBadge = (l: Line) => {
 		const r = l.refund;
 		if (!r) return null;
@@ -165,6 +175,8 @@
 					href="{staffBase}/front-desk?roomId={page.url.searchParams.get('roomId')}"
 					>← Front desk</Button
 				>
+			{:else if page.url.searchParams.get('from') === 'front-desk'}
+				<Button variant="outline" size="sm" href="{staffBase}/front-desk">← Front desk</Button>
 			{:else}
 				<Button variant="outline" size="sm" href="{staffBase}/reservations">← Reservations</Button>
 			{/if}
@@ -191,6 +203,21 @@
 							</div>
 							<Badge variant="outline" class={statusClass(l.status)}>{statusLabel(l.status)}</Badge>
 						</div>
+
+						{#if dueForCheckIn(l)}
+							<div
+								class="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-brand/[0.04] px-3 py-2"
+							>
+								<span class="text-sm text-ink"
+									>{l.checkIn === data.today ? 'Arriving today' : 'Ready to check in'}</span
+								>
+								<Button
+									size="sm"
+									href="{reservationHref(l)}?from=transaction&orderId={data.order.id}#check-in"
+									>Check in →</Button
+								>
+							</div>
+						{/if}
 
 						{#if l.cancelled}
 							{@const rb = refundBadge(l)}
