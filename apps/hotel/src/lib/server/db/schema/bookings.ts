@@ -284,7 +284,7 @@ export const payments = pgTable(
 		 *  (no self-referential FK) — see `folioId`'s own comment for why. */
 		refundsPaymentId: uuid('refunds_payment_id'),
 		/** PayMongo's own refund object id (`ref_...`), set when the refund was actually
-		 *  issued via their Refunds API — lets the webhook match `payment.refund_updated` /
+		 *  issued via their Refunds API — lets the webhook match `payment.refund.updated` /
 		 *  `payment.refunded` events back to this row. */
 		paymongoRefundId: text('paymongo_refund_id'),
 		/** Staff-uploaded proof for a *manual* refund payout (e.g. a bank transfer

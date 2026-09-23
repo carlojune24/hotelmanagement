@@ -333,6 +333,10 @@ export async function POST({ request }) {
 			});
 			break;
 		}
+		// PayMongo's event name is `payment.refund.updated` (dots — as registered on the
+		// webhook); the underscore spelling this handler originally listened for never
+		// arrives, which silently dropped every refund status update. Both are accepted.
+		case 'payment.refund.updated':
 		case 'payment.refund_updated':
 		case 'payment.refunded': {
 			// `refundOrderViaPaymongo` (lib/server/paymongo-refund.ts) already records a

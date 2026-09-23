@@ -214,7 +214,7 @@ export async function refundOrderViaPaymongo(params: {
 		// A standard refund is treated as paid immediately (PayMongo has committed to
 		// pushing the money back). QR Ph is different: the response is only a
 		// `transfer_link` the *guest* must open and claim — nothing has actually moved
-		// yet — so this stays `pending` until the `payment.refund_updated`/`refunded`
+		// yet — so this stays `pending` until the `payment.refund.updated`/`refunded`
 		// webhook confirms `succeeded`, which is also when its cash-out movement posts.
 		await db.transaction(async (tx) => {
 			const [row] = await tx
