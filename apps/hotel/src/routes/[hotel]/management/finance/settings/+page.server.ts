@@ -22,6 +22,7 @@ import {
 } from '$lib/server/finance/accounts';
 import { ensureFinanceSettings, getFinanceSettings, updateFinanceSettings } from '$lib/server/finance/settings';
 import { createApiKey, listApiKeysForHotel, revokeApiKey } from '$lib/server/auth/api-key';
+import { getScPwdDiscountBps, setScPwdDiscountBps } from '$lib/server/sc-pwd-discount';
 import type { Actions, PageServerLoad } from './$types';
 
 const ACCOUNT_KINDS = ['cash_drawer', 'petty_cash', 'bank', 'e_wallet', 'undeposited'] as const;
@@ -43,18 +44,20 @@ export const load: PageServerLoad = async ({ locals }) => {
 	requireCap(locals.user, locals.role, 'hotel:admin');
 	const hotel = locals.hotel!;
 	await ensureFinanceSettings(hotel.id);
-	const [accounts, categories, vendors, settings, apiKeys, hotelDetails] = await Promise.all([
-		listCashAccounts(hotel.id, { includeInactive: true }),
-		listExpenseCategories(hotel.id, { includeInactive: true }),
-		listVendors(hotel.id, { includeInactive: true }),
-		getFinanceSettings(hotel.id),
-		listApiKeysForHotel(hotel.id),
-		db
-			.select({ currency: hotels.currency, vatRateBps: hotels.vatRateBps, timezone: hotels.timezone })
-			.from(hotels)
-			.where(eq(hotels.id, hotel.id))
-			.then((r) => r[0]!)
-	]);
+	const [accounts, categories, vendors, settings, apiKeys, hotelDetails, scPwdDiscountBps] =
+		await Promise.all([
+			listCashAccounts(hotel.id, { includeInactive: true }),
+			listExpenseCategories(hotel.id, { includeInactive: true }),
+			listVendors(hotel.id, { includeInactive: true }),
+			getFinanceSettings(hotel.id),
+			listApiKeysForHotel(hotel.id),
+			db
+				.select({ currency: hotels.currency, vatRateBps: hotels.vatRateBps, timezone: hotels.timezone })
+				.from(hotels)
+				.where(eq(hotels.id, hotel.id))
+				.then((r) => r[0]!),
+			getScPwdDiscountBps(hotel.id)
+		]);
 	return {
 		accounts,
 		categories,
@@ -62,6 +65,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 		settings,
 		apiKeys,
 		hotelDetails,
+		scPwdDiscountBps,
 		accountKinds: ACCOUNT_KINDS,
 		expenseGroups: EXPENSE_GROUPS
 	};
@@ -85,7 +89,8 @@ export const actions: Actions = {
 			.object({
 				currency: z.enum(['PHP']),
 				vatRatePct: z.coerce.number().min(0).max(30),
-				timezone: z.string().min(1).max(64)
+				timezone: z.string().min(1).max(64),
+				scPwdDiscountPct: z.coerce.number().min(0).max(100).default(20)
 			})
 			.safeParse(Object.fromEntries(await event.request.formData()));
 		if (!p.success) return fail(400, { error: 'Check the hotel details.' });
@@ -99,6 +104,11 @@ export const actions: Actions = {
 				updatedAt: new Date()
 			})
 			.where(eq(hotels.id, hotelId));
+		await setScPwdDiscountBps(
+			hotelId,
+			Math.round(p.data.scPwdDiscountPct * 100),
+			event.locals.user
+		);
 		await writeAudit({
 			hotelId,
 			actor: event.locals.user,

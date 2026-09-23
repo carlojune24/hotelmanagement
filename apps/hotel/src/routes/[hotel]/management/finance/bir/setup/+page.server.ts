@@ -86,19 +86,13 @@ export const actions: Actions = {
 					.union([z.literal('on'), z.undefined()])
 					.transform((v) => v === 'on'),
 				footerNote: nullableStr(400),
-				thermalPaperWidthMm: z.coerce.number().int().refine((v) => v === 58 || v === 80).default(80),
-				scPwdDiscountPct: z.coerce.number().min(0).max(100).default(20)
+				thermalPaperWidthMm: z.coerce.number().int().refine((v) => v === 58 || v === 80).default(80)
 			})
 			.safeParse(Object.fromEntries(await event.request.formData()));
 		if (!parsed.success) return fail(400, { error: 'Check the BIR setup fields.' });
 
 		try {
-			const { scPwdDiscountPct, ...rest } = parsed.data;
-			await upsertBirSettings(
-				event.locals.hotel!.id,
-				{ ...rest, scPwdDiscountBps: Math.round(scPwdDiscountPct * 100) },
-				event.locals.user ?? null
-			);
+			await upsertBirSettings(event.locals.hotel!.id, parsed.data, event.locals.user ?? null);
 			return { ok: 'BIR setup saved.' };
 		} catch (e) {
 			if (e instanceof DocumentError) return fail(400, { error: e.message });

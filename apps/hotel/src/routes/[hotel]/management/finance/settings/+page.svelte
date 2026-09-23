@@ -35,7 +35,7 @@
 	<section class="mb-8 rounded-xl border border-border p-5">
 		<h2 class="mb-3 text-sm font-semibold text-ink">Hotel details</h2>
 		<form method="POST" action="?/updateHotelDetails" use:enhance class="space-y-3">
-			<div class="grid gap-3 sm:grid-cols-3">
+			<div class="grid gap-3 sm:grid-cols-4">
 				<div>
 					<Label class="text-xs" for="currency">Currency</Label>
 					<Select.Root type="single" name="currency" bind:value={currency}>
@@ -53,10 +53,26 @@
 					<Label class="text-xs" for="timezone">Timezone</Label>
 					<Input id="timezone" name="timezone" value={data.hotelDetails.timezone} required />
 				</div>
+				<div>
+					<Label class="text-xs" for="scPwdDiscountPct">Senior Citizen / PWD discount (%)</Label>
+					<Input
+						id="scPwdDiscountPct"
+						name="scPwdDiscountPct"
+						type="number"
+						min="0"
+						max="100"
+						step="0.01"
+						value={data.scPwdDiscountBps / 100}
+						required
+					/>
+				</div>
 			</div>
 			<p class="text-xs text-ink-muted">
 				Timezone resolves this hotel's business date (day-close, reports) — changing it after
-				you've started operating can shift how past dates are grouped.
+				you've started operating can shift how past dates are grouped. The Senior Citizen (RA
+				9994) / PWD (RA 10754) rate is applied when front desk flags a guest at check-in —
+				computed on the VAT-exclusive room charge, which then becomes VAT-exempt. Defaults to
+				the legally mandated 20%.
 			</p>
 			<Button type="submit" size="sm">Save hotel details</Button>
 		</form>

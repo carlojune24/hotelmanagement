@@ -13,16 +13,43 @@ import { ensureFolio, voidFolioCharge } from './folio';
 import { computeScPwdDiscount } from '$lib/sc-pwd-discount';
 import type { Tx } from './finance/shared';
 
-// Reads `bir_settings` directly (not `finance/documents.ts`'s `getBirSettings`) to avoid a
-// module cycle — `documents.ts`'s `buildInvoiceSnapshot` needs this module's
-// `getActiveScPwdClaim`, so this module can't import back from `documents.ts`.
-async function scPwdDiscountBpsFor(hotelId: string): Promise<number> {
+// Reads/writes `bir_settings.sc_pwd_discount_bps` directly (not `finance/documents.ts`'s
+// `getBirSettings`/`upsertBirSettings`) to avoid a module cycle — `documents.ts`'s
+// `buildInvoiceSnapshot` needs this module's `getActiveScPwdClaim`, so this module can't
+// import back from `documents.ts`. Also kept deliberately separate from the rest of BIR
+// Setup's form (the "Discounts" field lives on the Hotel details card in Finance Settings
+// instead) — the `onConflictDoUpdate` below only ever touches this one column, so saving it
+// never resets any other `bir_settings` field, and vice versa.
+export async function getScPwdDiscountBps(hotelId: string): Promise<number> {
 	const [row] = await db
 		.select({ scPwdDiscountBps: birSettings.scPwdDiscountBps })
 		.from(birSettings)
 		.where(eq(birSettings.hotelId, hotelId))
 		.limit(1);
 	return row?.scPwdDiscountBps ?? 2000;
+}
+
+export async function setScPwdDiscountBps(
+	hotelId: string,
+	discountBps: number,
+	actor: SessionUser | null
+): Promise<void> {
+	const clamped = Math.min(10000, Math.max(0, Math.round(discountBps)));
+	await db
+		.insert(birSettings)
+		.values({ hotelId, scPwdDiscountBps: clamped })
+		.onConflictDoUpdate({
+			target: birSettings.hotelId,
+			set: { scPwdDiscountBps: clamped, updatedAt: new Date() }
+		});
+	await writeAudit({
+		hotelId,
+		actor,
+		action: 'sc_pwd.update_rate',
+		entityType: 'hotel',
+		entityId: hotelId,
+		after: { scPwdDiscountBps: clamped }
+	});
 }
 
 export class ScPwdDiscountError extends Error {}
@@ -112,7 +139,7 @@ export async function applyScPwdDiscount(
 		throw new ScPwdDiscountError('A Senior Citizen/PWD discount is already applied to this booking.');
 	}
 
-	const discountBps = await scPwdDiscountBpsFor(input.hotelId);
+	const discountBps = await getScPwdDiscountBps(input.hotelId);
 	const calc = computeScPwdDiscount({
 		subtotalCentavos: booking.subtotalCentavos,
 		feesCentavos: booking.feesCentavos,

@@ -219,8 +219,6 @@ export interface BirSettingsInput {
 	footerNote: string | null;
 	/** 58 or 80 — app-validated, not a DB constraint. See the schema column's own comment. */
 	thermalPaperWidthMm: number;
-	/** RA 9994 / RA 10754 discount rate, in basis points (2000 = 20%). */
-	scPwdDiscountBps: number;
 }
 
 export async function upsertBirSettings(
@@ -235,7 +233,6 @@ export async function upsertBirSettings(
 		orPrefix: input.orPrefix.trim() || 'OR',
 		serialPadWidth: Math.min(12, Math.max(1, Math.round(input.serialPadWidth || 6))),
 		thermalPaperWidthMm: input.thermalPaperWidthMm === 58 ? 58 : 80,
-		scPwdDiscountBps: Math.min(10000, Math.max(0, Math.round(input.scPwdDiscountBps ?? 2000))),
 		updatedAt: new Date()
 	};
 	await db
