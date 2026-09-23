@@ -22,7 +22,7 @@ import {
 import { writeAudit } from './audit';
 import { expireCheckoutSession } from './paymongo/checkout';
 import { ensureFolio, getOrderIdForTarget, getOrderLedger, type FolioTarget } from './folio';
-import { cancellationRefundCentavos } from '$lib/ledger';
+import { cancellationRefundCentavos, noShowAdjustmentCentavos } from '$lib/ledger';
 import { recordCashMovement } from './finance/cash';
 import { resolvePaymentAccount, type PaymentMethod } from './finance/payments';
 import { businessDateFor, FinanceError } from './finance/shared';
@@ -765,12 +765,16 @@ export async function cancelBooking(input: CancelBookingInput): Promise<CancelBo
 }
 
 /** Marks a confirmed arrival that never showed up as `no_show`. Releases the room hold
- *  (implicit — `no_show` leaves `ACTIVE_BOOKING_STATUSES`); does not move any money. */
+ *  (implicit — `no_show` leaves `ACTIVE_BOOKING_STATUSES`). Money rule: the no-show keeps
+ *  exactly what was paid for this room — a folio adjustment writes off the unpaid rest of
+ *  the stay (or forfeits an overpayment), so the room shows neither a refund due nor a
+ *  balance owed. No money moves; a refund, if the hotel chooses to give one, is separate. */
 export async function markNoShow(
 	hotelId: string,
 	bookingId: string,
 	actor: SessionUser | null
-): Promise<void> {
+): Promise<{ keptCentavos: number }> {
+	let keptCentavos = 0;
 	await db.transaction(async (tx) => {
 		await tx.execute(
 			sql`select pg_advisory_xact_lock(hashtext(${hotelId}), hashtext(${'booking:' + bookingId}))`
@@ -788,11 +792,36 @@ export async function markNoShow(
 		if (flipped.length === 0) {
 			throw new CancellationError('This booking just changed — reload and try again.');
 		}
+		// Read before commit, so this still sees the line as `confirmed` — i.e. its charges
+		// are its folio (or, with no folio yet, its full total), same as `cancelBooking`.
+		const ledger = await getOrderLedger(booking.orderId);
+		const line = ledger.lines.find((l) => l.id === bookingId);
+		const adjustment = noShowAdjustmentCentavos({
+			lineChargesCentavos: line?.chargesCentavos ?? booking.totalCentavos,
+			linePaidCentavos: line?.paidCentavos ?? 0
+		});
+		if (adjustment !== 0) {
+			const folioId = await ensureFolio(tx, hotelId, { kind: 'room', bookingId });
+			await tx.insert(folioCharges).values({
+				folioId,
+				description:
+					adjustment < 0 ? 'No-show — unpaid balance written off' : 'No-show — overpayment forfeited',
+				quantity: 1,
+				unitPriceCentavos: adjustment,
+				taxCentavos: 0,
+				totalCentavos: adjustment,
+				addedByUserId: actor?.id ?? null
+			});
+		}
+		keptCentavos = Math.max(0, line?.paidCentavos ?? 0);
+
 		await tx.insert(bookingStatusHistory).values({
 			bookingId,
 			fromStatus: 'confirmed',
 			toStatus: 'no_show',
-			note: 'No-show — marked by front desk. Payment (if any) kept; refund separately if your policy requires it.'
+			note: actor
+				? 'No-show — marked by front desk. Hotel keeps what was paid; unpaid balance written off.'
+				: 'No-show — auto-flagged after the check-in date passed. Hotel keeps what was paid; unpaid balance written off.'
 		});
 	});
 
@@ -801,6 +830,8 @@ export async function markNoShow(
 		actor,
 		action: 'booking.no_show',
 		entityType: 'booking',
-		entityId: bookingId
+		entityId: bookingId,
+		after: { keptCentavos }
 	});
+	return { keptCentavos };
 }

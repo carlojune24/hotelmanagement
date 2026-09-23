@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { cancellationRefundCentavos, lineChargesCentavos, orderLedgerTotals } from './ledger';
+import {
+	cancellationRefundCentavos,
+	lineChargesCentavos,
+	noShowAdjustmentCentavos,
+	orderLedgerTotals
+} from './ledger';
 
 const room = (folio: number | null, total: number, status = 'confirmed') => ({
 	folioChargesCentavos: folio,
@@ -84,5 +89,33 @@ describe('cancellationRefundCentavos', () => {
 				feeCentavos: 200_000
 			})
 		).toBe(800_000);
+	});
+});
+
+describe('noShowAdjustmentCentavos', () => {
+	it('writes off the unpaid rest of a deposit-only stay', () => {
+		expect(noShowAdjustmentCentavos({ lineChargesCentavos: 500000, linePaidCentavos: 150000 })).toBe(
+			-350000
+		);
+	});
+
+	it('posts nothing when the stay was paid in full', () => {
+		expect(noShowAdjustmentCentavos({ lineChargesCentavos: 500000, linePaidCentavos: 500000 })).toBe(0);
+	});
+
+	it('writes off the whole stay when nothing was paid', () => {
+		expect(noShowAdjustmentCentavos({ lineChargesCentavos: 500000, linePaidCentavos: 0 })).toBe(-500000);
+	});
+
+	it('forfeits an overpayment rather than leaving a credit', () => {
+		expect(noShowAdjustmentCentavos({ lineChargesCentavos: 500000, linePaidCentavos: 520000 })).toBe(
+			20000
+		);
+	});
+
+	it('treats a net-refunded line as paid nothing', () => {
+		expect(noShowAdjustmentCentavos({ lineChargesCentavos: 500000, linePaidCentavos: -1000 })).toBe(
+			-500000
+		);
 	});
 });

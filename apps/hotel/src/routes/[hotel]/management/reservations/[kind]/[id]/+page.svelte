@@ -839,8 +839,8 @@
 			</div>
 			{#if data.canMarkNoShow && confirmingNoShow}
 				<p class="mt-2 text-xs text-ink-muted">
-					The room is released. Any payment is kept — issue a refund separately if your policy
-					requires it.
+					The room is released. The hotel keeps whatever was paid and the unpaid rest of the stay
+					is written off. Issue a refund separately only if your policy requires it.
 				</p>
 			{/if}
 		</div>

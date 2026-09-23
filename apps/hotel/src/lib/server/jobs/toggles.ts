@@ -21,7 +21,8 @@ export const JOB_DEFS = {
 	},
 	no_show_autoflag: {
 		label: 'Auto-flag no-shows',
-		description: "Marks a confirmed arrival no-show once its check-in date has fully passed with no check-in.",
+		description:
+			"Marks a confirmed arrival no-show once its check-in date has fully passed with no check-in. The hotel keeps whatever was paid; the unpaid rest of the stay is written off.",
 		defaultEnabled: true
 	},
 	auto_day_close: {

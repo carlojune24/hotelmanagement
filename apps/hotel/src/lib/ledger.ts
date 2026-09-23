@@ -50,3 +50,14 @@ export function cancellationRefundCentavos(args: {
 	const owedAfter = args.orderChargesCentavos - args.lineChargesCentavos + args.feeCentavos;
 	return Math.max(0, args.orderPaidCentavos - owedAfter);
 }
+
+/** The folio adjustment a no-show posts so the line keeps exactly what was paid for it —
+ *  no refund due, nothing owed (a hotel can't collect from a guest who never arrived).
+ *  Usually negative (writes off the unpaid rest of the stay); positive only when the line
+ *  was paid beyond its charges, which the no-show then forfeits. 0 = no line to post. */
+export function noShowAdjustmentCentavos(args: {
+	lineChargesCentavos: number;
+	linePaidCentavos: number;
+}): number {
+	return Math.max(0, args.linePaidCentavos) - args.lineChargesCentavos;
+}
