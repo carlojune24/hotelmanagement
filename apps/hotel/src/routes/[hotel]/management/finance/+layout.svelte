@@ -32,7 +32,9 @@
 </script>
 
 <div class="flex min-h-full flex-col">
-	<nav class="flex gap-1 overflow-x-auto border-b border-border bg-surface-2 px-4 py-2 sm:px-6 print:hidden">
+	<nav
+		class="sticky top-0 z-10 flex gap-1 overflow-x-auto border-b border-border bg-surface-2 px-4 py-2 sm:px-6 print:hidden"
+	>
 		{#each tabs as t (t.seg)}
 			<a
 				href={base + t.seg}
