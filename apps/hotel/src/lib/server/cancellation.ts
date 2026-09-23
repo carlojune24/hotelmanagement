@@ -734,7 +734,7 @@ export async function cancelBooking(input: CancelBookingInput): Promise<CancelBo
 	// Best-effort: kill an abandoned checkout so a late payment can't land on a cancelled hold.
 	if (result.pendingSessionId) {
 		try {
-			await expireCheckoutSession(result.pendingSessionId);
+			await expireCheckoutSession(hotelId, result.pendingSessionId);
 		} catch (e) {
 			console.error('cancelBooking: could not expire checkout session', orderId, e);
 		}

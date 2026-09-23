@@ -54,6 +54,7 @@ export default defineConfig({
 			'@lucide/svelte/icons/concierge-bell',
 			'@lucide/svelte/icons/cooking-pot',
 			'@lucide/svelte/icons/copy',
+			'@lucide/svelte/icons/credit-card',
 			'@lucide/svelte/icons/door-closed',
 			'@lucide/svelte/icons/door-open',
 			'@lucide/svelte/icons/download',

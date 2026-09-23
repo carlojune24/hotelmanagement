@@ -12,6 +12,7 @@ import {
 	roomTypes
 } from '$lib/server/db/schema/index';
 import { createCheckoutSession, type CheckoutLineItem } from '$lib/server/paymongo/checkout';
+import { PaymentsNotConfiguredError } from '$lib/server/paymongo/client';
 import type { Actions, PageServerLoad } from './$types';
 
 async function loadGuardedOrder(hotelId: string, orderId: string, token: string | null) {
@@ -131,16 +132,28 @@ export const actions: Actions = {
 		const successUrl = `${origin}/${event.locals.hotel!.slug}/confirmation/${order.id}?t=${order.accessToken}`;
 		const cancelUrl = `${origin}/${event.locals.hotel!.slug}/review/${order.id}?t=${order.accessToken}&cancelled=1`;
 
-		const { checkoutSessionId, checkoutUrl } = await createCheckoutSession({
-			order,
-			guest: guest!,
-			hotelName: event.locals.hotel!.name,
-			items,
-			successUrl,
-			cancelUrl,
-			// Only meaningful when the order has a downpayment; a pay-in-full order ignores it.
-			payInFull: (await event.request.formData()).get('option') === 'full'
-		});
+		let session: Awaited<ReturnType<typeof createCheckoutSession>>;
+		try {
+			session = await createCheckoutSession({
+				order,
+				guest: guest!,
+				hotelName: event.locals.hotel!.name,
+				items,
+				successUrl,
+				cancelUrl,
+				// Only meaningful when the order has a downpayment; a pay-in-full order ignores it.
+				payInFull: (await event.request.formData()).get('option') === 'full'
+			});
+		} catch (e) {
+			// The hotel disconnected PayMongo after this order was created.
+			if (e instanceof PaymentsNotConfiguredError) {
+				return fail(400, {
+					error: "Online payment isn't available for this hotel right now — please contact the hotel directly."
+				});
+			}
+			throw e;
+		}
+		const { checkoutSessionId, checkoutUrl } = session;
 
 		await db
 			.update(orders)

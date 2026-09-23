@@ -26,3 +26,4 @@ export * from './documents';
 export * from './email-log';
 export * from './guest-messages';
 export * from './hr';
+export * from './integrations';

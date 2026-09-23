@@ -18,6 +18,7 @@ import { computeDownpayment } from '$lib/downpayment';
 import { splitRoomLine } from '$lib/room-split';
 import { downpaymentBpsByRatePlan } from '$lib/server/downpayment-lookup';
 import { searchAvailability } from '$lib/server/availability';
+import { isOnlinePaymentEnabled } from '$lib/server/paymongo/client';
 import { checkHallAvailability } from '$lib/server/hall-availability';
 import { MAX_ROOMS_PER_LINE, addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
 import type { Actions } from './$types';
@@ -66,6 +67,13 @@ function lockKeysFor(items: CartLineInput[]): string[] {
 export const actions: Actions = {
 	createOrder: async (event) => {
 		const hotelId = event.locals.hotel!.id;
+		// No PayMongo account connected (Settings → Payments & email) = no online payment, so
+		// don't create an order that would hold rooms with no way to pay for them.
+		if (!(await isOnlinePaymentEnabled(hotelId))) {
+			return fail(400, {
+				error: "Online booking isn't available for this hotel yet — please contact the hotel directly to reserve."
+			});
+		}
 		const raw = Object.fromEntries(await event.request.formData());
 		const parsed = detailsSchema.safeParse(raw);
 		if (!parsed.success) return fail(400, { error: 'Check your details and try again.' });

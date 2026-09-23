@@ -13,11 +13,11 @@ documents, and marks pass/fail. Nothing automated drives your browser.
 | Check | How |
 |---|---|
 | Dev server + tunnel running, `ORIGIN` = current tunnel URL | `.env`; `pnpm dev:tunnel:ngrok` |
-| PayMongo webhook points at that URL, **enabled**, same mode as the key | `GET /v1/webhooks` (Claude checks); events: `checkout_session.payment.paid`, `payment.paid`, `payment.failed`, `payment.refunded`, `payment.refund.updated` |
-| `PAYMONGO_WEBHOOK_SECRET` matches that webhook | Claude checks |
+| Hotel's PayMongo connected in **test mode**, webhook pointing at the current tunnel | Settings → Payments & email shows "Test mode", webhook `…/api/webhooks/paymongo/{hotel}`; after a tunnel restart click **Reconnect**. Claude checks `GET /v1/webhooks` (enabled, events: `checkout_session.payment.paid`, `payment.paid`, `payment.failed`, `payment.refunded`, `payment.refund.updated`) |
+| `APP_ENCRYPTION_KEY` set | `.env` |
 | `PDF_RENDER_ORIGIN` = local server (`http://localhost:5175`) | `.env` |
 | BIR settings: an **active OR series** + "auto-issue receipt on payment" on | Finance → BIR → Setup / Series |
-| SMTP set, or a mail catcher running, to see the email + PDF | `npx maildev`, `SMTP_HOST=localhost SMTP_PORT=1025` |
+| A mailbox to see the email + PDF | Settings → Payments & email → Email (**Send test** passes), or platform `SMTP_*` / `npx maildev` |
 | A cashier shift open (for desk payments) | Front desk → Open shift |
 | Test data: one room type with a normal rate plan, one with a **50% downpayment** policy | Settings → Rates |
 
@@ -90,9 +90,9 @@ If D3/D4 can't complete in test mode, they move to Part 2 as a small real refund
 ## Part 2 — Live mode (after you switch)
 
 **Switch-over checklist** (no live payment until all are done):
-- Live secret key in the server's env; test key removed.
-- A **new live-mode webhook** (PayMongo keeps test and live separate) with the same events, pointing at the **permanent** public URL — never a tunnel URL; its secret in `PAYMONGO_WEBHOOK_SECRET`.
-- `ORIGIN` = the public URL; `PDF_RENDER_ORIGIN` = the server's internal address.
+- `ORIGIN` = the **permanent** public https URL (never a tunnel); `PDF_RENDER_ORIGIN` = the server's internal address; `APP_ENCRYPTION_KEY` set and backed up.
+- Settings → Payments & email → paste the **live** secret key → Replace. The live-mode webhook is registered automatically at the permanent URL (PayMongo keeps test and live webhooks separate); the page shows "Live".
+- Remove the legacy `PAYMONGO_WEBHOOK_SECRET` from the server env.
 - Chromium installed on the server (`pnpm exec playwright install chromium`).
 - Real BIR series and settings (not the sample series), real SMTP.
 
@@ -107,6 +107,10 @@ If D3/D4 can't complete in test mode, they move to Part 2 as a small real refund
 | L5 | Retire test data | Test bookings cancelled/refunded; nothing test-mode left looking like real revenue | |
 
 ## Known fixes from preparing this plan
+
+- 2026-09-23: PayMongo moved from `.env` to per-hotel Settings → Payments & email (encrypted
+  keys, auto-registered webhook at `/api/webhooks/paymongo/{hotel}`). A hotel with no
+  connection can't take online payment, so connect before any Part 1 run.
 
 - 2026-09-23: webhook handler listened for `payment.refund_updated`; PayMongo sends
   `payment.refund.updated`. Every refund status update was ignored. Fixed (both spellings

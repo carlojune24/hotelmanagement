@@ -2,7 +2,7 @@ import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import { PayMongoError, type Refund } from '@mm/paymongo';
 import { db } from './db/index';
 import { hotels, orders, payments } from './db/schema/index';
-import { getPaymongoClient } from './paymongo/client';
+import { getPaymongoClient, PaymentsNotConfiguredError } from './paymongo/client';
 import { getFinanceSettings } from './finance/settings';
 import { recordCashMovement } from './finance/cash';
 import { businessDateFor, FinanceError } from './finance/shared';
@@ -141,7 +141,17 @@ export async function refundOrderViaPaymongo(params: {
 		.limit(1);
 	const businessDate = businessDateFor(hotel?.timezone ?? 'Asia/Manila');
 	const settings = await getFinanceSettings(hotelId);
-	const client = getPaymongoClient();
+	let client: Awaited<ReturnType<typeof getPaymongoClient>>;
+	try {
+		client = await getPaymongoClient(hotelId);
+	} catch (e) {
+		if (e instanceof PaymentsNotConfiguredError) {
+			throw new FinanceError(
+				'PayMongo is not connected for this hotel (Settings → Payments & email) — refund another way.'
+			);
+		}
+		throw e;
+	}
 
 	let remaining = amountCentavos;
 	let refundedTotal = 0;

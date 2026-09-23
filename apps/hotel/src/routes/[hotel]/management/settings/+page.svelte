@@ -7,6 +7,7 @@
 	import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
 	import UtensilsIcon from '@lucide/svelte/icons/utensils';
 	import ClockIcon from '@lucide/svelte/icons/clock';
+	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
 	import GemIcon from '@lucide/svelte/icons/gem';
 	import ZapIcon from '@lucide/svelte/icons/zap';
 	import UsersIcon from '@lucide/svelte/icons/users';
@@ -56,6 +57,12 @@
 			icon: ClockIcon,
 			label: 'Check-in & check-out',
 			desc: 'Standard times and extension fees your front desk works from.'
+		},
+		{
+			href: 'payments-email',
+			icon: CreditCardIcon,
+			label: 'Payments & email',
+			desc: 'Your PayMongo account for online payment, and the mailbox guest email comes from.'
 		},
 		{
 			href: 'amenity-items',

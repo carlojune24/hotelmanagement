@@ -209,7 +209,7 @@ export async function expirePendingOrders(opts?: {
 		// non-fatal.
 		if (candidate.checkoutSessionId) {
 			try {
-				await expireCheckoutSession(candidate.checkoutSessionId);
+				await expireCheckoutSession(candidate.hotelId, candidate.checkoutSessionId);
 			} catch (e) {
 				console.error('expirePendingOrders: could not expire checkout session', candidate.id, e);
 			}

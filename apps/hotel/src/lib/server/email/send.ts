@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { db } from '../db/index';
 import { emailLog, type EmailType } from '../db/schema/index';
-import { fromForHotel, getTransport, isEmailConfigured } from './transport';
+import { getMailerForHotel } from './transport';
 
 export interface SendMailInput {
 	hotelId: string;
@@ -36,8 +36,10 @@ export interface SendMailResult {
  */
 export async function sendMail(input: SendMailInput): Promise<SendMailResult> {
 	try {
-		const info = await getTransport().sendMail({
-			from: fromForHotel(input.hotelName),
+		const mailer = await getMailerForHotel(input.hotelId, input.hotelName);
+		const info = await mailer.transport.sendMail({
+			from: mailer.from,
+			replyTo: mailer.replyTo,
 			to: input.to,
 			subject: input.subject,
 			html: input.html,
@@ -45,7 +47,7 @@ export async function sendMail(input: SendMailInput): Promise<SendMailResult> {
 			attachments: input.attachments
 		});
 
-		if (!isEmailConfigured()) {
+		if (!mailer.delivers) {
 			console.log(
 				`\n[email] SMTP not configured — not delivered.\n` +
 					`  to:      ${input.to}\n` +

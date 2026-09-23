@@ -71,7 +71,9 @@ export async function createCheckoutSession(params: {
 		}
 	}
 
-	const session = await getPaymongoClient().createCheckoutSession({
+	// The order's own hotel's PayMongo account — throws PaymentsNotConfiguredError if it has none.
+	const client = await getPaymongoClient(order.hotelId);
+	const session = await client.createCheckoutSession({
 		billing: { name: guest.fullName, email: guest.email, phone: guest.phone ?? undefined },
 		send_email_receipt: false,
 		show_description: true,
@@ -93,6 +95,9 @@ export async function createCheckoutSession(params: {
  * `lib/server/orders.ts`'s `expirePendingOrders`). PayMongo returns 4xx if the
  * session is already paid or expired — callers treat any failure as non-fatal.
  */
-export async function expireCheckoutSession(checkoutSessionId: string): Promise<void> {
-	await getPaymongoClient().expireCheckoutSession(checkoutSessionId);
+export async function expireCheckoutSession(
+	hotelId: string,
+	checkoutSessionId: string
+): Promise<void> {
+	await (await getPaymongoClient(hotelId)).expireCheckoutSession(checkoutSessionId);
 }
