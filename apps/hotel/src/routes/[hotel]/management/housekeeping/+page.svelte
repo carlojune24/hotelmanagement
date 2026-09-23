@@ -6,10 +6,29 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import type { ActionData, PageData } from './$types';
-	import type { HousekeepingHallCell, HousekeepingRoomCell } from '$lib/server/housekeeping';
+	import type {
+		HousekeepingBookingRef,
+		HousekeepingDamageReportView,
+		HousekeepingHallCell,
+		HousekeepingRoomCell
+	} from '$lib/server/housekeeping';
+
+	const fmtDateTime = (v: string | Date) =>
+		new Date(v).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
+	const flagReasonLabel: Record<string, string> = {
+		checkout: 'after checkout',
+		manual: 'flagged by staff',
+		completed: 'after the event'
+	};
+
+	function bookingRefLabel(ref: HousekeepingBookingRef | null): string {
+		return ref ? `Booking ${ref.bookingCode} — ${ref.guestName}` : 'No booking on file';
+	}
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
@@ -45,6 +64,7 @@
 	let roomDetailFormEl = $state<HTMLFormElement>();
 	let hallDetailFormEl = $state<HTMLFormElement>();
 	let loadedDetailFor = $state<string | null>(null);
+	let showResolvedHistory = $state(false);
 	$effect(() => {
 		if (!selected) {
 			loadedDetailFor = null;
@@ -53,6 +73,7 @@
 		const key = `${selected.kind}:${selected.id}`;
 		if (key !== loadedDetailFor) {
 			loadedDetailFor = key;
+			showResolvedHistory = false;
 			if (selected.kind === 'room') {
 				tick().then(() => roomDetailFormEl?.requestSubmit());
 			} else {
@@ -126,6 +147,27 @@
 			<span class="size-3 rounded border border-border bg-surface-2 opacity-70"></span>Out of order
 		</div>
 	</div>
+
+	{#snippet damageCard(r: HousekeepingDamageReportView)}
+		<div class="rounded-md border border-border p-2.5">
+			<img src={r.photoUrl} alt="Reported damage" class="mb-2 max-h-28 rounded object-cover" />
+			<p class="text-xs text-ink">{r.description}</p>
+			<p class="mt-1 text-[11px] text-ink-muted">{bookingRefLabel(r.bookingRef)}</p>
+			<div class="mt-1 flex items-center justify-between gap-2">
+				<Badge
+					variant="outline"
+					class={r.status === 'pending'
+						? 'border-transparent bg-danger/15 text-danger'
+						: r.status === 'charged'
+							? 'border-transparent bg-ok/15 text-ok'
+							: 'border-transparent bg-surface-2 text-ink-muted'}
+				>
+					{r.status === 'pending' ? 'Pending' : r.status === 'charged' ? 'Charged' : 'Dismissed'}
+				</Badge>
+				<span class="text-[10px] text-ink-muted">{fmtDateTime(r.resolvedAt ?? r.createdAt)}</span>
+			</div>
+		</div>
+	{/snippet}
 
 	<div class="flex min-h-0 flex-1">
 		<div class="min-w-0 flex-1 overflow-y-auto p-6">
@@ -240,6 +282,13 @@
 						{/if}
 					</div>
 
+					{#if detail && detail.status !== 'clean'}
+						<p class="mb-3 text-xs text-ink-muted">
+							Flagged {flagReasonLabel[detail.flagReason ?? 'manual']}{#if detail.flaggedBookingRef}
+								· {bookingRefLabel(detail.flaggedBookingRef)}{/if}
+						</p>
+					{/if}
+
 					{#if formError}
 						<p class="mb-2 text-xs text-danger">{formError}</p>
 					{/if}
@@ -290,37 +339,38 @@
 						</form>
 					</div>
 
-					{#if detail && detail.damageReports.length > 0}
+					{#if detail && detail.openDamageReports.length > 0}
 						<div class="mt-4 border-t border-border pt-3">
 							<h4 class="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">
-								Damage reports
+								Damage reports — needs attention
 							</h4>
 							<div class="space-y-2">
-								{#each detail.damageReports as r (r.id)}
-									<div class="rounded-md border border-border p-2.5">
-										<img
-											src={r.photoUrl}
-											alt="Reported damage"
-											class="mb-2 max-h-28 rounded object-cover"
-										/>
-										<p class="text-xs text-ink">{r.description}</p>
-										<Badge
-											variant="outline"
-											class="mt-1 {r.status === 'pending'
-												? 'border-transparent bg-danger/15 text-danger'
-												: r.status === 'charged'
-													? 'border-transparent bg-ok/15 text-ok'
-													: 'border-transparent bg-surface-2 text-ink-muted'}"
-										>
-											{r.status === 'pending'
-												? 'Pending'
-												: r.status === 'charged'
-													? 'Charged'
-													: 'Dismissed'}
-										</Badge>
-									</div>
+								{#each detail.openDamageReports as r (r.id)}
+									{@render damageCard(r)}
 								{/each}
 							</div>
+						</div>
+					{/if}
+
+					{#if detail && detail.resolvedDamageReports.length > 0}
+						<div class="mt-4 border-t border-border pt-3">
+							<button
+								type="button"
+								onclick={() => (showResolvedHistory = !showResolvedHistory)}
+								class="flex w-full items-center justify-between text-xs font-semibold tracking-wide text-ink-muted uppercase"
+							>
+								<span>Resolved history ({detail.resolvedDamageReports.length})</span>
+								<ChevronDownIcon
+									class="size-3.5 transition-transform {showResolvedHistory ? 'rotate-180' : ''}"
+								/>
+							</button>
+							{#if showResolvedHistory}
+								<div class="mt-2 space-y-2">
+									{#each detail.resolvedDamageReports as r (r.id)}
+										{@render damageCard(r)}
+									{/each}
+								</div>
+							{/if}
 						</div>
 					{/if}
 				</div>
@@ -350,6 +400,13 @@
 							{statusLabel[selectedHall.status]}
 						</Badge>
 					</div>
+
+					{#if detail && detail.status !== 'clean'}
+						<p class="mb-3 text-xs text-ink-muted">
+							Flagged {flagReasonLabel[detail.flagReason ?? 'manual']}{#if detail.flaggedBookingRef}
+								· {bookingRefLabel(detail.flaggedBookingRef)}{/if}
+						</p>
+					{/if}
 
 					{#if formError}
 						<p class="mb-2 text-xs text-danger">{formError}</p>
@@ -401,37 +458,38 @@
 						</form>
 					</div>
 
-					{#if detail && detail.damageReports.length > 0}
+					{#if detail && detail.openDamageReports.length > 0}
 						<div class="mt-4 border-t border-border pt-3">
 							<h4 class="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">
-								Damage reports
+								Damage reports — needs attention
 							</h4>
 							<div class="space-y-2">
-								{#each detail.damageReports as r (r.id)}
-									<div class="rounded-md border border-border p-2.5">
-										<img
-											src={r.photoUrl}
-											alt="Reported damage"
-											class="mb-2 max-h-28 rounded object-cover"
-										/>
-										<p class="text-xs text-ink">{r.description}</p>
-										<Badge
-											variant="outline"
-											class="mt-1 {r.status === 'pending'
-												? 'border-transparent bg-danger/15 text-danger'
-												: r.status === 'charged'
-													? 'border-transparent bg-ok/15 text-ok'
-													: 'border-transparent bg-surface-2 text-ink-muted'}"
-										>
-											{r.status === 'pending'
-												? 'Pending'
-												: r.status === 'charged'
-													? 'Charged'
-													: 'Dismissed'}
-										</Badge>
-									</div>
+								{#each detail.openDamageReports as r (r.id)}
+									{@render damageCard(r)}
 								{/each}
 							</div>
+						</div>
+					{/if}
+
+					{#if detail && detail.resolvedDamageReports.length > 0}
+						<div class="mt-4 border-t border-border pt-3">
+							<button
+								type="button"
+								onclick={() => (showResolvedHistory = !showResolvedHistory)}
+								class="flex w-full items-center justify-between text-xs font-semibold tracking-wide text-ink-muted uppercase"
+							>
+								<span>Resolved history ({detail.resolvedDamageReports.length})</span>
+								<ChevronDownIcon
+									class="size-3.5 transition-transform {showResolvedHistory ? 'rotate-180' : ''}"
+								/>
+							</button>
+							{#if showResolvedHistory}
+								<div class="mt-2 space-y-2">
+									{#each detail.resolvedDamageReports as r (r.id)}
+										{@render damageCard(r)}
+									{/each}
+								</div>
+							{/if}
 						</div>
 					{/if}
 				</div>

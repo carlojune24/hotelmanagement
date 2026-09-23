@@ -4,9 +4,11 @@ import {
 	bookingRooms,
 	bookings,
 	functionHalls,
+	guests,
 	hallBookings,
 	housekeepingDamageReports,
 	housekeepingStatus,
+	orders,
 	roomAssignments,
 	rooms,
 	roomTypes,
@@ -128,11 +130,84 @@ export async function getHousekeepingHallBoard(hotelId: string): Promise<Houseke
 	}));
 }
 
+/** Who a booking/hall booking was for — the "data integrity" reference the housekeeping
+ *  panel was missing: a booking code (same `orders.id.slice(0,8).toUpperCase()` convention
+ *  used everywhere else in the app, e.g. `reservations.ts`) plus the guest's name. */
+export interface HousekeepingBookingRef {
+	bookingCode: string;
+	guestName: string;
+}
+
+/** Batch-resolves room-booking ids to their order's booking code + guest name. Missing ids
+ *  (booking deleted, or none given) are simply absent from the returned map. */
+async function loadBookingRefs(bookingIds: string[]): Promise<Map<string, HousekeepingBookingRef>> {
+	const map = new Map<string, HousekeepingBookingRef>();
+	const ids = [...new Set(bookingIds)];
+	if (ids.length === 0) return map;
+	const rows = await db
+		.select({
+			bookingId: bookings.id,
+			orderId: orders.id,
+			guestName: guests.fullName
+		})
+		.from(bookings)
+		.innerJoin(orders, eq(orders.id, bookings.orderId))
+		.innerJoin(guests, eq(guests.id, orders.guestId))
+		.where(inArray(bookings.id, ids));
+	for (const r of rows) {
+		map.set(r.bookingId, { bookingCode: r.orderId.slice(0, 8).toUpperCase(), guestName: r.guestName });
+	}
+	return map;
+}
+
+/** Same as `loadBookingRefs` but for function-hall reservations. */
+async function loadHallBookingRefs(
+	hallBookingIds: string[]
+): Promise<Map<string, HousekeepingBookingRef>> {
+	const map = new Map<string, HousekeepingBookingRef>();
+	const ids = [...new Set(hallBookingIds)];
+	if (ids.length === 0) return map;
+	const rows = await db
+		.select({
+			hallBookingId: hallBookings.id,
+			orderId: orders.id,
+			guestName: guests.fullName
+		})
+		.from(hallBookings)
+		.innerJoin(orders, eq(orders.id, hallBookings.orderId))
+		.innerJoin(guests, eq(guests.id, orders.guestId))
+		.where(inArray(hallBookings.id, ids));
+	for (const r of rows) {
+		map.set(r.hallBookingId, {
+			bookingCode: r.orderId.slice(0, 8).toUpperCase(),
+			guestName: r.guestName
+		});
+	}
+	return map;
+}
+
+/** A damage report enriched with which booking/guest it was filed against — `bookingId`
+ *  is frozen at report time (see `reportRoomDamage`/`reportHallDamage`), so this stays
+ *  accurate even once the guest has checked out or a new guest has since checked in. */
+export interface HousekeepingDamageReportView extends HousekeepingDamageReport {
+	bookingRef: HousekeepingBookingRef | null;
+}
+
 export interface HousekeepingDetail {
 	status: CleanlinessStatus;
 	flaggedAt: Date | null;
 	clearedAt: Date | null;
-	damageReports: HousekeepingDamageReport[];
+	/** Why/who the *current* status came from — null once nothing has ever flagged it, or
+	 *  after it's been cleared with no new flag since. A manual flag with no booking in
+	 *  view (`flagReason === 'manual'` and no triggering booking) leaves `bookingRef` null. */
+	flagReason: 'checkout' | 'manual' | 'completed' | null;
+	flaggedBookingRef: HousekeepingBookingRef | null;
+	/** Not yet resolved — the ones that actually need front-desk/staff attention now. */
+	openDamageReports: HousekeepingDamageReportView[];
+	/** Already charged or dismissed — kept for the record, not for action; the UI keeps
+	 *  these collapsed by default so a freshly-cleaned room doesn't look like it still has
+	 *  open issues. */
+	resolvedDamageReports: HousekeepingDamageReportView[];
 }
 
 export async function getHousekeepingRoomDetail(
@@ -151,11 +226,26 @@ export async function getHousekeepingRoomDetail(
 			and(eq(housekeepingDamageReports.hotelId, hotelId), eq(housekeepingDamageReports.roomId, roomId))
 		)
 		.orderBy(desc(housekeepingDamageReports.createdAt));
+
+	const bookingIds = damageReports.map((r) => r.bookingId).filter((id): id is string => !!id);
+	if (status?.triggeringBookingId) bookingIds.push(status.triggeringBookingId);
+	const refs = await loadBookingRefs(bookingIds);
+
+	const view = (r: HousekeepingDamageReport): HousekeepingDamageReportView => ({
+		...r,
+		bookingRef: r.bookingId ? (refs.get(r.bookingId) ?? null) : null
+	});
+
 	return {
 		status: (status?.status ?? 'clean') as CleanlinessStatus,
 		flaggedAt: status?.flaggedAt ?? null,
 		clearedAt: status?.clearedAt ?? null,
-		damageReports
+		flagReason: status?.flagReason ?? null,
+		flaggedBookingRef: status?.triggeringBookingId
+			? (refs.get(status.triggeringBookingId) ?? null)
+			: null,
+		openDamageReports: damageReports.filter((r) => r.status === 'pending').map(view),
+		resolvedDamageReports: damageReports.filter((r) => r.status !== 'pending').map(view)
 	};
 }
 
@@ -183,11 +273,28 @@ export async function getHousekeepingHallDetail(
 			)
 		)
 		.orderBy(desc(housekeepingDamageReports.createdAt));
+
+	const hallBookingIds = damageReports
+		.map((r) => r.hallBookingId)
+		.filter((id): id is string => !!id);
+	if (status?.triggeringHallBookingId) hallBookingIds.push(status.triggeringHallBookingId);
+	const refs = await loadHallBookingRefs(hallBookingIds);
+
+	const view = (r: HousekeepingDamageReport): HousekeepingDamageReportView => ({
+		...r,
+		bookingRef: r.hallBookingId ? (refs.get(r.hallBookingId) ?? null) : null
+	});
+
 	return {
 		status: (status?.status ?? 'clean') as CleanlinessStatus,
 		flaggedAt: status?.flaggedAt ?? null,
 		clearedAt: status?.clearedAt ?? null,
-		damageReports
+		flagReason: status?.flagReason ?? null,
+		flaggedBookingRef: status?.triggeringHallBookingId
+			? (refs.get(status.triggeringHallBookingId) ?? null)
+			: null,
+		openDamageReports: damageReports.filter((r) => r.status === 'pending').map(view),
+		resolvedDamageReports: damageReports.filter((r) => r.status !== 'pending').map(view)
 	};
 }
 
