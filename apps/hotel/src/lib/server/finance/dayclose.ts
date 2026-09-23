@@ -69,6 +69,17 @@ export async function getDayCloseStatus(hotelId: string, businessDate: string) {
 	};
 }
 
+/** Whether the hotel has ever closed a business day. A hotel that doesn't run day close at
+ *  all shouldn't be nagged that "yesterday isn't closed" every morning. */
+export async function hotelUsesDayClose(hotelId: string): Promise<boolean> {
+	const [row] = await db
+		.select({ id: dayCloses.id })
+		.from(dayCloses)
+		.where(eq(dayCloses.hotelId, hotelId))
+		.limit(1);
+	return !!row;
+}
+
 export async function runDayClose(
 	hotelId: string,
 	businessDate: string,

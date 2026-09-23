@@ -321,6 +321,8 @@ export interface RoomGridDeparture {
 	roomId: string;
 	roomNumber: string;
 	roomTypeName: string;
+	/** The stay's own checkout date — earlier than the business date means overdue. */
+	checkOut: string;
 }
 
 export type RoomGridStatus = 'vacant' | 'occupied' | 'departing' | 'reserved' | 'ooo';
@@ -548,7 +550,8 @@ export async function getRoomStatusGrid(
 			guestName: r.guestName,
 			roomId: r.roomId,
 			roomNumber: roomById.get(r.roomId)?.roomNumber ?? '',
-			roomTypeName: roomById.get(r.roomId)?.roomTypeName ?? ''
+			roomTypeName: roomById.get(r.roomId)?.roomTypeName ?? '',
+			checkOut: r.assignmentCheckOut
 		}));
 
 	// An arrival with no room picked yet needs `quantity` rooms of its TYPE — not every room of the

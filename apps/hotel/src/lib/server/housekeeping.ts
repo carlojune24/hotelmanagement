@@ -631,3 +631,18 @@ export async function markDamageReportCharged(
 		after: { chargeId }
 	});
 }
+
+/** Damage reports Housekeeping filed that front desk hasn't charged or dismissed yet —
+ *  rooms and function halls alike. Drives the dashboard's "needs attention" row. */
+export async function countPendingDamageReports(hotelId: string): Promise<number> {
+	const [row] = await db
+		.select({ n: sql<number>`count(*)::int` })
+		.from(housekeepingDamageReports)
+		.where(
+			and(
+				eq(housekeepingDamageReports.hotelId, hotelId),
+				eq(housekeepingDamageReports.status, 'pending')
+			)
+		);
+	return row?.n ?? 0;
+}
