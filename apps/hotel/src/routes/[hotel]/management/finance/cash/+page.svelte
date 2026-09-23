@@ -34,6 +34,17 @@
 		closing: data.position.reduce((s, p) => s + p.closingCentavos, 0)
 	});
 
+	// Voided rows stay listed (greyed out, "Include voided") but never count toward the
+	// total — same posture the Reconciliation card's own totals already take.
+	const movementTotals = $derived({
+		in: data.movements
+			.filter((m) => !m.voidedAt && m.direction === 'in')
+			.reduce((s, m) => s + m.amountCentavos, 0),
+		out: data.movements
+			.filter((m) => !m.voidedAt && m.direction === 'out')
+			.reduce((s, m) => s + m.amountCentavos, 0)
+	});
+
 	const kindLabel: Record<string, string> = {
 		cash_drawer: 'Drawer',
 		petty_cash: 'Petty cash',
@@ -377,6 +388,16 @@
 					<Table.Row><Table.Cell colspan={7} class="py-6 text-center text-ink-muted">No movements match.</Table.Cell></Table.Row>
 				{/each}
 			</Table.Body>
+			{#if data.movements.length > 0}
+				<Table.Footer>
+					<Table.Row>
+						<Table.Cell colspan={4} class="text-ink">Total</Table.Cell>
+						<Table.Cell class="text-right tabular-nums text-ok">{peso(movementTotals.in)}</Table.Cell>
+						<Table.Cell class="text-right tabular-nums text-danger">{peso(movementTotals.out)}</Table.Cell>
+						<Table.Cell></Table.Cell>
+					</Table.Row>
+				</Table.Footer>
+			{/if}
 		</Table.Root>
 	</div>
 </div>
