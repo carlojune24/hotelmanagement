@@ -83,6 +83,7 @@
 						currentStepIndex
 							? 'is-done'
 							: ''}"
+						aria-current={i === currentStepIndex ? 'step' : undefined}
 					>
 						<span class="ledger-stepper-node-circle ledger-data"
 							>{(i + 1).toString().padStart(2, '0')}</span

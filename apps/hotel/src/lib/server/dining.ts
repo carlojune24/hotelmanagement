@@ -14,7 +14,14 @@ import { diningItems, type DiningItem } from './db/schema/index';
  */
 export const diningConfigSchema = z.object({
 	/** Photos of menus/menu boards, shown on the public Dining page below the venue list. */
-	menuImages: z.array(imageRef).max(MAX_GALLERY_IMAGES).optional()
+	menuImages: z.array(imageRef).max(MAX_GALLERY_IMAGES).optional(),
+	/** Hotel-wide intro block at the top of the public Dining page — eyebrow label,
+	 *  heading, and a short intro paragraph. Same jsonb-config pattern `branding.about`
+	 *  already uses; all optional, page falls back to a plain title with no intro
+	 *  block if unset. */
+	introEyebrow: z.string().max(60).optional(),
+	introHeading: z.string().max(160).optional(),
+	introBody: z.string().max(2000).optional()
 });
 
 export type DiningConfig = z.infer<typeof diningConfigSchema>;

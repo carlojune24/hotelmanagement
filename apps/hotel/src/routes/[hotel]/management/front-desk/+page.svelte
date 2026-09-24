@@ -1104,8 +1104,9 @@
 					<span class="text-xs font-medium text-ink-muted">Filter:</span>
 					<button
 						type="button"
+						aria-pressed={typeFilter === 'all'}
 						onclick={() => (typeFilter = 'all')}
-						class="rounded-full border px-2.5 py-1 text-xs transition {typeFilter === 'all'
+						class="min-h-9 rounded-full border px-3 py-2 text-xs transition {typeFilter === 'all'
 							? 'border-brand bg-brand/10 font-medium text-ink'
 							: 'border-border text-ink-muted hover:border-brand/50 hover:text-ink'}"
 					>
@@ -1114,8 +1115,9 @@
 					{#each roomTypeOptions as rt (rt.id)}
 						<button
 							type="button"
+							aria-pressed={typeFilter === rt.name}
 							onclick={() => (typeFilter = rt.name)}
-							class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition {typeFilter ===
+							class="flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-2 text-xs transition {typeFilter ===
 							rt.name
 								? 'border-brand bg-brand/10 font-medium text-ink'
 								: 'border-border text-ink-muted hover:border-brand/50 hover:text-ink'}"
@@ -1133,7 +1135,7 @@
 						<button
 							type="button"
 							onclick={() => openAvailability('roomType', rt.id, rt.name)}
-							class="flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs text-ink-muted transition hover:border-brand/50 hover:text-ink"
+							class="flex min-h-9 items-center gap-1.5 rounded-full border border-border px-3 py-2 text-xs text-ink-muted transition hover:border-brand/50 hover:text-ink"
 						>
 							<CalendarRangeIcon class="size-3" />
 							{rt.name}
@@ -1171,6 +1173,9 @@
 									type="button"
 									disabled={pickDisabled}
 									title={pickDisabled ? disabledTileReason(c.status, c.roomId) : undefined}
+									aria-label="Room {c.roomNumber}, {c.roomTypeName}, {statusLabel[c.status] ??
+										c.status}{c.status === 'departing' ? ', departing today' : ''}"
+									aria-pressed={picked || (!pickMode && selectedRoomId === c.roomId)}
 									onclick={() => (pickMode ? toggleTilePick(c) : (selectedRoomId = c.roomId))}
 									class="relative rounded-lg border p-2.5 text-left transition {statusCardClass(
 										c.status
@@ -1288,7 +1293,11 @@
 			{/if}
 		</div>
 
-		<div class="hidden w-120 shrink-0 overflow-y-auto border-l border-border lg:block">
+		<div
+			class="{pickMode || selectedRoomId
+				? 'fixed inset-0 z-40 bg-background'
+				: 'hidden'} overflow-y-auto lg:static lg:z-auto lg:block lg:w-120 lg:shrink-0 lg:border-l lg:border-border lg:bg-transparent"
+		>
 			{#if pickMode}
 				<div class="p-4">
 					<div class="mb-3 flex items-center justify-between">
@@ -1726,13 +1735,14 @@
 										<IdCameraCapture />
 										<div class="flex gap-2">
 											<Button type="submit" size="sm">Save ID photo</Button>
-											<button
+											<Button
 												type="button"
+												variant="ghost"
+												size="sm"
 												onclick={() => (idCaptureOpen = false)}
-												class="text-xs text-ink-muted underline underline-offset-2"
 											>
 												Cancel
-											</button>
+											</Button>
 										</div>
 									</form>
 								{:else}
@@ -1802,13 +1812,14 @@
 										</div>
 										<div class="flex gap-2">
 											<Button type="submit" size="sm">Apply discount</Button>
-											<button
+											<Button
 												type="button"
+												variant="ghost"
+												size="sm"
 												onclick={() => (scPwdToggleOpen = false)}
-												class="text-xs text-ink-muted underline underline-offset-2"
 											>
 												Cancel
-											</button>
+											</Button>
 										</div>
 									</form>
 								{:else}
@@ -1816,6 +1827,7 @@
 										type="button"
 										variant="outline"
 										size="sm"
+										aria-expanded={scPwdToggleOpen}
 										onclick={() => {
 											scPwdClaimantNameInput = formRoomDetail?.guest.fullName ?? '';
 											scPwdToggleOpen = true;
@@ -1916,15 +1928,22 @@
 												cashier={data.cashier}
 												onDone={() => (roomPayOpen = false)}
 											/>
-											<button
+											<Button
 												type="button"
+												variant="ghost"
+												size="sm"
 												onclick={() => (roomPayOpen = false)}
-												class="mt-1 text-xs text-ink-muted underline underline-offset-2"
+												class="mt-1"
 											>
 												Cancel
-											</button>
+											</Button>
 										{:else}
-											<Button size="sm" class="w-full" onclick={() => (roomPayOpen = true)}>
+											<Button
+												size="touch"
+												class="w-full"
+												aria-expanded={roomPayOpen}
+												onclick={() => (roomPayOpen = true)}
+											>
 												Take payment ({peso(formFolio.balanceCentavos)} due)
 											</Button>
 										{/if}
@@ -1941,18 +1960,21 @@
 												mode="refund"
 												onDone={() => (roomRefundOpen = false)}
 											/>
-											<button
+											<Button
 												type="button"
+												variant="ghost"
+												size="sm"
 												onclick={() => (roomRefundOpen = false)}
-												class="mt-1 text-xs text-ink-muted underline underline-offset-2"
+												class="mt-1"
 											>
 												Cancel
-											</button>
+											</Button>
 										{:else}
 											<Button
-												size="sm"
+												size="touch"
 												variant="outline"
 												class="w-full"
+												aria-expanded={roomRefundOpen}
 												onclick={() => (roomRefundOpen = true)}
 											>
 												Refund credit ({peso(-formFolio.balanceCentavos)})
@@ -1992,13 +2014,14 @@
 													<Button type="submit" size="sm" variant="outline" class="flex-1"
 														>Charge & check out</Button
 													>
-													<button
+													<Button
 														type="button"
+														variant="ghost"
+														size="sm"
 														onclick={() => (checkoutCityLedger = false)}
-														class="text-xs text-ink-muted underline underline-offset-2"
 													>
 														Cancel
-													</button>
+													</Button>
 												</div>
 											</form>
 										{:else}
@@ -2284,10 +2307,12 @@
 				</div>
 			{:else}
 				<div class="p-4">
-					<div class="mb-3 flex gap-1 rounded-lg bg-surface-2 p-1">
+					<div class="mb-3 flex gap-1 rounded-lg bg-surface-2 p-1" role="tablist">
 						<button
 							type="button"
-							class="flex-1 rounded-md px-2 py-1.5 text-xs font-semibold {railTab === 'arrivals'
+							role="tab"
+							aria-selected={railTab === 'arrivals'}
+							class="min-h-9 flex-1 rounded-md px-2 py-2 text-xs font-semibold {railTab === 'arrivals'
 								? 'bg-surface text-ink shadow-sm'
 								: 'text-ink-muted'}"
 							onclick={() => (railTab = 'arrivals')}
@@ -2296,7 +2321,9 @@
 						</button>
 						<button
 							type="button"
-							class="flex-1 rounded-md px-2 py-1.5 text-xs font-semibold {railTab === 'departures'
+							role="tab"
+							aria-selected={railTab === 'departures'}
+							class="min-h-9 flex-1 rounded-md px-2 py-2 text-xs font-semibold {railTab === 'departures'
 								? 'bg-surface text-ink shadow-sm'
 								: 'text-ink-muted'}"
 							onclick={() => (railTab = 'departures')}
@@ -2812,15 +2839,22 @@
 										cashier={data.cashier}
 										onDone={() => (hallPayOpen = false)}
 									/>
-									<button
+									<Button
 										type="button"
+										variant="ghost"
+										size="sm"
 										onclick={() => (hallPayOpen = false)}
-										class="mt-1 text-xs text-ink-muted underline underline-offset-2"
+										class="mt-1"
 									>
 										Cancel
-									</button>
+									</Button>
 								{:else}
-									<Button size="sm" class="w-full" onclick={() => (hallPayOpen = true)}>
+									<Button
+										size="touch"
+										class="w-full"
+										aria-expanded={hallPayOpen}
+										onclick={() => (hallPayOpen = true)}
+									>
 										Take payment ({peso(formHallFolio.balanceCentavos)} due)
 									</Button>
 								{/if}
@@ -2837,18 +2871,21 @@
 										mode="refund"
 										onDone={() => (hallRefundOpen = false)}
 									/>
-									<button
+									<Button
 										type="button"
+										variant="ghost"
+										size="sm"
 										onclick={() => (hallRefundOpen = false)}
-										class="mt-1 text-xs text-ink-muted underline underline-offset-2"
+										class="mt-1"
 									>
 										Cancel
-									</button>
+									</Button>
 								{:else}
 									<Button
-										size="sm"
+										size="touch"
 										variant="outline"
 										class="w-full"
+										aria-expanded={hallRefundOpen}
 										onclick={() => (hallRefundOpen = true)}
 									>
 										Refund credit ({peso(-formHallFolio.balanceCentavos)})

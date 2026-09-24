@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 
@@ -14,8 +15,46 @@
 
 	const hasMultiple = $derived(images.length > 1);
 
+	let dialogEl = $state<HTMLDivElement | null>(null);
+	let closeBtnEl = $state<HTMLButtonElement | null>(null);
+	let lastFocused: HTMLElement | null = null;
+
+	// Move focus into the dialog on open, lock background scroll, and restore
+	// focus to whatever opened it on close — a real modal dialog, not just an
+	// overlay that happens to sit on top.
+	$effect(() => {
+		if (index != null) {
+			lastFocused = document.activeElement as HTMLElement | null;
+			const prevOverflow = document.body.style.overflow;
+			document.body.style.overflow = 'hidden';
+			tick().then(() => closeBtnEl?.focus());
+			return () => {
+				document.body.style.overflow = prevOverflow;
+			};
+		} else if (lastFocused) {
+			lastFocused.focus();
+			lastFocused = null;
+		}
+	});
+
 	function close() {
 		index = null;
+	}
+	function trapFocus(e: KeyboardEvent) {
+		if (!dialogEl) return;
+		const focusable = dialogEl.querySelectorAll<HTMLElement>(
+			'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+		);
+		if (focusable.length === 0) return;
+		const first = focusable[0]!;
+		const last = focusable[focusable.length - 1]!;
+		if (e.shiftKey && document.activeElement === first) {
+			e.preventDefault();
+			last.focus();
+		} else if (!e.shiftKey && document.activeElement === last) {
+			e.preventDefault();
+			first.focus();
+		}
 	}
 	function stepPrev() {
 		if (index != null) index = (index - 1 + images.length) % images.length;
@@ -47,6 +86,7 @@
 		if (e.key === 'Escape') close();
 		else if (hasMultiple && e.key === 'ArrowLeft') stepPrev();
 		else if (hasMultiple && e.key === 'ArrowRight') stepNext();
+		else if (e.key === 'Tab') trapFocus(e);
 	}}
 />
 
@@ -54,15 +94,22 @@
 	{@const current = images[index]!}
 	<div
 		class="storefront-lightbox"
-		role="button"
-		tabindex="0"
-		aria-label="Close photo"
+		role="dialog"
+		aria-modal="true"
+		aria-label="Photo gallery"
+		tabindex="-1"
+		bind:this={dialogEl}
 		onclick={close}
 		onkeydown={(e) => {
 			if (e.key === 'Enter' || e.key === ' ') close();
 		}}
 	>
-		<button type="button" class="storefront-lightbox-close" onclick={close}>
+		<button
+			type="button"
+			class="storefront-lightbox-close"
+			onclick={close}
+			bind:this={closeBtnEl}
+		>
 			Close ✕
 		</button>
 
@@ -91,7 +138,7 @@
 		</div>
 
 		{#if hasMultiple}
-			<div class="storefront-lightbox-thumbs" onclick={stopClick}>
+			<div class="storefront-lightbox-thumbs" role="presentation" onclick={stopClick}>
 				{#each images as url, i (url + i)}
 					<button
 						type="button"

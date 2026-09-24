@@ -295,9 +295,32 @@
 	align-items: center;
 	gap: 1.75rem;
 }
+.storefront-nav-menu-btn {
+	display: flex;
+}
+/* `.woven-ledger` prefix matches `.woven-ledger .ledger-btn-primary`'s own
+   specificity (both buttons also carry that class, which sets `display: inline-flex`
+   unconditionally) — a bare single-class rule here would lose to it regardless of
+   this media query, since equal-layer CSS resolves same-origin conflicts by
+   specificity before source order. */
+.woven-ledger .storefront-nav-book-full {
+	display: none;
+}
+.woven-ledger .storefront-nav-book-compact {
+	display: inline-flex;
+}
 @media (min-width: 768px) {
 	.storefront-nav-links {
 		display: flex;
+	}
+	.storefront-nav-menu-btn {
+		display: none;
+	}
+	.woven-ledger .storefront-nav-book-full {
+		display: inline-flex;
+	}
+	.woven-ledger .storefront-nav-book-compact {
+		display: none;
 	}
 }
 .storefront-nav-link {
@@ -333,6 +356,37 @@
 .storefront-nav.is-transparent .storefront-nav-link:hover {
 	color: oklch(0.98 0.008 75);
 	border-bottom-color: oklch(0.98 0.008 75);
+}
+
+/* Mobile nav trigger + drawer: below the 768px breakpoint where
+   .storefront-nav-links disappears, this is the only way to reach the other
+   storefront pages/sections without scrolling to the footer. */
+.storefront-nav-menu-btn {
+	align-items: center;
+	justify-content: center;
+	width: 44px;
+	height: 44px;
+	color: var(--ledger-ink);
+	border-radius: 4px;
+	background: transparent;
+}
+.storefront-nav-menu-btn:hover {
+	color: var(--hotel-accent);
+}
+.storefront-nav.is-transparent .storefront-nav-menu-btn {
+	color: oklch(0.98 0.008 75);
+}
+.storefront-nav-mobile-link {
+	display: flex;
+	align-items: center;
+	min-height: 44px;
+	font-size: 0.9375rem;
+	font-weight: 500;
+	color: var(--ledger-ink-muted);
+	border-bottom: 1px solid var(--ledger-rule);
+}
+.storefront-nav-mobile-link:hover {
+	color: var(--ledger-ink);
 }
 
 /* Hero: the folio's opening page. With a hero photo or video, a scrim earns the
@@ -382,6 +436,7 @@
 	display: inline-flex;
 	align-items: center;
 	gap: 0.5rem;
+	min-height: 44px;
 	background: oklch(0.16 0.02 60 / 0.55);
 	color: oklch(0.98 0.008 75);
 	border: 1px solid oklch(0.98 0.008 75 / 0.4);
@@ -961,8 +1016,8 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 2.25rem;
-	height: 2.25rem;
+	width: 44px;
+	height: 44px;
 	border-radius: 999px;
 	border: 1px solid var(--ledger-rule);
 	background: var(--ledger-paper);
@@ -1252,8 +1307,8 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 26px;
-	height: 26px;
+	width: 44px;
+	height: 44px;
 	border-radius: 999px;
 	border: 1px solid var(--ledger-rule);
 	color: var(--ledger-ink);
@@ -1458,9 +1513,16 @@
 }
 .storefront-hall-details-grid {
 	display: grid;
-	grid-template-columns: repeat(2, 1fr);
+	/* 1 column below ~400px (a narrow phone can't fit 2 of these fields side by
+	   side without squeezing labels/values), 2 from there to 640px, 5 above. */
+	grid-template-columns: 1fr;
 	gap: 1rem;
 	margin-top: 1rem;
+}
+@media (min-width: 400px) {
+	.storefront-hall-details-grid {
+		grid-template-columns: repeat(2, 1fr);
+	}
 }
 @media (min-width: 640px) {
 	.storefront-hall-details-grid {
@@ -1622,6 +1684,11 @@
 	background-color: var(--ledger-paper-2);
 }
 .storefront-invoice-close {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 44px;
+	min-height: 44px;
 	color: var(--ledger-ink-muted);
 	font-size: 0.75rem;
 }
@@ -1644,6 +1711,11 @@
 	border-bottom: none;
 }
 .storefront-invoice-remove {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 44px;
+	min-height: 44px;
 	color: var(--ledger-ink-muted);
 	font-size: 0.75rem;
 	flex-shrink: 0;
@@ -1705,6 +1777,11 @@
 	border-bottom: 1px solid var(--ledger-rule);
 }
 .storefront-summary-remove {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 44px;
+	min-height: 44px;
 	color: var(--ledger-ink-muted);
 	font-size: 0.75rem;
 	flex-shrink: 0;
@@ -1997,4 +2074,29 @@
 }
 .storefront-room-dialog-footer-price {
 	color: var(--ledger-ink);
+}
+
+/* Consistent keyboard-focus ring — extends the same accent outline already used
+   on .ledger-btn-primary/.ledger-field/.storefront-gallery-item/-tile to the rest
+   of this world's interactive elements, so keyboard focus reads as one system
+   rather than falling back to a mix of browser defaults on some controls. */
+.storefront-nav-link:focus-visible,
+.storefront-nav-menu-btn:focus-visible,
+.storefront-nav-mobile-link:focus-visible,
+.storefront-room-card:focus-visible,
+.storefront-stepper button:focus-visible,
+.storefront-invoice-pill:focus-visible,
+.storefront-invoice-close:focus-visible,
+.storefront-invoice-remove:focus-visible,
+.storefront-invoice-cta:focus-visible,
+.storefront-lightbox-close:focus-visible,
+.storefront-lightbox-arrow:focus-visible,
+.storefront-lightbox-thumb:focus-visible,
+.storefront-summary-edit:focus-visible,
+.storefront-summary-remove:focus-visible,
+.storefront-gallery-nav-btn:focus-visible,
+.storefront-hero-gallery-cta:focus-visible,
+.storefront-view-details-btn:focus-visible {
+	outline: 2px solid var(--hotel-accent);
+	outline-offset: 2px;
 }

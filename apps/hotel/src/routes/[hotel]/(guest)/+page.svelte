@@ -21,7 +21,7 @@
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
 	import InfoIcon from '@lucide/svelte/icons/info';
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
-	import { getContext } from 'svelte';
+	import { getContext, onMount } from 'svelte';
 	import type { CartStore } from '$lib/cart.svelte';
 	import type { BedConfigEntry } from '$lib/server/db/schema/inventory';
 	import type { HallPriceBreakdown } from '$lib/server/pricing';
@@ -97,6 +97,20 @@
 	});
 
 	let lightboxIndex = $state<number | null>(null);
+
+	// PRODUCT.md calls out low-end Android / mobile-data guests explicitly — an
+	// autoplaying hero video is real weight to force on that connection, so a
+	// guest with data-saver on or a known-slow connection gets the static poster
+	// image instead. `navigator.connection` is Chromium-only; unsupported browsers
+	// (Safari, Firefox) just keep the existing autoplay behavior, unchanged.
+	let allowHeroVideo = $state(true);
+	onMount(() => {
+		const conn = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } })
+			.connection;
+		if (!conn) return;
+		const isSlow = conn.saveData || conn.effectiveType === 'slow-2g' || conn.effectiveType === '2g';
+		if (isSlow) allowHeroVideo = false;
+	});
 
 	let galleryStripEl: HTMLDivElement | undefined = $state();
 	function scrollGallery(direction: 1 | -1) {
@@ -191,6 +205,10 @@
 	showDining={data.diningItems.length > 0 || (data.dining.menuImages ?? []).length > 0}
 	showReviews={data.reviews.length > 0}
 	transparentOverHero={Boolean(data.branding.heroVideoUrl || data.branding.heroImageUrl)}
+	accent={data.theme.accent}
+	accentDeep={data.theme.accentDeep}
+	paper={data.theme.paper}
+	paperDeep={data.theme.paperDeep}
 />
 
 <div id="top"></div>
@@ -200,7 +218,7 @@
 		? 'has-media'
 		: 'ledger-woven-band'}"
 >
-	{#if data.branding.heroVideoUrl}
+	{#if data.branding.heroVideoUrl && allowHeroVideo}
 		<div class="storefront-hero-photo">
 			<!-- svelte-ignore a11y_media_has_caption -->
 			<video

@@ -38,6 +38,10 @@
 	showFunctionHall={data.functionHalls.length > 0}
 	showDining={data.diningItems.length > 0 || (data.dining.menuImages ?? []).length > 0}
 	showReviews={data.reviews.length > 0}
+	accent={data.theme.accent}
+	accentDeep={data.theme.accentDeep}
+	paper={data.theme.paper}
+	paperDeep={data.theme.paperDeep}
 />
 
 <div class="storefront-section mx-auto max-w-4xl px-4 py-10 sm:px-6">

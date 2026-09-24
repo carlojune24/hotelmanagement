@@ -7,7 +7,7 @@ import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { deleteUploadIfOwned, saveUpload, UploadValidationError } from '$lib/server/uploads';
 import { MAX_GALLERY_IMAGES } from '$lib/branding';
-import { parseDiningConfig, mergeDiningConfigIntoConfig } from '$lib/server/dining';
+import { diningConfigSchema, parseDiningConfig, mergeDiningConfigIntoConfig } from '$lib/server/dining';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -27,6 +27,16 @@ const createSchema = z.object({
 	title: z.string().min(2).max(120),
 	description: z.string().max(2000).optional(),
 	operatingHours: z.string().max(200).optional()
+});
+
+// Picked from `diningConfigSchema` rather than redeclared — this action's caps
+// must never drift from the read-side schema `parseDiningConfig` validates
+// against, or a future edit that passes here but fails there would silently
+// drop the *entire* dining config (menu images included) on next read.
+const introSchema = diningConfigSchema.pick({
+	introEyebrow: true,
+	introHeading: true,
+	introBody: true
 });
 
 export const actions: Actions = {
@@ -58,6 +68,36 @@ export const actions: Actions = {
 		});
 
 		return { ok: `Created "${parsed.data.title}".`, createdItemId: row!.id };
+	},
+
+	updateIntro: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		const hotel = event.locals.hotel!;
+
+		const raw = Object.fromEntries(await event.request.formData());
+		const parsed = introSchema.safeParse(raw);
+		if (!parsed.success) return fail(400, { error: 'Check the intro block fields and try again.' });
+
+		const current = parseDiningConfig(hotel.config);
+		const nextConfig = mergeDiningConfigIntoConfig(hotel.config, {
+			...current,
+			introEyebrow: parsed.data.introEyebrow?.trim() || undefined,
+			introHeading: parsed.data.introHeading?.trim() || undefined,
+			introBody: parsed.data.introBody?.trim() || undefined
+		});
+		await db
+			.update(hotels)
+			.set({ config: nextConfig, updatedAt: new Date() })
+			.where(eq(hotels.id, hotel.id));
+		await writeAudit({
+			hotelId: hotel.id,
+			actor: event.locals.user,
+			action: 'hotel.update_dining_config',
+			entityType: 'hotel',
+			entityId: hotel.id
+		});
+
+		return { ok: 'Intro block updated.' };
 	},
 
 	uploadMenuImages: async (event) => {

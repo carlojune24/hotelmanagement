@@ -40,7 +40,49 @@
 		<Button variant="outline" href="{base}/settings">← Settings</Button>
 	</div>
 
-	<div class="flex items-center justify-between gap-4">
+	<div class="rounded-xl border border-border bg-surface p-4 shadow-sm">
+		<h2 class="text-base font-semibold text-ink">Intro block</h2>
+		<p class="text-sm text-ink-muted">
+			The opening of your Dining page, above the venue list. Leave blank to skip it and go
+			straight into venues.
+		</p>
+		<form method="POST" action="?/updateIntro" use:enhance class="mt-4 space-y-3">
+			<div>
+				<Label for="introEyebrow">Eyebrow (optional)</Label>
+				<Input
+					id="introEyebrow"
+					name="introEyebrow"
+					placeholder="Dining"
+					value={data.dining.introEyebrow ?? ''}
+					class="mt-1"
+				/>
+			</div>
+			<div>
+				<Label for="introHeading">Heading (optional)</Label>
+				<Input
+					id="introHeading"
+					name="introHeading"
+					placeholder="Discover our dining venues"
+					value={data.dining.introHeading ?? ''}
+					class="mt-1"
+				/>
+			</div>
+			<div>
+				<Label for="introBody">Intro paragraph (optional)</Label>
+				<textarea
+					id="introBody"
+					name="introBody"
+					rows="3"
+					placeholder="Indulge in exceptional dining — whether you're craving a freshly brewed coffee, a delightful meal, or handcrafted cocktails, we offer the perfect destination for every occasion."
+					class="mt-1 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm"
+					>{data.dining.introBody ?? ''}</textarea
+				>
+			</div>
+			<Button type="submit" size="sm">Save intro block</Button>
+		</form>
+	</div>
+
+	<div class="mt-8 flex items-center justify-between gap-4">
 		<div>
 			<h2 class="text-base font-semibold text-ink">Venues</h2>
 			<p class="text-sm text-ink-muted">Each gets its own photo, description, and optional hours.</p>
@@ -62,17 +104,22 @@
 					<Table.Row>
 						<Table.Head></Table.Head>
 						<Table.Head>Title</Table.Head>
+						<Table.Head>Type</Table.Head>
 						<Table.Head>Hours</Table.Head>
 						<Table.Head class="text-right">Edit</Table.Head>
 					</Table.Row>
 				</Table.Header>
 				<Table.Body>
 					{#each data.items as item (item.id)}
+						{@const cover =
+							(item.photos as { url: string; tag: string }[] | null)?.find(
+								(p) => p.tag === 'cover'
+							)?.url ?? (item.photos as { url: string }[] | null)?.[0]?.url}
 						<Table.Row>
 							<Table.Cell class="w-14">
-								{#if item.photoUrl}
+								{#if cover}
 									<img
-										src={item.photoUrl}
+										src={cover}
 										alt=""
 										class="size-10 rounded-md border border-border object-cover"
 									/>
@@ -88,6 +135,7 @@
 								<div class="font-medium text-ink">{item.title}</div>
 								{#if !item.isActive}<div class="text-xs text-ink-muted">Inactive</div>{/if}
 							</Table.Cell>
+							<Table.Cell class="text-ink-muted">{item.category ?? '—'}</Table.Cell>
 							<Table.Cell class="text-ink-muted">{item.operatingHours ?? '—'}</Table.Cell>
 							<Table.Cell class="text-right">
 								<Button
