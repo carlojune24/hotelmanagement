@@ -191,6 +191,7 @@
 	let shiftFloat = $state('');
 	let shiftDrawer = $state('');
 
+
 	let hallDetailDialogOpen = $state(false);
 	$effect(() => {
 		if (formHallBookingDetail) hallDetailDialogOpen = true;
@@ -228,6 +229,20 @@
 		const timer = setInterval(() => (nowMs = Date.now()), 60_000);
 		return () => clearInterval(timer);
 	});
+
+	// The open-shift pill turns red once the shift outlives the hotel's overdue threshold;
+	// the same minute ticker flips it without a reload.
+	const shiftHoursOpen = $derived(
+		data.cashier.openShift
+			? Math.max(
+					0,
+					Math.floor((nowMs - new Date(data.cashier.openShift.openedAt).getTime()) / 3_600_000)
+				)
+			: 0
+	);
+	const shiftStale = $derived(
+		!!data.cashier.openShift && shiftHoursOpen >= data.cashier.staleShiftHours
+	);
 
 	/** The actual checkout deadline (date + time, in the hotel's own timezone —
 	 *  not the staff device's), plus whether it's already passed. A duration
@@ -1000,10 +1015,16 @@
 			{#if data.cashier.openShift}
 				<a
 					href="{staffBase}/finance/shifts"
-					class="flex items-center gap-1.5 rounded-md border border-ok/40 bg-ok/10 px-2.5 py-1.5 text-xs font-medium text-ok"
+					class="flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium {shiftStale
+						? 'border-danger/40 bg-danger/10 text-danger'
+						: 'border-ok/40 bg-ok/10 text-ok'}"
 				>
 					<BanknoteIcon class="size-3.5" />
-					Shift open · float {peso(data.cashier.openShift.openingFloatCentavos)}
+					{#if shiftStale}
+						Shift overdue · open {shiftHoursOpen}h — count &amp; close
+					{:else}
+						Shift open · float {peso(data.cashier.openShift.openingFloatCentavos)}
+					{/if}
 				</a>
 			{:else if data.cashier.hasDrawerAccount}
 				<form method="POST" action="?/openShift" use:enhance class="flex items-center gap-1.5">

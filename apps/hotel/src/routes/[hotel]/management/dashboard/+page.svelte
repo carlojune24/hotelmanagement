@@ -13,6 +13,7 @@
 	import BanknoteIcon from '@lucide/svelte/icons/banknote';
 	import HammerIcon from '@lucide/svelte/icons/hammer';
 	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
+	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -68,19 +69,46 @@
 	const attention = $derived.by(() => {
 		const items: AttentionItem[] = [];
 		const a = data.attention;
-		if (a.yesterdayNotClosed) {
+		const oldest = a.unclosedDays[0];
+		if (oldest) {
+			const oldestLabel = asDate(oldest.businessDate).toLocaleDateString('en-PH', {
+				month: 'short',
+				day: 'numeric',
+				timeZone: 'UTC'
+			});
+			const noZ = oldest.kind === 'no_z';
 			items.push({
-				href: `${staffBase}/finance`,
-				text: `Yesterday (${yesterdayLabel}) isn't closed`,
+				href: noZ ? `${staffBase}/finance/bir/readings?date=${oldest.businessDate}` : `${staffBase}/finance`,
+				text:
+					a.unclosedDays.length === 1 && oldest.businessDate === data.yesterday && !noZ
+						? `Yesterday (${yesterdayLabel}) isn't closed`
+						: noZ
+							? `${oldestLabel} is closed but has no Z-reading`
+							: `${plural(a.unclosedDays.length, 'day')} not closed — oldest is ${oldestLabel}`,
 				icon: CalendarXIcon,
 				urgent: true
 			});
 		}
-		if (a.openShifts) {
+		if (a.staleShifts) {
+			items.push({
+				href: `${staffBase}/finance/shifts`,
+				text: `${plural(a.staleShifts, 'cashier shift')} overdue — open ${a.oldestStaleHours}h, count and close`,
+				icon: BanknoteIcon,
+				urgent: true
+			});
+		} else if (a.openShifts) {
 			items.push({
 				href: `${staffBase}/finance/shifts`,
 				text: `${plural(a.openShifts, 'cashier shift')} still open`,
 				icon: BanknoteIcon
+			});
+		}
+		if (a.ledgerMismatches > 0) {
+			items.push({
+				href: `${staffBase}/finance/reports/trial-balance`,
+				text: `Cash doesn't tie out to the ledger — ${plural(a.ledgerMismatches, 'account')} off`,
+				icon: TriangleAlertIcon,
+				urgent: true
 			});
 		}
 		if (a.pendingDamage) {

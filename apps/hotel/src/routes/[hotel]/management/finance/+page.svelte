@@ -184,6 +184,49 @@
 					<h2 class="text-sm font-semibold text-ink">Day close · {data.today}</h2>
 				</div>
 				<div class="px-4 py-3 text-sm">
+					{#if data.unresolvedDays.length > 0}
+						{@const oldestDate = data.unresolvedDays[0]?.businessDate}
+						<div class="mb-3 rounded-lg border border-danger/40 bg-danger/5 p-3">
+							<p class="font-medium text-danger">Close earlier days first</p>
+							<p class="mt-0.5 mb-2 text-xs text-ink-muted">
+								Days are closed oldest-first so the Z-reading numbers follow the calendar.
+							</p>
+							<ul class="divide-y divide-border">
+								{#each data.unresolvedDays as d, i (d.businessDate)}
+									{@const shiftsOpen = data.openShifts.filter(
+										(s) => s.businessDate === d.businessDate
+									).length}
+									<li class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-1.5">
+										<span class="text-ink tabular-nums">
+											{d.businessDate}
+											<span class="text-xs text-ink-muted"
+												>· {d.kind === 'unclosed' ? 'not closed' : 'closed, no Z-reading'}</span
+											>
+										</span>
+										{#if i > 0}
+											<span class="text-xs text-ink-muted">after {oldestDate}</span>
+										{:else if d.kind === 'no_z'}
+											<a
+												href="{base}/bir/readings?date={d.businessDate}"
+												class="text-xs underline underline-offset-2">Issue Z-reading</a
+											>
+										{:else if shiftsOpen > 0}
+											<a href="{base}/shifts" class="text-xs underline underline-offset-2"
+												>{shiftsOpen} shift{shiftsOpen === 1 ? '' : 's'} still open — close first</a
+											>
+										{:else if data.finance.canDayClose}
+											<form method="POST" action="?/dayClose" use:enhance>
+												<input type="hidden" name="businessDate" value={d.businessDate} />
+												<Button type="submit" size="sm" variant="outline">Close {d.businessDate}</Button>
+											</form>
+										{:else}
+											<span class="text-xs text-ink-muted">Needs someone who can close the day</span>
+										{/if}
+									</li>
+								{/each}
+							</ul>
+						</div>
+					{/if}
 					{#if data.dayClose.closed}
 						<p class="mb-2 text-ink">
 							<Badge variant="outline" class="border-transparent bg-ok/15 text-ok">Closed</Badge>
@@ -203,7 +246,11 @@
 						{#if data.finance.canDayClose}
 							<form method="POST" action="?/dayClose" use:enhance>
 								<input type="hidden" name="businessDate" value={data.today} />
-								<Button type="submit" size="sm" disabled={data.openShifts.length > 0}>
+								<Button
+									type="submit"
+									size="sm"
+									disabled={data.openShifts.length > 0 || data.unresolvedDays.length > 0}
+								>
 									Run day close
 								</Button>
 							</form>

@@ -2,8 +2,10 @@ import { roleCan } from '$lib/server/auth/rbac';
 import { getRoomStatusGrid } from '$lib/server/front-desk';
 import { getCashPosition } from '$lib/server/finance/cash';
 import { revenueBySourceReport } from '$lib/server/finance/reports';
-import { listShifts } from '$lib/server/finance/shifts';
-import { getDayCloseStatus, hotelUsesDayClose } from '$lib/server/finance/dayclose';
+import { listOpenShiftAlerts } from '$lib/server/finance/shifts';
+import { listUnresolvedDays } from '$lib/server/finance/dayclose';
+import { cashLedgerTieOut } from '$lib/server/finance/tieout';
+import { db } from '$lib/server/db/index';
 import { businessDateFor } from '$lib/server/finance/shared';
 import { countPendingDamageReports } from '$lib/server/housekeeping';
 import { addDays } from '$lib/finance-range';
@@ -31,17 +33,21 @@ export const load: PageServerLoad = async ({ locals }) => {
 	const yesterday = addDays(today, -1);
 	const monthStart = `${today.slice(0, 8)}01`;
 
-	const [grid, cash, collected, shifts, usesDayClose, yesterdayClose, pendingDamage] =
+	// The Trial balance page (where the reasons are) needs `reports:read`, so only nag those who can open it.
+	const canSeeLedgerHealth = can('reports:read');
+
+	const [grid, cash, collected, shifts, unclosedDays, pendingDamage, ledgerTieOut] =
 		await Promise.all([
 			canRooms
 				? getRoomStatusGrid(hotel.id, today, hotel.checkOutTime, hotel.timezone, hotel.checkInTime)
 				: null,
 			canFinance ? getCashPosition(hotel.id) : null,
 			canFinance ? revenueBySourceReport(hotel.id, monthStart, today) : null,
-			canFinance ? listShifts(hotel.id, 100) : null,
-			canDayClose ? hotelUsesDayClose(hotel.id) : false,
-			canDayClose ? getDayCloseStatus(hotel.id, yesterday) : null,
-			canSeeDamage ? countPendingDamageReports(hotel.id) : null
+			canFinance ? listOpenShiftAlerts(hotel.id) : null,
+			// Empty for a hotel that has never closed a day, so it isn't nagged about days it doesn't run.
+			canDayClose ? listUnresolvedDays(hotel.id, today) : [],
+			canSeeDamage ? countPendingDamageReports(hotel.id) : null,
+			canSeeLedgerHealth ? cashLedgerTieOut(db, hotel.id) : null
 		]);
 
 	return {
@@ -65,9 +71,16 @@ export const load: PageServerLoad = async ({ locals }) => {
 					}
 				: null,
 		attention: {
-			openShifts: shifts ? shifts.filter((s) => s.status === 'open').length : null,
-			// Only nag about day close for a hotel that actually runs it.
-			yesterdayNotClosed: usesDayClose && yesterdayClose ? !yesterdayClose.closed : false,
+			openShifts: shifts ? shifts.length : null,
+			// Overdue = open past the hotel's stale-shift threshold; oldest first, so index 0 is the worst.
+			staleShifts: shifts ? shifts.filter((s) => s.stale).length : null,
+			oldestStaleHours: shifts?.find((s) => s.stale)?.hoursOpen ?? null,
+			// Earlier days still to close (or missing their Z), oldest first — the oldest is what
+			// blocks every later close, so it's the one named.
+			unclosedDays,
+			// Cash accounts whose stored balance disagrees with the ledger (0 when all tie out, or the
+			// viewer can't open the Trial balance page that explains why).
+			ledgerMismatches: ledgerTieOut ? ledgerTieOut.filter((t) => !t.ok).length : 0,
 			pendingDamage,
 			damageHref: canChargeDamage ? 'front-desk' : 'housekeeping'
 		},

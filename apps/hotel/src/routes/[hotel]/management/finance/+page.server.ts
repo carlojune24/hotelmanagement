@@ -6,6 +6,7 @@ import { getCashPosition } from '$lib/server/finance/cash';
 import {
 	daySnapshot,
 	getDayCloseStatus,
+	listUnresolvedDays,
 	reopenDayClose,
 	runDayClose
 } from '$lib/server/finance/dayclose';
@@ -43,7 +44,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		receivablesActive,
 		shifts,
 		dayClose,
-		todaySnap
+		todaySnap,
+		unresolvedDays
 	] = await Promise.all([
 		getCashPosition(hotel.id), // balances as of now — range-independent
 		cashflowReport(hotel.id, from, to),
@@ -55,7 +57,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		listReceivables(hotel.id, { status: 'active' }),
 		listShifts(hotel.id, 100),
 		getDayCloseStatus(hotel.id, today),
-		daySnapshot(hotel.id, today)
+		daySnapshot(hotel.id, today),
+		listUnresolvedDays(hotel.id, today)
 	]);
 
 	// Dense per-day series for the chart (fill the days with no movement).
@@ -90,6 +93,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		draftExpenseTotalCentavos: drafts.reduce((s, e) => s + e.grossCentavos, 0),
 		openShifts: shifts.filter((s) => s.status === 'open'),
 		dayClose,
+		/** Earlier days that must be closed (or have their Z issued) first, oldest first. */
+		unresolvedDays,
 		todayNetCentavos: todaySnap.netCentavos
 	};
 };

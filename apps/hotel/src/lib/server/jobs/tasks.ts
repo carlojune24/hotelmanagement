@@ -83,8 +83,10 @@ export async function runNoShowAutoflag(): Promise<JobRunSummary> {
  *  Z-reading as part of closing, same as the manual "Close day" button does.
  *  Only ever targets yesterday (never today's still-open business date, and
  *  never further back — a hotel that's fallen behind closes older days by hand
- *  from the Finance tab, same as it always could). A day already closed, or one
- *  with an open cashier shift, is skipped rather than treated as an error. */
+ *  from the Finance page's Day-close card, oldest first). A day already closed,
+ *  one with an open cashier shift, or one held up by an older unclosed day
+ *  (`runDayClose` refuses to close out of order) is skipped rather than
+ *  treated as an error. */
 export async function runAutoDayClose(): Promise<JobRunSummary> {
 	const hotelIds = await getEnabledHotelIds('auto_day_close');
 	if (hotelIds.length === 0) return { hotelsProcessed: 0, detail: { closed: 0, skipped: 0 } };

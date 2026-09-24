@@ -2,6 +2,8 @@
 	import { page } from '$app/state';
 	import { invalidate } from '$app/navigation';
 	import { Badge } from '$lib/components/ui/badge/index.js';
+	import { Button } from '$lib/components/ui/button/index.js';
+	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
@@ -128,6 +130,49 @@
 		const interval = setInterval(() => invalidate('app:guest-messages'), 30_000);
 		return () => clearInterval(interval);
 	});
+
+	// Open cashier shifts are the one thing staff must never lose sight of: an always-on
+	// strip (own shift, plus overdue ones for anyone who can close them) and a sign-out gate.
+	// Re-poll so a shift's age ticks up and it turns red without a page change.
+	$effect(() => {
+		const interval = setInterval(() => invalidate('app:shift-alerts'), 60_000);
+		return () => clearInterval(interval);
+	});
+
+	const shiftsHref = $derived(`${base}/finance/shifts`);
+	const isShiftsIndex = $derived(page.url.pathname === shiftsHref);
+	const ageLabel = (h: number) => (h < 1 ? 'under an hour' : `${h}h`);
+	const clock = (d: Date) =>
+		new Date(d).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' });
+
+	type StripItem = { id: string; stale: boolean; text: string; action: string };
+	const stripItems = $derived.by((): StripItem[] => {
+		const a = data.shiftAlerts;
+		const mine: StripItem[] = a.mine.map((s) => ({
+			id: s.shiftId,
+			stale: s.stale,
+			text: s.stale
+				? `Your shift on ${s.drawerName} is overdue — open ${ageLabel(s.hoursOpen)} since ${clock(s.openedAt)}. Count the drawer and close it.`
+				: `Your shift on ${s.drawerName} has been open since ${clock(s.openedAt)}. Count and close it when you finish — you can't sign out with it open.`,
+			action: 'Close shift'
+		}));
+		const others: StripItem[] = a.others
+			.filter((s) => s.stale)
+			.map((s) => ({
+				id: s.shiftId,
+				stale: true,
+				text: `${s.openedByName ?? 'Someone'}'s shift on ${s.drawerName} is overdue — open ${ageLabel(s.hoursOpen)}. The day can't be closed while it's open.`,
+				action: 'Close on behalf'
+			}));
+		return [...mine, ...others];
+	});
+	const STRIP_MAX = 3;
+
+	let signOutGateOpen = $state(false);
+	function requestSignOut() {
+		if (data.shiftAlerts.mine.length > 0) signOutGateOpen = true;
+		else logoutForm.requestSubmit();
+	}
 </script>
 
 {#if isLoginRoute}
@@ -229,7 +274,7 @@
 								<span class="block text-xs font-normal text-ink-muted">{roleLabel}</span>
 							</DropdownMenu.Label>
 							<DropdownMenu.Separator />
-							<DropdownMenu.Item variant="destructive" onSelect={() => logoutForm.requestSubmit()}>
+							<DropdownMenu.Item variant="destructive" onSelect={requestSignOut}>
 								<LogOutIcon />
 								Sign out
 							</DropdownMenu.Item>
@@ -259,7 +304,54 @@
 		<div class="md:hidden print:hidden">
 			<Sidebar.Trigger class="m-2" />
 		</div>
+		{#if stripItems.length > 0 && !isShiftsIndex}
+			<div class="border-b border-border print:hidden" role="status" aria-live="polite">
+				{#each stripItems.slice(0, STRIP_MAX) as item (item.id)}
+					<div
+						class="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-sm {item.stale
+							? 'bg-danger/10 text-danger'
+							: 'bg-surface-2 text-ink-muted'}"
+					>
+						<BanknoteIcon class="size-4 shrink-0" />
+						<span class="min-w-0 flex-1">{item.text}</span>
+						<a href={shiftsHref} class="font-medium whitespace-nowrap underline underline-offset-2"
+							>{item.action}</a
+						>
+					</div>
+				{/each}
+				{#if stripItems.length > STRIP_MAX}
+					<a
+						href={shiftsHref}
+						class="block bg-surface-2 px-4 py-1.5 text-xs text-ink-muted underline underline-offset-2"
+						>{stripItems.length - STRIP_MAX} more open shifts</a
+					>
+				{/if}
+			</div>
+		{/if}
 		<main class="flex-1">{@render children()}</main>
 	</Sidebar.Inset>
 </Sidebar.Provider>
+
+<Dialog.Root bind:open={signOutGateOpen}>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>Close your shift before signing out</Dialog.Title>
+			<Dialog.Description>
+				{#each data.shiftAlerts.mine as s (s.shiftId)}
+					<span class="block">{s.drawerName} — open since {clock(s.openedAt)}</span>
+				{/each}
+				<span class="mt-2 block"
+					>Count the drawer so the cash you handled matches what's in it. The shift stays open, and
+					under your name, until you do.</span
+				>
+			</Dialog.Description>
+		</Dialog.Header>
+		<Dialog.Footer>
+			<Button variant="outline" onclick={() => (signOutGateOpen = false)}>Stay signed in</Button>
+			<Button href={`${shiftsHref}?logout=blocked`} onclick={() => (signOutGateOpen = false)}
+				>Count &amp; close shift</Button
+			>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>
 {/if}

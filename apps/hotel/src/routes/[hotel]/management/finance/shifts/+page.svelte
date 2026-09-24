@@ -7,6 +7,7 @@
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
+	import { otherDaysNotes } from '$lib/shift-days';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -19,6 +20,11 @@
 		if (form && 'ok' in form && form.ok) toast.success(form.ok);
 		if (form && 'error' in form && form.error) toast.error(form.error);
 	});
+
+	const viewerId = $derived(data.user?.id ?? null);
+	const isOnBehalf = (r: (typeof data.openReconciliations)[number]) =>
+		!!r.shift.openedByUserId && r.shift.openedByUserId !== viewerId;
+	const blockedSignOut = $derived(page.url.searchParams.get('logout') === 'blocked');
 
 	let counted = $state<Record<string, string>>({});
 	const varianceOf = (r: (typeof data.openReconciliations)[number]) => {
@@ -48,17 +54,40 @@
 <div class="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6">
 	<h1 class="mb-4 text-xl font-semibold tracking-tight text-ink">Cashier shifts</h1>
 
+	{#if blockedSignOut}
+		<p class="mb-4 rounded-lg border border-danger/40 bg-danger/5 px-3 py-2 text-sm text-danger">
+			You can't sign out while your shift is open. Count the drawer and close it below, then sign
+			out.
+		</p>
+	{/if}
+
 	{#each data.openReconciliations as r (r.shift.id)}
-		<div class="mb-5 rounded-xl border border-ok/40 bg-ok/5 p-4">
-			<div class="mb-2 flex items-center justify-between">
+		{@const age = data.shiftAges[r.shift.id]}
+		{@const stale = !!age?.stale}
+		<div
+			class="mb-5 rounded-xl border p-4 {stale
+				? 'border-danger/40 bg-danger/5'
+				: 'border-ok/40 bg-ok/5'}"
+		>
+			<div class="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
 				<div>
 					<span class="font-semibold text-ink">{r.drawerName}</span>
-					<Badge variant="outline" class="ml-2 border-transparent bg-ok/15 text-ok">Open</Badge>
+					<Badge
+						variant="outline"
+						class="ml-2 border-transparent {stale ? 'bg-danger/15 text-danger' : 'bg-ok/15 text-ok'}"
+						>{stale ? `Overdue · open ${age.hoursOpen}h` : 'Open'}</Badge
+					>
 				</div>
 				<span class="text-xs text-ink-muted"
 					>Opened {fmt(r.shift.openedAt)} by {r.openedByName ?? '—'}</span
 				>
 			</div>
+			{#if stale}
+				<p class="mb-3 text-sm text-danger">
+					This shift has been open {age.hoursOpen} hours. Count the drawer and close it — the Z-reading
+					can't be issued for {r.shift.businessDate} until it is.
+				</p>
+			{/if}
 
 			<div class="mb-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
 				<div>
@@ -78,6 +107,10 @@
 					<div class="tabular-nums font-semibold text-ink">{peso(r.expectedCashCentavos)}</div>
 				</div>
 			</div>
+
+			{#each otherDaysNotes(r.otherDays, r.shift.businessDate) as note (note)}
+				<p class="mb-3 text-xs text-ink-muted">{note}</p>
+			{/each}
 
 			{#if r.byMethod.length > 0}
 				<div class="mb-3 flex flex-wrap gap-3 text-xs text-ink-muted">
@@ -176,9 +209,25 @@
 								required
 							/>
 						</div>
+						{#if isOnBehalf(r)}
+							<div class="min-w-[10rem] flex-1">
+								<Label class="text-xs">Why are you closing it for {r.openedByName ?? 'them'}?</Label>
+								<Input name="reason" required minlength={3} maxlength={300} class="mt-1 h-8" />
+							</div>
+						{/if}
 						<div><Label class="text-xs">Notes</Label><Input name="notes" class="mt-1 h-8" /></div>
-						<Button type="submit" size="sm">Close shift</Button>
+						<Button type="submit" size="sm"
+							>{isOnBehalf(r)
+								? `Close on behalf of ${r.openedByName ?? 'opener'}`
+								: 'Close shift'}</Button
+						>
 					</div>
+					{#if isOnBehalf(r)}
+						<p class="mt-2 text-xs text-ink-muted">
+							Count the drawer yourself. Any shortage or overage stays with {r.openedByName ?? 'the opener'},
+							and this close is logged under your name.
+						</p>
+					{/if}
 					{#if varianceOf(r) !== null}
 						<p
 							class="mt-2 text-sm font-semibold {varianceOf(r)! < 0
@@ -219,7 +268,13 @@
 					<Table.Row>
 						<Table.Cell class="whitespace-nowrap text-ink-muted">{s.businessDate}</Table.Cell>
 						<Table.Cell class="text-ink">{s.drawerName}</Table.Cell>
-						<Table.Cell class="text-ink-muted">{s.openedByName ?? '—'}</Table.Cell>
+						<Table.Cell class="text-ink-muted"
+							>{s.openedByName ?? '—'}
+							{#if s.closedOnBehalf}<Badge
+									variant="outline"
+									class="ml-1.5 border-border bg-surface-2 text-ink-muted">Closed by other</Badge
+								>{/if}</Table.Cell
+						>
 						<Table.Cell class="text-right tabular-nums text-ink-muted"
 							>{peso(s.openingFloatCentavos)}</Table.Cell
 						>

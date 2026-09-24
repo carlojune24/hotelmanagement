@@ -128,6 +128,10 @@ export const cashierShifts = pgTable(
 		/** Optional bill/coin breakdown entered on the close screen: `{ "1000": 3, "500": 2, ... }`. */
 		denominations: jsonb('denominations'),
 		closeNotes: text('close_notes'),
+		/** True when someone other than the opener closed the shift (still with a real count).
+		 *  The variance stays attributed to `opened_by_user_id`; `close_reason` says why. */
+		closedOnBehalf: boolean('closed_on_behalf').notNull().default(false),
+		closeReason: text('close_reason'),
 
 		// --- Shortage charge-back (accountant/hotel_admin only — see lib/server/finance/shifts.ts) ---
 		varianceChargebackStatus: shiftChargebackStatus('variance_chargeback_status')
@@ -615,6 +619,10 @@ export const financeSettings = pgTable('finance_settings', {
 	 *  Never applies to a past business date — its cutoff has, by definition, already
 	 *  passed. */
 	dayCloseCutoffTime: text('day_close_cutoff_time'),
+	/** A cashier shift open longer than this many hours is flagged overdue (alarm strip,
+	 *  dashboard, front-desk pill). Hours rather than a date change because a legitimate
+	 *  overnight shift crosses midnight. */
+	staleShiftHours: integer('stale_shift_hours').notNull().default(16),
 	/** Gapless per-hotel `journal_entries.entry_no` counter — bumped under a row lock
 	 *  in `finance/journal.ts`'s `postJournalEntry`, same pattern as
 	 *  `finance/documents.ts`'s `allocateSerial`. */

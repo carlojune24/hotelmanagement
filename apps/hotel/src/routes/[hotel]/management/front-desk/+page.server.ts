@@ -163,6 +163,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 		role: locals.role,
 		cashier: {
 			requireOpenShiftForCashPayment: financeSettings.requireOpenShiftForCashPayment,
+			staleShiftHours: financeSettings.staleShiftHours,
 			hasBankAccount: !!financeSettings.defaultBankAccountId,
 			hasDrawerAccount: !!financeSettings.defaultDrawerAccountId || drawers.length > 0,
 			drawers,

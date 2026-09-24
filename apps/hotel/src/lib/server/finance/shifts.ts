@@ -16,8 +16,15 @@ import {
 import { writeAudit } from '../audit';
 import type { SessionUser } from '../auth/session';
 import { FinanceError, businessDateFor, type Tx } from './shared';
-import { expectedShiftCash, inputVatOf } from './calc';
+import {
+	cashOnOtherDays,
+	expectedShiftCash,
+	inputVatOf,
+	isClosedOnBehalf,
+	shiftAge
+} from './calc';
 import { recordCashMovement } from './cash';
+import { getFinanceSettings } from './settings';
 
 export { expectedShiftCash } from './calc';
 
@@ -137,6 +144,9 @@ export interface ShiftReconciliation {
 	varianceCentavos: number | null;
 	/** Every non-voided payment rung on this shift, grouped by tender. */
 	byMethod: { method: string; count: number; amountCentavos: number }[];
+	/** Cash on a business date other than the shift's own (after-midnight takings on an
+	 *  overnight shift) — counted in this shift's drawer, but in that date's Z-reading. */
+	otherDays: { businessDate: string; cashInCentavos: number; cashOutCentavos: number }[];
 	events: {
 		id: string;
 		kind: string;
@@ -252,6 +262,7 @@ export async function getShiftReconciliation(
 		countedCashCentavos: shift.countedCashCentavos,
 		varianceCentavos: shift.varianceCentavos,
 		byMethod: [...methodMap.entries()].map(([method, v]) => ({ method, ...v })),
+		otherDays: cashOnOtherDays(movementRows, shift.businessDate),
 		events: eventRows.map((e) => ({
 			id: e.id,
 			kind: e.kind,
@@ -481,6 +492,8 @@ export async function closeShift(input: {
 	countedCentavos: number;
 	denominations?: Record<string, number> | null;
 	notes?: string | null;
+	/** Required when someone other than the opener closes the shift. */
+	reason?: string | null;
 	actor: SessionUser | null;
 }): Promise<{ varianceCentavos: number; expectedCentavos: number }> {
 	if (!Number.isInteger(input.countedCentavos) || input.countedCentavos < 0) {
@@ -490,6 +503,17 @@ export async function closeShift(input: {
 	const recon = await getShiftReconciliation(input.hotelId, input.shiftId);
 	if (!recon) throw new FinanceError('Shift not found.');
 	if (recon.shift.status !== 'open') throw new FinanceError('That shift is already closed.');
+
+	// A shift is always closed with a real count. If it's someone else closing it, the
+	// count still happens — but we record who and why, and the variance stays with the opener.
+	const openerId = recon.shift.openedByUserId;
+	const onBehalf = isClosedOnBehalf(openerId, input.actor?.id);
+	const reason = input.reason?.trim() || null;
+	if (onBehalf && (!reason || reason.length < 3)) {
+		throw new FinanceError(
+			`Say why you're closing ${recon.openedByName ? `${recon.openedByName}'s` : "the opener's"} shift on their behalf.`
+		);
+	}
 
 	const expected = recon.expectedCashCentavos;
 	const variance = input.countedCentavos - expected;
@@ -526,6 +550,8 @@ export async function closeShift(input: {
 				varianceCentavos: variance,
 				denominations: input.denominations ?? null,
 				closeNotes: input.notes?.trim() || null,
+				closedOnBehalf: onBehalf,
+				closeReason: onBehalf ? reason : null,
 				updatedAt: new Date()
 			})
 			.where(eq(cashierShifts.id, input.shiftId));
@@ -540,11 +566,64 @@ export async function closeShift(input: {
 		after: {
 			countedCentavos: input.countedCentavos,
 			expectedCentavos: expected,
-			varianceCentavos: variance
+			varianceCentavos: variance,
+			...(onBehalf ? { closedOnBehalfOf: openerId, reason } : {})
 		}
 	});
 
 	return { varianceCentavos: variance, expectedCentavos: expected };
+}
+
+export interface OpenShiftAlert {
+	shiftId: string;
+	drawerName: string;
+	openedByUserId: string | null;
+	openedByName: string | null;
+	openedAt: Date;
+	hoursOpen: number;
+	/** Open longer than the hotel's `staleShiftHours`. */
+	stale: boolean;
+}
+
+/** Every open cashier shift for the hotel with its age, oldest first. Feeds the staff-shell
+ *  alarm strip, the dashboard's Needs-attention list and the front-desk pill, so all three
+ *  agree on what "overdue" means. */
+export async function listOpenShiftAlerts(hotelId: string): Promise<OpenShiftAlert[]> {
+	const [{ staleShiftHours }, rows] = await Promise.all([
+		getFinanceSettings(hotelId),
+		db
+			.select({
+				shiftId: cashierShifts.id,
+				drawerName: cashAccounts.name,
+				openedByUserId: cashierShifts.openedByUserId,
+				openedByName: users.name,
+				openedAt: cashierShifts.openedAt
+			})
+			.from(cashierShifts)
+			.innerJoin(cashAccounts, eq(cashAccounts.id, cashierShifts.cashAccountId))
+			.leftJoin(users, eq(users.id, cashierShifts.openedByUserId))
+			.where(and(eq(cashierShifts.hotelId, hotelId), eq(cashierShifts.status, 'open')))
+			.orderBy(cashierShifts.openedAt)
+	]);
+	const now = new Date();
+	return rows.map((r) => ({ ...r, ...shiftAge(r.openedAt, now, staleShiftHours) }));
+}
+
+/** Open shifts a given user opened, across every hotel — what blocks them from signing out.
+ *  Person-scoped (not hotel-scoped) because `/auth/logout` has no hotel context. */
+export async function listOpenShiftsOpenedBy(userId: string) {
+	return db
+		.select({
+			shiftId: cashierShifts.id,
+			hotelSlug: hotels.slug,
+			drawerName: cashAccounts.name,
+			openedAt: cashierShifts.openedAt
+		})
+		.from(cashierShifts)
+		.innerJoin(cashAccounts, eq(cashAccounts.id, cashierShifts.cashAccountId))
+		.innerJoin(hotels, eq(hotels.id, cashierShifts.hotelId))
+		.where(and(eq(cashierShifts.openedByUserId, userId), eq(cashierShifts.status, 'open')))
+		.orderBy(cashierShifts.openedAt);
 }
 
 /** List for the Shifts page — recent shifts with cashier names + variance. */
@@ -563,6 +642,7 @@ export async function listShifts(hotelId: string, limit = 60) {
 			expectedCashCentavos: cashierShifts.expectedCashCentavos,
 			countedCashCentavos: cashierShifts.countedCashCentavos,
 			varianceCentavos: cashierShifts.varianceCentavos,
+			closedOnBehalf: cashierShifts.closedOnBehalf,
 			varianceChargebackStatus: cashierShifts.varianceChargebackStatus,
 			varianceChargebackCentavos: cashierShifts.varianceChargebackCentavos
 		})

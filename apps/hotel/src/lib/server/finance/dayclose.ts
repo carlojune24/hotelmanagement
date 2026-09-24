@@ -1,9 +1,11 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lt, min, sql } from 'drizzle-orm';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { db } from '../db/index';
-import { cashMovements, cashierShifts, dayCloses, hotels } from '../db/schema/index';
+import { cashMovements, cashierShifts, dayCloses, hotels, zReadings } from '../db/schema/index';
 import { writeAudit } from '../audit';
 import type { SessionUser } from '../auth/session';
 import { FinanceError, businessDateFor, currentTimeOfDayFor } from './shared';
+import { findUnresolvedDays, unresolvedDayMessage, type UnresolvedDay } from './calc';
 import { getFinanceSettings } from './settings';
 
 /** Aggregates for `businessDate` used both in the day-close snapshot and the
@@ -69,15 +71,53 @@ export async function getDayCloseStatus(hotelId: string, businessDate: string) {
 	};
 }
 
-/** Whether the hotel has ever closed a business day. A hotel that doesn't run day close at
- *  all shouldn't be nagged that "yesterday isn't closed" every morning. */
-export async function hotelUsesDayClose(hotelId: string): Promise<boolean> {
-	const [row] = await db
-		.select({ id: dayCloses.id })
+/** Earlier business dates (before `before`) that still have to be closed — or, if closed, have
+ *  their Z-reading issued — oldest first. See `findUnresolvedDays` for why order matters.
+ *
+ *  Empty for a hotel that has never closed a day: one that doesn't run day close at all
+ *  shouldn't be nagged, or blocked, over days it never closed. */
+export async function listUnresolvedDays(hotelId: string, before: string): Promise<UnresolvedDay[]> {
+	const [anchorRow] = await db
+		.select({ anchor: min(dayCloses.businessDate) })
 		.from(dayCloses)
-		.where(eq(dayCloses.hotelId, hotelId))
-		.limit(1);
-	return !!row;
+		.where(eq(dayCloses.hotelId, hotelId));
+	const anchor = anchorRow?.anchor ?? null;
+	if (!anchor) return [];
+
+	const inRange = (col: AnyPgColumn) => and(gte(col, anchor), lt(col, before));
+	const [moves, shifts, closes, zs] = await Promise.all([
+		db
+			.selectDistinct({ d: cashMovements.businessDate })
+			.from(cashMovements)
+			.where(
+				and(
+					eq(cashMovements.hotelId, hotelId),
+					sql`${cashMovements.voidedAt} is null`,
+					inRange(cashMovements.businessDate)
+				)
+			),
+		db
+			.selectDistinct({ d: cashierShifts.businessDate })
+			.from(cashierShifts)
+			.where(and(eq(cashierShifts.hotelId, hotelId), inRange(cashierShifts.businessDate))),
+		db
+			.select({ d: dayCloses.businessDate, reopenedAt: dayCloses.reopenedAt })
+			.from(dayCloses)
+			.where(and(eq(dayCloses.hotelId, hotelId), inRange(dayCloses.businessDate)))
+			.orderBy(asc(dayCloses.businessDate)),
+		db
+			.selectDistinct({ d: zReadings.businessDate })
+			.from(zReadings)
+			.where(eq(zReadings.hotelId, hotelId))
+	]);
+
+	return findUnresolvedDays({
+		anchor,
+		before,
+		activityDates: [...moves, ...shifts].map((r) => r.d),
+		closedDates: closes.filter((c) => !c.reopenedAt).map((c) => c.d),
+		zDates: zs.map((r) => r.d)
+	});
 }
 
 export async function runDayClose(
@@ -87,6 +127,11 @@ export async function runDayClose(
 ): Promise<void> {
 	const status = await getDayCloseStatus(hotelId, businessDate);
 	if (status.closed) throw new FinanceError(`${businessDate} is already closed.`);
+
+	// Days are closed oldest-first: the Z-reading counter is issued in call order, so closing a
+	// later day first would give it the lower number.
+	const [holdingUp] = await listUnresolvedDays(hotelId, businessDate);
+	if (holdingUp) throw new FinanceError(unresolvedDayMessage(holdingUp, businessDate));
 
 	// Safety cutoff: only meaningful for *today's* business date — a past date's
 	// cutoff time has, by definition, already passed, so this never blocks closing

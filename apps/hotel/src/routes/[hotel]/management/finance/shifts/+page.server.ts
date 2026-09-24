@@ -2,21 +2,32 @@ import { fail } from '@sveltejs/kit';
 import { z } from 'zod';
 import { requireCap } from '$lib/server/auth/rbac';
 import { FinanceError } from '$lib/server/finance/shared';
-import { addShiftEvent, closeShift, getShiftReconciliation, listShifts } from '$lib/server/finance/shifts';
+import {
+	addShiftEvent,
+	closeShift,
+	getShiftReconciliation,
+	listOpenShiftAlerts,
+	listShifts
+} from '$lib/server/finance/shifts';
 import { listExpenseCategories } from '$lib/server/finance/accounts';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
 	requireCap(locals.user, locals.role, 'finance:read');
 	const hotel = locals.hotel!;
-	const [shifts, expenseCategories] = await Promise.all([
+	const [shifts, expenseCategories, alerts] = await Promise.all([
 		listShifts(hotel.id, 80),
-		listExpenseCategories(hotel.id)
+		listExpenseCategories(hotel.id),
+		listOpenShiftAlerts(hotel.id)
 	]);
 	const openIds = shifts.filter((s) => s.status === 'open').map((s) => s.id);
 	const reconciliations = await Promise.all(openIds.map((id) => getShiftReconciliation(hotel.id, id)));
 	return {
 		shifts,
+		/** shiftId → age/stale flag, so each open card can show "open 19h" and turn red. */
+		shiftAges: Object.fromEntries(
+			alerts.map((a) => [a.shiftId, { hoursOpen: a.hoursOpen, stale: a.stale }])
+		),
 		expenseCategories: expenseCategories.map((c) => ({ id: c.id, name: c.name, group: c.group })),
 		openReconciliations: reconciliations.filter((r): r is NonNullable<typeof r> => !!r)
 	};
@@ -30,7 +41,8 @@ export const actions: Actions = {
 			.object({
 				shiftId: z.string().uuid(),
 				counted: z.coerce.number().min(0),
-				notes: z.string().max(500).optional()
+				notes: z.string().max(500).optional(),
+				reason: z.string().max(300).optional()
 			})
 			.safeParse(Object.fromEntries(await event.request.formData()));
 		if (!parsed.success) return fail(400, { error: 'Enter the counted cash.' });
@@ -40,6 +52,7 @@ export const actions: Actions = {
 				shiftId: parsed.data.shiftId,
 				countedCentavos: Math.round(parsed.data.counted * 100),
 				notes: parsed.data.notes || null,
+				reason: parsed.data.reason || null,
 				actor: event.locals.user
 			});
 			return {

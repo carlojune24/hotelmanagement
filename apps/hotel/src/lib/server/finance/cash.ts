@@ -139,15 +139,21 @@ export async function recordCashMovement(input: RecordMovementInput, tx?: Tx): P
 	return tx ? run(tx) : db.transaction(run);
 }
 
-/** Soft-void a movement and reverse its effect on the account balance. Refuses if the
- *  movement's `businessDate` sits inside a locked day-close (reopen it first). */
+/** Soft-void a movement and reverse its effect on the account balance *and* the ledger (a
+ *  reversing journal entry — entries are immutable). Refuses if the movement's `businessDate`
+ *  sits inside a locked day-close (reopen it first).
+ *
+ *  This is the ONLY place a cash movement may be voided: writing `voided_at` directly skips the
+ *  reversing entry and leaves the voided money in the ledger. Pass a `tx` to void atomically with
+ *  the caller's own change (a payment/expense void); the caller then owns the audit row. */
 export async function voidCashMovement(
 	hotelId: string,
 	movementId: string,
 	reason: string | null,
-	actor: SessionUser | null
+	actor: SessionUser | null,
+	outerTx?: Tx
 ): Promise<void> {
-	await db.transaction(async (tx) => {
+	const run = async (tx: Tx) => {
 		const [m] = await tx
 			.select()
 			.from(cashMovements)
@@ -201,7 +207,15 @@ export async function voidCashMovement(
 				tx
 			);
 		}
-	});
+	};
+
+	// Inside a caller's transaction: no audit row of our own — the caller writes one for the
+	// whole operation, and one written here would survive a rollback of that transaction.
+	if (outerTx) {
+		await run(outerTx);
+		return;
+	}
+	await db.transaction(run);
 
 	await writeAudit({
 		hotelId,

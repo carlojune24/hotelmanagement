@@ -7,6 +7,7 @@ import { writeAudit } from '../audit';
 import { inputVatOf } from './calc';
 import { daySnapshot } from './dayclose';
 import { getBirSettings } from './documents';
+import { onHotelDate } from './shared';
 
 /** The computed figures on an X- or Z-reading — same shape for both; a Z also
  *  carries the counter and grand-total accumulation from its stored row. */
@@ -55,7 +56,7 @@ async function serialSpan(hotelId: string, type: 'invoice' | 'official_receipt',
 				eq(documents.hotelId, hotelId),
 				eq(documents.type, type),
 				eq(documents.status, 'issued'),
-				sql`${documents.issuedAt} >= ${businessDate}::date and ${documents.issuedAt} < (${businessDate}::date + 1)`
+				onHotelDate(documents.issuedAt, hotelId, businessDate)
 			)
 		)
 		.orderBy(asc(documents.serialNo));
@@ -103,7 +104,7 @@ export async function computeReadingData(hotelId: string, businessDate: string):
 		.where(
 			and(
 				eq(orders.hotelId, hotelId),
-				sql`${payments.paidAt} >= ${businessDate}::date and ${payments.paidAt} < (${businessDate}::date + 1)`
+				onHotelDate(payments.paidAt, hotelId, businessDate)
 			)
 		);
 
@@ -129,7 +130,7 @@ export async function computeReadingData(hotelId: string, businessDate: string):
 			and(
 				eq(documents.hotelId, hotelId),
 				eq(documents.status, 'cancelled'),
-				sql`${documents.cancelledAt} >= ${businessDate}::date and ${documents.cancelledAt} < (${businessDate}::date + 1)`
+				onHotelDate(documents.cancelledAt, hotelId, businessDate)
 			)
 		);
 	const cancelledAmount = cancelled.reduce(
@@ -153,7 +154,7 @@ export async function computeReadingData(hotelId: string, businessDate: string):
 			and(
 				eq(scPwdDiscounts.hotelId, hotelId),
 				isNull(scPwdDiscounts.reversedAt),
-				sql`${scPwdDiscounts.appliedAt} >= ${businessDate}::date and ${scPwdDiscounts.appliedAt} < (${businessDate}::date + 1)`
+				onHotelDate(scPwdDiscounts.appliedAt, hotelId, businessDate)
 			)
 		);
 	const scPwd = scPwdRow?.sum ?? 0;

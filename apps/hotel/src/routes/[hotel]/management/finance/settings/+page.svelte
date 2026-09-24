@@ -142,6 +142,25 @@
 					the auto-close automation (which only ever closes yesterday).
 				</p>
 			</div>
+			<div>
+				<Label class="text-xs" for="staleShiftHours">Flag a cashier shift as overdue after (hours)</Label>
+				<Input
+					id="staleShiftHours"
+					name="staleShiftHours"
+					type="number"
+					min="1"
+					max="72"
+					step="1"
+					required
+					value={data.settings.staleShiftHours}
+					class="mt-1 w-28"
+				/>
+				<p class="mt-1 text-xs text-ink-muted">
+					An open shift older than this turns red everywhere staff can see it, and keeps showing
+					until someone counts the drawer and closes it. Set it longer than your longest normal
+					shift — an overnight shift is fine.
+				</p>
+			</div>
 			<Button type="submit" size="sm">Save preferences</Button>
 		</form>
 	</section>

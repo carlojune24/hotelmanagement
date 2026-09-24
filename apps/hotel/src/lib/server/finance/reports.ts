@@ -4,6 +4,7 @@ import { cashMovements, expenseCategories, expenses, payments, orders } from '..
 import { getCashPosition } from './cash';
 import { arAging } from './receivables';
 import { daySnapshot } from './dayclose';
+import { betweenHotelDates, onHotelDate } from './shared';
 
 export { toCsv } from './calc';
 
@@ -66,7 +67,7 @@ export async function dailySalesReport(hotelId: string, date: string): Promise<D
 				eq(orders.hotelId, hotelId),
 				eq(payments.status, 'paid'),
 				sql`${payments.voidedAt} is null`,
-				sql`${payments.paidAt} >= ${date}::date and ${payments.paidAt} < (${date}::date + 1)`
+				onHotelDate(payments.paidAt, hotelId, date)
 			)
 		);
 	const methodMap = new Map<string, { count: number; amountCentavos: number }>();
@@ -313,7 +314,7 @@ export async function paymentMethodBreakdown(hotelId: string, from: string, to: 
 				eq(orders.hotelId, hotelId),
 				eq(payments.status, 'paid'),
 				sql`${payments.voidedAt} is null`,
-				sql`${payments.paidAt} >= ${from}::date and ${payments.paidAt} < (${to}::date + 1)`
+				betweenHotelDates(payments.paidAt, hotelId, from, to)
 			)
 		)
 		.groupBy(payments.method);

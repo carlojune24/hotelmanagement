@@ -1,4 +1,6 @@
+import { sql, type SQLWrapper } from 'drizzle-orm';
 import { db } from '../db/index';
+import { hotels } from '../db/schema/index';
 
 /** The transaction object `db.transaction(cb)` hands its callback — same derivation
  *  `lib/server/folio.ts` uses, so it stays correct whatever driver `db` is built with. */
@@ -19,6 +21,26 @@ export function pesos(centavos: number): string {
  *  module doesn't have to import the front-desk lib (which would be a cycle). */
 export function businessDateFor(timezone: string): string {
 	return new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date());
+}
+
+/** SQL: the calendar date of a `timestamptz` column *in the hotel's own timezone*.
+ *
+ *  Never compare a timestamp to `'YYYY-MM-DD'::date` directly: that cast lands on midnight in
+ *  the *database session's* timezone, so on a UTC server a Manila "day" would run 08:00–08:00
+ *  and X/Z-readings and daily reports would drift from the stored `business_date` on cash
+ *  movements. Same correlated-lookup shape as `availability.ts`'s `hotelTomorrow`. */
+export function hotelLocalDate(column: SQLWrapper, hotelId: string) {
+	return sql`((${column}) at time zone (select h.timezone from ${hotels} h where h.id = ${hotelId}))::date`;
+}
+
+/** SQL predicate: `column` falls on `date` (`YYYY-MM-DD`) in the hotel's timezone. */
+export function onHotelDate(column: SQLWrapper, hotelId: string, date: string) {
+	return sql`${hotelLocalDate(column, hotelId)} = ${date}::date`;
+}
+
+/** SQL predicate: `column` falls on or between `from` and `to` (inclusive) in the hotel's timezone. */
+export function betweenHotelDates(column: SQLWrapper, hotelId: string, from: string, to: string) {
+	return sql`${hotelLocalDate(column, hotelId)} between ${from}::date and ${to}::date`;
 }
 
 /** `HH:MM` (24h, zero-padded) wall-clock time in a hotel's own timezone — same

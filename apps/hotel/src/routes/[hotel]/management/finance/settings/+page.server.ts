@@ -299,7 +299,8 @@ export const actions: Actions = {
 					.string()
 					.regex(/^([01]\d|2[0-3]):[0-5]\d$/)
 					.optional()
-					.or(z.literal(''))
+					.or(z.literal('')),
+				staleShiftHours: z.coerce.number().int().min(1).max(72)
 			})
 			.safeParse(fd);
 		if (!p.success) return fail(400, { error: 'Check the settings.' });
@@ -315,7 +316,8 @@ export const actions: Actions = {
 						requireExpenseApproval: p.data.requireExpenseApproval === 'on',
 						lockOnDayClose: p.data.lockOnDayClose === 'on',
 						requireOpenShiftForCashPayment: p.data.requireOpenShiftForCashPayment === 'on',
-						dayCloseCutoffTime: p.data.dayCloseCutoffTime || null
+						dayCloseCutoffTime: p.data.dayCloseCutoffTime || null,
+						staleShiftHours: p.data.staleShiftHours
 					},
 					event.locals.user
 				),

@@ -15,7 +15,7 @@ import { writeAudit } from '../audit';
 import type { SessionUser } from '../auth/session';
 import { FinanceError, businessDateFor, type Tx } from './shared';
 import { advanceDueDate, inputVatOf } from './calc';
-import { recordCashMovement } from './cash';
+import { recordCashMovement, voidCashMovement } from './cash';
 import { getFinanceSettings } from './settings';
 
 export { advanceDueDate, inputVatOf } from './calc';
@@ -316,8 +316,10 @@ export async function voidExpense(
 		if (e.status === 'void') throw new FinanceError('Already voided.');
 
 		if (e.status === 'paid') {
+			// Through `voidCashMovement` so the ledger gets its reversing entry too, atomically
+			// with this expense's void (a closed day rolls the whole thing back).
 			const movements = await tx
-				.select()
+				.select({ id: cashMovements.id })
 				.from(cashMovements)
 				.where(
 					and(
@@ -327,22 +329,7 @@ export async function voidExpense(
 					)
 				);
 			for (const m of movements) {
-				const reverse = m.direction === 'in' ? -m.amountCentavos : m.amountCentavos;
-				await tx
-					.update(cashAccounts)
-					.set({
-						currentBalanceCentavos: sql`${cashAccounts.currentBalanceCentavos} + ${reverse}`,
-						updatedAt: new Date()
-					})
-					.where(eq(cashAccounts.id, m.cashAccountId));
-				await tx
-					.update(cashMovements)
-					.set({
-						voidedAt: new Date(),
-						voidedByUserId: actor?.id ?? null,
-						voidReason: 'Expense voided'
-					})
-					.where(eq(cashMovements.id, m.id));
+				await voidCashMovement(hotelId, m.id, 'Expense voided', actor, tx);
 			}
 		}
 

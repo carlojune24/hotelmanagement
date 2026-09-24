@@ -7,6 +7,7 @@
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
+	import { otherDaysNotes } from '$lib/shift-days';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -44,8 +45,29 @@
 		<div><dt class="text-xs text-ink-muted">Opened</dt><dd class="text-ink">{fmt(r.shift.openedAt)}</dd></div>
 		<div><dt class="text-xs text-ink-muted">Opened by</dt><dd class="text-ink">{r.openedByName ?? '—'}</dd></div>
 		<div><dt class="text-xs text-ink-muted">Closed</dt><dd class="text-ink">{fmt(r.shift.closedAt)}</dd></div>
-		<div><dt class="text-xs text-ink-muted">Closed by</dt><dd class="text-ink">{r.closedByName ?? '—'}</dd></div>
+		<div>
+			<dt class="text-xs text-ink-muted">Closed by</dt>
+			<dd class="text-ink">
+				{r.closedByName ?? '—'}
+				{#if r.shift.closedOnBehalf}
+					<Badge variant="outline" class="ml-1 border-border bg-surface-2 text-ink-muted"
+						>On behalf</Badge
+					>
+				{/if}
+			</dd>
+		</div>
 	</dl>
+
+	{#if r.shift.closedOnBehalf}
+		<p class="mb-5 text-sm text-ink-muted">
+			<strong class="text-ink">Closed on behalf of {r.openedByName ?? 'the opener'}:</strong>
+			{r.shift.closeReason ?? 'no reason recorded'}. Any variance stays with {r.openedByName ?? 'the opener'}.
+		</p>
+	{/if}
+
+	{#each otherDaysNotes(r.otherDays, r.shift.businessDate) as note (note)}
+		<p class="mb-3 text-sm text-ink-muted">{note}</p>
+	{/each}
 
 	<div class="mb-5 rounded-xl border border-border">
 		<table class="w-full text-sm">

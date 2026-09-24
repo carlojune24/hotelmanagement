@@ -10,7 +10,9 @@ export const GET: RequestHandler = async ({ locals, params, url }) => {
 		timezone: hotel.timezone,
 		date: url.searchParams.get('date') || undefined,
 		from: url.searchParams.get('from') || undefined,
-		to: url.searchParams.get('to') || undefined
+		to: url.searchParams.get('to') || undefined,
+		account: url.searchParams.get('account') || undefined,
+		all: url.searchParams.get('all') === '1'
 	});
 	if (!result) error(404, 'Unknown report');
 

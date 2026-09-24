@@ -5,6 +5,7 @@ import {
 	cashMovements,
 	expenseCategories,
 	expenses,
+	hotels,
 	recurringExpenses,
 	vendors,
 	type CashAccount,
@@ -13,7 +14,8 @@ import {
 } from '../db/schema/index';
 import { writeAudit } from '../audit';
 import type { SessionUser } from '../auth/session';
-import { FinanceError } from './shared';
+import { FinanceError, businessDateFor, type Tx } from './shared';
+import { coaAccountIdForKind, postOpeningBalanceEntry } from './opening-balance';
 
 // --- Cash accounts ---------------------------------------------------------
 
@@ -36,31 +38,50 @@ export async function createCashAccount(
 		accountRef?: string | null;
 		openingBalanceCentavos?: number;
 	},
-	actor: SessionUser | null
+	actor: SessionUser | null,
+	outerTx?: Tx
 ): Promise<string> {
 	if (!input.name.trim()) throw new FinanceError('Give the account a name.');
 	const opening = input.openingBalanceCentavos ?? 0;
-	const [row] = await db
-		.insert(cashAccounts)
-		.values({
-			hotelId,
-			name: input.name.trim(),
-			kind: input.kind,
-			institution: input.institution?.trim() || null,
-			accountRef: input.accountRef?.trim() || null,
-			openingBalanceCentavos: opening,
-			currentBalanceCentavos: opening
-		})
-		.returning({ id: cashAccounts.id });
+	if (!Number.isInteger(opening)) throw new FinanceError('Enter the opening balance as a valid amount.');
+
+	const [hotel] = await db.select({ timezone: hotels.timezone }).from(hotels).where(eq(hotels.id, hotelId)).limit(1);
+	const today = businessDateFor(hotel?.timezone ?? 'Asia/Manila');
+
+	// One transaction: the account, its link to the ledger, and its opening-balance entry. Without
+	// the link no payment into the account could ever post; without the entry the ledger would
+	// sit below the stored balance by exactly the opening (see `tieout.ts`).
+	const run = async (tx: Tx) => {
+		const coaAccountId = await coaAccountIdForKind(hotelId, input.kind, tx);
+		const [row] = await tx
+			.insert(cashAccounts)
+			.values({
+				hotelId,
+				name: input.name.trim(),
+				kind: input.kind,
+				institution: input.institution?.trim() || null,
+				accountRef: input.accountRef?.trim() || null,
+				openingBalanceCentavos: opening,
+				currentBalanceCentavos: opening,
+				coaAccountId
+			})
+			.returning({ id: cashAccounts.id });
+		await postOpeningBalanceEntry({ hotelId, cashAccountId: row!.id, entryDate: today, actor }, tx);
+		return row!.id;
+	};
+	// Inside a caller's transaction the caller owns the audit row (one written here would outlive
+	// a rollback) — same rule as `voidCashMovement`.
+	if (outerTx) return run(outerTx);
+	const id = await db.transaction(run);
 	await writeAudit({
 		hotelId,
 		actor,
 		action: 'finance.create_cash_account',
 		entityType: 'cash_account',
-		entityId: row!.id,
+		entityId: id,
 		after: input
 	});
-	return row!.id;
+	return id;
 }
 
 export async function updateCashAccount(

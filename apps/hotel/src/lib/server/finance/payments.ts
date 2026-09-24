@@ -22,7 +22,7 @@ import {
 } from '../folio';
 import { validateAllocations } from '$lib/allocation';
 import { FinanceError, businessDateFor, pesos, type Tx } from './shared';
-import { recordCashMovement } from './cash';
+import { recordCashMovement, voidCashMovement } from './cash';
 import { getFinanceSettings } from './settings';
 import { getDefaultOpenShift } from './shifts';
 import { getBirSettings, issueOfficialReceipt } from './documents';
@@ -420,28 +420,16 @@ export async function voidPayment(
 			})
 			.where(eq(payments.id, paymentId));
 
-		// Reverse every non-voided cash movement tied to this payment.
+		// Reverse every non-voided cash movement tied to this payment — through
+		// `voidCashMovement` so the account balance AND the ledger (a reversing journal
+		// entry) both unwind. Inside this transaction: if a movement's day is closed the
+		// whole void rolls back, payment row included.
 		const movements = await tx
-			.select()
+			.select({ id: cashMovements.id })
 			.from(cashMovements)
 			.where(and(eq(cashMovements.paymentId, paymentId), sql`${cashMovements.voidedAt} is null`));
 		for (const m of movements) {
-			const reverse = m.direction === 'in' ? -m.amountCentavos : m.amountCentavos;
-			await tx
-				.update(cashAccounts)
-				.set({
-					currentBalanceCentavos: sql`${cashAccounts.currentBalanceCentavos} + ${reverse}`,
-					updatedAt: new Date()
-				})
-				.where(eq(cashAccounts.id, m.cashAccountId));
-			await tx
-				.update(cashMovements)
-				.set({
-					voidedAt: new Date(),
-					voidedByUserId: actor?.id ?? null,
-					voidReason: reason?.trim() || 'Payment voided'
-				})
-				.where(eq(cashMovements.id, m.id));
+			await voidCashMovement(hotelId, m.id, reason?.trim() || 'Payment voided', actor, tx);
 		}
 	});
 
