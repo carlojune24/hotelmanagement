@@ -2030,7 +2030,9 @@
 										type="submit"
 										variant="outline"
 										class="w-full gap-1.5"
-										disabled={!roomDetailReady || roomDeposit?.status === 'held'}
+										disabled={!roomDetailReady ||
+											roomDeposit?.status === 'held' ||
+											(formFolio?.balanceCentavos ?? 0) > 0}
 									>
 										<DoorOpenIcon class="size-4" />
 										{selectedRoom.status === 'departing' ? 'Check out' : 'Check out early'}
