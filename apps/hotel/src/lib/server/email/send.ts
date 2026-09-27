@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { db } from '../db/index';
 import { emailLog, type EmailType } from '../db/schema/index';
-import { getMailerForHotel } from './transport';
+import { getMailerForHotel, getPlatformMailer } from './transport';
 
 export interface SendMailInput {
 	hotelId: string;
@@ -85,6 +85,47 @@ export async function sendMail(input: SendMailInput): Promise<SendMailResult> {
 				error
 			})
 			.catch((logErr) => console.error('[email] could not write email_log', logErr));
+		return { ok: false, error };
+	}
+}
+
+/**
+ * Sends a transactional email that isn't tied to any one hotel — currently just
+ * the platform-admin invite. Never throws. Not written to `email_log`, which is
+ * hotel-scoped by schema (`hotel_id` is `NOT NULL`); the calling action's own
+ * `writeAudit` entry is the record that this happened.
+ */
+export async function sendPlatformMail(input: {
+	to: string;
+	subject: string;
+	html: string;
+	text: string;
+}): Promise<SendMailResult> {
+	try {
+		const mailer = getPlatformMailer();
+		const info = await mailer.transport.sendMail({
+			from: mailer.from,
+			replyTo: mailer.replyTo,
+			to: input.to,
+			subject: input.subject,
+			html: input.html,
+			text: input.text
+		});
+
+		if (!mailer.delivers) {
+			console.log(
+				`\n[email] SMTP not configured — not delivered.\n` +
+					`  to:      ${input.to}\n` +
+					`  subject: ${input.subject}\n` +
+					`${input.text.replace(/^/gm, '  | ')}\n`
+			);
+		}
+
+		const messageId = typeof info?.messageId === 'string' ? info.messageId : undefined;
+		return { ok: true, messageId };
+	} catch (e) {
+		const error = e instanceof Error ? e.message : String(e);
+		console.error('[email] platform send failed', input.to, error);
 		return { ok: false, error };
 	}
 }

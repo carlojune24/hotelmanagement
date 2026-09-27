@@ -1,5 +1,5 @@
 import { renderStaffInvite } from './invite';
-import { sendMail, type SendMailResult } from './send';
+import { sendMail, sendPlatformMail, type SendMailResult } from './send';
 
 /**
  * Emails a staff invite link. Best-effort and never throws — invite creation
@@ -33,4 +33,23 @@ export async function sendStaffInvite(input: {
 		html,
 		text
 	});
+}
+
+/** Emails a platform-admin invite — not tied to any hotel, so it goes out through
+ *  the platform mailer (`sendPlatformMail`), not a hotel's own SMTP settings. */
+export async function sendPlatformAdminInvite(input: {
+	toEmail: string;
+	inviteUrl: string;
+	inviterName: string | null;
+	expiresInDays: number;
+}): Promise<SendMailResult> {
+	const { subject, html, text } = renderStaffInvite({
+		hotelName: 'MM Hotel',
+		roleName: 'Platform Admin',
+		inviteUrl: input.inviteUrl,
+		inviterName: input.inviterName,
+		expiresInDays: input.expiresInDays
+	});
+
+	return sendPlatformMail({ to: input.toEmail, subject, html, text });
 }
