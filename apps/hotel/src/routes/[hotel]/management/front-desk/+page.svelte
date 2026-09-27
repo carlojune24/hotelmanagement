@@ -481,8 +481,9 @@
 		if (isOverdueTile(c)) return 'border-danger/50 bg-danger/10';
 		switch (c.status) {
 			case 'occupied':
-			case 'departing':
 				return 'border-ok/40 bg-ok/10';
+			case 'departing':
+				return 'border-warning/40 bg-warning/10';
 			case 'reserved':
 				return 'border-dashed border-brand/50';
 			case 'ooo':
@@ -494,8 +495,9 @@
 	function statusPillClass(status: string): string {
 		switch (status) {
 			case 'occupied':
-			case 'departing':
 				return 'border-transparent bg-ok/15 text-ok';
+			case 'departing':
+				return 'border-transparent bg-warning/15 text-warning';
 			case 'reserved':
 				return 'border-transparent bg-brand/15 text-brand';
 			case 'ooo':
@@ -507,7 +509,7 @@
 	const statusLabel: Record<string, string> = {
 		vacant: 'Vacant',
 		occupied: 'Occupied',
-		departing: 'Occupied',
+		departing: 'Departing',
 		reserved: 'Reserved',
 		ooo: 'Out of order'
 	};
@@ -1242,7 +1244,7 @@
 				{@render statusChip(
 					'departing',
 					'Departing',
-					overdueDepartingCount > 0 ? 'bg-danger' : 'bg-ok',
+					overdueDepartingCount > 0 ? 'bg-danger' : 'bg-warning',
 					statusCounts.departing,
 					overdueDepartingCount > 0 ? `${overdueDepartingCount} overdue` : 'on schedule',
 					overdueDepartingCount > 0 ? 'font-semibold text-danger' : ''
@@ -1346,7 +1348,7 @@
 				<span class="font-semibold text-ink">Quick view</span>
 				<span class="flex items-center gap-1.5"><span class="fd-dot bg-ink-muted"></span>Ready</span>
 				<span class="flex items-center gap-1.5"><span class="fd-dot bg-ok"></span>Occupied</span>
-				<span class="flex items-center gap-1.5"><span class="fd-dot bg-ink-muted"></span>Departing</span>
+				<span class="flex items-center gap-1.5"><span class="fd-dot bg-warning"></span>Departing</span>
 				<span class="flex items-center gap-1.5"><span class="fd-dot bg-brand"></span>Reserved</span>
 				<span class="flex items-center gap-1.5"><span class="fd-dot bg-danger"></span>Out of order</span>
 			</div>
@@ -1432,7 +1434,7 @@
 												c
 											)
 												? 'bg-danger/15 text-danger'
-												: 'bg-ok/15 text-ok'}"
+												: 'bg-warning/15 text-warning'}"
 										>
 											<LogOutIcon class="size-3.5" />
 										</span>
