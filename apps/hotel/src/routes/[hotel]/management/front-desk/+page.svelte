@@ -146,7 +146,10 @@
 			toast.success('ID photo saved.');
 			idCaptureOpen = false;
 		}
-		if (formDepositOk) toast.success(formDepositOk);
+		if (formDepositOk) {
+			toast.success(formDepositOk);
+			depositOverrideConfirming = false;
+		}
 		if (formIdPhotoError) toast.error(formIdPhotoError);
 		if (formScPwdOk) {
 			toast.success('Senior Citizen/PWD discount updated.');
@@ -183,6 +186,7 @@
 			roomDetailBookingId = bookingId;
 			idCaptureOpen = false;
 			scPwdToggleOpen = false;
+			depositOverrideConfirming = false;
 			tick().then(() => roomDetailFormEl?.requestSubmit());
 		}
 	});
@@ -198,6 +202,7 @@
 	let hallPayOpen = $state(false);
 	let hallRefundOpen = $state(false);
 	let checkoutCityLedger = $state(false);
+	let depositOverrideConfirming = $state(false);
 	let shiftFloat = $state('');
 	let shiftDrawer = $state('');
 
@@ -2478,16 +2483,40 @@
 											</Button>
 										</form>
 										{#if depositGateBlocked && canChargeCityLedger}
-											<form method="POST" action="?/settleDeposit" use:enhance class="mt-1.5">
-												<input type="hidden" name="bookingId" value={o.bookingId} />
-												<input type="hidden" name="override" value="1" />
-												<button
-													type="submit"
-													class="text-xs text-ink-muted underline underline-offset-2 hover:text-danger"
-												>
-													Admin override — settle anyway, skip the housekeeping check
-												</button>
-											</form>
+											<div class="mt-2 rounded-lg border border-danger/30 bg-danger/5 p-2.5">
+												{#if depositOverrideConfirming}
+													<p class="mb-2 text-xs text-danger">
+														This skips the housekeeping check — the deposit settles even though the
+														room hasn't been confirmed clean or a damage report is still open. Only
+														do this if you've verified the room yourself.
+													</p>
+													<form method="POST" action="?/settleDeposit" use:enhance class="flex gap-2">
+														<input type="hidden" name="bookingId" value={o.bookingId} />
+														<input type="hidden" name="override" value="1" />
+														<Button type="submit" size="sm" variant="destructive" class="flex-1">
+															Yes, skip the check and settle
+														</Button>
+														<Button
+															type="button"
+															size="sm"
+															variant="ghost"
+															onclick={() => (depositOverrideConfirming = false)}
+														>
+															Cancel
+														</Button>
+													</form>
+												{:else}
+													<Button
+														type="button"
+														size="sm"
+														variant="outline"
+														class="w-full text-danger"
+														onclick={() => (depositOverrideConfirming = true)}
+													>
+														Admin override — skip the housekeeping check
+													</Button>
+												{/if}
+											</div>
 										{/if}
 									</div>
 								{:else if roomDeposit?.status === 'settled'}
