@@ -1622,6 +1622,7 @@
 											type="button"
 											onclick={() => removePickedTile(tile.roomId)}
 											class="shrink-0 text-ink-muted hover:text-danger"
+											aria-label="Remove room {tile.roomNumber} from selection"
 										>
 											<XIcon class="size-3.5" />
 										</button>
@@ -3060,6 +3061,7 @@
 										class="size-7"
 										disabled={line.roomCount <= 1}
 										onclick={() => bumpWalkInCartQty(line.id, -1)}
+										aria-label="Decrease room count for {line.roomTypeName}"
 									>
 										<MinusIcon class="size-3.5" />
 									</Button>
@@ -3071,6 +3073,7 @@
 										class="size-7"
 										disabled={line.roomCount >= Math.min(MAX_ROOMS_PER_LINE, line.availableRooms)}
 										onclick={() => bumpWalkInCartQty(line.id, 1)}
+										aria-label="Increase room count for {line.roomTypeName}"
 									>
 										<PlusIcon class="size-3.5" />
 									</Button>
@@ -3085,6 +3088,7 @@
 								variant="ghost"
 								class="size-7"
 								onclick={() => removeFromWalkInCart(line.id)}
+								aria-label="Remove {line.roomTypeName} from cart"
 							>
 								<XIcon class="size-3.5" />
 							</Button>
