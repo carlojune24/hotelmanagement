@@ -37,9 +37,7 @@
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import UserIcon from '@lucide/svelte/icons/user';
 	import WrenchIcon from '@lucide/svelte/icons/wrench';
-	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
 	import WalletIcon from '@lucide/svelte/icons/wallet';
-	import BellIcon from '@lucide/svelte/icons/bell';
 	import DoorOpenIcon from '@lucide/svelte/icons/door-open';
 	import IdCardIcon from '@lucide/svelte/icons/id-card';
 	import type { ActionData, PageData } from './$types';
@@ -2002,30 +2000,30 @@
 								it to the folio below before checking out.
 							</p>
 						{/if}
-						{#if roomDeposit?.status === 'held' && (selectedRoom.status === 'departing' || selectedRoom.status === 'occupied')}
-							<p class="mb-2 text-xs text-danger">
-								Settle the ₱{(roomDeposit.amountCentavos / 100).toFixed(
-									2
-								)} security deposit below before checking out.
-							</p>
-						{/if}
-						{#if formRoomDetail && formFolio && formRoomDetail.booking.id === o.bookingId && formFolio.balanceCentavos > 0 && (selectedRoom.status === 'departing' || selectedRoom.status === 'occupied')}
-							<p class="mb-3 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
-								<strong>Can't check out yet</strong> — {peso(formFolio.balanceCentavos)} still due.
-								Take payment in the Folio section below before checking out.
-							</p>
+						{#if (selectedRoom.status === 'departing' || selectedRoom.status === 'occupied') && (roomDeposit?.status === 'held' || (formRoomDetail && formFolio && formRoomDetail.booking.id === o.bookingId && formFolio.balanceCentavos > 0))}
+							<div class="mb-3 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
+								<p class="font-semibold">Before you can check out</p>
+								<ul class="mt-1 list-disc space-y-0.5 pl-4">
+									{#if roomDeposit?.status === 'held'}
+										<li>
+											Settle the ₱{(roomDeposit.amountCentavos / 100).toFixed(2)} security deposit
+											below.
+										</li>
+									{/if}
+									{#if formRoomDetail && formFolio && formRoomDetail.booking.id === o.bookingId && formFolio.balanceCentavos > 0}
+										<li>
+											{peso(formFolio.balanceCentavos)} still due — take payment in the Folio section
+											below.
+										</li>
+									{/if}
+								</ul>
+							</div>
 						{/if}
 						{#if selectedRoom.status === 'departing' && (selectedHousekeeping?.status === 'dirty' || selectedHousekeeping?.status === 'in_progress')}
 							<p class="mb-2 text-xs text-ink-muted">
 								This room wasn't marked clean by Housekeeping before this stay — checking out
 								anyway.
 							</p>
-						{/if}
-						{#if formFolio && formRoomDetail?.booking.id === o.bookingId && formFolio.balanceCentavos > 0}
-							<Button size="touch" class="mb-2 w-full gap-1.5" onclick={() => (roomPayOpen = true)}>
-								<CreditCardIcon class="size-4" />
-								Take payment ({peso(formFolio.balanceCentavos)} due)
-							</Button>
 						{/if}
 						<div class="flex gap-2">
 							{#if selectedRoom.status === 'departing' || selectedRoom.status === 'occupied'}
