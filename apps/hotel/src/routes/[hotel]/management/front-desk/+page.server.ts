@@ -434,7 +434,11 @@ export const actions: Actions = {
 			.object({
 				bookingId: z.string().uuid(),
 				kind: z.enum(['late_checkout', 'early_check_in']),
-				hours: z.coerce.number().min(0.5).max(48)
+				hours: z.coerce
+					.number()
+					.min(0.5)
+					.max(48)
+					.refine((h) => Number.isInteger(h * 2), 'Must be in half-hour increments.')
 			})
 			.safeParse(raw);
 		if (!parsed.success) return fail(400, { folioError: 'Enter a valid number of hours.' });
@@ -499,15 +503,29 @@ export const actions: Actions = {
 		requireCap(event.locals.user, event.locals.role, 'booking:write');
 		const hotelId = event.locals.hotel!.id;
 		const raw = Object.fromEntries(await event.request.formData());
-		const parsed = z.object({ bookingId: z.string().uuid() }).safeParse(raw);
+		const parsed = z
+			.object({ bookingId: z.string().uuid(), override: z.enum(['1']).optional() })
+			.safeParse(raw);
 		if (!parsed.success) return fail(400, { folioError: 'Missing booking.' });
+
+		const wantsOverride = parsed.data.override === '1';
+		if (wantsOverride) {
+			try {
+				requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+			} catch {
+				return fail(403, {
+					folioError: 'Only a hotel admin can settle a deposit past the housekeeping check.'
+				});
+			}
+		}
 
 		let depositOk: string;
 		try {
 			const result = await settleSecurityDeposit(
 				hotelId,
 				parsed.data.bookingId,
-				event.locals.user
+				event.locals.user,
+				wantsOverride
 			);
 			if (result.forfeitedCentavos === 0) {
 				depositOk = `Deposit refunded in full — ₱${(result.refundedCentavos / 100).toFixed(2)}.`;

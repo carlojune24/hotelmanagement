@@ -19,6 +19,7 @@ import {
 import { writeAudit } from './audit';
 import type { SessionUser } from './auth/session';
 import { ensureFolio, getFolioDetail, FolioError } from './folio';
+import { getRoomHousekeepingOverlay } from './housekeeping';
 import { businessDateFor, type Tx } from './finance/shared';
 import { recordCashMovement, voidCashMovement } from './finance/cash';
 import { resolvePaymentAccount, type PaymentMethod } from './finance/payments';
@@ -299,7 +300,12 @@ export async function collectSecurityDeposit(
 export async function settleSecurityDeposit(
 	hotelId: string,
 	bookingId: string,
-	actor: SessionUser | null
+	actor: SessionUser | null,
+	/** Hotel-admin-only escape hatch — the caller MUST have already checked the `hotel:admin`
+	 *  capability before passing `true`. Skips the housekeeping gate below but never the
+	 *  underlying money math, and is always written to the audit trail so an override is
+	 *  never silent. */
+	overrideHousekeepingGate = false
 ): Promise<{
 	heldCentavos: number;
 	forfeitedCentavos: number;
@@ -309,6 +315,34 @@ export async function settleSecurityDeposit(
 	const deposit = await getSecurityDepositForBooking(hotelId, bookingId);
 	if (!deposit || deposit.status !== 'held') {
 		throw new SecurityDepositError('No held deposit found for this booking.');
+	}
+
+	// Never let the deposit settle on front desk's say-so alone — the folio's damage charges
+	// only reflect what's already been reported AND resolved. If housekeeping hasn't inspected
+	// the room yet, or has reported damage that isn't charged (or dismissed) yet, settling now
+	// would refund in full before anyone actually checked. A hotel admin can override this one
+	// gate (e.g. housekeeping is backed up and the guest can't wait) — see `overrideHousekeepingGate`.
+	const assignedRooms = await db
+		.select({ roomId: roomAssignments.roomId })
+		.from(bookingRooms)
+		.innerJoin(roomAssignments, eq(roomAssignments.bookingRoomId, bookingRooms.id))
+		.where(eq(bookingRooms.bookingId, bookingId));
+	const roomIds = [...new Set(assignedRooms.map((r) => r.roomId))];
+	if (roomIds.length > 0 && !overrideHousekeepingGate) {
+		const overlay = await getRoomHousekeepingOverlay(hotelId, roomIds);
+		for (const roomId of roomIds) {
+			const entry = overlay.get(roomId);
+			if (entry?.pendingDamageReports.length) {
+				throw new SecurityDepositError(
+					'Housekeeping has an unresolved damage report on this room — resolve it before settling the deposit.'
+				);
+			}
+			if (entry && entry.status !== 'clean') {
+				throw new SecurityDepositError(
+					"Housekeeping hasn't marked this room clean yet — settle the deposit once it's inspected."
+				);
+			}
+		}
 	}
 
 	let folio;
@@ -431,7 +465,12 @@ export async function settleSecurityDeposit(
 		action: 'security_deposit.settle',
 		entityType: 'booking',
 		entityId: bookingId,
-		after: { securityDepositId: deposit.id, forfeitedCentavos, refundedCentavos }
+		after: {
+			securityDepositId: deposit.id,
+			forfeitedCentavos,
+			refundedCentavos,
+			...(overrideHousekeepingGate ? { housekeepingGateOverridden: true } : {})
+		}
 	});
 
 	return {

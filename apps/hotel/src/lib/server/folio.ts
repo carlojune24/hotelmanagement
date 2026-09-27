@@ -516,13 +516,15 @@ export async function addExtensionFeeCharge(
 		);
 	const label = kind === 'late_checkout' ? 'Late checkout fee' : 'Early check-in fee';
 
+	// `quantity` is an integer column, but the fee is meant to bill in half-hour increments —
+	// fold the hours into one flat line (quantity 1) rather than storing a fractional quantity.
 	await insertCharge(
 		hotelId,
 		{ kind: 'room', bookingId },
 		{
 			description: `${label} (${hours}h)`,
-			quantity: hours,
-			unitPriceCentavos: perHour,
+			quantity: 1,
+			unitPriceCentavos: Math.round(hours * perHour),
 			taxable: false
 		},
 		actor

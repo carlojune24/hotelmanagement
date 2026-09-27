@@ -15,6 +15,8 @@
 	import UserPlusIcon from '@lucide/svelte/icons/user-plus';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import GlobeIcon from '@lucide/svelte/icons/globe';
 	import BanknoteIcon from '@lucide/svelte/icons/banknote';
 	import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
@@ -33,10 +35,18 @@
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
+	import UserIcon from '@lucide/svelte/icons/user';
+	import WrenchIcon from '@lucide/svelte/icons/wrench';
+	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
+	import WalletIcon from '@lucide/svelte/icons/wallet';
+	import BellIcon from '@lucide/svelte/icons/bell';
+	import DoorOpenIcon from '@lucide/svelte/icons/door-open';
+	import IdCardIcon from '@lucide/svelte/icons/id-card';
 	import type { ActionData, PageData } from './$types';
 	import type {
 		HallGridCell,
 		RoomGridCell,
+		RoomGridStatus,
 		WalkInAvailabilityCheckResult
 	} from '$lib/server/front-desk';
 	import type { HallPriceBreakdown } from '$lib/server/pricing';
@@ -215,6 +225,10 @@
 	// --- Room grid filtering ---
 	let search = $state('');
 	let typeFilter = $state('all');
+	/** Set by tapping a count in the status strip — a second, independent filter layer on
+	 *  top of the room-type pills, so "how many are departing right now" is always one tap
+	 *  away instead of a scroll through every floor. */
+	let statusFilter = $state<'all' | RoomGridStatus>('all');
 	// Arriving from a just-completed check-in (see the reservation detail page's `checkIn`
 	// action) lands here with the assigned room pre-selected, so staff see it immediately
 	// instead of having to find it again in the grid.
@@ -261,7 +275,9 @@
 		calendarOpen = true;
 	}
 
-	const filteredCells = $derived(
+	/** Type-filtered + searched, but NOT yet status-filtered — the base every status count in
+	 *  the strip below is drawn from, so tapping "Departing" doesn't change what "Vacant" reads. */
+	const searchedCells = $derived(
 		data.cells.filter((c) => {
 			if (typeFilter !== 'all' && c.roomTypeName !== typeFilter) return false;
 			if (!search.trim()) return true;
@@ -274,6 +290,10 @@
 		})
 	);
 
+	const filteredCells = $derived(
+		statusFilter === 'all' ? searchedCells : searchedCells.filter((c) => c.status === statusFilter)
+	);
+
 	const floorGroups = $derived.by(() => {
 		const map = new Map<string, RoomGridCell[]>();
 		for (const c of filteredCells) {
@@ -284,6 +304,31 @@
 		}
 		return [...map.entries()];
 	});
+
+	/** One tap tells staff "how many, right now" per status — the room-status legend doubles
+	 *  as this filter, so it's never just decoration. */
+	const statusCounts = $derived.by(() => {
+		const counts: Record<RoomGridStatus, number> = {
+			vacant: 0,
+			occupied: 0,
+			departing: 0,
+			reserved: 0,
+			ooo: 0
+		};
+		for (const c of searchedCells) counts[c.status]++;
+		return counts;
+	});
+
+	/** Of the rooms currently showing "Departing," how many are already past the checkout
+	 *  deadline — the single most urgent number on this screen. */
+	const overdueDepartingCount = $derived(
+		searchedCells.filter(
+			(c) =>
+				c.status === 'departing' &&
+				c.occupant &&
+				checkoutDeadline(c.occupant.checkoutAtIso, nowMs, data.timezone).overdue
+		).length
+	);
 
 	const selectedRoom = $derived(data.cells.find((c) => c.roomId === selectedRoomId) ?? null);
 
@@ -325,6 +370,88 @@
 	const selectedHousekeeping = $derived(
 		selectedRoom ? (housekeepingByRoom.get(selectedRoom.roomId) ?? null) : null
 	);
+	/** Mirrors the server-side gate in `settleSecurityDeposit` exactly — kept in the client
+	 *  only to disable the button proactively; the real enforcement is server-side. */
+	const depositGateBlocked = $derived(
+		!!selectedHousekeeping &&
+			(selectedHousekeeping.pendingDamageReports.length > 0 ||
+				selectedHousekeeping.status !== 'clean')
+	);
+
+	const cellByRoomId = $derived(new Map(data.cells.map((c) => [c.roomId, c])));
+
+	/** The default side rail's departures list, enriched from the grid cell it already loaded
+	 *  (balance, real checkout time, pending damage) and sorted overdue-first — the flat,
+	 *  same-looking list this replaced gave every departure the same green "by 12:00" badge
+	 *  whether it left on time or three hours ago. */
+	const departureRows = $derived(
+		data.departures
+			.map((d) => {
+				const occ = cellByRoomId.get(d.roomId)?.occupant;
+				const deadline = occ ? checkoutDeadline(occ.checkoutAtIso, nowMs, data.timezone) : null;
+				return {
+					...d,
+					balanceCentavos: occ?.balanceCentavos ?? 0,
+					overdue: deadline?.overdue ?? false,
+					deadlineLabel: deadline?.label ?? null,
+					hasPendingDamage: (housekeepingByRoom.get(d.roomId)?.pendingDamageReports.length ?? 0) > 0
+				};
+			})
+			.sort((a, b) => Number(b.overdue) - Number(a.overdue))
+	);
+
+	/** Every room with something a front-desk staffer needs to act on right now — an overdue
+	 *  departure, a balance still owed at checkout, or a damage report housekeeping hasn't
+	 *  resolved yet — collapsed into one always-visible list instead of requiring a scroll
+	 *  through every floor or a trip into the Departures tab to notice. One row per room even
+	 *  when several reasons apply, sorted worst-first. */
+	const attentionRows = $derived.by(() => {
+		const rows: {
+			roomId: string;
+			roomNumber: string;
+			guestName: string | null;
+			reasons: string[];
+			severity: number;
+		}[] = [];
+		for (const c of searchedCells) {
+			const reasons: string[] = [];
+			let severity = 0;
+			if (c.status === 'departing' && c.occupant) {
+				const deadline = checkoutDeadline(c.occupant.checkoutAtIso, nowMs, data.timezone);
+				if (deadline.overdue) {
+					reasons.push(`overdue since ${deadline.label}`);
+					severity += 2;
+				}
+				if (c.occupant.balanceCentavos > 0) {
+					reasons.push(`${peso(c.occupant.balanceCentavos)} balance due`);
+					severity += 1;
+				}
+			}
+			const pendingDamage = housekeepingByRoom.get(c.roomId)?.pendingDamageReports.length ?? 0;
+			if (pendingDamage > 0) {
+				reasons.push(`${pendingDamage} damage report${pendingDamage > 1 ? 's' : ''} pending`);
+				severity += 2;
+			}
+			const hkStatus = housekeepingByRoom.get(c.roomId)?.status;
+			if (hkStatus === 'in_progress') {
+				reasons.push('housekeeping in progress');
+				severity += 1;
+			} else if (hkStatus === 'dirty') {
+				reasons.push('flagged for housekeeping');
+				severity += 1;
+			}
+			if (reasons.length > 0) {
+				rows.push({
+					roomId: c.roomId,
+					roomNumber: c.roomNumber,
+					guestName: c.occupant?.guestName ?? null,
+					reasons,
+					severity
+				});
+			}
+		}
+		return rows.sort((a, b) => b.severity - a.severity);
+	});
 
 	/** The form result is whatever action ran last (possibly another room's), so deposit state is only
 	 *  trusted for the SELECTED room once ITS detail has loaded and the deposit row belongs to it —
@@ -339,8 +466,20 @@
 			: undefined
 	);
 
-	function statusCardClass(status: string): string {
-		switch (status) {
+	/** A tile's overdue-ness needs its own occupant/clock check, not just its status —
+	 *  "departing" alone reads identically whether the deadline is in three hours or was
+	 *  three hours ago, which is exactly the distinction a busy front desk needs at a glance. */
+	function isOverdueTile(c: RoomGridCell): boolean {
+		return (
+			c.status === 'departing' &&
+			!!c.occupant &&
+			checkoutDeadline(c.occupant.checkoutAtIso, nowMs, data.timezone).overdue
+		);
+	}
+
+	function statusCardClass(c: RoomGridCell): string {
+		if (isOverdueTile(c)) return 'border-danger/50 bg-danger/10';
+		switch (c.status) {
 			case 'occupied':
 			case 'departing':
 				return 'border-ok/40 bg-ok/10';
@@ -1067,68 +1206,151 @@
 		</div>
 	</div>
 
-	<div
-		class="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface-2 px-6 py-2.5"
-	>
-		<div class="flex flex-wrap items-center gap-4 text-xs text-ink-muted">
-			<div class="flex items-center gap-1.5">
-				<span class="size-3 rounded border border-border"></span>Vacant
+	<div class="border-b border-border bg-surface-2 px-6 py-4">
+		<div class="flex flex-wrap items-start justify-between gap-4">
+			<div
+				class="grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-5"
+			>
+				{#snippet statusChip(
+					value: RoomGridStatus,
+					label: string,
+					dotClass: string,
+					count: number,
+					subText: string,
+					subClass: string
+				)}
+					<button
+						type="button"
+						aria-pressed={statusFilter === value}
+						onclick={() => (statusFilter = statusFilter === value ? 'all' : value)}
+						class="fd-cell {statusFilter === value ? 'fd-cell-active' : ''}"
+					>
+						<span class="fd-label"><span class="fd-dot {dotClass}"></span>{label}</span>
+						<span class="fd-figure">{count}</span>
+						<span class="fd-sub {subClass}">{subText}</span>
+					</button>
+				{/snippet}
+				{@render statusChip('vacant', 'Vacant', 'bg-ink-muted', statusCounts.vacant, 'ready to occupy', '')}
+				{@render statusChip(
+					'occupied',
+					'Occupied',
+					'bg-ok',
+					statusCounts.occupied,
+					'checked in',
+					''
+				)}
+				{@render statusChip(
+					'departing',
+					'Departing',
+					overdueDepartingCount > 0 ? 'bg-danger' : 'bg-ok',
+					statusCounts.departing,
+					overdueDepartingCount > 0 ? `${overdueDepartingCount} overdue` : 'on schedule',
+					overdueDepartingCount > 0 ? 'font-semibold text-danger' : ''
+				)}
+				{@render statusChip(
+					'reserved',
+					'Reserved',
+					'bg-brand',
+					statusCounts.reserved,
+					'arriving today',
+					''
+				)}
+				{@render statusChip('ooo', 'Out of order', 'bg-danger', statusCounts.ooo, 'flagged', '')}
 			</div>
-			<div class="flex items-center gap-1.5">
-				<span class="size-3 rounded border border-ok/40 bg-ok/15"></span>Occupied
-			</div>
-			<div class="flex items-center gap-1.5">
-				<span class="relative size-3 rounded border border-ok/40 bg-ok/15">
-					<LogOutIcon class="absolute -top-1 -right-1 size-2.5 text-ok" />
-				</span>Departing today
-			</div>
-			<div class="flex items-center gap-1.5">
-				<span class="size-3 rounded border border-dashed border-brand/50"></span>Reserved
-			</div>
-			<div class="flex items-center gap-1.5">
-				<span class="size-3 rounded border border-danger/30 bg-danger/15"></span>Out of order
+			<div class="flex items-center gap-2">
+				<div class="relative">
+					<SearchIcon class="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-muted" />
+					<Input placeholder="Find a room or guest…" bind:value={search} class="w-56 pl-8" />
+				</div>
 			</div>
 		</div>
-		<div class="flex items-center gap-2">
-			<div class="relative">
-				<SearchIcon class="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-muted" />
-				<Input placeholder="Find a room or guest…" bind:value={search} class="w-56 pl-8" />
-			</div>
-		</div>
+		{#if statusFilter !== 'all'}
+			<button
+				type="button"
+				onclick={() => (statusFilter = 'all')}
+				class="mt-2 text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
+			>
+				Clear filter
+			</button>
+		{/if}
 	</div>
 
 	<div class="flex min-h-0 flex-1">
 		<div class="min-w-0 flex-1 overflow-y-auto p-6">
-			{#if roomTypeOptions.length > 0}
-				<div class="mb-3 flex flex-wrap items-center gap-2">
-					<span class="text-xs font-medium text-ink-muted">Filter:</span>
-					<button
-						type="button"
-						aria-pressed={typeFilter === 'all'}
-						onclick={() => (typeFilter = 'all')}
-						class="min-h-9 rounded-full border px-3 py-2 text-xs transition {typeFilter === 'all'
-							? 'border-brand bg-brand/10 font-medium text-ink'
-							: 'border-border text-ink-muted hover:border-brand/50 hover:text-ink'}"
-					>
-						All room types
-					</button>
-					{#each roomTypeOptions as rt (rt.id)}
+			{#if attentionRows.length > 0}
+				<section aria-labelledby="fd-attention-heading" class="mb-6">
+					<h2 id="fd-attention-heading" class="mb-3 text-sm font-semibold text-ink">
+						Needs attention
+					</h2>
+					<ul class="divide-y divide-border overflow-hidden rounded-xl border border-border">
+						{#each attentionRows as row (row.roomId)}
+							<li>
+								<button
+									type="button"
+									onclick={() => (selectedRoomId = row.roomId)}
+									class="group flex min-h-12 w-full items-center gap-3 px-4 py-3 text-left text-sm transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+								>
+									<TriangleAlertIcon class="size-4 shrink-0 text-danger" />
+									<span class="min-w-0 flex-1">
+										<span class="font-medium text-ink"
+											>Room {row.roomNumber}{row.guestName ? ` · ${row.guestName}` : ''}</span
+										>
+										<span class="text-ink-muted"> — {row.reasons.join(' · ')}</span>
+									</span>
+									<ChevronRightIcon
+										class="size-4 shrink-0 text-ink-muted transition-transform group-hover:translate-x-0.5"
+									/>
+								</button>
+							</li>
+						{/each}
+					</ul>
+				</section>
+			{/if}
+			<div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+				<div>
+					<h2 class="text-lg font-semibold text-ink">Today's rooms</h2>
+					<p class="text-xs text-ink-muted">Select a room to view guest details and take action.</p>
+				</div>
+				{#if roomTypeOptions.length > 0}
+					<div class="flex flex-wrap items-center gap-2">
 						<button
 							type="button"
-							aria-pressed={typeFilter === rt.name}
-							onclick={() => (typeFilter = rt.name)}
-							class="flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-2 text-xs transition {typeFilter ===
-							rt.name
+							aria-pressed={typeFilter === 'all'}
+							onclick={() => (typeFilter = 'all')}
+							class="min-h-9 rounded-full border px-3 py-2 text-xs transition {typeFilter === 'all'
 								? 'border-brand bg-brand/10 font-medium text-ink'
 								: 'border-border text-ink-muted hover:border-brand/50 hover:text-ink'}"
 						>
-							{#if rt.color}
-								<span class="size-2 rounded-full" style="background-color: {rt.color}"></span>
-							{/if}
-							{rt.name}
+							All rooms
 						</button>
-					{/each}
-				</div>
+						{#each roomTypeOptions as rt (rt.id)}
+							<button
+								type="button"
+								aria-pressed={typeFilter === rt.name}
+								onclick={() => (typeFilter = rt.name)}
+								class="flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-2 text-xs transition {typeFilter ===
+								rt.name
+									? 'border-brand bg-brand/10 font-medium text-ink'
+									: 'border-border text-ink-muted hover:border-brand/50 hover:text-ink'}"
+							>
+								{#if rt.color}
+									<span class="size-2 rounded-full" style="background-color: {rt.color}"></span>
+								{/if}
+								{rt.name}
+							</button>
+						{/each}
+					</div>
+				{/if}
+			</div>
+			<div class="mb-5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-muted">
+				<span class="font-semibold text-ink">Quick view</span>
+				<span class="flex items-center gap-1.5"><span class="fd-dot bg-ink-muted"></span>Ready</span>
+				<span class="flex items-center gap-1.5"><span class="fd-dot bg-ok"></span>Occupied</span>
+				<span class="flex items-center gap-1.5"><span class="fd-dot bg-ink-muted"></span>Departing</span>
+				<span class="flex items-center gap-1.5"><span class="fd-dot bg-brand"></span>Reserved</span>
+				<span class="flex items-center gap-1.5"><span class="fd-dot bg-danger"></span>Out of order</span>
+			</div>
+			{#if roomTypeOptions.length > 0}
 				<div class="mb-5 flex flex-wrap items-center gap-2">
 					<span class="text-xs font-medium text-ink-muted">Check availability:</span>
 					{#each roomTypeOptions as rt (rt.id)}
@@ -1164,11 +1386,16 @@
 								>{cells.length} room{cells.length === 1 ? '' : 's'}</span
 							>
 						</div>
-						<div class="grid grid-cols-[repeat(auto-fill,minmax(108px,1fr))] gap-2.5">
+						<div class="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-3">
 							{#each cells as c (c.roomId)}
 								{@const picked = pickMode && pickedTiles.some((t) => t.roomId === c.roomId)}
 								{@const pickDisabled =
 									pickMode && (c.status !== 'vacant' || isAlreadyInCart(c.roomId))}
+								{@const hk = housekeepingByRoom.get(c.roomId)?.status}
+								{@const needsCleaning = hk === 'dirty' || hk === 'in_progress'}
+								{@const deadline = c.occupant
+									? checkoutDeadline(c.occupant.checkoutAtIso, nowMs, data.timezone)
+									: null}
 								<button
 									type="button"
 									disabled={pickDisabled}
@@ -1177,8 +1404,8 @@
 										c.status}{c.status === 'departing' ? ', departing today' : ''}"
 									aria-pressed={picked || (!pickMode && selectedRoomId === c.roomId)}
 									onclick={() => (pickMode ? toggleTilePick(c) : (selectedRoomId = c.roomId))}
-									class="relative rounded-lg border p-2.5 text-left transition {statusCardClass(
-										c.status
+									class="relative rounded-xl border p-3 text-left transition {statusCardClass(
+										c
 									)} {pickDisabled
 										? 'cursor-not-allowed opacity-40'
 										: 'hover:-translate-y-0.5 hover:shadow-sm'} {picked
@@ -1193,25 +1420,82 @@
 										>
 											<CheckIcon class="size-2.5" />
 										</span>
+									{:else if c.status === 'occupied'}
+										<span
+											class="absolute top-1.5 right-1.5 flex size-6 items-center justify-center rounded-full bg-brand/15 text-brand"
+										>
+											<UserIcon class="size-3.5" />
+										</span>
 									{:else if c.status === 'departing'}
-										<LogOutIcon class="absolute top-1.5 right-1.5 size-3 text-ok" />
+										<span
+											class="absolute top-1.5 right-1.5 flex size-6 items-center justify-center rounded-full {isOverdueTile(
+												c
+											)
+												? 'bg-danger/15 text-danger'
+												: 'bg-ok/15 text-ok'}"
+										>
+											<LogOutIcon class="size-3.5" />
+										</span>
 									{:else if c.status === 'reserved'}
-										<span class="absolute top-2 right-2 size-1.5 rounded-full bg-brand"></span>
-									{/if}
-									{#if housekeepingByRoom.get(c.roomId)?.status === 'dirty' || housekeepingByRoom.get(c.roomId)?.status === 'in_progress'}
-										<SparklesIcon
-											class="absolute right-1.5 bottom-1.5 size-3 text-danger"
-										/>
-									{:else if housekeepingByRoom.get(c.roomId)?.status === 'clean' && c.status === 'vacant'}
-										<CheckIcon class="absolute right-1.5 bottom-1.5 size-3 text-ok" />
+										<span
+											class="absolute top-1.5 right-1.5 flex size-6 items-center justify-center rounded-full bg-brand/15"
+										>
+											<span class="size-1.5 rounded-full bg-brand"></span>
+										</span>
+									{:else if c.status === 'ooo'}
+										<span
+											class="absolute top-1.5 right-1.5 flex size-6 items-center justify-center rounded-full bg-danger/15 text-danger"
+										>
+											<WrenchIcon class="size-3.5" />
+										</span>
+									{:else if needsCleaning}
+										<span
+											class="absolute top-1.5 right-1.5 flex size-6 items-center justify-center rounded-full bg-danger/15 text-danger"
+										>
+											<SparklesIcon class="size-3.5" />
+										</span>
+									{:else}
+										<span
+											class="absolute top-1.5 right-1.5 flex size-6 items-center justify-center rounded-full bg-ok/15 text-ok"
+										>
+											<CheckIcon class="size-3.5" />
+										</span>
 									{/if}
 									<div
-										class="text-base font-bold tabular-nums {c.roomTypeColor ? '' : 'text-ink'}"
+										class="text-2xl leading-tight font-bold tabular-nums {c.roomTypeColor
+											? ''
+											: 'text-ink'}"
 										style={c.roomTypeColor ? `color: ${c.roomTypeColor}` : undefined}
 									>
 										{c.roomNumber}
 									</div>
-									<div class="truncate text-[11px] text-ink-muted">{c.roomTypeName}</div>
+									<div class="mt-0.5 truncate text-xs text-ink-muted">
+										{c.roomTypeName}
+									</div>
+									{#if c.status === 'ooo'}
+										<div class="mt-1 truncate text-[11px] font-medium text-danger">Maintenance</div>
+									{:else if c.status === 'vacant'}
+										{#if needsCleaning}
+											<div class="mt-1 truncate text-[11px] text-ink-muted">Needs cleaning</div>
+										{:else}
+											<div class="mt-1 truncate text-[11px] font-medium text-ok">Ready</div>
+										{/if}
+									{:else if c.status === 'reserved'}
+										<div class="mt-1 truncate text-[11px] text-ink-muted">Arrives today</div>
+									{:else if c.occupant}
+										<div class="mt-1 truncate text-[11px] text-ink-muted/80">
+											{c.occupant.guestName}
+										</div>
+										{#if deadline}
+											<div
+												class="mt-0.5 truncate text-[11px] font-medium {deadline.overdue
+													? 'text-danger'
+													: 'text-ink-muted'}"
+											>
+												{deadline.overdue ? `Overdue since ${deadline.label}` : `Out by ${deadline.label}`}
+											</div>
+										{/if}
+									{/if}
 								</button>
 							{/each}
 						</div>
@@ -1226,7 +1510,7 @@
 					</h2>
 					<div class="space-y-3">
 						{#each data.hallGrid as hall (hall.functionHallId)}
-							<div class="rounded-lg border border-border p-4">
+							<div class="rounded-xl border border-border p-4">
 								<div class="mb-3 flex items-center justify-between gap-3">
 									<div class="flex items-center gap-2">
 										<PartyPopperIcon class="size-4 text-ink-muted" />
@@ -1438,14 +1722,42 @@
 						<ChevronLeftIcon class="size-3.5" />
 						Back to today's list
 					</button>
-					<button
-						type="button"
-						onclick={() => openRoomTypeDetail(selectedRoom.roomTypeId)}
-						class="text-lg font-bold text-ink tabular-nums underline-offset-4 hover:underline"
-						title="View this room's full details, spec, and gallery"
-					>
-						Room {selectedRoom.roomNumber}
-					</button>
+					<p class="text-[11px] font-semibold tracking-wide text-ink-muted uppercase">
+						Selected room
+					</p>
+					<div class="mb-1 flex items-center justify-between gap-2">
+						<button
+							type="button"
+							onclick={() => openRoomTypeDetail(selectedRoom.roomTypeId)}
+							class="text-lg font-bold text-ink tabular-nums underline-offset-4 hover:underline"
+							title="View this room's full details, spec, and gallery"
+						>
+							Room {selectedRoom.roomNumber}
+						</button>
+						{#if selectedRoom.occupant}
+							{@const o = selectedRoom.occupant}
+							<div class="flex shrink-0 items-center gap-1">
+								<a
+									href="{base}/print/invoice/for/booking/{o.bookingId}"
+									target="_blank"
+									title="Print invoice"
+									class="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-ink-muted hover:bg-surface-2 hover:text-ink"
+								>
+									<ReceiptIcon class="size-4" />
+									Invoice
+								</a>
+								<a
+									href="{base}/print/registration/{o.bookingId}"
+									target="_blank"
+									title="Print registration card"
+									class="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-ink-muted hover:bg-surface-2 hover:text-ink"
+								>
+									<IdCardIcon class="size-4" />
+									Registration card
+								</a>
+							</div>
+						{/if}
+					</div>
 					<p class="mb-2 text-xs text-ink-muted">
 						<a
 							href="{base}/rooms/{selectedRoom.roomTypeId}"
@@ -1470,13 +1782,60 @@
 								{/if}
 								{channelLabel(selectedRoom.occupant.channel)}
 							</Badge>
-							{#if selectedRoom.occupant.balanceCentavos > 0}
-								<Badge variant="outline" class="border-danger/30 bg-danger/10 text-danger">
-									Room balance {peso(selectedRoom.occupant.balanceCentavos)}
-								</Badge>
-							{/if}
 						{/if}
 					</div>
+
+					{#if selectedRoom.occupant}
+						{@const o = selectedRoom.occupant}
+						{@const glanceDeadline = checkoutDeadline(o.checkoutAtIso, nowMs, data.timezone)}
+						{@const nights = Math.round(
+							(Date.parse(o.checkOut) - Date.parse(o.checkIn)) / 86_400_000
+						)}
+						<!-- The one-glance guest card: who, how many, how long, when they must leave,
+						     and anything they asked for — zero clicks. Everything else is one away. -->
+						<div class="mb-4 rounded-lg border border-border p-3">
+							<div class="flex items-center gap-2.5">
+								<span
+									class="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand/15 text-xs font-semibold text-brand"
+								>
+									{o.guestName.slice(0, 1).toUpperCase()}
+								</span>
+								<div class="min-w-0">
+									<div class="truncate text-sm font-semibold text-ink">{o.guestName}</div>
+									<div class="text-xs text-ink-muted">
+										{o.occupancy} guest{o.occupancy === 1 ? '' : 's'} · Staying {nights} night{nights ===
+										1
+											? ''
+											: 's'}
+									</div>
+								</div>
+							</div>
+							<dl class="mt-2.5 space-y-1 border-t border-border pt-2.5 text-sm">
+								<div class="flex items-center justify-between gap-3">
+									<dt class="text-ink-muted">Departure</dt>
+									<dd
+										class="text-right font-medium {glanceDeadline.overdue
+											? 'text-danger'
+											: 'text-ink'}"
+									>
+										{glanceDeadline.overdue ? `Overdue — ${glanceDeadline.label}` : glanceDeadline.label}
+									</dd>
+								</div>
+								{#if o.balanceCentavos > 0}
+									<div class="flex items-center justify-between gap-3">
+										<dt class="text-ink-muted">Balance due</dt>
+										<dd class="text-right font-medium text-danger">{peso(o.balanceCentavos)}</dd>
+									</div>
+								{/if}
+								{#if o.specialRequests}
+									<div class="flex items-center justify-between gap-3">
+										<dt class="text-ink-muted">Special request</dt>
+										<dd class="truncate text-right font-medium text-ink">{o.specialRequests}</dd>
+									</div>
+								{/if}
+							</dl>
+						</div>
+					{/if}
 
 					{#if selectedHousekeeping && selectedHousekeeping.pendingDamageReports.length > 0}
 						<div class="mb-4 space-y-2">
@@ -1545,7 +1904,7 @@
 					{#if selectedRoom.occupant}
 						{@const o = selectedRoom.occupant}
 						{@const deadline = checkoutDeadline(o.checkoutAtIso, nowMs, data.timezone)}
-						<Accordion.Root type="single" value="guest-details" class="mb-4">
+						<Accordion.Root type="single" class="mb-4">
 							<Accordion.Item value="guest-details" class="rounded-lg border border-border">
 								<Accordion.Trigger class="px-3 py-2 text-sm font-semibold text-ink hover:no-underline"
 									>Guest & stay details</Accordion.Trigger
@@ -1601,11 +1960,24 @@
 								</Accordion.Content>
 							</Accordion.Item>
 						</Accordion.Root>
-						{#if o.specialRequests}
-							<p class="mb-4 text-xs text-ink-muted">
-								<strong class="text-ink">Special requests:</strong>
-								{o.specialRequests}
-							</p>
+						{#if selectedRoom.status === 'occupied'}
+							{#if selectedHousekeeping?.status === 'dirty' || selectedHousekeeping?.status === 'in_progress'}
+								<p class="mb-3 flex items-center gap-1.5 text-xs text-ink-muted">
+									<SparklesIcon class="size-3.5 text-danger" />
+									{selectedHousekeeping.status === 'in_progress'
+										? 'Housekeeping is already cleaning this room.'
+										: 'Already flagged for housekeeping.'}
+								</p>
+							{:else}
+								<form method="POST" action="?/flagForHousekeeping" use:enhance class="mb-3">
+									<input type="hidden" name="bookingId" value={o.bookingId} />
+									<input type="hidden" name="roomId" value={selectedRoomId} />
+									<Button type="submit" variant="outline" class="w-full gap-1.5">
+										<SparklesIcon class="size-4" />
+										Flag for housekeeping
+									</Button>
+								</form>
+							{/if}
 						{/if}
 						{#if selectedRoom.status === 'departing' && o.checkOut < data.businessDate}
 							<p class="mb-3 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
@@ -1630,11 +2002,23 @@
 								)} security deposit below before checking out.
 							</p>
 						{/if}
+						{#if formRoomDetail && formFolio && formRoomDetail.booking.id === o.bookingId && formFolio.balanceCentavos > 0 && (selectedRoom.status === 'departing' || selectedRoom.status === 'occupied')}
+							<p class="mb-3 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
+								<strong>Can't check out yet</strong> — {peso(formFolio.balanceCentavos)} still due.
+								Take payment in the Folio section below before checking out.
+							</p>
+						{/if}
 						{#if selectedRoom.status === 'departing' && (selectedHousekeeping?.status === 'dirty' || selectedHousekeeping?.status === 'in_progress')}
 							<p class="mb-2 text-xs text-ink-muted">
 								This room wasn't marked clean by Housekeeping before this stay — checking out
 								anyway.
 							</p>
+						{/if}
+						{#if formFolio && formRoomDetail?.booking.id === o.bookingId && formFolio.balanceCentavos > 0}
+							<Button size="touch" class="mb-2 w-full gap-1.5" onclick={() => (roomPayOpen = true)}>
+								<CreditCardIcon class="size-4" />
+								Take payment ({peso(formFolio.balanceCentavos)} due)
+							</Button>
 						{/if}
 						<div class="flex gap-2">
 							{#if selectedRoom.status === 'departing' || selectedRoom.status === 'occupied'}
@@ -1642,51 +2026,24 @@
 									<input type="hidden" name="bookingId" value={o.bookingId} />
 									<Button
 										type="submit"
-										class="w-full"
+										variant="outline"
+										class="w-full gap-1.5"
 										disabled={!roomDetailReady || roomDeposit?.status === 'held'}
 									>
+										<DoorOpenIcon class="size-4" />
 										{selectedRoom.status === 'departing' ? 'Check out' : 'Check out early'}
 									</Button>
 								</form>
 							{/if}
 							<Button
 								variant="outline"
-								class="flex-1"
-								href="{base}/print/invoice/for/booking/{o.bookingId}"
-								target="_blank"
-							>
-								Print invoice
-							</Button>
-						</div>
-						<div class="mt-2 flex gap-2">
-							<Button
-								variant="outline"
-								size="sm"
-								class="flex-1"
-								href="{base}/print/registration/{o.bookingId}"
-								target="_blank"
-							>
-								Registration card
-							</Button>
-							<Button
-								variant="outline"
-								size="sm"
-								class="flex-1"
+								class="flex-1 gap-1.5"
 								href="{staffBase}/reservations/room/{o.bookingId}?from=front-desk&roomId={selectedRoomId}"
 							>
-								View full details
+								<UserIcon class="size-4" />
+								Guest details
 							</Button>
 						</div>
-						{#if selectedRoom.status === 'occupied'}
-							<form method="POST" action="?/flagForHousekeeping" use:enhance class="mt-2">
-								<input type="hidden" name="bookingId" value={o.bookingId} />
-								<input type="hidden" name="roomId" value={selectedRoomId} />
-								<Button type="submit" variant="outline" size="sm" class="w-full gap-1.5">
-									<SparklesIcon class="size-3.5" />
-									Flag for housekeeping
-								</Button>
-							</form>
-						{/if}
 
 						<!-- Fetches automatically whenever a new occupied room is selected — see the
 						     $effect above. Never shown to the staff; it just keeps `formRoomDetail`/
@@ -1702,7 +2059,17 @@
 						</form>
 
 						{#if formRoomDetail && formFolio && formRoomDetail.booking.id === o.bookingId}
-							<div class="mt-4 rounded-lg border border-border p-3">
+							<!-- Occasional, per-guest paperwork — not needed at a glance, so it's tucked
+							     behind one toggle instead of two always-open boxes. -->
+							<Accordion.Root type="single" class="mt-4">
+								<Accordion.Item value="more-guest-actions" class="rounded-lg border border-border">
+									<Accordion.Trigger
+										class="px-3 py-2 text-sm font-semibold text-ink hover:no-underline"
+									>
+										Guest ID &amp; SC/PWD discount
+									</Accordion.Trigger>
+									<Accordion.Content class="space-y-4 px-3 pt-1 pb-3">
+							<div>
 								<div class="mb-2 flex items-center justify-between">
 									<h4 class="text-sm font-semibold text-ink">Guest ID</h4>
 									{#if formRoomDetail.booking.guestIdPhotoUrl && !idCaptureOpen}
@@ -1757,7 +2124,7 @@
 								{/if}
 							</div>
 
-							<div class="mt-4 rounded-lg border border-border p-3">
+							<div>
 								<div class="mb-2 flex items-center justify-between">
 									<h4 class="text-sm font-semibold text-ink">Senior Citizen / PWD discount</h4>
 								</div>
@@ -1837,10 +2204,16 @@
 									</Button>
 								{/if}
 							</div>
+									</Accordion.Content>
+								</Accordion.Item>
+							</Accordion.Root>
 
 							<div class="mt-4 rounded-lg border border-border p-3">
 								<div class="mb-2 flex items-center justify-between">
-									<h4 class="text-sm font-semibold text-ink">Folio</h4>
+									<h4 class="flex items-center gap-1.5 text-sm font-semibold text-ink">
+										<WalletIcon class="size-4 text-ink-muted" />
+										Folio &amp; balance
+									</h4>
 									<Badge
 										variant="outline"
 										class={formFolio.balanceCentavos > 0
@@ -2078,10 +2451,40 @@
 											refunds the rest. Taking payment for it separately first means there's
 											nothing left to forfeit, so the full deposit gets refunded.
 										</p>
+										{#if selectedHousekeeping?.pendingDamageReports.length}
+											<p
+												class="mt-2 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger"
+											>
+												<strong>Can't settle yet</strong> — Housekeeping has an unresolved damage
+												report on this room. Add the damage charge above (or ask Housekeeping to
+												dismiss it) first.
+											</p>
+										{:else if selectedHousekeeping && selectedHousekeeping.status !== 'clean'}
+											<p
+												class="mt-2 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger"
+											>
+												<strong>Can't settle yet</strong> — Housekeeping hasn't marked this room clean
+												yet.
+											</p>
+										{/if}
 										<form method="POST" action="?/settleDeposit" use:enhance class="mt-2">
 											<input type="hidden" name="bookingId" value={o.bookingId} />
-											<Button type="submit" size="sm" class="w-full">Settle deposit</Button>
+											<Button type="submit" size="sm" class="w-full" disabled={depositGateBlocked}>
+												Settle deposit
+											</Button>
 										</form>
+										{#if depositGateBlocked && canChargeCityLedger}
+											<form method="POST" action="?/settleDeposit" use:enhance class="mt-1.5">
+												<input type="hidden" name="bookingId" value={o.bookingId} />
+												<input type="hidden" name="override" value="1" />
+												<button
+													type="submit"
+													class="text-xs text-ink-muted underline underline-offset-2 hover:text-danger"
+												>
+													Admin override — settle anyway, skip the housekeeping check
+												</button>
+											</form>
+										{/if}
 									</div>
 								{:else if roomDeposit?.status === 'settled'}
 									<div class="mt-4 border-t border-border pt-3">
@@ -2329,6 +2732,9 @@
 							onclick={() => (railTab = 'departures')}
 						>
 							Departures · {data.departures.length}
+							{#if overdueDepartingCount > 0}
+								<span class="font-bold text-danger">· {overdueDepartingCount} overdue</span>
+							{/if}
 						</button>
 					</div>
 					{#if railTab === 'arrivals'}
@@ -2368,22 +2774,37 @@
 								{/each}
 							</div>
 						{/if}
-					{:else if data.departures.length === 0}
+					{:else if departureRows.length === 0}
 						<p class="text-sm text-ink-muted">No departures expected today.</p>
 					{:else}
 						<div class="divide-y divide-border">
-							{#each data.departures as d (d.bookingId)}
+							{#each departureRows as d (d.bookingId)}
 								<button
 									type="button"
-									class="flex w-full items-center justify-between py-2.5 text-left hover:opacity-80"
+									class="flex w-full items-center justify-between gap-2 py-2.5 text-left hover:opacity-80 {d.overdue
+										? 'bg-danger/5'
+										: ''}"
 									onclick={() => (selectedRoomId = d.roomId)}
 								>
-									<div>
+									<div class="min-w-0">
 										<div class="text-sm font-medium text-ink">{d.guestName}</div>
-										<div class="text-xs text-ink-muted">Room {d.roomNumber} · {d.roomTypeName}</div>
+										<div class="text-xs text-ink-muted">
+											Room {d.roomNumber} · {d.roomTypeName}
+											{#if d.balanceCentavos > 0}
+												<span class="font-medium text-danger">· Balance {peso(d.balanceCentavos)}</span>
+											{/if}
+											{#if d.hasPendingDamage}
+												<span class="font-medium text-danger">· Damage reported</span>
+											{/if}
+										</div>
 									</div>
-									<Badge variant="outline" class="border-transparent bg-ok/15 text-ok">
-										by {data.checkOutTime.slice(0, 5)}
+									<Badge
+										variant="outline"
+										class="shrink-0 border-transparent {d.overdue
+											? 'bg-danger/15 text-danger'
+											: 'bg-ok/15 text-ok'}"
+									>
+										{d.overdue ? 'Overdue' : `by ${data.checkOutTime.slice(0, 5)}`}
 									</Badge>
 								</button>
 							{/each}
@@ -3218,3 +3639,60 @@
 		{/if}
 	</Dialog.Content>
 </Dialog.Root>
+
+<style>
+	/* The status board's ruled hairline cells — same motif as the Dashboard's Rooms/Money
+	   boards (`.dash-cell` there), reused here so Front desk reaches the same visual
+	   confidence instead of the flat pill-chip legend it had before. */
+	.fd-cell {
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+		min-width: 0;
+		padding: 0.75rem 1rem;
+		background: var(--surface);
+		text-align: left;
+		transition: background-color 150ms cubic-bezier(0.16, 1, 0.3, 1);
+	}
+	.fd-cell:hover {
+		background: var(--surface-2);
+	}
+	.fd-cell:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: -2px;
+	}
+	.fd-cell-active {
+		background: color-mix(in oklch, var(--brand) 12%, var(--surface));
+	}
+	.fd-label {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+		font-size: 0.6875rem;
+		font-weight: 600;
+		color: var(--ink-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+	.fd-dot {
+		display: inline-block;
+		size: 0.375rem;
+		width: 0.375rem;
+		height: 0.375rem;
+		border-radius: 999px;
+		flex-shrink: 0;
+	}
+	.fd-figure {
+		margin-top: 0.125rem;
+		font-size: 1.75rem;
+		line-height: 1;
+		font-weight: 700;
+		letter-spacing: -0.01em;
+		font-variant-numeric: tabular-nums;
+		color: var(--ink);
+	}
+	.fd-sub {
+		font-size: 0.75rem;
+		color: var(--ink-muted);
+	}
+</style>
