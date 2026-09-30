@@ -414,6 +414,13 @@
       "when": 1790773313385,
       "tag": "0058_promo_codes",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1790774480503,
+      "tag": "0059_shift_templates",
+      "breakpoints": true
     }
   ]
 }
