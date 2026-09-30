@@ -1,4 +1,4 @@
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 import {
 	bigint,
 	boolean,
@@ -131,6 +131,45 @@ export const schedules = pgTable(
 	(t) => [
 		index('schedules_hotel_idx').on(t.hotelId),
 		uniqueIndex('schedules_employee_date_idx').on(t.employeeId, t.date)
+	]
+);
+
+// ---------------------------------------------------------------------------
+// Shift templates — app-level roster shortcuts
+// ---------------------------------------------------------------------------
+
+/**
+ * A reusable shift ("Morning 07:00–15:00", "Rest day") a roster cell can be painted
+ * with. Deliberately **not** part of the portable `@mm/hr-core` standard: applying a
+ * template just writes ordinary `schedules` rows (copying the times in), so nothing
+ * downstream ever needs to know a template existed and editing/deleting one never
+ * rewrites a roster that was already built from it.
+ */
+export const shiftTemplates = pgTable(
+	'shift_templates',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		isRestDay: boolean('is_rest_day').notNull().default(false),
+		/** Null for a rest-day template. `endTime < startTime` means the shift ends the next day. */
+		startTime: time('start_time'),
+		endTime: time('end_time'),
+		breakMinutes: integer('break_minutes').notNull().default(0),
+		/** `neutral` | `brand` | `ok` | `warning` — a fixed set of staff-theme tokens, never a free colour. */
+		tag: text('tag').notNull().default('neutral'),
+		sortOrder: integer('sort_order').notNull().default(0),
+		createdAt: createdAt(),
+		updatedAt: updatedAt(),
+		deletedAt: deletedAt()
+	},
+	(t) => [
+		index('shift_templates_hotel_idx').on(t.hotelId),
+		uniqueIndex('shift_templates_hotel_name_idx')
+			.on(t.hotelId, t.name)
+			.where(sql`deleted_at is null`)
 	]
 );
 

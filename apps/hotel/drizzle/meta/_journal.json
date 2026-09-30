@@ -407,6 +407,13 @@
       "when": 1790511230649,
       "tag": "0057_modern_dazzler",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1790774480503,
+      "tag": "0058_shift_templates",
+      "breakpoints": true
     }
   ]
 }
