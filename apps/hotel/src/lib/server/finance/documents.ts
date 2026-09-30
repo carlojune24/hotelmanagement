@@ -544,15 +544,42 @@ export async function buildInvoiceSnapshot(
 		target.kind === 'room' ? await getActiveScPwdClaim(hotelId, target.bookingId) : null;
 
 	const nonVoid = folio.charges.filter((c) => !c.voidedAt);
-	const lines: DocumentSnapshotLine[] = nonVoid.map((c) => {
+	// A redeemed promo code is already baked into the room's base charge (the folio seeds from the
+	// discounted booking total). To show the guest — and an auditor — the whole trail, the base
+	// line prints at its pre-promo price followed by a "Less: Promo" line. Display only: the
+	// lines still sum to the same total, and the VAT/sales breakdown below is untouched.
+	const promo = target.kind === 'room' ? folio.promo : null;
+	const lines: DocumentSnapshotLine[] = nonVoid.flatMap((c) => {
 		const net = c.quantity * c.unitPriceCentavos;
-		return {
-			description: c.description,
-			quantity: c.quantity,
-			unitPriceCentavos: c.unitPriceCentavos,
-			amountCentavos: c.isBaseCharge ? c.totalCentavos : net,
-			vatable: isVat && !activeScPwdClaim && (c.isBaseCharge || c.taxCentavos > 0)
-		};
+		const vatable = isVat && !activeScPwdClaim && (c.isBaseCharge || c.taxCentavos > 0);
+		if (c.isBaseCharge && promo && promo.discountCentavos > 0) {
+			const grossCentavos = c.totalCentavos + promo.discountCentavos;
+			return [
+				{
+					description: c.description,
+					quantity: c.quantity,
+					unitPriceCentavos: grossCentavos,
+					amountCentavos: grossCentavos,
+					vatable
+				},
+				{
+					description: `Less: Promo ${promo.code}${promo.terms ? ` (${promo.terms})` : ''}`,
+					quantity: 1,
+					unitPriceCentavos: -promo.discountCentavos,
+					amountCentavos: -promo.discountCentavos,
+					vatable
+				}
+			];
+		}
+		return [
+			{
+				description: c.description,
+				quantity: c.quantity,
+				unitPriceCentavos: c.unitPriceCentavos,
+				amountCentavos: c.isBaseCharge ? c.totalCentavos : net,
+				vatable
+			}
+		];
 	});
 
 	const gross = folio.chargesTotalCentavos;

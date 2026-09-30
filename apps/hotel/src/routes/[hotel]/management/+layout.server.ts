@@ -1,6 +1,7 @@
 import { redirect } from '@sveltejs/kit';
 import { requireHotelRole, roleCan } from '$lib/server/auth/rbac';
 import { countUnreadGuestMessages } from '$lib/server/guest-messages';
+import { countUpcomingReservations } from '$lib/server/reservations';
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = async ({ locals, url, route, params, depends }) => {
@@ -12,7 +13,8 @@ export const load: LayoutServerLoad = async ({ locals, url, route, params, depen
 			user: locals.user,
 			hotel: locals.hotel,
 			role: locals.role,
-			unreadMessageCount: 0
+			unreadMessageCount: 0,
+			upcomingReservationCount: 0
 		};
 	}
 
@@ -33,10 +35,16 @@ export const load: LayoutServerLoad = async ({ locals, url, route, params, depen
 		(locals.role ? roleCan(locals.role.capabilities, 'booking:read') : false);
 	const unreadMessageCount = canSeeMessages ? await countUnreadGuestMessages(locals.hotel!.id) : 0;
 
+	// Same polled invalidation as the unread-messages badge, so both stay fresh together.
+	const upcomingReservationCount = canSeeMessages
+		? await countUpcomingReservations(locals.hotel!.id)
+		: 0;
+
 	return {
 		user: locals.user,
 		hotel: locals.hotel,
 		role: locals.role,
-		unreadMessageCount
+		unreadMessageCount,
+		upcomingReservationCount
 	};
 };

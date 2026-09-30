@@ -17,6 +17,7 @@ import {
 	promoRedemptions
 } from './db/schema/index';
 import { writeAudit } from './audit';
+import { describePromoTerms } from './promo-codes';
 import type { SessionUser } from './auth/session';
 
 /** The transaction object `db.transaction(async (tx) => ...)` hands its callback — derived
@@ -383,7 +384,7 @@ export async function getFolioDetail(hotelId: string, target: FolioTarget): Prom
 	};
 }
 
-async function loadFolioPromo(hotelId: string, bookingId: string): Promise<FolioPromo | null> {
+export async function loadFolioPromo(hotelId: string, bookingId: string): Promise<FolioPromo | null> {
 	const [row] = await db
 		.select({
 			code: promoRedemptions.code,
@@ -407,12 +408,7 @@ async function loadFolioPromo(hotelId: string, bookingId: string): Promise<Folio
 	if (!row || row.discountCentavos <= 0) return null;
 
 	const grossCentavos = row.netCentavos + row.discountCentavos;
-	const terms =
-		row.discountType === 'percentage' && row.discountBps != null
-			? `${row.discountBps / 100}% off`
-			: row.discountType === 'fixed_amount' && row.discountAmountCentavos != null
-				? `₱${(row.discountAmountCentavos / 100).toFixed(2)} off`
-				: null;
+	const terms = describePromoTerms(row);
 	return {
 		code: row.code,
 		terms,

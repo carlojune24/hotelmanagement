@@ -64,6 +64,8 @@ async function loadOrderLines(orderId: string) {
 	return { roomLines, hallLines };
 }
 
+import { getOrderPromo } from '$lib/server/promo-codes';
+
 export const load: PageServerLoad = async ({ locals, params, url }) => {
 	const hotelId = locals.hotel!.id;
 	const order = await loadGuardedOrder(hotelId, params.orderId, url.searchParams.get('t'));
@@ -76,6 +78,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 
 	const [guest] = await db.select().from(guests).where(eq(guests.id, order.guestId));
 	const { roomLines, hallLines } = await loadOrderLines(order.id);
+	const promo = await getOrderPromo(order.id);
 
 	return {
 		order: {
@@ -89,6 +92,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 			// What PayMongo will charge now; the rest is paid at the hotel.
 			dueNowCentavos: order.amountDueNowCentavos ?? order.totalCentavos
 		},
+		promo,
 		guest: { fullName: guest!.fullName, email: guest!.email },
 		roomLines,
 		hallLines,

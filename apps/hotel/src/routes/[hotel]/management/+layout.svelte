@@ -178,6 +178,15 @@
 												{data.unreadMessageCount}
 											</Badge>
 										{/if}
+										{#if item.seg === 'reservations' && data.upcomingReservationCount > 0}
+											<Badge
+												variant="outline"
+												class="ml-auto border-transparent bg-brand/15 px-1.5 text-brand"
+												title="Upcoming reservations"
+											>
+												{data.upcomingReservationCount}
+											</Badge>
+										{/if}
 									</a>
 								{/snippet}
 							</Sidebar.MenuButton>

@@ -154,3 +154,22 @@ describe('renderBookingConfirmation — downpayment', () => {
 		}
 	});
 });
+
+describe('renderBookingConfirmation — promo code', () => {
+	const promo = { code: 'SUMMER10', terms: '10% off', discountCentavos: 100_80 };
+
+	it('shows the code, its terms and the amount taken off, in both html and text', () => {
+		const r = renderBookingConfirmation(base({ promo, totalCentavos: 907_20 }));
+		expect(r.html).toContain('Promo SUMMER10 (10% off)');
+		expect(r.html).toContain('₱100.80');
+		expect(r.text).toContain('PROMO       -₱100.80   (SUMMER10, 10% off)');
+	});
+
+	it('shows no promo row when no code was redeemed', () => {
+		for (const promo of [undefined, null]) {
+			const r = renderBookingConfirmation(base({ promo }));
+			expect(r.html).not.toContain('Promo ');
+			expect(r.text).not.toContain('PROMO');
+		}
+	});
+});

@@ -8,6 +8,8 @@
 	import CircleXIcon from '@lucide/svelte/icons/circle-x';
 	import { getContext } from 'svelte';
 	import type { CartStore } from '$lib/cart.svelte';
+	import { FEW_LEFT_ROOMS } from '$lib/day-availability';
+	import { formatStayDateShort, nightsLabel } from '$lib/stay-dates';
 	import type { BedConfigEntry } from '$lib/server/db/schema/inventory';
 	import type { AmenityHighlight, AvailableRatePlan, AvailableRoomType, CancellationTerms } from '$lib/server/availability';
 	import { MAX_ROOMS_PER_LINE, addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
@@ -74,6 +76,34 @@
 		}
 		return price.totalCentavos;
 	}
+
+	/** "₱4,200.00 × 3 nights" when every night costs the same, otherwise the average — so the
+	 *  guest can see how a room's price is built. Null for a single-night stay. */
+	function nightlyNote(plan: AvailableRatePlan): string | null {
+		const nights = plan.price.nights;
+		if (nights.length < 2) return null;
+		const first = nights[0]!.priceCentavos;
+		const even = nights.every((n) => n.priceCentavos === first);
+		const avg = Math.round(plan.price.subtotalCentavos / nights.length);
+		return even
+			? `${peso(first)} × ${nightsLabel(nights.length)}`
+			: `avg ${peso(avg)} × ${nightsLabel(nights.length)}`;
+	}
+
+	/** How many rooms of this rate are already on the invoice for these dates. */
+	const addedCount = (planId: string) =>
+		cart.items.reduce(
+			(sum, i) =>
+				i.kind === 'room' &&
+				i.ratePlanId === planId &&
+				i.checkIn === data.checkIn &&
+				i.checkOut === data.checkOut
+					? sum + i.roomCount
+					: sum,
+			0
+		);
+
+	const lowStock = (rt: AvailableRoomType) => rt.availableRooms <= FEW_LEFT_ROOMS;
 
 	function cancellationLabel(c: CancellationTerms | null): { text: string; free: boolean } {
 		if (c && c.freeCancelHours != null) {
@@ -147,75 +177,115 @@
 <div>
 	<a href={backHref} class="storefront-step-back">← Back to dates</a>
 	<h1 class="mt-2 ledger-display text-2xl">Select rooms &amp; rates</h1>
-	<p class="mt-1 text-sm text-[var(--ledger-ink-muted)]">
-		<span class="ledger-data">{data.checkIn}</span> →
-		<span class="ledger-data">{data.checkOut}</span>
-		· <span class="ledger-data">{data.nights}</span> night{data.nights === 1 ? '' : 's'} ·
-		<span class="ledger-data">{data.adults}</span> adult{data.adults === 1 ? '' : 's'}
-		{#if data.children > 0}
-			· <span class="ledger-data">{data.children}</span> child{data.children === 1 ? '' : 'ren'}
-		{/if}
-	</p>
+
+	<!-- Your stay: the dates and party in words, with a one-tap way to change them. -->
+	<div
+		class="mt-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 rounded-md border border-[var(--ledger-rule)] bg-[var(--ledger-paper-2)] px-4 py-3"
+	>
+		<div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+			<span class="ledger-data text-[0.9375rem]">{formatStayDateShort(data.checkIn)}</span>
+			<span class="text-[var(--ledger-ink-muted)]" aria-hidden="true">→</span>
+			<span class="ledger-data text-[0.9375rem]">{formatStayDateShort(data.checkOut)}</span>
+			<span class="text-sm text-[var(--ledger-ink-muted)]">
+				· {nightsLabel(data.nights)} · {data.adults} adult{data.adults === 1 ? '' : 's'}{#if data.children > 0}, {data.children}
+					child{data.children === 1 ? '' : 'ren'}{/if}
+			</span>
+		</div>
+		<a
+			href={backHref}
+			class="text-sm font-medium text-[var(--hotel-accent-deep)] underline underline-offset-2"
+		>
+			Change dates
+		</a>
+	</div>
 
 	{#if data.results.length === 0}
-		<p class="storefront-section-lede mt-8">
-			Nothing is free for those dates and party size right now. Try different dates, or fewer
-			guests per room.
-		</p>
+		<div class="mt-8 rounded-md border border-[var(--ledger-rule)] px-5 py-6">
+			<p class="ledger-display text-lg">Nothing is free for those dates</p>
+			<p class="mt-1 text-sm text-[var(--ledger-ink-muted)]">
+				Every room that fits your party is booked. Try different dates, or fewer guests per room.
+			</p>
+			<a href={backHref} class="ledger-btn-primary mt-4 inline-block text-sm">Choose other dates</a>
+		</div>
 	{:else}
-		<div class="mt-8 border-t border-[var(--ledger-rule)]">
+		<p class="mt-6 text-sm text-[var(--ledger-ink-muted)]">
+			{data.results.length} room type{data.results.length === 1 ? '' : 's'} available · prices are for
+			your whole stay, taxes and fees included.
+		</p>
+
+		<div class="mt-4 space-y-8">
 			{#each data.results as roomType (roomType.id)}
 				{@const cover = coverPhoto(roomType.photos)}
-				<details class="ledger-room-row group" open={roomType.id === data.highlightRoomTypeId}>
-					<summary class="flex w-full cursor-pointer flex-col sm:flex-row">
-						<div class="ledger-room-photo">
+				{@const highlighted = roomType.id === data.highlightRoomTypeId}
+				<article
+					class="overflow-hidden rounded-md border"
+					style="border-color: {highlighted ? 'var(--hotel-accent)' : 'var(--ledger-rule)'};"
+				>
+					<div class="flex flex-col sm:flex-row">
+						<div class="ledger-room-photo sm:w-64 sm:shrink-0">
 							<span class="ledger-room-photo-mark">{roomType.name.charAt(0)}</span>
 							{#if cover}<img src={cover} alt="" onerror={hidePhoto} />{/if}
 						</div>
-						<div class="ledger-room-body">
-							<div>
-								<div class="ledger-display text-xl">{roomType.name}</div>
-								{#if roomType.description}
-									<p class="mt-0.5 max-w-md text-sm text-[var(--ledger-ink-muted)]">
-										{roomType.description}
-									</p>
-								{/if}
-								<p class="mt-1 text-xs text-[var(--ledger-ink-muted)]">
-									Sleeps up to <span class="ledger-data">{roomType.maxOccupancy}</span> ·
-									<span class="ledger-data">{roomType.availableRooms}</span> left
+						<div class="flex-1 px-4 py-4 sm:px-5">
+							<div class="flex flex-wrap items-start justify-between gap-2">
+								<h2 class="ledger-display text-xl">{roomType.name}</h2>
+								<span
+									class="rounded-full border px-2.5 py-0.5 text-xs font-semibold"
+									style={lowStock(roomType)
+										? 'color: var(--hotel-accent-deep); border-color: var(--hotel-accent);'
+										: 'color: var(--ledger-ink-muted); border-color: var(--ledger-rule);'}
+								>
+									{lowStock(roomType)
+										? `Only ${roomType.availableRooms} left`
+										: `${roomType.availableRooms} rooms available`}
+								</span>
+							</div>
+							{#if roomType.description}
+								<p class="mt-1 max-w-xl text-sm text-[var(--ledger-ink-muted)]">
+									{roomType.description}
 								</p>
-								{@render glanceRow(
-									roomType.bedConfiguration,
-									roomType.wheelchairAccessible,
-									roomType.highlightedAmenities
-								)}
-								<a href={roomDetailHref(roomType)} class="storefront-view-details-btn">
-									View full details →
-								</a>
-							</div>
-							<div class="ledger-data text-right text-xl">
-								from {peso(Math.min(...roomType.ratePlans.map((p) => p.price.totalCentavos)))}
-							</div>
+							{/if}
+							<p class="mt-2 text-xs text-[var(--ledger-ink-muted)]">
+								Sleeps up to <span class="ledger-data">{roomType.maxOccupancy}</span>
+								{#if roomType.sizeSqm}· <span class="ledger-data">{roomType.sizeSqm}</span> m²{/if}
+							</p>
+							{@render glanceRow(
+								roomType.bedConfiguration,
+								roomType.wheelchairAccessible,
+								roomType.highlightedAmenities
+							)}
+							<a href={roomDetailHref(roomType)} class="storefront-view-details-btn">
+								View photos &amp; full details →
+							</a>
 						</div>
-					</summary>
+					</div>
 
-					<div class="ledger-hairline bg-[var(--ledger-paper-2)]">
+					<div class="border-t border-[var(--ledger-rule)] bg-[var(--ledger-paper-2)]">
+						<div class="ledger-label px-4 py-2 sm:px-5">Choose a rate</div>
 						{#each roomType.ratePlans as plan (plan.id)}
 							{@const cancel = cancellationLabel(plan.cancellation)}
 							{@const count = roomCounts[plan.id] ?? 1}
+							{@const inCart = addedCount(plan.id)}
+							{@const note = nightlyNote(plan)}
 							<div
-								class="ledger-hairline flex flex-wrap items-center justify-between gap-3 px-4 py-3 last:border-b-0 sm:pl-8"
+								class="grid gap-4 border-t border-[var(--ledger-rule)] px-4 py-4 sm:grid-cols-[1fr_auto] sm:px-5"
 							>
-								<div>
-									<div class="text-sm font-semibold text-[var(--ledger-ink)]">
+								<div class="min-w-0">
+									<div class="text-[0.9375rem] font-semibold text-[var(--ledger-ink)]">
 										{plan.name}
 									</div>
 									{#if plan.inclusions.length > 0}
-										<p class="mt-0.5 text-xs text-[var(--ledger-ink-muted)]">
-											{plan.inclusions.join(' · ')}
-										</p>
+										<ul
+											class="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-[var(--ledger-ink-muted)]"
+										>
+											{#each plan.inclusions as inc (inc)}
+												<li class="flex items-center gap-1">
+													<CircleCheckIcon class="size-3.5" aria-hidden="true" />{inc}
+												</li>
+											{/each}
+										</ul>
 									{/if}
-									<span class="storefront-cancel-badge" class:is-free={cancel.free}>
+									<span class="storefront-cancel-badge mt-2" class:is-free={cancel.free}>
 										{#if cancel.free}<CircleCheckIcon aria-hidden="true" />{:else}<CircleXIcon
 												aria-hidden="true"
 											/>{/if}
@@ -227,54 +297,69 @@
 										</p>
 									{/if}
 									{#if roomType.extraBedsNeeded > 0}
-										<p class="mt-0.5 text-xs text-[var(--ledger-ink-muted)]">
+										<p class="mt-1 text-xs text-[var(--ledger-ink-muted)]">
 											Includes {roomType.extraBedsNeeded} extra bed{roomType.extraBedsNeeded === 1
 												? ''
 												: 's'} for your party size{#if plan.extraBedFeeCentavos}
-												({peso(roomType.extraBedsNeeded * plan.extraBedFeeCentavos)})
-											{/if}
+												({peso(roomType.extraBedsNeeded * plan.extraBedFeeCentavos)}){/if}
 										</p>
 									{/if}
-									<div class="storefront-stepper-row mt-2 max-w-xs">
-										<span class="text-sm text-[var(--ledger-ink)]">Rooms</span>
-										<div class="storefront-stepper">
+								</div>
+
+								<div class="flex flex-col gap-3 sm:w-64 sm:items-end">
+									<div class="sm:text-right">
+										<div class="ledger-data text-xl font-semibold">
+											{peso(lineTotalCentavos(roomType, plan, count))}
+										</div>
+										<div class="text-xs text-[var(--ledger-ink-muted)]">
+											total for {nightsLabel(data.nights)}{count > 1 ? ` · ${count} rooms` : ''}
+										</div>
+										{#if note}
+											<div class="ledger-data mt-0.5 text-xs text-[var(--ledger-ink-muted)]">
+												{note}{count > 1 ? ` × ${count} rooms` : ''}
+											</div>
+										{/if}
+									</div>
+									<div class="flex items-center justify-between gap-3 sm:justify-end">
+										<div class="storefront-stepper" role="group" aria-label="Number of rooms">
 											<button
 												type="button"
 												aria-label="Fewer rooms"
-												onclick={() =>
-													(roomCounts[plan.id] = clampRoomCount(roomType, count - 1))}
+												disabled={count <= 1}
+												onclick={() => (roomCounts[plan.id] = clampRoomCount(roomType, count - 1))}
 												><MinusIcon /></button
 											>
 											<span class="ledger-data">{count}</span>
 											<button
 												type="button"
 												aria-label="More rooms"
-												onclick={() =>
-													(roomCounts[plan.id] = clampRoomCount(roomType, count + 1))}
+												disabled={count >= Math.min(MAX_ROOMS_PER_LINE, roomType.availableRooms)}
+												onclick={() => (roomCounts[plan.id] = clampRoomCount(roomType, count + 1))}
 												><PlusIcon /></button
 											>
 										</div>
-									</div>
-								</div>
-								<div class="flex items-center gap-4">
-									<div class="ledger-data text-right">
-										{peso(lineTotalCentavos(roomType, plan, count))}
-										<span class="ledger-label block"
-											>total{count > 1 ? ` · ${count} rooms` : ''}</span
+										<Button
+											type="button"
+											onclick={() => addRoomToCart(roomType, plan)}
+											class="ledger-btn-primary min-h-11 text-sm !px-5"
 										>
+											{inCart > 0 ? 'Add another' : 'Add to invoice'}
+										</Button>
 									</div>
-									<Button
-										type="button"
-										onclick={() => addRoomToCart(roomType, plan)}
-										class="ledger-btn-primary text-sm !px-4 !py-2"
-									>
-										Add to invoice
-									</Button>
+									{#if inCart > 0}
+										<p
+											class="flex items-center gap-1 text-xs font-medium text-[var(--hotel-accent-deep)]"
+											role="status"
+										>
+											<CircleCheckIcon class="size-4" aria-hidden="true" />
+											{inCart} room{inCart === 1 ? '' : 's'} added to your invoice
+										</p>
+									{/if}
 								</div>
 							</div>
 						{/each}
 					</div>
-				</details>
+				</article>
 			{/each}
 		</div>
 	{/if}

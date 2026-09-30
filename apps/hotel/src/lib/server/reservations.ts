@@ -71,6 +71,25 @@ export interface ReservationLine {
 }
 
 /**
+ * How many room stays + hall events sit in the Reservations "Upcoming" tab (not yet checked in,
+ * not cancelled) — the sidebar badge. Uses the same statuses as the tab (`VIEW_STATUSES`), with
+ * no search/type filter, so the badge and the tab's own count always agree.
+ */
+export async function countUpcomingReservations(hotelId: string): Promise<number> {
+	const statuses = sql.join(
+		VIEW_STATUSES.upcoming.map((st) => sql`${st}`),
+		sql`, `
+	);
+	const [row] = await db.execute<{ n: string | number }>(sql`
+		select (
+			(select count(*) from ${bookings} where hotel_id = ${hotelId} and status::text in (${statuses}))
+			+ (select count(*) from ${hallBookings} h join ${orders} o on o.id = h.order_id
+				where o.hotel_id = ${hotelId} and h.status::text in (${statuses}))
+		) as n`);
+	return Number(row?.n ?? 0);
+}
+
+/**
  * One page of the staff Reservations list — room stays and hall events together, filtered by
  * tab (see `$lib/reservation-views`), type and search, ordered the way each tab is read, and
  * paged in the database (the list used to load every booking the hotel ever had). Also

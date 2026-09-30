@@ -29,7 +29,13 @@ import { recordOrderPayment, refundPayment, voidPayment } from '$lib/server/fina
 import { openReceivable } from '$lib/server/finance/receivables';
 import { getFinanceSettings } from '$lib/server/finance/settings';
 import { getDefaultOpenShift } from '$lib/server/finance/shifts';
-import { FolioError, getOrderIdForTarget, getOrderLedger, type FolioTarget } from '$lib/server/folio';
+import {
+	FolioError,
+	getOrderIdForTarget,
+	getOrderLedger,
+	loadFolioPromo,
+	type FolioTarget
+} from '$lib/server/folio';
 import { summariseRefund } from '$lib/refund-status';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -258,6 +264,14 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 	);
 	const ledgerOf = new Map(ledger.lines.map((l) => [l.id, l]));
 
+	// Promo-code trail per room (gross → code → discount → net). The room's folio line already
+	// carries the net amount, so this is display only — it explains why the stay line is lower.
+	const promoByLine = new Map(
+		await Promise.all(
+			roomRows.map(async (r) => [r.id, await loadFolioPromo(hotel.id, r.id)] as const)
+		)
+	);
+
 	const buildLine = (
 		base: { id: string; status: string; checkIn?: string; checkOut?: string },
 		kind: 'room' | 'hall',
@@ -279,6 +293,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			title,
 			detail,
 			status: base.status,
+			promo: promoByLine.get(base.id) ?? null,
 			chargesCentavos: l?.chargesCentavos ?? 0,
 			charges: chargeView(base.id, l?.chargesCentavos ?? 0, stay),
 			depositAppliedCentavos: depositApplied,
@@ -378,6 +393,15 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			? roleCan(locals.role.capabilities, 'booking:write')
 			: false;
 
+	const promoLines = lines.flatMap((l) => (l.promo ? [l.promo] : []));
+	const orderPromo =
+		promoLines.length > 0
+			? {
+					code: promoLines[0]!.code,
+					terms: promoLines[0]!.terms,
+					discountCentavos: promoLines.reduce((sum, p) => sum + p.discountCentavos, 0)
+				}
+			: null;
 	const cancelledCount = lines.filter((l) => l.cancelled).length;
 	const depositAppliedTotal = lines.reduce((sum, l) => sum + l.depositAppliedCentavos, 0);
 	const cityLedgerTotal = lines.reduce((sum, l) => sum + l.cityLedgerMovedCentavos, 0);
@@ -389,7 +413,9 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			code: order.id.slice(0, 8).toUpperCase(),
 			status: order.status,
 			totalCentavos: order.totalCentavos,
-			amountDueNowCentavos: order.amountDueNowCentavos
+			amountDueNowCentavos: order.amountDueNowCentavos,
+			/** The promo code redeemed on this booking, summed across its rooms — null if none. */
+			promo: orderPromo
 		},
 		guest: {
 			fullName: guest?.fullName ?? '—',

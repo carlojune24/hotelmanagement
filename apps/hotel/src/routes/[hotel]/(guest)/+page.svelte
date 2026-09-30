@@ -28,11 +28,29 @@
 	import StorefrontNav from '$lib/components/storefront/storefront-nav.svelte';
 	import StorefrontFooter from '$lib/components/storefront/storefront-footer.svelte';
 	import StorefrontLightbox from '$lib/components/storefront/storefront-lightbox.svelte';
+	import AvailabilityRangePicker from '$lib/components/storefront/availability-range-picker.svelte';
+	import { FEW_LEFT_ROOMS } from '$lib/day-availability';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 
 	const cart = getContext<CartStore>('cart');
+
+	// Dates chosen in the availability calendar; submitted to /rooms by the search form.
+	let checkIn = $state('');
+	let checkOut = $state('');
+
+	/** "N rooms available tonight" / "Only N left" / "Fully booked tonight" for a room card —
+	 *  real counts from live bookings, never invented. Null when the hotel has no rooms of the
+	 *  type set up yet, so nothing is claimed. */
+	function stockBadge(roomTypeId: string): { text: string; tone: 'ok' | 'low' | 'out' } | null {
+		const s = data.stockByRoomType[roomTypeId];
+		if (!s || s.totalRooms === 0) return null;
+		if (s.freeTonight === 0) return { text: 'Fully booked tonight', tone: 'out' };
+		if (s.freeTonight <= FEW_LEFT_ROOMS)
+			return { text: `Only ${s.freeTonight} left tonight`, tone: 'low' };
+		return { text: `${s.freeTonight} of ${s.totalRooms} rooms free tonight`, tone: 'ok' };
+	}
 
 	// No "add to invoice, then separately open the floating invoice" step for halls —
 	// booking commits and takes the guest straight into the same guest-info → review →
@@ -285,18 +303,30 @@
 		<form
 			method="GET"
 			action="/{data.hotel.slug}/rooms"
-			class="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+			class="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-stretch"
 		>
-			<div>
-				<Label for="checkIn" class="ledger-label">Arrival date</Label>
-				<Input id="checkIn" name="checkIn" type="date" required class="ledger-field mt-1" />
-			</div>
-			<div>
-				<Label for="checkOut" class="ledger-label">Departure date</Label>
-				<Input id="checkOut" name="checkOut" type="date" required class="ledger-field mt-1" />
-			</div>
-			<Button type="submit" class="ledger-btn-primary">Check availability</Button>
+			<AvailabilityRangePicker
+				days={data.dayAvailability}
+				today={data.today}
+				bind:checkIn
+				bind:checkOut
+			/>
+			<Button
+				type="submit"
+				class="ledger-btn-primary h-auto min-h-[3.25rem] px-8"
+				disabled={!checkIn || !checkOut}
+			>
+				Check availability
+			</Button>
 		</form>
+		<p class="mt-3 text-xs text-[var(--ledger-ink-muted)]">
+			{#if checkIn && checkOut}
+				Great — we'll show every room and rate open for these dates.
+			{:else}
+				Pick your arrival and departure. Sold-out days are crossed out, and days with only a few
+				rooms left are marked.
+			{/if}
+		</p>
 	</div>
 </div>
 
@@ -383,6 +413,10 @@
 					<div class="storefront-room-card-photo">
 						<span class="ledger-room-photo-mark">{rt.name.charAt(0)}</span>
 						{#if cover}<img src={cover} alt="" onerror={hidePhoto} />{/if}
+						{#if stockBadge(rt.id)}
+							{@const stock = stockBadge(rt.id)!}
+							<span class="storefront-room-card-stock is-{stock.tone}">{stock.text}</span>
+						{/if}
 						<div class="storefront-room-card-scrim"></div>
 						<div class="storefront-room-card-overlay">
 							<div class="storefront-room-card-name">{rt.name}</div>
@@ -413,6 +447,34 @@
 									<span class="storefront-room-card-details">Details →</span>
 								</div>
 							</div>
+						</div>
+					</div>
+					<div class="storefront-room-card-body">
+						{#if rt.description}
+							<p class="storefront-room-card-desc">{rt.description}</p>
+						{/if}
+						{#if rt.highlightedAmenities.length > 0}
+							<ul class="storefront-room-card-chips">
+								{#each rt.highlightedAmenities.slice(0, 3) as a (a.name)}
+									<li>{a.name}</li>
+								{/each}
+							</ul>
+						{/if}
+						<div class="storefront-room-card-rates">
+							{#if rt.startingPriceCentavos != null}
+								<span>
+									<span class="storefront-room-card-rates-from">from</span>
+									<span class="ledger-data storefront-room-card-rates-price"
+										>{peso(rt.startingPriceCentavos)}</span
+									>
+									<span class="storefront-room-card-rates-from">/ night</span>
+								</span>
+								{#if rt.ratePlanCount > 1}
+									<span class="storefront-room-card-rates-count">{rt.ratePlanCount} rate options</span>
+								{/if}
+							{:else}
+								<span class="storefront-room-card-rates-from">Rates coming soon</span>
+							{/if}
 						</div>
 					</div>
 				</a>

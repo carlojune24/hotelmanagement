@@ -19,6 +19,12 @@ import {
 } from './db/schema/index';
 import { nightsBetween, priceStay, type PriceBreakdown } from './pricing';
 import { isPartialDownpayment } from '$lib/downpayment';
+import {
+	addDays,
+	computeDayAvailability,
+	roomsLeftForType,
+	type DayAvailability
+} from '$lib/day-availability';
 import { resolveOccupancyPlan, type OccupancyPlan } from '$lib/occupancy';
 
 export interface AmenityHighlight {
@@ -444,6 +450,8 @@ export interface BrowsableRoomType {
 	smokingPolicy: 'non_smoking' | 'smoking_allowed';
 	/** Lowest active rate plan's nightly base price. Null = no bookable rate plan configured yet. */
 	startingPriceCentavos: number | null;
+	/** How many active rate plans this room type sells — "3 rate options" on the card. */
+	ratePlanCount: number;
 	/** Up to 4 highlighted amenities for the room card — the full list lives on the room type's own settings page. */
 	highlightedAmenities: AmenityHighlight[];
 	/** Full, uncapped amenity list grouped-ready for the room details dialog. */
@@ -484,7 +492,9 @@ export async function listBrowsableRoomTypes(
 	if (types.length === 0) return [];
 
 	const minPriceByType = new Map<string, number>();
+	const planCountByType = new Map<string, number>();
 	for (const p of plans) {
+		planCountByType.set(p.roomTypeId, (planCountByType.get(p.roomTypeId) ?? 0) + 1);
 		const current = minPriceByType.get(p.roomTypeId);
 		if (current == null || p.basePriceCentavos < current) {
 			minPriceByType.set(p.roomTypeId, p.basePriceCentavos);
@@ -509,6 +519,7 @@ export async function listBrowsableRoomTypes(
 		grabBars: t.grabBars,
 		smokingPolicy: t.smokingPolicy,
 		startingPriceCentavos: minPriceByType.get(t.id) ?? null,
+		ratePlanCount: planCountByType.get(t.id) ?? 0,
 		highlightedAmenities: highlightsByType.get(t.id) ?? [],
 		amenities: amenitiesByType.get(t.id) ?? []
 	}));
@@ -690,5 +701,67 @@ export async function getRoomTypeAvailabilityCalendar(
 		totalRooms,
 		lanes: Math.max(totalRooms, laneFreeFrom.length),
 		bars
+	};
+}
+
+/**
+ * Everything the guest homepage needs to show real availability: per-night status across the
+ * whole hotel (for the date picker) and, per room type, how many rooms are free tonight and how
+ * many exist (for the room cards). Counts come from live bookings only — same room total and
+ * blocking statuses as the front-desk tape chart (`getRoomTypeAvailabilityCalendar`) — so what a
+ * guest sees is what staff see. Anonymous by design: no guest names, only counts.
+ */
+export async function getStorefrontAvailability(
+	hotelId: string,
+	from: string,
+	days: number
+): Promise<{
+	days: DayAvailability[];
+	stockByRoomType: Record<string, { totalRooms: number; freeTonight: number }>;
+}> {
+	const to = addDays(from, days);
+	const [roomCounts, held] = await Promise.all([
+		db
+			.select({ roomTypeId: rooms.roomTypeId, n: count() })
+			.from(rooms)
+			.where(
+				and(
+					eq(rooms.hotelId, hotelId),
+					eq(rooms.isActive, true),
+					eq(rooms.operationalStatus, 'available')
+				)
+			)
+			.groupBy(rooms.roomTypeId),
+		db
+			.select({
+				roomTypeId: bookingRooms.roomTypeId,
+				checkIn: bookings.checkIn,
+				checkOut: bookings.checkOut,
+				quantity: bookingRooms.quantity
+			})
+			.from(bookingRooms)
+			.innerJoin(bookings, eq(bookings.id, bookingRooms.bookingId))
+			.where(
+				and(
+					eq(bookings.hotelId, hotelId),
+					inArray(bookings.status, [...CALENDAR_BLOCKING_BOOKING_STATUSES]),
+					lt(bookings.checkIn, to),
+					gt(bookings.checkOut, from)
+				)
+			)
+	]);
+
+	const types = roomCounts
+		.filter((r): r is { roomTypeId: string; n: number } => r.roomTypeId != null)
+		.map((r) => ({ id: r.roomTypeId, totalRooms: Number(r.n) }));
+
+	return {
+		days: computeDayAvailability(types, held, from, days),
+		stockByRoomType: Object.fromEntries(
+			types.map((t) => [
+				t.id,
+				{ totalRooms: t.totalRooms, freeTonight: roomsLeftForType(t, held, from) }
+			])
+		)
 	};
 }

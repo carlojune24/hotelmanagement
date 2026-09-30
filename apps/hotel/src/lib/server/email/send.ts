@@ -1,7 +1,40 @@
 import { and, eq } from 'drizzle-orm';
 import { db } from '../db/index';
 import { emailLog, type EmailType } from '../db/schema/index';
+import type { Transporter } from 'nodemailer';
 import { getMailerForHotel, getPlatformMailer } from './transport';
+
+/** Network-level failures that are usually momentary (DNS server hiccup, dropped connection),
+ *  as opposed to a real problem like a wrong password or a bad recipient. */
+const TRANSIENT_NET_CODES = new Set([
+	'EAI_FAIL',
+	'EAI_AGAIN',
+	'ECONNRESET',
+	'ETIMEDOUT',
+	'ESOCKET',
+	'ECONNECTION'
+]);
+const RETRY_DELAYS_MS = [750, 2000];
+
+/** `transport.sendMail`, retried a couple of times when the failure is a transient network
+ *  error — e.g. `getaddrinfo EAI_FAIL smtp.gmail.com` when DNS blips for a moment. Anything
+ *  else (auth, rejected recipient) throws immediately, since retrying can't fix it. */
+async function sendMailWithRetry(
+	transport: Transporter,
+	message: Parameters<Transporter['sendMail']>[0]
+) {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			return await transport.sendMail(message);
+		} catch (e) {
+			const code = (e as { code?: string })?.code;
+			const delay = RETRY_DELAYS_MS[attempt];
+			if (!code || !TRANSIENT_NET_CODES.has(code) || delay === undefined) throw e;
+			console.warn(`[email] transient ${code}, retrying in ${delay}ms`);
+			await new Promise((r) => setTimeout(r, delay));
+		}
+	}
+}
 
 export interface SendMailInput {
 	hotelId: string;
@@ -37,7 +70,7 @@ export interface SendMailResult {
 export async function sendMail(input: SendMailInput): Promise<SendMailResult> {
 	try {
 		const mailer = await getMailerForHotel(input.hotelId, input.hotelName);
-		const info = await mailer.transport.sendMail({
+		const info = await sendMailWithRetry(mailer.transport, {
 			from: mailer.from,
 			replyTo: mailer.replyTo,
 			to: input.to,
@@ -103,7 +136,7 @@ export async function sendPlatformMail(input: {
 }): Promise<SendMailResult> {
 	try {
 		const mailer = getPlatformMailer();
-		const info = await mailer.transport.sendMail({
+		const info = await sendMailWithRetry(mailer.transport, {
 			from: mailer.from,
 			replyTo: mailer.replyTo,
 			to: input.to,

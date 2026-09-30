@@ -14,6 +14,15 @@
 		detail: string;
 		status: string;
 		charges: Charge[];
+		/** Promo-code trail for this room (display only — `charges` already hold the net amount). */
+		promo: {
+			code: string;
+			terms: string | null;
+			grossCentavos: number;
+			discountCentavos: number;
+			effectiveBps: number;
+			netCentavos: number;
+		} | null;
 		chargesCentavos: number;
 		deposit: {
 			status: string;
@@ -48,7 +57,11 @@
 	}
 	interface Data {
 		hotel: { name: string; legalName: string | null; address: string | null };
-		order: { code: string; status: string };
+		order: {
+			code: string;
+			status: string;
+			promo: { code: string; terms: string | null; discountCentavos: number } | null;
+		};
 		guest: { fullName: string; email: string; phone: string | null };
 		lines: Line[];
 		payments: Payment[];
@@ -137,6 +150,17 @@
 				{/if}
 				<table>
 					<tbody>
+						{#if l.promo}
+							<tr class="ts-note">
+								<td colspan="2">
+									Promo {l.promo.code}{l.promo.terms ? ` (${l.promo.terms})` : ''} applied — room price
+									before promo {peso(l.promo.grossCentavos)}, less {peso(l.promo.discountCentavos)}
+									({(l.promo.effectiveBps / 100).toFixed(2).replace(/\.?0+$/, '')}% of this room) =
+									{peso(l.promo.netCentavos)} charged. The discount is already deducted from the
+									room stay below.
+								</td>
+							</tr>
+						{/if}
 						{#each l.charges as c (c.id)}
 							<tr class:ts-void={c.voided}>
 								<td>{c.description}{c.quantity > 1 ? ` × ${c.quantity}` : ''}{c.voided ? ' (voided)' : ''}</td>
@@ -232,6 +256,15 @@
 				{#each d.lines.filter((x) => x.cancelled) as l (l.id)}
 					<tr><td>{l.title} — cancelled ({refundText(l)})</td><td class="ts-num">{peso(l.feeKeptCentavos)}</td></tr>
 				{/each}
+				{#if d.order.promo}
+					<tr class="ts-note">
+						<td colspan="2">
+							Promo {d.order.promo.code}{d.order.promo.terms ? ` (${d.order.promo.terms})` : ''} saved
+							the guest {peso(d.order.promo.discountCentavos)} — already deducted from the charges above
+							(before promo: {peso(d.ledger.chargesTotalCentavos + d.order.promo.discountCentavos)}).
+						</td>
+					</tr>
+				{/if}
 				<tr class="ts-sub"><td>Total charges</td><td class="ts-num">{peso(d.ledger.chargesTotalCentavos)}</td></tr>
 				{#if d.ledger.depositAppliedTotalCentavos > 0}
 					<tr><td>Less: security deposits applied to damage</td><td class="ts-num">−{peso(d.ledger.depositAppliedTotalCentavos)}</td></tr>

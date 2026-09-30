@@ -2100,3 +2100,77 @@
 	outline: 2px solid var(--hotel-accent);
 	outline-offset: 2px;
 }
+
+/* Room card: live stock badge on the photo + a ruled detail strip under it. Stock is real
+   ("N of M free tonight", from bookings) — never invented urgency. */
+.storefront-room-card-stock {
+	position: absolute;
+	top: 0.75rem;
+	left: 0.75rem;
+	z-index: 2;
+	padding: 0.25rem 0.625rem;
+	font-size: 0.75rem;
+	font-weight: 600;
+	color: var(--ledger-ink);
+	background: var(--ledger-paper);
+	border: 1px solid var(--ledger-rule);
+	border-radius: 999px;
+}
+.storefront-room-card-stock.is-low {
+	color: var(--hotel-accent-deep);
+	border-color: var(--hotel-accent);
+}
+.storefront-room-card-stock.is-out {
+	color: var(--ledger-ink-muted);
+}
+.storefront-room-card-body {
+	padding: 0.875rem 0.125rem 0;
+	border-top: 1px solid var(--ledger-rule);
+}
+.storefront-room-card-desc {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+	font-size: 0.875rem;
+	line-height: 1.5;
+	color: var(--ledger-ink-muted);
+}
+.storefront-room-card-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.375rem;
+	margin-top: 0.625rem;
+	padding: 0;
+	list-style: none;
+}
+.storefront-room-card-chips li {
+	padding: 0.125rem 0.5rem;
+	font-size: 0.75rem;
+	color: var(--ledger-ink-muted);
+	border: 1px solid var(--ledger-rule);
+	border-radius: 999px;
+}
+.storefront-room-card-rates {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 0.25rem 0.75rem;
+	margin-top: 0.75rem;
+	padding-bottom: 0.25rem;
+	font-size: 0.8125rem;
+}
+.storefront-room-card-rates-from {
+	color: var(--ledger-ink-muted);
+}
+.storefront-room-card-rates-price {
+	font-size: 1.0625rem;
+	font-weight: 600;
+	color: var(--ledger-ink);
+}
+.storefront-room-card-rates-count {
+	color: var(--hotel-accent-deep);
+	font-weight: 500;
+}

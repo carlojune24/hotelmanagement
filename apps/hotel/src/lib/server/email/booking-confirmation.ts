@@ -51,6 +51,8 @@ export interface BookingConfirmationData {
 	feesCentavos: number;
 	vatCentavos: number;
 	totalCentavos: number;
+	/** A redeemed promo code, already subtracted out of `totalCentavos`. Absent = none. */
+	promo?: { code: string; terms: string | null; discountCentavos: number } | null;
 	/** Set only for a downpayment order that still owes a balance (see `getOrderPaymentSummary`).
 	 *  Absent/null = paid in full, and the email reads exactly as it always has. */
 	payment?: { paidCentavos: number; dueAtHotelCentavos: number } | null;
@@ -194,10 +196,16 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 			<td style="padding:${opts.total ? '12px' : '6px'} 0 6px;border-top:${opts.total ? `1px solid ${INK}` : '0'};text-align:right;font-family:${FONT_DATA};font-size:${opts.total ? '15px' : '13px'};font-weight:${opts.total ? 700 : 400};color:${INK};">${value}</td>
 		</tr>`;
 
+	const promoLabel = data.promo
+		? 'Promo ' + data.promo.code + (data.promo.terms ? ' (' + data.promo.terms + ')' : '')
+		: '';
 	const breakdown =
 		priceRow('Subtotal', money(data.subtotalCentavos, currency)) +
 		(data.feesCentavos > 0 ? priceRow('Fees', money(data.feesCentavos, currency)) : '') +
 		priceRow('VAT', money(data.vatCentavos, currency)) +
+		(data.promo
+			? priceRow(promoLabel, '−' + money(data.promo.discountCentavos, currency))
+			: '') +
 		(partial
 			? priceRow('Total', money(data.totalCentavos, currency), { total: true }) +
 				priceRow('Paid now', money(partial.paidCentavos, currency)) +
@@ -337,6 +345,10 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 	tLines.push(`Subtotal    ${money(data.subtotalCentavos, currency)}`);
 	if (data.feesCentavos > 0) tLines.push(`Fees        ${money(data.feesCentavos, currency)}`);
 	tLines.push(`VAT         ${money(data.vatCentavos, currency)}`);
+	if (data.promo)
+		tLines.push(
+			`PROMO       -${money(data.promo.discountCentavos, currency)}   (${data.promo.code}${data.promo.terms ? ', ' + data.promo.terms : ''})`
+		);
 	if (partial) {
 		tLines.push(`TOTAL       ${money(data.totalCentavos, currency)}`);
 		tLines.push(`PAID NOW    ${money(partial.paidCentavos, currency)}   (via PayMongo)`);

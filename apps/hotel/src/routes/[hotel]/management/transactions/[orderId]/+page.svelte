@@ -9,6 +9,7 @@
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import PaymentFields from '$lib/components/staff/payment-fields.svelte';
 	import OrderPaymentForm from '$lib/components/staff/order-payment-form.svelte';
+	import FolioPromoTrail from '$lib/components/staff/folio-promo-trail.svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -234,6 +235,11 @@
 							</div>
 						{/if}
 
+						{#if l.promo}
+							<div class="border-b border-border p-3">
+								<FolioPromoTrail promo={l.promo} />
+							</div>
+						{/if}
 						<div class="divide-y divide-border text-sm">
 							{#each l.charges as c (c.id)}
 								<div
@@ -556,8 +562,23 @@
 		<aside class="space-y-4 lg:sticky lg:top-6">
 			<div class="rounded-lg border border-border p-4">
 				<dl class="space-y-1.5 text-sm">
+					{#if data.order.promo}
+						<div class="flex justify-between">
+							<dt class="text-ink-muted">Before promo</dt>
+							<dd class="tabular-nums text-ink">
+								{peso(data.ledger.chargesTotalCentavos + data.order.promo.discountCentavos)}
+							</dd>
+						</div>
+						<div class="flex justify-between">
+							<dt class="text-ink-muted">
+								Promo {data.order.promo.code}{#if data.order.promo.terms}
+									<span class="text-xs">({data.order.promo.terms})</span>{/if}
+							</dt>
+							<dd class="tabular-nums text-ok">−{peso(data.order.promo.discountCentavos)}</dd>
+						</div>
+					{/if}
 					<div class="flex justify-between">
-						<dt class="text-ink-muted">Charges</dt>
+						<dt class="text-ink-muted">{data.order.promo ? 'Charges after promo' : 'Charges'}</dt>
 						<dd class="tabular-nums text-ink">{peso(data.ledger.chargesTotalCentavos)}</dd>
 					</div>
 					{#if data.ledger.depositAppliedTotalCentavos > 0}

@@ -17,6 +17,7 @@ import {
 import { DEFAULT_ACCENT_COLOR, DEFAULT_PAPER_COLOR, parseBranding } from '../branding';
 import { renderBookingConfirmation, type BookingConfirmationData } from './booking-confirmation';
 import { renderPdf } from '../pdf/render';
+import { getOrderPromo } from '../promo-codes';
 import { alreadySent, sendMail, type MailAttachment, type SendMailResult } from './send';
 
 /**
@@ -105,6 +106,7 @@ export async function sendBookingConfirmation(
 			vatCentavos: order.vatCentavos,
 			totalCentavos: order.totalCentavos,
 			payment: await getOrderPaymentSummary(order),
+			promo: await getOrderPromo(order.id),
 			manageUrl,
 			manageBookingUrl
 		};

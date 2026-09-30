@@ -12,6 +12,7 @@ import {
 	roomTypes
 } from '$lib/server/db/schema/index';
 import { getOrderPaymentSummary } from '$lib/server/order-payment';
+import { getOrderPromo } from '$lib/server/promo-codes';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, params, url, depends }) => {
@@ -58,11 +59,13 @@ export const load: PageServerLoad = async ({ locals, params, url, depends }) => 
 		.where(eq(hallBookings.orderId, order.id));
 
 	const payment = await getOrderPaymentSummary(order);
+	const promo = await getOrderPromo(order.id);
 
 	return {
 		status: order.status,
 		// Null for an ordinary pay-in-full order — the page then keeps saying "Total paid".
 		payment,
+		promo,
 		order: {
 			id: order.id,
 			accessToken: order.accessToken,
@@ -70,6 +73,11 @@ export const load: PageServerLoad = async ({ locals, params, url, depends }) => 
 			// Short, human-shareable stand-in for a proper OR/confirmation number —
 			// derived from the order id itself so no extra column/sequence is needed.
 			confirmationCode: order.id.slice(0, 8).toUpperCase()
+		},
+		// Arrival essentials for the "What's next" block — the hotel's own configured times.
+		stayInfo: {
+			checkInTime: locals.hotel!.checkInTime,
+			checkOutTime: locals.hotel!.checkOutTime
 		},
 		guestName: guest!.fullName,
 		roomLines,
