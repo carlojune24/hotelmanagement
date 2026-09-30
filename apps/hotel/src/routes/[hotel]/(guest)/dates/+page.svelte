@@ -34,7 +34,6 @@
 		{#if data.roomTypeId}
 			<input type="hidden" name="roomTypeId" value={data.roomTypeId} />
 		{/if}
-
 		<div class="grid grid-cols-2 gap-4">
 			<div>
 				<Label for="checkIn" class="ledger-label">Check-in</Label>

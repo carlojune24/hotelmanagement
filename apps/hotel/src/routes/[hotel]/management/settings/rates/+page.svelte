@@ -17,6 +17,7 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import ShieldIcon from '@lucide/svelte/icons/shield';
+	import TicketPercentIcon from '@lucide/svelte/icons/ticket-percent';
 	import InclusionsInput from '$lib/components/staff/inclusions-input.svelte';
 	import type { ActionData, PageData } from './$types';
 
@@ -25,6 +26,18 @@
 	const base = $derived(`/${page.params.hotel}/management`);
 
 	const peso = (centavos: number) => `₱${(centavos / 100).toFixed(2)}`;
+	const fmtUtc = (v: string | Date) =>
+		new Date(v).toLocaleString('en-US', {
+			timeZone: 'UTC',
+			dateStyle: 'medium',
+			timeStyle: 'short'
+		}) + ' UTC';
+	function promoWindowLabel(from: string | Date | null, until: string | Date | null): string | null {
+		if (from && until) return `${fmtUtc(from)} – ${fmtUtc(until)}`;
+		if (from) return `From ${fmtUtc(from)}`;
+		if (until) return `Until ${fmtUtc(until)}`;
+		return null;
+	}
 
 	let createPlanOpen = $state(false);
 	let createPolicyOpen = $state(false);
@@ -48,10 +61,7 @@
 		data.ratePlans.filter((p) => {
 			const q = planSearch.trim().toLowerCase();
 			const matchesSearch =
-				q === '' ||
-				p.name.toLowerCase().includes(q) ||
-				p.roomTypeName.toLowerCase().includes(q) ||
-				(p.promoCode ?? '').toLowerCase().includes(q);
+				q === '' || p.name.toLowerCase().includes(q) || p.roomTypeName.toLowerCase().includes(q);
 			const matchesStatus =
 				planStatusFilter === 'all' || (planStatusFilter === 'active') === p.isActive;
 			return matchesSearch && matchesStatus;
@@ -105,6 +115,43 @@
 		full_amount: 'Full amount'
 	};
 
+	/** Stored UTC Date → `<input type="datetime-local">`'s "YYYY-MM-DDTHH:MM" value — same
+	 *  UTC-throughout convention the rate-plan edit page's own copy of this helper uses. */
+	const toDatetimeLocalUtc = (d: Date | string | null) =>
+		d ? new Date(d).toISOString().slice(0, 16) : '';
+
+	let createPromoOpen = $state(false);
+	let createPromoDiscountType = $state<'percentage' | 'fixed_amount'>('percentage');
+	let editPromoOpen = $state(false);
+	let editPromoId = $state('');
+	let editPromoCode = $state('');
+	let editPromoDescription = $state('');
+	let editPromoDiscountType = $state<'percentage' | 'fixed_amount'>('percentage');
+	let editPromoPercent = $state('');
+	let editPromoFixedPhp = $state('');
+	let editPromoValidFrom = $state('');
+	let editPromoValidUntil = $state('');
+	let editPromoActive = $state(true);
+
+	function openEditPromo(p: (typeof data.promoCodes)[number]) {
+		editPromoId = p.id;
+		editPromoCode = p.code;
+		editPromoDescription = p.description ?? '';
+		editPromoDiscountType = p.discountType;
+		editPromoPercent = p.discountBps != null ? String(p.discountBps / 100) : '';
+		editPromoFixedPhp = p.discountAmountCentavos != null ? peso(p.discountAmountCentavos).slice(1) : '';
+		editPromoValidFrom = toDatetimeLocalUtc(p.validFrom);
+		editPromoValidUntil = toDatetimeLocalUtc(p.validUntil);
+		editPromoActive = p.isActive;
+		editPromoOpen = true;
+	}
+
+	function discountLabel(p: { discountType: string; discountBps: number | null; discountAmountCentavos: number | null }) {
+		return p.discountType === 'percentage'
+			? `${(p.discountBps ?? 0) / 100}% off`
+			: `${peso(p.discountAmountCentavos ?? 0)} off`;
+	}
+
 	$effect(() => {
 		if (form?.error) toast.error(form.error);
 		if (form?.ok) {
@@ -114,6 +161,9 @@
 			editPolicyOpen = false;
 			createDepositPolicyOpen = false;
 			editDepositPolicyOpen = false;
+			createPromoOpen = false;
+			createPromoDiscountType = 'percentage';
+			editPromoOpen = false;
 			createInclusions = [];
 		}
 	});
@@ -182,6 +232,17 @@
 				<div class="truncate text-xs text-ink-muted">Security deposit policies</div>
 			</div>
 		</div>
+		<div class="flex items-center gap-3 rounded-xl border border-border bg-surface p-4 shadow-sm">
+			<div
+				class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand"
+			>
+				<TicketPercentIcon class="size-5" />
+			</div>
+			<div class="min-w-0">
+				<div class="text-xl font-semibold text-ink">{data.promoCodes.length}</div>
+				<div class="truncate text-xs text-ink-muted">Promo codes</div>
+			</div>
+		</div>
 	</div>
 
 	<section class="mt-8">
@@ -246,7 +307,6 @@
 							<Table.Row>
 								<Table.Cell>
 									<div class="font-medium text-ink">{p.name}</div>
-									{#if p.promoCode}<div class="text-xs text-ink-muted">{p.promoCode}</div>{/if}
 								</Table.Cell>
 								<Table.Cell class="text-ink-muted">{p.roomTypeName}</Table.Cell>
 								<Table.Cell class="text-ink-muted">{peso(p.basePriceCentavos)}</Table.Cell>
@@ -268,6 +328,68 @@
 										size="icon"
 										href="{base}/settings/rates/{p.id}"
 										aria-label="Edit {p.name}"
+									>
+										<PencilIcon class="size-4" />
+									</Button>
+								</Table.Cell>
+							</Table.Row>
+						{/each}
+					</Table.Body>
+				</Table.Root>
+			{/if}
+		</div>
+	</section>
+
+	<section class="mt-10">
+		<div class="flex items-center justify-between gap-4">
+			<div>
+				<h2 class="text-base font-semibold text-ink">Promo codes</h2>
+				<p class="text-sm text-ink-muted">
+					A real discount off the price a guest actually pays — applied at checkout and posted as
+					its own line on the room's folio.
+				</p>
+			</div>
+			<Button variant="outline" onclick={() => (createPromoOpen = true)}>
+				<PlusIcon class="size-4" /> New promo code
+			</Button>
+		</div>
+
+		<div class="mt-4 overflow-hidden rounded-xl border border-border">
+			{#if data.promoCodes.length === 0}
+				<p class="p-6 text-center text-sm text-ink-muted">No promo codes yet.</p>
+			{:else}
+				<Table.Root>
+					<Table.Body>
+						{#each data.promoCodes as p (p.id)}
+							<Table.Row>
+								<Table.Cell>
+									<div class="font-medium text-ink">{p.code}</div>
+									<div class="text-xs text-ink-muted">
+										{discountLabel(p)}{#if p.description}
+											· {p.description}{/if}
+									</div>
+									{#if promoWindowLabel(p.validFrom, p.validUntil)}
+										<div class="text-[11px] text-ink-muted/80">
+											{promoWindowLabel(p.validFrom, p.validUntil)}
+										</div>
+									{/if}
+								</Table.Cell>
+								<Table.Cell>
+									<Badge
+										variant="outline"
+										class={p.isActive
+											? 'border-transparent bg-ok/15 text-ok'
+											: 'border-border bg-surface-2 text-ink-muted'}
+									>
+										{p.isActive ? 'Active' : 'Inactive'}
+									</Badge>
+								</Table.Cell>
+								<Table.Cell class="text-right">
+									<Button
+										variant="ghost"
+										size="icon"
+										aria-label="Edit {p.code}"
+										onclick={() => openEditPromo(p)}
 									>
 										<PencilIcon class="size-4" />
 									</Button>
@@ -432,23 +554,17 @@
 					</Select.Content>
 				</Select.Root>
 			</div>
-			<div class="grid grid-cols-2 gap-3">
-				<div>
-					<Label for="basePricePhp">Price / night (₱)</Label>
-					<Input
-						id="basePricePhp"
-						name="basePricePhp"
-						type="number"
-						min="0"
-						step="0.01"
-						required
-						class="mt-1"
-					/>
-				</div>
-				<div>
-					<Label for="promoCode">Promo code</Label>
-					<Input id="promoCode" name="promoCode" class="mt-1" />
-				</div>
+			<div>
+				<Label for="basePricePhp">Price / night (₱)</Label>
+				<Input
+					id="basePricePhp"
+					name="basePricePhp"
+					type="number"
+					min="0"
+					step="0.01"
+					required
+					class="mt-1"
+				/>
 			</div>
 			<div class="grid grid-cols-2 gap-3">
 				<div>
@@ -765,6 +881,211 @@
 		<Dialog.Footer>
 			<Button variant="outline" onclick={() => (editDepositPolicyOpen = false)}>Cancel</Button>
 			<Button type="submit" form="updateDepositPolicyForm">Save changes</Button>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={createPromoOpen}>
+	<Dialog.Content>
+		<Dialog.Header>
+			<Dialog.Title>New promo code</Dialog.Title>
+			<Dialog.Description>
+				A real discount off the price a guest already booked, applied at checkout.
+			</Dialog.Description>
+		</Dialog.Header>
+		<form
+			id="createPromoForm"
+			method="POST"
+			action="?/createPromoCode"
+			use:enhance
+			class="space-y-3"
+		>
+			<div>
+				<Label for="promoCode">Code</Label>
+				<Input
+					id="promoCode"
+					name="code"
+					required
+					maxlength={40}
+					placeholder="WELCOME10"
+					class="mt-1 uppercase"
+				/>
+			</div>
+			<div>
+				<Label for="promoDescription">Description</Label>
+				<Input id="promoDescription" name="description" class="mt-1" />
+			</div>
+			<div>
+				<Label for="promoDiscountType">Discount</Label>
+				<Select.Root type="single" name="discountType" bind:value={createPromoDiscountType}>
+					<Select.Trigger id="promoDiscountType" class="mt-1 w-full">
+						{createPromoDiscountType === 'percentage' ? 'Percentage off' : 'Fixed amount off'}
+					</Select.Trigger>
+					<Select.Content>
+						<Select.Item value="percentage" label="Percentage off" />
+						<Select.Item value="fixed_amount" label="Fixed amount off" />
+					</Select.Content>
+				</Select.Root>
+			</div>
+			{#if createPromoDiscountType === 'percentage'}
+				<div>
+					<Label for="promoDiscountPct">Percent off (%)</Label>
+					<Input
+						id="promoDiscountPct"
+						name="discountPct"
+						type="number"
+						min="0.01"
+						max="100"
+						step="0.01"
+						required
+						class="mt-1"
+					/>
+				</div>
+			{:else}
+				<div>
+					<Label for="promoDiscountAmountPhp">Amount off (₱)</Label>
+					<Input
+						id="promoDiscountAmountPhp"
+						name="discountAmountPhp"
+						type="number"
+						min="0.01"
+						step="0.01"
+						required
+						class="mt-1"
+					/>
+				</div>
+			{/if}
+			<div class="grid grid-cols-2 gap-3">
+				<div>
+					<Label for="promoValidFrom">Valid from (UTC)</Label>
+					<Input id="promoValidFrom" name="validFrom" type="datetime-local" class="mt-1" />
+				</div>
+				<div>
+					<Label for="promoValidUntil">Valid until (UTC)</Label>
+					<Input id="promoValidUntil" name="validUntil" type="datetime-local" class="mt-1" />
+				</div>
+			</div>
+			<p class="text-xs text-ink-muted">Leave both blank for no time limit.</p>
+		</form>
+		<Dialog.Footer>
+			<Button variant="outline" onclick={() => (createPromoOpen = false)}>Cancel</Button>
+			<Button type="submit" form="createPromoForm">Create promo code</Button>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={editPromoOpen}>
+	<Dialog.Content>
+		<Dialog.Header>
+			<Dialog.Title>Edit promo code</Dialog.Title>
+			<Dialog.Description>Changes apply the next time a guest redeems this code.</Dialog.Description>
+		</Dialog.Header>
+		<form
+			id="updatePromoForm"
+			method="POST"
+			action="?/updatePromoCode"
+			use:enhance
+			class="space-y-3"
+		>
+			<input type="hidden" name="id" value={editPromoId} />
+			<div>
+				<Label for="editPromoCode">Code</Label>
+				<Input
+					id="editPromoCode"
+					name="code"
+					required
+					maxlength={40}
+					bind:value={editPromoCode}
+					class="mt-1 uppercase"
+				/>
+			</div>
+			<div>
+				<Label for="editPromoDescription">Description</Label>
+				<Input
+					id="editPromoDescription"
+					name="description"
+					bind:value={editPromoDescription}
+					class="mt-1"
+				/>
+			</div>
+			<div>
+				<Label for="editPromoDiscountType">Discount</Label>
+				<Select.Root type="single" name="discountType" bind:value={editPromoDiscountType}>
+					<Select.Trigger id="editPromoDiscountType" class="mt-1 w-full">
+						{editPromoDiscountType === 'percentage' ? 'Percentage off' : 'Fixed amount off'}
+					</Select.Trigger>
+					<Select.Content>
+						<Select.Item value="percentage" label="Percentage off" />
+						<Select.Item value="fixed_amount" label="Fixed amount off" />
+					</Select.Content>
+				</Select.Root>
+			</div>
+			{#if editPromoDiscountType === 'percentage'}
+				<div>
+					<Label for="editPromoDiscountPct">Percent off (%)</Label>
+					<Input
+						id="editPromoDiscountPct"
+						name="discountPct"
+						type="number"
+						min="0.01"
+						max="100"
+						step="0.01"
+						required
+						bind:value={editPromoPercent}
+						class="mt-1"
+					/>
+				</div>
+			{:else}
+				<div>
+					<Label for="editPromoDiscountAmountPhp">Amount off (₱)</Label>
+					<Input
+						id="editPromoDiscountAmountPhp"
+						name="discountAmountPhp"
+						type="number"
+						min="0.01"
+						step="0.01"
+						required
+						bind:value={editPromoFixedPhp}
+						class="mt-1"
+					/>
+				</div>
+			{/if}
+			<div class="grid grid-cols-2 gap-3">
+				<div>
+					<Label for="editPromoValidFrom">Valid from (UTC)</Label>
+					<Input
+						id="editPromoValidFrom"
+						name="validFrom"
+						type="datetime-local"
+						bind:value={editPromoValidFrom}
+						class="mt-1"
+					/>
+				</div>
+				<div>
+					<Label for="editPromoValidUntil">Valid until (UTC)</Label>
+					<Input
+						id="editPromoValidUntil"
+						name="validUntil"
+						type="datetime-local"
+						bind:value={editPromoValidUntil}
+						class="mt-1"
+					/>
+				</div>
+			</div>
+			<div class="flex items-center gap-2">
+				<input
+					id="editPromoActive"
+					name="isActive"
+					type="checkbox"
+					bind:checked={editPromoActive}
+					class="size-4 rounded border-border"
+				/>
+				<Label for="editPromoActive">Active</Label>
+			</div>
+		</form>
+		<Dialog.Footer>
+			<Button variant="outline" onclick={() => (editPromoOpen = false)}>Cancel</Button>
+			<Button type="submit" form="updatePromoForm">Save changes</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

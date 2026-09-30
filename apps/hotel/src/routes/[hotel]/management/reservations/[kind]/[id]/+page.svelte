@@ -10,8 +10,18 @@
 	import * as Table from '$lib/components/ui/table/index.js';
 	import BedIcon from '@lucide/svelte/icons/bed';
 	import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
+	import CalendarDaysIcon from '@lucide/svelte/icons/calendar-days';
+	import ReceiptIcon from '@lucide/svelte/icons/receipt';
+	import WalletIcon from '@lucide/svelte/icons/wallet';
+	import MailIcon from '@lucide/svelte/icons/mail';
+	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
+	import HistoryIcon from '@lucide/svelte/icons/history';
+	import CircleXIcon from '@lucide/svelte/icons/circle-x';
+	import ShieldAlertIcon from '@lucide/svelte/icons/shield-alert';
+	import LinkIcon from '@lucide/svelte/icons/link';
 	import CancelBookingDialog from '$lib/components/staff/cancel-booking-dialog.svelte';
 	import IdCameraCapture from '$lib/components/staff/id-camera-capture.svelte';
+	import FolioPromoTrail from '$lib/components/staff/folio-promo-trail.svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -242,6 +252,13 @@
 		refund: 'refund'
 	};
 
+	function guestInitials(name: string): string {
+		const parts = name.trim().split(/\s+/).filter(Boolean);
+		const first = parts[0]?.[0] ?? '';
+		const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? '') : '';
+		return (first + last).toUpperCase() || '?';
+	}
+
 	function emailStatusClass(status: string): string {
 		if (status === 'sent') return 'border-transparent bg-ok/15 text-ok';
 		if (status === 'failed') return 'border-transparent bg-danger/15 text-danger';
@@ -249,8 +266,8 @@
 	}
 </script>
 
-<div class="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6">
-	<div class="mb-6 flex items-center justify-between">
+<div class="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
+	<div class="mb-6 flex flex-wrap items-center justify-between gap-4">
 		<div class="flex items-center gap-2">
 			{#if data.kind === 'room'}
 				<BedIcon class="size-5 text-ink-muted" />
@@ -298,65 +315,37 @@
 		</div>
 	</div>
 
-	<div class="flex items-center gap-2">
-		<Badge
-			variant="outline"
-			class={statusVariantClass(
-				data.kind === 'room' ? data.detail.booking.status : data.detail.hallBooking.status
-			)}
+	<!-- Guest identity band -->
+	<div class="mb-6 flex flex-wrap items-start gap-4 rounded-xl border border-border bg-surface-2/60 p-4">
+		<span
+			class="flex size-12 shrink-0 items-center justify-center rounded-full bg-brand/15 text-base font-semibold text-brand"
 		>
-			{statusLabel(
-				data.kind === 'room' ? data.detail.booking.status : data.detail.hallBooking.status
-			)}
-		</Badge>
-		<span class="text-xs text-ink-muted">
-			Order {statusLabel(data.detail.order.status)}
+			{guestInitials(data.detail.guest.fullName)}
 		</span>
-	</div>
-
-	<!-- Guest -->
-	<div class="mt-6 rounded-xl border border-border p-4">
-		<h2 class="mb-2 text-sm font-semibold text-ink">Guest</h2>
-		<div class="text-sm text-ink">{data.detail.guest.fullName}</div>
-		<div class="text-sm text-ink-muted">{data.detail.guest.email}</div>
-		{#if data.detail.guest.phone}
-			<div class="text-sm text-ink-muted">{data.detail.guest.phone}</div>
-		{/if}
-		{#if data.detail.guest.specialRequests}
-			<p class="mt-2 text-xs text-ink-muted">
-				Special requests: {data.detail.guest.specialRequests}
-			</p>
-		{/if}
-	</div>
-
-	{#if data.detail.siblings.length > 0}
-		<!-- Same order, different room/hall line — see `siblingLines` in reservations.ts:
-		     a multi-room-type walk-in (or online order) settled in one payment still
-		     becomes one reservation line per room/hall, so surface the others here or
-		     staff opening one line has no way to tell the rest of the sale exists. -->
-		<div class="mt-4 rounded-xl border border-border p-4">
-			<h2 class="mb-2 text-sm font-semibold text-ink">Also in this booking</h2>
-			<div class="flex flex-col gap-2">
-				{#each data.detail.siblings as s (s.id)}
-					<a
-						href="{staffBase}/reservations/{s.kind}/{s.id}"
-						class="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm hover:bg-surface-2"
-					>
-						<span>
-							<span class="text-ink">{s.title}</span>
-							<span class="text-ink-muted"> · {s.subtitle}</span>
-						</span>
-						<Badge variant="outline" class={statusVariantClass(s.status)}>
-							{statusLabel(s.status)}
-						</Badge>
-					</a>
-				{/each}
+		<div class="min-w-0 flex-1">
+			<div class="flex flex-wrap items-center gap-2">
+				<span class="text-base font-semibold text-ink">{data.detail.guest.fullName}</span>
+				<Badge variant="outline" class={statusVariantClass(currentStatus)}>
+					{statusLabel(currentStatus)}
+				</Badge>
+				<span class="text-xs text-ink-muted">Order {statusLabel(data.detail.order.status)}</span>
 			</div>
+			<div class="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-sm text-ink-muted">
+				<span class="truncate">{data.detail.guest.email}</span>
+				{#if data.detail.guest.phone}<span>{data.detail.guest.phone}</span>{/if}
+			</div>
+			{#if data.detail.guest.specialRequests}
+				<p class="mt-1.5 text-xs text-ink-muted">
+					Special requests: {data.detail.guest.specialRequests}
+				</p>
+			{/if}
 		</div>
-	{/if}
+	</div>
 
-	<!-- Stay / Event details -->
-	<div class="mt-4 rounded-xl border border-border p-4">
+	<div class="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_300px] lg:items-start">
+		<div class="min-w-0 space-y-4 lg:order-1">
+			<!-- Stay / Event details -->
+			<div class="rounded-xl border border-border p-4">
 		{#if data.kind === 'room'}
 			{#snippet securityDepositFields()}
 				{#if data.kind === 'room' && data.securityDeposit?.status === 'held'}
@@ -452,7 +441,10 @@
 				</div>
 			{/snippet}
 			<div class="mb-2 flex items-center justify-between gap-3">
-				<h2 class="text-sm font-semibold text-ink">Stay</h2>
+				<h2 class="flex items-center gap-1.5 text-sm font-semibold text-ink">
+					<CalendarDaysIcon class="size-4 text-ink-muted" />
+					Stay
+				</h2>
 				{#if data.canModifyStay}
 					<Button variant="outline" size="sm" onclick={openModifyDialog}>Modify booking</Button>
 				{/if}
@@ -569,7 +561,10 @@
 				</form>
 			{/if}
 		{:else}
-			<h2 class="mb-2 text-sm font-semibold text-ink">Event</h2>
+			<h2 class="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink">
+				<CalendarDaysIcon class="size-4 text-ink-muted" />
+				Event
+			</h2>
 			<div class="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
 				<div>
 					<div class="text-xs text-ink-muted">Event date</div>
@@ -590,8 +585,11 @@
 	</div>
 
 	<!-- Bill -->
-	<div class="mt-4 rounded-xl border border-border p-4">
-		<h2 class="mb-2 text-sm font-semibold text-ink">Bill</h2>
+	<div class="rounded-xl border border-border p-4">
+		<h2 class="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink">
+			<ReceiptIcon class="size-4 text-ink-muted" />
+			Bill
+		</h2>
 		{#if data.kind === 'room'}
 			<Table.Root>
 				<Table.Body>
@@ -665,11 +663,19 @@
 	</div>
 
 	<!-- Payments -->
-	<div class="mt-4 rounded-xl border border-border p-4">
-		<h2 class="mb-2 text-sm font-semibold text-ink">Payments</h2>
+	<div class="rounded-xl border border-border p-4">
+		<h2 class="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink">
+			<WalletIcon class="size-4 text-ink-muted" />
+			Payments
+		</h2>
 		{#if data.detail.folio}
 			{@const f = data.detail.folio}
 			{@const multi = f.orderLineCount > 1}
+			{#if f.promo}
+				<div class="mb-3">
+					<FolioPromoTrail promo={f.promo} />
+				</div>
+			{/if}
 			<div class="mb-3 space-y-1 border-b border-border pb-3 text-sm">
 				<div class="flex justify-between">
 					<span class="text-ink-muted">Charges{multi ? ` (this ${data.kind === 'room' ? 'room' : 'event'})` : ''}</span>
@@ -760,9 +766,12 @@
 	</div>
 
 	<!-- Confirmation email -->
-	<div class="mt-4 rounded-xl border border-border p-4">
+	<div class="rounded-xl border border-border p-4">
 		<div class="mb-2 flex items-center justify-between gap-3">
-			<h2 class="text-sm font-semibold text-ink">Confirmation email</h2>
+			<h2 class="flex items-center gap-1.5 text-sm font-semibold text-ink">
+				<MailIcon class="size-4 text-ink-muted" />
+				Confirmation email
+			</h2>
 			{#if data.detail.order.status === 'pending_payment'}
 				<form
 					method="POST"
@@ -826,8 +835,9 @@
 
 	<!-- Cancel / no-show -->
 	{#if data.cancelQuote || data.canMarkNoShow}
-		<div class="mt-4 rounded-xl border border-border p-4">
-			<h2 class="mb-1 text-sm font-semibold text-ink">
+		<div class="rounded-xl border border-border border-l-4 border-l-danger/40 p-4">
+			<h2 class="mb-1 flex items-center gap-1.5 text-sm font-semibold text-ink">
+				<CircleXIcon class="size-4 text-danger" />
 				Cancel {data.kind === 'room' ? 'booking' : 'event'}
 			</h2>
 			<p class="mb-3 text-xs text-ink-muted">
@@ -908,8 +918,11 @@
 
 	<!-- Status override (hotel_admin only) -->
 	{#if data.canAdmin && (currentStatus === 'pending_payment' || currentStatus === 'cancelled' || currentStatus === 'no_show')}
-		<div class="mt-4 rounded-xl border border-border p-4">
-			<h2 class="mb-1 text-sm font-semibold text-ink">Override status</h2>
+		<div class="rounded-xl border border-border border-l-4 border-l-warning/50 p-4">
+			<h2 class="mb-1 flex items-center gap-1.5 text-sm font-semibold text-ink">
+				<ShieldAlertIcon class="size-4 text-warning" />
+				Override status
+			</h2>
 			<p class="mb-3 text-xs text-ink-muted">
 				Admin-only escape hatch for a stuck or wrongly-set status — not a substitute for the normal
 				check-in/check-out/cancel flows.
@@ -930,8 +943,11 @@
 	{/if}
 
 	<!-- Guest messages -->
-	<div class="mt-4 rounded-xl border border-border p-4">
-		<h2 class="mb-2 text-sm font-semibold text-ink">Messages</h2>
+	<div class="rounded-xl border border-border p-4">
+		<h2 class="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink">
+			<MessageSquareIcon class="size-4 text-ink-muted" />
+			Messages
+		</h2>
 		{#if data.thread.length === 0}
 			<p class="text-sm text-ink-muted">No messages from this guest yet.</p>
 		{:else}
@@ -987,8 +1003,11 @@
 	</div>
 
 	<!-- Status history -->
-	<div class="mt-4 rounded-xl border border-border p-4">
-		<h2 class="mb-2 text-sm font-semibold text-ink">Status history</h2>
+	<div class="rounded-xl border border-border p-4">
+		<h2 class="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink">
+			<HistoryIcon class="size-4 text-ink-muted" />
+			Status history
+		</h2>
 		{#if data.detail.history.length === 0}
 			<p class="text-sm text-ink-muted">No status changes recorded yet.</p>
 		{:else}
@@ -1004,6 +1023,80 @@
 				{/each}
 			</div>
 		{/if}
+	</div>
+		</div>
+
+		<div class="space-y-4 lg:sticky lg:top-6 lg:order-2">
+			{#if data.detail.siblings.length > 0}
+				<!-- Same order, different room/hall line — see `siblingLines` in reservations.ts:
+				     a multi-room-type walk-in (or online order) settled in one payment still
+				     becomes one reservation line per room/hall, so surface the others here or
+				     staff opening one line has no way to tell the rest of the sale exists. -->
+				<div class="rounded-xl border border-border p-4">
+					<h2 class="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink">
+						<LinkIcon class="size-4 text-ink-muted" />
+						Also in this booking
+					</h2>
+					<div class="flex flex-col gap-2">
+						{#each data.detail.siblings as s (s.id)}
+							<a
+								href="{staffBase}/reservations/{s.kind}/{s.id}"
+								class="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm hover:bg-surface-2"
+							>
+								<span>
+									<span class="text-ink">{s.title}</span>
+									<span class="text-ink-muted"> · {s.subtitle}</span>
+								</span>
+								<Badge variant="outline" class={statusVariantClass(s.status)}>
+									{statusLabel(s.status)}
+								</Badge>
+							</a>
+						{/each}
+					</div>
+				</div>
+			{/if}
+
+			<!-- At a glance -->
+			<div class="rounded-xl border border-border p-4">
+				<h2 class="mb-3 flex items-center gap-1.5 text-sm font-semibold text-ink">
+					<ReceiptIcon class="size-4 text-ink-muted" />
+					At a glance
+				</h2>
+				<div class="flex items-center justify-between text-sm">
+					<span class="text-ink-muted">Total</span>
+					<span class="font-semibold text-ink">
+						{peso(
+							data.kind === 'room'
+								? data.detail.booking.totalCentavos
+								: data.detail.hallBooking.totalCentavos
+						)}
+					</span>
+				</div>
+				{#if data.detail.folio}
+					<div
+						class="mt-1.5 flex items-center justify-between text-sm font-semibold {data.detail.folio
+							.balanceCentavos > 0
+							? 'text-danger'
+							: 'text-ink'}"
+					>
+						<span class="font-normal text-ink-muted">
+							{data.detail.folio.balanceCentavos < 0 ? 'Credit' : 'Balance due'}
+						</span>
+						<span>{peso(Math.abs(data.detail.folio.balanceCentavos))}</span>
+					</div>
+					<Button
+						variant="outline"
+						size="sm"
+						class="mt-3 w-full"
+						href="{staffBase}/transactions/{data.detail.order.id}"
+					>
+						Open transaction
+					</Button>
+				{:else}
+					<p class="mt-2 text-xs text-ink-muted">No payment recorded yet.</p>
+				{/if}
+			</div>
+		</div>
 	</div>
 </div>
 

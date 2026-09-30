@@ -58,8 +58,6 @@
 	const peso = (centavos: number) =>
 		`₱${(centavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 
-	let promo = $state(data.promo ?? '');
-
 	const coverPhoto = (photos: { url: string; tag: string }[] | undefined) =>
 		photos?.find((p) => p.tag === 'cover')?.url ?? photos?.[0]?.url ?? null;
 
@@ -287,7 +285,7 @@
 		<form
 			method="GET"
 			action="/{data.hotel.slug}/rooms"
-			class="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end"
+			class="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
 		>
 			<div>
 				<Label for="checkIn" class="ledger-label">Arrival date</Label>
@@ -296,17 +294,6 @@
 			<div>
 				<Label for="checkOut" class="ledger-label">Departure date</Label>
 				<Input id="checkOut" name="checkOut" type="date" required class="ledger-field mt-1" />
-			</div>
-			<div>
-				<Label for="promo" class="ledger-label">Promo code</Label>
-				<Input
-					id="promo"
-					name="promo"
-					type="text"
-					placeholder="Code here"
-					bind:value={promo}
-					class="ledger-field mt-1"
-				/>
 			</div>
 			<Button type="submit" class="ledger-btn-primary">Check availability</Button>
 		</form>

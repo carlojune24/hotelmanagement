@@ -1,10 +1,12 @@
 import { fail } from '@sveltejs/kit';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import {
 	cancellationPenaltyType,
 	cancellationPolicies,
+	promoCodes,
+	promoDiscountType,
 	ratePlans,
 	roomTypes,
 	securityDepositPolicies
@@ -12,6 +14,7 @@ import {
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { listDistinctInclusions } from '$lib/server/rate-plans';
+import { normalizePromoCode, MAX_PROMO_CODE_LENGTH } from '$lib/server/promo-codes';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -44,7 +47,6 @@ export const load: PageServerLoad = async ({ locals }) => {
 			cancellationPolicyId: ratePlans.cancellationPolicyId,
 			securityDepositPolicyId: ratePlans.securityDepositPolicyId,
 			basePriceCentavos: ratePlans.basePriceCentavos,
-			promoCode: ratePlans.promoCode,
 			isActive: ratePlans.isActive
 		})
 		.from(ratePlans)
@@ -55,10 +57,17 @@ export const load: PageServerLoad = async ({ locals }) => {
 	const depositPolicyName = new Map(depositPolicies.map((c) => [c.id, c.name]));
 	const inclusionSuggestions = await listDistinctInclusions(hotelId);
 
+	const promos = await db
+		.select()
+		.from(promoCodes)
+		.where(and(eq(promoCodes.hotelId, hotelId), isNull(promoCodes.deletedAt)))
+		.orderBy(asc(promoCodes.code));
+
 	return {
 		roomTypes: types,
 		cancellationPolicies: policies,
 		securityDepositPolicies: depositPolicies,
+		promoCodes: promos,
 		inclusionSuggestions,
 		ratePlans: plans.map((p) => ({
 			...p,
@@ -101,6 +110,14 @@ const updateDepositPolicySchema = createDepositPolicySchema.extend({ id: z.strin
 const blankToUndef = (v: unknown) => (v === '' || v == null ? undefined : v);
 const optMoney = z.preprocess(blankToUndef, z.coerce.number().min(0).optional());
 const optNights = z.preprocess(blankToUndef, z.coerce.number().int().min(1).max(365).optional());
+/** A `<input type="datetime-local">` value ("YYYY-MM-DDTHH:MM") → a UTC Date. Deliberately
+ *  UTC rather than the hotel's own timezone (this app has no wall-time→zone conversion
+ *  helper the other direction, only `businessDateFor`'s UTC→local one) — the field is
+ *  labelled "(UTC)" in the UI so an admin isn't guessing which clock it means. */
+const optUtcDateTime = z.preprocess(
+	(v) => (v === '' || v == null ? undefined : `${v}:00Z`),
+	z.coerce.date().optional()
+);
 
 const createPlanSchema = z.object({
 	roomTypeId: z.string().uuid(),
@@ -113,9 +130,29 @@ const createPlanSchema = z.object({
 	extraPersonFeePhp: optMoney,
 	extraBedFeePhp: optMoney,
 	minStayNights: optNights,
-	maxStayNights: optNights,
-	promoCode: z.string().max(40).optional()
+	maxStayNights: optNights
 });
+
+const promoCodeBaseSchema = z.object({
+	code: z.string().min(2).max(MAX_PROMO_CODE_LENGTH),
+	description: z.string().max(2000).optional(),
+	discountType: z.enum(promoDiscountType.enumValues),
+	/** Percent off (1–100), required when `discountType` is `percentage`. */
+	discountPct: z.preprocess(blankToUndef, z.coerce.number().min(0.01).max(100).optional()),
+	/** Flat ₱ off, required when `discountType` is `fixed_amount`. */
+	discountAmountPhp: optMoney,
+	validFrom: optUtcDateTime,
+	validUntil: optUtcDateTime
+});
+function hasMatchingDiscountValue(d: z.infer<typeof promoCodeBaseSchema>): boolean {
+	return d.discountType === 'percentage' ? d.discountPct != null : d.discountAmountPhp != null;
+}
+const createPromoCodeSchema = promoCodeBaseSchema.refine(hasMatchingDiscountValue, {
+	message: 'Set a discount value matching the chosen type.'
+});
+const updatePromoCodeSchema = promoCodeBaseSchema
+	.extend({ id: z.string().uuid(), isActive: z.coerce.boolean().optional() })
+	.refine(hasMatchingDiscountValue, { message: 'Set a discount value matching the chosen type.' });
 
 const toCentavos = (php: number | undefined) => (php != null ? Math.round(php * 100) : null);
 const csvToArray = (csv: string | undefined) =>
@@ -304,8 +341,7 @@ export const actions: Actions = {
 				extraPersonFeeCentavos: toCentavos(parsed.data.extraPersonFeePhp),
 				extraBedFeeCentavos: toCentavos(parsed.data.extraBedFeePhp),
 				minStayNights: parsed.data.minStayNights ?? null,
-				maxStayNights: parsed.data.maxStayNights ?? null,
-				promoCode: parsed.data.promoCode?.trim() || null
+				maxStayNights: parsed.data.maxStayNights ?? null
 			})
 			.returning({ id: ratePlans.id });
 
@@ -319,5 +355,120 @@ export const actions: Actions = {
 		});
 
 		return { ok: `Created rate plan "${parsed.data.name}".` };
+	},
+
+	createPromoCode: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		const hotelId = event.locals.hotel!.id;
+
+		const parsed = createPromoCodeSchema.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: 'Check the promo code details and try again.' });
+
+		if (
+			parsed.data.validFrom &&
+			parsed.data.validUntil &&
+			parsed.data.validUntil < parsed.data.validFrom
+		) {
+			return fail(400, { error: 'Valid-until must not be before valid-from.' });
+		}
+
+		const code = normalizePromoCode(parsed.data.code);
+		try {
+			const [row] = await db
+				.insert(promoCodes)
+				.values({
+					hotelId,
+					code,
+					description: parsed.data.description?.trim() || null,
+					discountType: parsed.data.discountType,
+					discountBps:
+						parsed.data.discountType === 'percentage'
+							? Math.round(parsed.data.discountPct! * 100)
+							: null,
+					discountAmountCentavos:
+						parsed.data.discountType === 'fixed_amount' ? toCentavos(parsed.data.discountAmountPhp) : null,
+					validFrom: parsed.data.validFrom ?? null,
+					validUntil: parsed.data.validUntil ?? null
+				})
+				.returning({ id: promoCodes.id });
+
+			await writeAudit({
+				hotelId,
+				actor: event.locals.user,
+				action: 'promo_code.create',
+				entityType: 'promo_code',
+				entityId: row!.id,
+				after: { ...parsed.data, code }
+			});
+		} catch (e) {
+			if (e instanceof Error && 'code' in e && (e as { code: string }).code === '23505') {
+				return fail(400, { error: `Promo code "${code}" already exists.` });
+			}
+			throw e;
+		}
+
+		return { ok: `Created promo code "${code}".` };
+	},
+
+	updatePromoCode: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		const hotelId = event.locals.hotel!.id;
+
+		const raw = Object.fromEntries(await event.request.formData());
+		const parsed = updatePromoCodeSchema.safeParse({ ...raw, isActive: raw.isActive === 'on' });
+		if (!parsed.success) return fail(400, { error: 'Check the promo code details and try again.' });
+
+		if (
+			parsed.data.validFrom &&
+			parsed.data.validUntil &&
+			parsed.data.validUntil < parsed.data.validFrom
+		) {
+			return fail(400, { error: 'Valid-until must not be before valid-from.' });
+		}
+
+		const [existing] = await db
+			.select({ id: promoCodes.id })
+			.from(promoCodes)
+			.where(and(eq(promoCodes.id, parsed.data.id), eq(promoCodes.hotelId, hotelId)))
+			.limit(1);
+		if (!existing) return fail(404, { error: 'Promo code not found.' });
+
+		const code = normalizePromoCode(parsed.data.code);
+		try {
+			await db
+				.update(promoCodes)
+				.set({
+					code,
+					description: parsed.data.description?.trim() || null,
+					discountType: parsed.data.discountType,
+					discountBps:
+						parsed.data.discountType === 'percentage'
+							? Math.round(parsed.data.discountPct! * 100)
+							: null,
+					discountAmountCentavos:
+						parsed.data.discountType === 'fixed_amount' ? toCentavos(parsed.data.discountAmountPhp) : null,
+					validFrom: parsed.data.validFrom ?? null,
+					validUntil: parsed.data.validUntil ?? null,
+					isActive: parsed.data.isActive ?? false,
+					updatedAt: new Date()
+				})
+				.where(eq(promoCodes.id, parsed.data.id));
+
+			await writeAudit({
+				hotelId,
+				actor: event.locals.user,
+				action: 'promo_code.update',
+				entityType: 'promo_code',
+				entityId: parsed.data.id,
+				after: { ...parsed.data, code }
+			});
+		} catch (e) {
+			if (e instanceof Error && 'code' in e && (e as { code: string }).code === '23505') {
+				return fail(400, { error: `Promo code "${code}" already exists.` });
+			}
+			throw e;
+		}
+
+		return { ok: `Updated promo code "${code}".` };
 	}
 };

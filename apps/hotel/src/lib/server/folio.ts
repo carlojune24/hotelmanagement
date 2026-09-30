@@ -12,7 +12,9 @@ import {
 	hotels,
 	orders,
 	paymentAllocations,
-	payments
+	payments,
+	promoCodes,
+	promoRedemptions
 } from './db/schema/index';
 import { writeAudit } from './audit';
 import type { SessionUser } from './auth/session';
@@ -289,8 +291,27 @@ export interface FolioChargeLine {
 	createdAt: Date;
 }
 
+/** The promo-code trail for a room: gross price → code → discount → what the folio actually
+ *  charges. Display only — the folio's own charge lines already carry the net amount (see
+ *  `ensureFolio`), so this never changes a balance. */
+export interface FolioPromo {
+	code: string;
+	/** Terms of the code, e.g. "10% off" or "₱200.00 off". Null if the code row is gone. */
+	terms: string | null;
+	/** This room's pre-discount price (net charge + discount). */
+	grossCentavos: number;
+	/** This room's own share of the code's discount. */
+	discountCentavos: number;
+	/** Effective share of this room's gross price, in basis points. */
+	effectiveBps: number;
+	/** What the folio charges for the stay after the discount. */
+	netCentavos: number;
+}
+
 export interface FolioDetail {
 	folioId: string;
+	/** Promo-code trail for this room, or null when none was redeemed. */
+	promo: FolioPromo | null;
 	status: 'open' | 'closed';
 	charges: FolioChargeLine[];
 	/** THIS room's / hall's own charges. */
@@ -334,8 +355,11 @@ export async function getFolioDetail(hotelId: string, target: FolioTarget): Prom
 		.filter((c) => !c.voidedAt)
 		.reduce((sum, c) => sum + c.totalCentavos, 0);
 
+	const promo = target.kind === 'room' ? await loadFolioPromo(hotelId, target.bookingId) : null;
+
 	return {
 		folioId,
+		promo,
 		status: folio!.status,
 		charges: chargeRows.map((c) => ({
 			id: c.id,
@@ -356,6 +380,47 @@ export async function getFolioDetail(hotelId: string, target: FolioTarget): Prom
 		orderBalanceCentavos: ledger?.balanceCentavos ?? chargesTotalCentavos,
 		orderChargesTotalCentavos: ledger?.chargesTotalCentavos ?? chargesTotalCentavos,
 		orderLineCount: ledger?.lines.length ?? 1
+	};
+}
+
+async function loadFolioPromo(hotelId: string, bookingId: string): Promise<FolioPromo | null> {
+	const [row] = await db
+		.select({
+			code: promoRedemptions.code,
+			discountCentavos: promoRedemptions.discountCentavos,
+			discountType: promoCodes.discountType,
+			discountBps: promoCodes.discountBps,
+			discountAmountCentavos: promoCodes.discountAmountCentavos,
+			netCentavos: bookings.totalCentavos
+		})
+		.from(promoRedemptions)
+		.innerJoin(bookings, eq(bookings.id, promoRedemptions.bookingId))
+		.leftJoin(promoCodes, eq(promoCodes.id, promoRedemptions.promoCodeId))
+		.where(
+			and(
+				eq(promoRedemptions.hotelId, hotelId),
+				eq(promoRedemptions.bookingId, bookingId),
+				isNull(promoRedemptions.voidedAt)
+			)
+		)
+		.limit(1);
+	if (!row || row.discountCentavos <= 0) return null;
+
+	const grossCentavos = row.netCentavos + row.discountCentavos;
+	const terms =
+		row.discountType === 'percentage' && row.discountBps != null
+			? `${row.discountBps / 100}% off`
+			: row.discountType === 'fixed_amount' && row.discountAmountCentavos != null
+				? `₱${(row.discountAmountCentavos / 100).toFixed(2)} off`
+				: null;
+	return {
+		code: row.code,
+		terms,
+		grossCentavos,
+		discountCentavos: row.discountCentavos,
+		effectiveBps:
+			grossCentavos > 0 ? Math.round((row.discountCentavos / grossCentavos) * 10000) : 0,
+		netCentavos: row.netCentavos
 	};
 }
 

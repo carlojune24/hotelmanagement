@@ -23,6 +23,7 @@
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
 	import PaymentFields from '$lib/components/staff/payment-fields.svelte';
 	import WalkinPaymentFields from '$lib/components/staff/walkin-payment-fields.svelte';
+	import FolioPromoTrail from '$lib/components/staff/folio-promo-trail.svelte';
 	import IdCameraCapture from '$lib/components/staff/id-camera-capture.svelte';
 	import AvailabilityCalendarSheet, {
 		type AvailabilityTarget
@@ -37,9 +38,7 @@
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import UserIcon from '@lucide/svelte/icons/user';
 	import WrenchIcon from '@lucide/svelte/icons/wrench';
-	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
 	import WalletIcon from '@lucide/svelte/icons/wallet';
-	import BellIcon from '@lucide/svelte/icons/bell';
 	import DoorOpenIcon from '@lucide/svelte/icons/door-open';
 	import IdCardIcon from '@lucide/svelte/icons/id-card';
 	import type { ActionData, PageData } from './$types';
@@ -54,7 +53,7 @@
 	import type { PriceBreakdown } from '$lib/server/pricing';
 	import { MAX_ROOMS_PER_LINE, addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
 	import { resolveOccupancyPlan } from '$lib/occupancy';
-	import { suggestedExtensionHours } from '$lib/extension-hours';
+	import { suggestedExtensionHours, MAX_EXTENSION_HOURS } from '$lib/extension-hours';
 	import { AMENITY_CATEGORY_LABELS, AMENITY_CATEGORY_ORDER } from '$lib/amenity-categories';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -146,7 +145,10 @@
 			toast.success('ID photo saved.');
 			idCaptureOpen = false;
 		}
-		if (formDepositOk) toast.success(formDepositOk);
+		if (formDepositOk) {
+			toast.success(formDepositOk);
+			depositOverrideConfirming = false;
+		}
 		if (formIdPhotoError) toast.error(formIdPhotoError);
 		if (formScPwdOk) {
 			toast.success('Senior Citizen/PWD discount updated.');
@@ -183,6 +185,7 @@
 			roomDetailBookingId = bookingId;
 			idCaptureOpen = false;
 			scPwdToggleOpen = false;
+			depositOverrideConfirming = false;
 			tick().then(() => roomDetailFormEl?.requestSubmit());
 		}
 	});
@@ -198,6 +201,7 @@
 	let hallPayOpen = $state(false);
 	let hallRefundOpen = $state(false);
 	let checkoutCityLedger = $state(false);
+	let depositOverrideConfirming = $state(false);
 	let shiftFloat = $state('');
 	let shiftDrawer = $state('');
 
@@ -481,8 +485,9 @@
 		if (isOverdueTile(c)) return 'border-danger/50 bg-danger/10';
 		switch (c.status) {
 			case 'occupied':
-			case 'departing':
 				return 'border-ok/40 bg-ok/10';
+			case 'departing':
+				return 'border-warning/40 bg-warning/10';
 			case 'reserved':
 				return 'border-dashed border-brand/50';
 			case 'ooo':
@@ -494,8 +499,9 @@
 	function statusPillClass(status: string): string {
 		switch (status) {
 			case 'occupied':
-			case 'departing':
 				return 'border-transparent bg-ok/15 text-ok';
+			case 'departing':
+				return 'border-transparent bg-warning/15 text-warning';
 			case 'reserved':
 				return 'border-transparent bg-brand/15 text-brand';
 			case 'ooo':
@@ -507,7 +513,7 @@
 	const statusLabel: Record<string, string> = {
 		vacant: 'Vacant',
 		occupied: 'Occupied',
-		departing: 'Occupied',
+		departing: 'Departing',
 		reserved: 'Reserved',
 		ooo: 'Out of order'
 	};
@@ -516,6 +522,12 @@
 	}
 	function humanize(s: string): string {
 		return s.replace(/_/g, ' ');
+	}
+	function guestInitials(name: string): string {
+		const parts = name.trim().split(/\s+/).filter(Boolean);
+		const first = parts[0]?.[0] ?? '';
+		const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? '') : '';
+		return (first + last).toUpperCase() || '?';
 	}
 
 	// --- Walk-in drawer ---
@@ -1242,7 +1254,7 @@
 				{@render statusChip(
 					'departing',
 					'Departing',
-					overdueDepartingCount > 0 ? 'bg-danger' : 'bg-ok',
+					overdueDepartingCount > 0 ? 'bg-danger' : 'bg-warning',
 					statusCounts.departing,
 					overdueDepartingCount > 0 ? `${overdueDepartingCount} overdue` : 'on schedule',
 					overdueDepartingCount > 0 ? 'font-semibold text-danger' : ''
@@ -1346,7 +1358,7 @@
 				<span class="font-semibold text-ink">Quick view</span>
 				<span class="flex items-center gap-1.5"><span class="fd-dot bg-ink-muted"></span>Ready</span>
 				<span class="flex items-center gap-1.5"><span class="fd-dot bg-ok"></span>Occupied</span>
-				<span class="flex items-center gap-1.5"><span class="fd-dot bg-ink-muted"></span>Departing</span>
+				<span class="flex items-center gap-1.5"><span class="fd-dot bg-warning"></span>Departing</span>
 				<span class="flex items-center gap-1.5"><span class="fd-dot bg-brand"></span>Reserved</span>
 				<span class="flex items-center gap-1.5"><span class="fd-dot bg-danger"></span>Out of order</span>
 			</div>
@@ -1432,7 +1444,7 @@
 												c
 											)
 												? 'bg-danger/15 text-danger'
-												: 'bg-ok/15 text-ok'}"
+												: 'bg-warning/15 text-warning'}"
 										>
 											<LogOutIcon class="size-3.5" />
 										</span>
@@ -1617,6 +1629,7 @@
 											type="button"
 											onclick={() => removePickedTile(tile.roomId)}
 											class="shrink-0 text-ink-muted hover:text-danger"
+											aria-label="Remove room {tile.roomNumber} from selection"
 										>
 											<XIcon class="size-3.5" />
 										</button>
@@ -1791,14 +1804,15 @@
 						{@const nights = Math.round(
 							(Date.parse(o.checkOut) - Date.parse(o.checkIn)) / 86_400_000
 						)}
-						<!-- The one-glance guest card: who, how many, how long, when they must leave,
-						     and anything they asked for — zero clicks. Everything else is one away. -->
+						<!-- One guest card: identity + the zero-click facts (departure, balance,
+						     request) up top; contact/dates/rate plan/total sit behind one toggle
+						     below instead of duplicating the header in a second card. -->
 						<div class="mb-4 rounded-lg border border-border p-3">
 							<div class="flex items-center gap-2.5">
 								<span
-									class="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand/15 text-xs font-semibold text-brand"
+									class="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand/15 text-sm font-semibold text-brand"
 								>
-									{o.guestName.slice(0, 1).toUpperCase()}
+									{guestInitials(o.guestName)}
 								</span>
 								<div class="min-w-0">
 									<div class="truncate text-sm font-semibold text-ink">{o.guestName}</div>
@@ -1834,6 +1848,47 @@
 									</div>
 								{/if}
 							</dl>
+							<Accordion.Root type="single" class="mt-2 border-t border-border pt-1">
+								<Accordion.Item value="guest-details">
+									<Accordion.Trigger
+										class="px-0 py-1.5 text-xs font-medium text-ink-muted hover:text-ink hover:no-underline"
+									>
+										More details
+									</Accordion.Trigger>
+									<Accordion.Content class="pb-0">
+										<div class="pt-1 text-sm">
+											<div class="mb-3 space-y-0.5">
+												<div class="truncate text-ink">{o.guestEmail}</div>
+												{#if o.guestPhone}
+													<div class="text-ink-muted">{o.guestPhone}</div>
+												{/if}
+											</div>
+											<div class="grid grid-cols-2 gap-2">
+												<div class="rounded-lg bg-surface-2 px-3 py-2">
+													<div class="text-[11px] text-ink-muted">Check-in</div>
+													<div class="font-medium text-ink">{o.checkIn}</div>
+												</div>
+												<div class="rounded-lg bg-surface-2 px-3 py-2">
+													<div class="text-[11px] text-ink-muted">Check-out</div>
+													<div class="font-medium text-ink">{o.checkOut}</div>
+												</div>
+												<div class="rounded-lg bg-surface-2 px-3 py-2">
+													<div class="text-[11px] text-ink-muted">Occupancy</div>
+													<div class="font-medium text-ink">{o.occupancy} guests</div>
+												</div>
+												<div class="rounded-lg bg-surface-2 px-3 py-2">
+													<div class="text-[11px] text-ink-muted">Rate plan</div>
+													<div class="truncate font-medium text-ink">{o.ratePlanName}</div>
+												</div>
+											</div>
+											<div class="mt-3 flex items-center justify-between border-t border-border pt-3">
+												<span class="text-ink-muted">Total</span>
+												<span class="font-semibold text-ink">{peso(o.totalCentavos)}</span>
+											</div>
+										</div>
+									</Accordion.Content>
+								</Accordion.Item>
+							</Accordion.Root>
 						</div>
 					{/if}
 
@@ -1903,63 +1958,6 @@
 
 					{#if selectedRoom.occupant}
 						{@const o = selectedRoom.occupant}
-						{@const deadline = checkoutDeadline(o.checkoutAtIso, nowMs, data.timezone)}
-						<Accordion.Root type="single" class="mb-4">
-							<Accordion.Item value="guest-details" class="rounded-lg border border-border">
-								<Accordion.Trigger class="px-3 py-2 text-sm font-semibold text-ink hover:no-underline"
-									>Guest & stay details</Accordion.Trigger
-								>
-								<Accordion.Content class="pb-0">
-									<dl class="divide-y divide-border border-t border-border text-sm">
-										<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-											<dt class="text-ink-muted">Guest</dt>
-											<dd class="text-right font-medium text-ink">{o.guestName}</dd>
-										</div>
-										<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-											<dt class="text-ink-muted">Email</dt>
-											<dd class="truncate text-right text-ink">{o.guestEmail}</dd>
-										</div>
-										{#if o.guestPhone}
-											<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-												<dt class="text-ink-muted">Phone</dt>
-												<dd class="text-right text-ink">{o.guestPhone}</dd>
-											</div>
-										{/if}
-										<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-											<dt class="text-ink-muted">Check-in</dt>
-											<dd class="text-right text-ink">{o.checkIn}</dd>
-										</div>
-										<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-											<dt class="text-ink-muted">Check-out</dt>
-											<dd class="text-right text-ink">{o.checkOut}</dd>
-										</div>
-										<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-											<dt class="flex items-center gap-1 text-ink-muted">
-												<ClockIcon class="size-3.5" />
-												{deadline.overdue ? 'Overdue since' : 'Checkout due'}
-											</dt>
-											<dd
-												class="text-right font-medium {deadline.overdue ? 'text-danger' : 'text-ink'}"
-											>
-												{deadline.label}
-											</dd>
-										</div>
-										<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-											<dt class="text-ink-muted">Occupancy</dt>
-											<dd class="text-right text-ink">{o.occupancy} guests</dd>
-										</div>
-										<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-											<dt class="text-ink-muted">Rate plan</dt>
-											<dd class="text-right text-ink">{o.ratePlanName}</dd>
-										</div>
-										<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-											<dt class="text-ink-muted">Total</dt>
-											<dd class="text-right font-semibold text-ink">{peso(o.totalCentavos)}</dd>
-										</div>
-									</dl>
-								</Accordion.Content>
-							</Accordion.Item>
-						</Accordion.Root>
 						{#if selectedRoom.status === 'occupied'}
 							{#if selectedHousekeeping?.status === 'dirty' || selectedHousekeeping?.status === 'in_progress'}
 								<p class="mb-3 flex items-center gap-1.5 text-xs text-ink-muted">
@@ -1995,30 +1993,30 @@
 								it to the folio below before checking out.
 							</p>
 						{/if}
-						{#if roomDeposit?.status === 'held' && (selectedRoom.status === 'departing' || selectedRoom.status === 'occupied')}
-							<p class="mb-2 text-xs text-danger">
-								Settle the ₱{(roomDeposit.amountCentavos / 100).toFixed(
-									2
-								)} security deposit below before checking out.
-							</p>
-						{/if}
-						{#if formRoomDetail && formFolio && formRoomDetail.booking.id === o.bookingId && formFolio.balanceCentavos > 0 && (selectedRoom.status === 'departing' || selectedRoom.status === 'occupied')}
-							<p class="mb-3 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
-								<strong>Can't check out yet</strong> — {peso(formFolio.balanceCentavos)} still due.
-								Take payment in the Folio section below before checking out.
-							</p>
+						{#if (selectedRoom.status === 'departing' || selectedRoom.status === 'occupied') && (roomDeposit?.status === 'held' || (formRoomDetail && formFolio && formRoomDetail.booking.id === o.bookingId && formFolio.balanceCentavos > 0))}
+							<div class="mb-3 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
+								<p class="font-semibold">Before you can check out</p>
+								<ul class="mt-1 list-disc space-y-0.5 pl-4">
+									{#if roomDeposit?.status === 'held'}
+										<li>
+											Settle the ₱{(roomDeposit.amountCentavos / 100).toFixed(2)} security deposit
+											below.
+										</li>
+									{/if}
+									{#if formRoomDetail && formFolio && formRoomDetail.booking.id === o.bookingId && formFolio.balanceCentavos > 0}
+										<li>
+											{peso(formFolio.balanceCentavos)} still due — take payment in the Folio section
+											below.
+										</li>
+									{/if}
+								</ul>
+							</div>
 						{/if}
 						{#if selectedRoom.status === 'departing' && (selectedHousekeeping?.status === 'dirty' || selectedHousekeeping?.status === 'in_progress')}
 							<p class="mb-2 text-xs text-ink-muted">
 								This room wasn't marked clean by Housekeeping before this stay — checking out
 								anyway.
 							</p>
-						{/if}
-						{#if formFolio && formRoomDetail?.booking.id === o.bookingId && formFolio.balanceCentavos > 0}
-							<Button size="touch" class="mb-2 w-full gap-1.5" onclick={() => (roomPayOpen = true)}>
-								<CreditCardIcon class="size-4" />
-								Take payment ({peso(formFolio.balanceCentavos)} due)
-							</Button>
 						{/if}
 						<div class="flex gap-2">
 							{#if selectedRoom.status === 'departing' || selectedRoom.status === 'occupied'}
@@ -2028,7 +2026,9 @@
 										type="submit"
 										variant="outline"
 										class="w-full gap-1.5"
-										disabled={!roomDetailReady || roomDeposit?.status === 'held'}
+										disabled={!roomDetailReady ||
+											roomDeposit?.status === 'held' ||
+											(formFolio?.balanceCentavos ?? 0) > 0}
 									>
 										<DoorOpenIcon class="size-4" />
 										{selectedRoom.status === 'departing' ? 'Check out' : 'Check out early'}
@@ -2226,6 +2226,12 @@
 									</Badge>
 								</div>
 
+								{#if formFolio.promo}
+									<div class="mb-2">
+										<FolioPromoTrail promo={formFolio.promo} />
+									</div>
+								{/if}
+
 								<div class="divide-y divide-border text-sm">
 									{#each formFolio.charges as c (c.id)}
 										<div class="flex items-start justify-between gap-2 py-1.5">
@@ -2280,12 +2286,14 @@
 									</div>
 									{#if formRoomDetail}
 										<div class="py-1.5">
-											<a
+											<Button
+												variant="outline"
+												size="sm"
+												class="w-full"
 												href="{staffBase}/transactions/{formRoomDetail.order.id}?roomId={selectedRoomId ?? ''}"
-												class="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
 											>
-												Open booking transaction →
-											</a>
+												Open booking transaction
+											</Button>
 										</div>
 									{/if}
 								</div>
@@ -2398,13 +2406,15 @@
 												</div>
 											</form>
 										{:else}
-											<button
+											<Button
 												type="button"
+												variant="outline"
+												size="sm"
+												class="w-full"
 												onclick={() => (checkoutCityLedger = true)}
-												class="text-xs font-medium text-ink-muted underline underline-offset-2 hover:text-ink"
 											>
-												Check out with balance → charge to city ledger
-											</button>
+												Check out with balance → city ledger
+											</Button>
 										{/if}
 									</div>
 								{/if}
@@ -2474,16 +2484,40 @@
 											</Button>
 										</form>
 										{#if depositGateBlocked && canChargeCityLedger}
-											<form method="POST" action="?/settleDeposit" use:enhance class="mt-1.5">
-												<input type="hidden" name="bookingId" value={o.bookingId} />
-												<input type="hidden" name="override" value="1" />
-												<button
-													type="submit"
-													class="text-xs text-ink-muted underline underline-offset-2 hover:text-danger"
-												>
-													Admin override — settle anyway, skip the housekeeping check
-												</button>
-											</form>
+											<div class="mt-2 rounded-lg border border-danger/30 bg-danger/5 p-2.5">
+												{#if depositOverrideConfirming}
+													<p class="mb-2 text-xs text-danger">
+														This skips the housekeeping check — the deposit settles even though the
+														room hasn't been confirmed clean or a damage report is still open. Only
+														do this if you've verified the room yourself.
+													</p>
+													<form method="POST" action="?/settleDeposit" use:enhance class="flex gap-2">
+														<input type="hidden" name="bookingId" value={o.bookingId} />
+														<input type="hidden" name="override" value="1" />
+														<Button type="submit" size="sm" variant="destructive" class="flex-1">
+															Yes, skip the check and settle
+														</Button>
+														<Button
+															type="button"
+															size="sm"
+															variant="ghost"
+															onclick={() => (depositOverrideConfirming = false)}
+														>
+															Cancel
+														</Button>
+													</form>
+												{:else}
+													<Button
+														type="button"
+														size="sm"
+														variant="outline"
+														class="w-full text-danger"
+														onclick={() => (depositOverrideConfirming = true)}
+													>
+														Admin override — skip the housekeeping check
+													</Button>
+												{/if}
+											</div>
 										{/if}
 									</div>
 								{:else if roomDeposit?.status === 'settled'}
@@ -2554,6 +2588,7 @@
 														type="number"
 														min="0.5"
 														step="0.5"
+														max={MAX_EXTENSION_HOURS}
 														bind:value={lateFeeHours}
 														class="w-16"
 													/>
@@ -2584,6 +2619,7 @@
 														type="number"
 														min="0.5"
 														step="0.5"
+														max={MAX_EXTENSION_HOURS}
 														bind:value={earlyFeeHours}
 														class="w-16"
 													/>
@@ -3029,6 +3065,7 @@
 										class="size-7"
 										disabled={line.roomCount <= 1}
 										onclick={() => bumpWalkInCartQty(line.id, -1)}
+										aria-label="Decrease room count for {line.roomTypeName}"
 									>
 										<MinusIcon class="size-3.5" />
 									</Button>
@@ -3040,6 +3077,7 @@
 										class="size-7"
 										disabled={line.roomCount >= Math.min(MAX_ROOMS_PER_LINE, line.availableRooms)}
 										onclick={() => bumpWalkInCartQty(line.id, 1)}
+										aria-label="Increase room count for {line.roomTypeName}"
 									>
 										<PlusIcon class="size-3.5" />
 									</Button>
@@ -3054,6 +3092,7 @@
 								variant="ghost"
 								class="size-7"
 								onclick={() => removeFromWalkInCart(line.id)}
+								aria-label="Remove {line.roomTypeName} from cart"
 							>
 								<XIcon class="size-3.5" />
 							</Button>

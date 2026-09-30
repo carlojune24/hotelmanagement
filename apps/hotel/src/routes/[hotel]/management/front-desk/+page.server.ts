@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import { amenityItems, cashAccounts, roomTypes } from '$lib/server/db/schema/index';
 import { requireCap } from '$lib/server/auth/rbac';
+import { MAX_EXTENSION_HOURS } from '$lib/extension-hours';
 import { getHallBookingDetail, getRoomBookingDetail } from '$lib/server/reservations';
 import {
 	getBrowsableRoomType,
@@ -437,11 +438,14 @@ export const actions: Actions = {
 				hours: z.coerce
 					.number()
 					.min(0.5)
-					.max(48)
+					.max(MAX_EXTENSION_HOURS)
 					.refine((h) => Number.isInteger(h * 2), 'Must be in half-hour increments.')
 			})
 			.safeParse(raw);
-		if (!parsed.success) return fail(400, { folioError: 'Enter a valid number of hours.' });
+		if (!parsed.success)
+			return fail(400, {
+				folioError: `Enter hours between 0.5 and ${MAX_EXTENSION_HOURS}, in half-hour steps (e.g. 56.5).`
+			});
 
 		try {
 			await addExtensionFeeCharge(

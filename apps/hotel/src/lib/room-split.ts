@@ -10,6 +10,26 @@ export function splitInteger(total: number, n: number): number[] {
 	return Array.from({ length: n }, (_, i) => base + (i < extra ? 1 : 0));
 }
 
+/** Splits `total` (an integer, e.g. a promo discount in centavos) across `weights`
+ *  proportionally, largest-remainder method — parts sum back to `total` exactly, unlike a
+ *  naive `Math.round` per share which can be off by a centavo or two. Weights that are all
+ *  zero (nothing eligible) get an all-zero split rather than dividing by zero. */
+export function splitProportional(total: number, weights: number[]): number[] {
+	const sumWeights = weights.reduce((a, b) => a + b, 0);
+	if (sumWeights <= 0) return weights.map(() => 0);
+	const raw = weights.map((w) => (total * w) / sumWeights);
+	const floors = raw.map(Math.floor);
+	let remainder = total - floors.reduce((a, b) => a + b, 0);
+	const byFraction = raw
+		.map((r, i) => ({ i, frac: r - floors[i]! }))
+		.sort((a, b) => b.frac - a.frac);
+	const result = [...floors];
+	for (let k = 0; k < remainder && k < byFraction.length; k++) {
+		result[byFraction[k]!.i]! += 1;
+	}
+	return result;
+}
+
 export interface LinePrice {
 	subtotalCentavos: number;
 	/** Sum of the line's fee amounts. */

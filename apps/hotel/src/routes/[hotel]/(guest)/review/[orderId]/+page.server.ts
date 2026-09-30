@@ -34,6 +34,7 @@ async function loadOrderLines(orderId: string) {
 			occupancy: bookings.occupancy,
 			quantity: bookingRooms.quantity,
 			subtotalCentavos: bookings.subtotalCentavos,
+			discountCentavos: bookings.discountCentavos,
 			totalCentavos: bookings.totalCentavos,
 			roomTypeName: roomTypes.name,
 			ratePlanName: ratePlans.name
@@ -83,6 +84,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 			subtotalCentavos: order.subtotalCentavos,
 			feesCentavos: order.feesCentavos,
 			vatCentavos: order.vatCentavos,
+			discountCentavos: order.discountCentavos,
 			totalCentavos: order.totalCentavos,
 			// What PayMongo will charge now; the rest is paid at the hotel.
 			dueNowCentavos: order.amountDueNowCentavos ?? order.totalCentavos

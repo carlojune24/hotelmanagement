@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import type { CartStore } from '$lib/cart.svelte';
 	import { itemLabel, itemDetail } from '$lib/cart-display';
+	import { Input } from '$lib/components/ui/input/index.js';
 
 	let { cart, hotelSlug }: { cart: CartStore; hotelSlug: string } = $props();
 
@@ -12,7 +13,6 @@
 	const checkOut = $derived(page.url.searchParams.get('checkOut'));
 	const adults = $derived(page.url.searchParams.get('adults') ?? '2');
 	const children = $derived(page.url.searchParams.get('children') ?? '0');
-	const promo = $derived(page.url.searchParams.get('promo'));
 
 	/** Editing dates/guests routes back to the Dates step, pre-filled with whatever's known
 	    right now — the only place occupancy can be corrected once past the Dates step, since
@@ -46,9 +46,17 @@
 			<a href={editDatesHref} class="storefront-summary-edit">Edit</a>
 		</div>
 	{/if}
-	<div class="storefront-summary-row">
-		<span class="ledger-label">Special code</span>
-		<span class="ledger-data text-sm">{promo || 'None'}</span>
+	<div class="storefront-summary-row items-start">
+		<span class="ledger-label pt-1.5">Promo code</span>
+		<Input
+			type="text"
+			placeholder="Add a code"
+			maxlength={40}
+			value={cart.promoCode ?? ''}
+			oninput={(e) => cart.setPromoCode(e.currentTarget.value)}
+			class="ledger-field h-8 max-w-[9.5rem] text-sm"
+			aria-label="Promo code"
+		/>
 	</div>
 
 	{#if cart.items.length > 0}

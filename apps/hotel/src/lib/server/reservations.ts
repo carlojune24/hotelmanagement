@@ -313,6 +313,8 @@ async function folioSummary(
 	if (!['confirmed', 'checked_in', 'checked_out', 'completed'].includes(status)) return null;
 	const f = await getFolioDetail(hotelId, target);
 	return {
+		/** Promo-code trail (gross → code → discount → net) for this room, or null. */
+		promo: f.promo,
 		/** This room's own charges. */
 		chargesTotalCentavos: f.chargesTotalCentavos,
 		/** THIS room's own paid amount and balance. */

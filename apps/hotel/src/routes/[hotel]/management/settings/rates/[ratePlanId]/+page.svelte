@@ -76,24 +76,18 @@
 					<Label for="description">Description</Label>
 					<Input id="description" name="description" value={p.description ?? ''} class="mt-1" />
 				</div>
-				<div class="grid grid-cols-2 gap-3">
-					<div>
-						<Label for="basePricePhp">Price / night (₱)</Label>
-						<Input
-							id="basePricePhp"
-							name="basePricePhp"
-							type="number"
-							min="0"
-							step="0.01"
-							value={peso(p.basePriceCentavos)}
-							required
-							class="mt-1"
-						/>
-					</div>
-					<div>
-						<Label for="promoCode">Promo code</Label>
-						<Input id="promoCode" name="promoCode" value={p.promoCode ?? ''} class="mt-1" />
-					</div>
+				<div>
+					<Label for="basePricePhp">Price / night (₱)</Label>
+					<Input
+						id="basePricePhp"
+						name="basePricePhp"
+						type="number"
+						min="0"
+						step="0.01"
+						value={peso(p.basePriceCentavos)}
+						required
+						class="mt-1"
+					/>
 				</div>
 				<div>
 					<Label for="inclusionsInput">Inclusions</Label>

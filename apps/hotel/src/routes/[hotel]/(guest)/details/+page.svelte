@@ -85,6 +85,7 @@
 			class="mt-6 space-y-5"
 		>
 			<input type="hidden" name="cartJson" value={cartJson} />
+				<input type="hidden" name="promoCode" value={cart.promoCode ?? ''} />
 
 			<div>
 				<Label for="fullName" class="ledger-label">Full name</Label>
