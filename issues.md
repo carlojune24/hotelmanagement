@@ -7,6 +7,7 @@
 | **Method** | Manual code review (read-only). Data flow traced from form → validation → database → consumer. |
 | **Not done** | None of the findings below were exploited against a running instance, and no database rows were changed. Every "Verified by" line says what was actually read. |
 | **Status** | All findings **Open** — nothing has been fixed yet. |
+| **Main review** | Blocks marked **`[main]`** were added on **main** (2026-09-30) after checking each finding against the code. Jade's original text is unchanged. Read-only: no code was modified and no data changed. |
 
 ## Files in scope
 
@@ -39,10 +40,31 @@
 
 Suggested fix order: **001 → 003 → 002 → 008 (after accountant sign-off) → 004 → 005/006/007**.
 
+### `[main]` verdicts at a glance
+
+| ID | Real lapse? | Severity per main | Solution needed |
+|---|---|---|---|
+| RATES-001 | **Yes — confirmed** | 🔴 High (agree) | Ownership guard on `addOverride` / `addSeason` / `update`, **plus** hotel filter in the pricing readers, plus cleanup query |
+| RATES-002 | **Yes — confirmed** (caveat: ₱0 path unverified) | 🟡 Medium (agree) | Redemption limits (atomic), throttle, longer min code, cap % |
+| RATES-003 | **Yes — confirmed** | 🟢–🟡 Low–Medium (main would downgrade) | Verify room type + both policy IDs belong to the hotel |
+| RATES-004 | **Yes — confirmed** | 🟢 Low (agree) | One shared finite, capped money schema |
+| RATES-005 | **Yes — confirmed** | 🟢 Low (agree) | Range-check the time regex |
+| RATES-006 | **Yes — confirmed** | 🟢 Low (agree) | `z.string().uuid()` on delete `id`s |
+| RATES-007 | **Yes — confirmed** (polish, not security) | 🟢 Low (agree) | Check the row count, 404 + skip audit |
+| RATES-008 | **Yes — confirmed in code**, treatment needs accountant | 🟡 Medium (agree) | Accountant sign-off first, then discount before VAT |
+
 ---
 
 ## RATES-001
 ### 🔴 High — Price overrides and seasonal rates can be written to another hotel's rate plan
+
+> **`[main]` review — confirmed, a real lapse.**
+> - Re-checked in code: `addOverride` and `addSeason` take `ratePlanId` from the URL and never check it belongs to the caller's hotel; `pricing.ts` and `booking-modify.ts` read `daily_rates` / `seasonal_rates` by plan ID only; rate plan IDs do reach the public rooms page; the unique index `(rate_plan_id, date)` enables the overwrite. It also breaks our own rule (CLAUDE.md): every query scopes by `hotel_id`.
+> - **Corrections to the text above:**
+>   - "Hard to spot" is overstated — the rate-plan page lists overrides by plan ID only, so the **victim's admin can see** the planted rows. The audit entry is still under the attacker's hotel.
+>   - "Cannot be cleaned up": the victim sees the row but **Remove can't delete it** (delete is scoped by `hotel_id`), and the toast still says "Override removed" — misleading.
+>   - When an existing row is **overwritten**, it keeps the victim's `hotel_id`, so it is deletable, but the original price is already lost.
+> - **Solution needed:** (1) ownership guard at the top of `addOverride`, `addSeason`, and `update`; (2) add the hotel filter to the readers in `pricing.ts` and `booking-modify.ts` (defence in depth); (3) run the cleanup query on every real database, not only dev; (4) the three tests listed below; (5) sweep other actions that take an ID from the URL — 001, 003 and 006 share the same habit.
 
 **Type:** Broken access control — cross-tenant IDOR (write)
 **Files:** `settings/rates/[ratePlanId]/+page.server.ts` — `addOverride` (action at line 175, insert at 184), `addSeason` (action at line 234, insert at 247)
@@ -113,6 +135,12 @@ where d.hotel_id <> p.hotel_id;
 ## RATES-002
 ### 🟡 Medium — Promo codes have no usage limits and no guess protection
 
+> **`[main]` review — confirmed, with one unverified point.**
+> - Re-checked: no limit columns exist; the 2-character minimum is real; 100% is accepted; the only rate limiters in the app are on login, invite and API-key paths, **never on guest checkout**.
+> - The lack of throttling was a **deliberate choice** (see the comment in `promo-codes.ts`), but it only considered hidden inventory — not guessing a code to get a discount. That is the lapse.
+> - **Not verified:** the ₱0 path. A 100% code sends zero-amount line items to PayMongo, which most likely rejects it — leaving a pending order that holds inventory until it expires, rather than a free stay. Needs a test before we rely on this.
+> - **Solution needed:** `maxRedemptions` (and optional per-email limit) enforced **inside the same transaction** as the redemption insert; a throttle on promo attempts per IP and hotel reusing `auth/rate-limit.ts`; minimum code length 6; cap percentage codes (or explicit "allow 100%"); test the ₱0 path end to end.
+
 **Type:** Business-logic abuse; brute force
 **Files:** `lib/server/db/schema/promo-codes.ts` (no limit columns), `lib/server/promo-codes.ts:20` (`findRedeemablePromoCode`), `(guest)/details/+page.server.ts:244` (redemption), `settings/rates/+page.server.ts:137-141` (code and percent validation)
 
@@ -150,6 +178,12 @@ Read the schema, lookup, checkout redemption, and admin validation. Confirmed no
 ## RATES-003
 ### 🟡 Medium — Rate plans can reference another hotel's room type and policies
 
+> **`[main]` review — confirmed, but main would rate it Low–Medium.**
+> - Re-checked: neither `createRatePlan` nor `update` verifies the room type or policy IDs belong to the hotel.
+> - The harm lands almost entirely on the **attacker's own hotel**. The leak is narrower than described: the availability join exposes only `freeCancelHours`, `penaltyType` and the downpayment percentage — not the policy name or text — and it needs the other hotel's policy UUID, which we saw no sign of being public.
+> - Still worth fixing: it violates the "every tenant row carries a matching `hotel_id`" rule at the write boundary.
+> - **Solution needed:** one small shared helper that checks room type, cancellation policy and security-deposit policy all belong to `hotelId`, used by both actions; the RATES-001 guard can live beside it; test for rejection.
+
 **Type:** Broken access control — cross-tenant reference
 **Files:** `settings/rates/+page.server.ts` — `createRatePlan` (lines 334-336); `settings/rates/[ratePlanId]/+page.server.ts` — `update` (lines 156-157)
 
@@ -184,6 +218,8 @@ Repeat for room type and security-deposit policy. A small shared helper keeps th
 ## RATES-004
 ### 🟢 Low — No upper bound on any money field; `Infinity` crashes the save
 
+> **`[main]` review — confirmed.** No money field has `.max()` or `.finite()`; the check-in/out fees already cap at 1,000,000, so the rates pages simply missed it. **Solution needed:** one shared finite, capped money schema used by every rates field (including the deposit, extra-fee and promo amount fields), with a readable error message.
+
 **Type:** Input validation
 **Files:** `settings/rates/+page.server.ts:105` (deposit `amountPhp`), `:129` (`basePricePhp`), `:111` (`optMoney`, used for extra-person and extra-bed fees, and fixed promo amount); `settings/rates/[ratePlanId]/+page.server.ts:26, 84, 99, 108` (base price, override price, seasonal price, extra fees)
 
@@ -214,6 +250,8 @@ Show a specific message ("Enter an amount up to ₱1,000,000") instead of the ge
 ## RATES-005
 ### 🟢 Low — Impossible times accepted for check-in / check-out
 
+> **`[main]` review — confirmed.** The regex checks shape only. Nuance: Postgres accepts `24:00` as a valid time, so that value would not crash — rejecting it is an app-policy choice, not a bug fix. **Solution needed:** range-check the regex as suggested.
+
 **Type:** Input validation
 **File:** `settings/check-in-out/+page.server.ts:22-23`
 
@@ -227,6 +265,8 @@ Show a specific message ("Enter an amount up to ₱1,000,000") instead of the ge
 ## RATES-006
 ### 🟢 Low — Malformed IDs on delete actions cause server errors
 
+> **`[main]` review — confirmed.** Only an empty check before the query; a non-UUID reaches a `uuid` column and returns a 500. Not exploitable. **Solution needed:** `z.string().uuid()` on both delete actions; while there, check other `remove*` / `delete*` actions in the settings pages for the same pattern.
+
 **Type:** Input validation / error handling
 **File:** `settings/rates/[ratePlanId]/+page.server.ts:218` (`removeOverride`), `:277` (`removeSeason`)
 
@@ -239,6 +279,8 @@ Show a specific message ("Enter an amount up to ₱1,000,000") instead of the ge
 ## RATES-007
 ### 🟢 Low — Rate plan update writes an audit entry even when nothing changed
 
+> **`[main]` review — confirmed, but closer to polish than security.** The update is hotel-scoped, so no other hotel's data changes; the only effect is a misleading audit entry and success message in the caller's own hotel. **Solution needed:** `.returning({ id })`, 404 and skip the audit write when nothing matched. Falls out of the RATES-001 guard once that is applied to `update`.
+
 **Type:** Audit integrity
 **File:** `settings/rates/[ratePlanId]/+page.server.ts:141-170` (`update`)
 
@@ -250,6 +292,12 @@ The update is scoped by hotel (`where id and hotelId`) so it cannot change anoth
 
 ## RATES-008
 ### 🟡 Medium — Promo discount does not reduce the VAT shown on invoices
+
+> **`[main]` review — confirmed in code; the correct treatment needs an accountant.**
+> - Re-checked: in `details/+page.server.ts` the **booking** rows subtract the discount from `subtotal` and `total` but leave `vat` at its full value, and `documents.ts` sums `bookings.vat_centavos` onto the invoice. That also contradicts the code's own comment (a few lines above) that subtotal/fees/VAT stay undiscounted — the **order** row does that, the **booking** rows do not. The two levels are inconsistent.
+> - The worked example's arithmetic is internally correct (33,000 + 3,960 = 36,960; 10% = 3,696; 29,304 subtotal; 33,264 total; VAT unchanged at 3,960).
+> - **Not verified:** the stored figures for order `C7FB25D1` — that order is not in main's dev database (it was in Jade's). The code path reproduces the behaviour.
+> - **Solution needed:** (1) an accountant decides whether a promo discount reduces the taxable base; (2) if yes, discount before VAT at checkout so `vat = rate × vatable sales` and the parts sum to the total; (3) decide whether to correct or annotate existing promo bookings; (4) the two tests listed below.
 
 **Type:** Tax accuracy / accounting (not an access-control issue)
 **Files:** `(guest)/details/+page.server.ts` (discount applied at checkout, ~lines 232-260 and 340-360), `lib/server/finance/documents.ts` (`buildInvoiceSnapshot`, VAT recovery from the booking row)
@@ -310,3 +358,4 @@ Guest checkout flow beyond the promo lookup, PayMongo payment handling, other se
 |---|---|
 | 2026-09-30 | Initial review; 7 findings recorded, none fixed. |
 | 2026-09-30 | Added RATES-008 (promo discount vs VAT) after adding the promo trail to the Booking Transactions page and printed invoice. |
+| 2026-09-30 | **`[main]`** reviewed all 8 findings against the code: all confirmed as real lapses. Added a verdict table and a `[main]` comment + "solution needed" block under each finding. RATES-003 suggested Low–Medium; corrections noted on RATES-001. No code changed. |
