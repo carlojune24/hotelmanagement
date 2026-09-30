@@ -45,6 +45,13 @@ describe('RateLimiter', () => {
 		rl.recordFailure('a');
 		expect(rl.retryAfter('b')).toBe(0);
 	});
+
+	it('consume behaves like recordFailure', () => {
+		const { rl } = make(2);
+		rl.consume('k');
+		rl.consume('k');
+		expect(rl.retryAfter('k')).toBeGreaterThan(0);
+	});
 });
 
 describe('tooManyMessage', () => {

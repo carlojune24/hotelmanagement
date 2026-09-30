@@ -113,6 +113,17 @@ export async function getMailerForHotel(hotelId: string, hotelName: string): Pro
 	};
 }
 
+/** The mailer for an email that isn't tied to any one hotel (e.g. a platform-admin
+ *  invite) — always the platform `SMTP_*` transport, sent as "MM Hotel" itself. */
+export function getPlatformMailer(): HotelMailer {
+	return {
+		transport: getPlatformTransport(),
+		from: { name: 'MM Hotel', address: platformFromAddress() },
+		delivers: isPlatformEmailConfigured(),
+		source: isPlatformEmailConfigured() ? 'platform' : 'console'
+	};
+}
+
 /** Call after a hotel's email settings change so the next send re-reads them. */
 export function forgetHotelMailer(hotelId: string): void {
 	const entry = hotelTransports.get(hotelId);

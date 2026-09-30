@@ -5,8 +5,23 @@ import { db } from '$lib/server/db/index';
 import { apiKeyHotelScopes, apiKeys, hotels } from '$lib/server/db/schema/index';
 import { hashOpaqueToken } from '$lib/server/crypto';
 import { ApiError } from '$lib/server/api/api-error';
+import { RateLimiter, type RateLimitRule } from './rate-limit';
 
 const KEY_PREFIX = 'mmhk_live_';
+
+const MIN = 60_000;
+
+/** Requests allowed per API key per rolling minute, shared across every
+ *  `/api/v1/finance/*` endpoint (not per-route) — a paginated sync commonly
+ *  touches more than one endpoint in a session, so one shared budget is the
+ *  right unit. Data endpoints page at up to `limit=200`; a well-behaved
+ *  integrator syncing tens of thousands of rows needs on the order of a few
+ *  hundred sequential requests for a first full historical sync — 300/min
+ *  (≈60,000 rows/min at max page size) lets that run essentially
+ *  uninterrupted, while still bounding a runaway retry loop to 5 req/s
+ *  against this process. */
+const FINANCE_API_RATE_LIMIT: RateLimitRule = { max: 300, windowMs: MIN };
+const financeApiLimiter = new RateLimiter(FINANCE_API_RATE_LIMIT);
 
 /** Raw key format: `mmhk_live_<32 base32 chars>`. Only the hash is ever stored. */
 export function generateApiKey(): string {
@@ -118,6 +133,14 @@ export async function requireApiKey(event: RequestEvent): Promise<ApiKeyAuth> {
 	if (!key) throw new ApiError(401, 'Invalid API key.');
 	if (key.revokedAt) throw new ApiError(401, 'This API key has been revoked.');
 	if (key.expiresAt && key.expiresAt.getTime() < Date.now()) throw new ApiError(401, 'This API key has expired.');
+
+	const retryAfter = financeApiLimiter.retryAfter(key.id);
+	if (retryAfter > 0) {
+		throw new ApiError(429, `Too many requests for this API key. Retry in ${retryAfter}s.`, {
+			'Retry-After': String(retryAfter)
+		});
+	}
+	financeApiLimiter.consume(key.id);
 
 	const scopes = await db
 		.select({ hotelId: apiKeyHotelScopes.hotelId })

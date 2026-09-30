@@ -5,6 +5,7 @@ import { db } from '$lib/server/db/index';
 import { users } from '$lib/server/db/schema/index';
 import { writeAudit } from '$lib/server/audit';
 import { createInvite } from '$lib/server/auth/invite';
+import { sendPlatformAdminInvite } from '$lib/server/email/send-invite';
 import { requirePlatformAdmin } from '$lib/server/auth/rbac';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -44,7 +45,18 @@ export const actions: Actions = {
 			entityType: 'invite',
 			after: { email: email.data }
 		});
-		return { ok: 'Invite created.', inviteLink: `${event.url.origin}/auth/accept-invite/${token}` };
+
+		const link = `${event.url.origin}/auth/accept-invite/${token}`;
+		const emailed = await sendPlatformAdminInvite({
+			toEmail: email.data,
+			inviteUrl: link,
+			inviterName: event.locals.user?.name ?? null,
+			expiresInDays: 7
+		});
+		return {
+			ok: emailed.ok ? 'Invite created and emailed.' : 'Invite created, but the email failed to send.',
+			inviteLink: link
+		};
 	},
 
 	setStatus: async (event) => {

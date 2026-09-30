@@ -8,7 +8,8 @@
 		{ href: '/admin', label: 'Overview' },
 		{ href: '/admin/hotels', label: 'Hotels' },
 		{ href: '/admin/users', label: 'Users' },
-		{ href: '/admin/api-keys', label: 'API keys' }
+		{ href: '/admin/api-keys', label: 'API keys' },
+		{ href: '/admin/errors', label: 'Errors' }
 	];
 
 	const isActive = (href: string) =>

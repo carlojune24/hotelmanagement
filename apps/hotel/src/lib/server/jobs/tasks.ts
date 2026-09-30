@@ -8,6 +8,7 @@ import { markNoShow } from '../cancellation';
 import { businessDateFor } from '../finance/shared';
 import { addDays } from '$lib/finance-range';
 import { getEnabledHotelIds } from './toggles';
+import { runErrorLogRetention } from '../error-log';
 
 export interface JobRunSummary {
 	hotelsProcessed: number;
@@ -110,4 +111,11 @@ export async function runAutoDayClose(): Promise<JobRunSummary> {
 		}
 	}
 	return { hotelsProcessed: rows.length, detail: { closed, skipped } };
+}
+
+/** Sweeps `error_log` rows past their retention window. Platform-wide, not
+ *  per-hotel — errors aren't scoped the way the other jobs' hotel toggles are. */
+export async function runErrorLogRetentionJob(): Promise<JobRunSummary> {
+	const { deleted } = await runErrorLogRetention();
+	return { hotelsProcessed: 0, detail: { deleted } };
 }

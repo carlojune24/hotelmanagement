@@ -24,7 +24,10 @@ export async function withApiKey(
 		return json(data, { headers: HEADERS });
 	} catch (e) {
 		if (e instanceof ApiError) {
-			return json({ error: { message: e.message } }, { status: e.status, headers: HEADERS });
+			return json(
+				{ error: { message: e.message } },
+				{ status: e.status, headers: { ...HEADERS, ...e.headers } }
+			);
 		}
 		if (e instanceof FinanceError) {
 			return json({ error: { message: e.message } }, { status: 400, headers: HEADERS });

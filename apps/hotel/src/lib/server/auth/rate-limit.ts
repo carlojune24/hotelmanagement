@@ -1,9 +1,12 @@
-/** In-memory fixed-window limiter for the unauthenticated auth endpoints (login, invite-accept).
+/** In-memory fixed-window limiter. Originally for the unauthenticated auth endpoints
+ *  (login, invite-accept) — only *failures* recorded there, a success clears the key, so a
+ *  legitimate user is never penalised for prior good logins. Also used for the external
+ *  Finance API's per-key request throttling (`lib/server/auth/api-key.ts`), which instead
+ *  counts every call via `consume` — there's no "failure" concept for a plain GET.
  *
  *  Process-local: a restart clears it and multiple app instances don't share counts. That's
- *  acceptable for brute-force throttling on a single-node deploy; move to a shared store
- *  (Postgres / `pg-boss`) if the app ever runs horizontally. Only *failures* are recorded, and
- *  a success clears the key, so a legitimate user is never penalised for prior good logins. */
+ *  acceptable for brute-force throttling and this app's single-node deploy; move to a shared
+ *  store (Postgres / `pg-boss`) if the app ever runs horizontally. */
 
 export interface RateLimitRule {
 	/** Failures allowed inside the window before further attempts are blocked. */
@@ -36,6 +39,13 @@ export class RateLimiter {
 		if (e) e.count += 1;
 		else this.entries.set(key, { count: 1, resetAt: this.now() + this.rule.windowMs });
 		if (this.entries.size > 10_000) this.sweep();
+	}
+
+	/** Records one unit of consumption against `key`'s budget — same mechanics as
+	 *  `recordFailure`, just a name that reads correctly where every call counts
+	 *  (e.g. per-request API throttling), not only failed ones. */
+	consume(key: string): void {
+		this.recordFailure(key);
 	}
 
 	reset(key: string): void {

@@ -143,8 +143,25 @@
 			if you ask for a <code class="text-xs">hotel_id</code> the key isn't scoped to &mdash; never
 			silently filtered. Every response carries an
 			<code class="text-xs">X-MM-Standard-Version</code> header (currently <code class="text-xs">1.0.0</code
-			>); a breaking change to these shapes bumps the major version, additive changes don't.
+			>); a breaking change to these shapes bumps the major version, additive changes don't. This is
+			a server-to-server API &mdash; no CORS headers are sent, so calling it directly from
+			browser-side JavaScript on another origin will fail by design.
 		</p>
+	</section>
+
+	<section class="mb-8 space-y-3 rounded-xl border border-border bg-surface-2 p-5">
+		<h2 class="text-sm font-semibold uppercase tracking-wide text-ink-muted">Rate limits</h2>
+		<p class="text-sm text-ink">
+			300 requests per minute per API key, shared across every endpoint on this page (not
+			per-endpoint). That's roughly 60,000 rows/minute at the largest page size — enough to page
+			through a full historical sync in one uninterrupted burst. A key that exceeds it gets
+			<code class="text-xs">429</code> until the window resets, with a
+			<code class="text-xs">Retry-After</code> header (seconds) telling you exactly how long to wait.
+		</p>
+		<pre class="overflow-x-auto rounded-lg bg-ink px-3 py-2 text-xs text-white">HTTP/1.1 429 Too Many Requests
+Retry-After: 42
+
+{'{ "error": { "message": "Too many requests for this API key. Retry in 42s." } }'}</pre>
 	</section>
 
 	<section class="mb-8 space-y-3 rounded-xl border border-border bg-surface-2 p-5">
@@ -152,7 +169,8 @@
 		<p class="text-sm text-ink">
 			Every endpoint takes a repeatable <code class="text-xs">hotel_id</code> query param. Omit it
 			to get everything your key is scoped to; pass it (one or more times) to narrow to specific
-			hotels within that scope.
+			hotels within that scope. Don't know a hotel's UUID? Click its badge on the
+			<a href="/admin/api-keys" class="text-brand hover:underline">API keys</a> page to copy it.
 		</p>
 		<pre class="overflow-x-auto rounded-lg bg-ink px-3 py-2 text-xs text-white">GET /api/v1/finance/reports/income-statement?hotel_id=&lt;a&gt;&amp;hotel_id=&lt;b&gt;&amp;date_from=2026-09-01&amp;date_to=2026-09-30</pre>
 	</section>
@@ -167,6 +185,10 @@
 			<code class="text-xs">next_cursor</code>), and <code class="text-xs">updated_since</code>
 			(an ISO instant, for incremental sync). Response shape:
 			<code class="text-xs">{'{ data: [...], next_cursor, standard_version }'}</code>.
+			<code class="text-xs">cursor</code> is opaque &mdash; round-trip whatever
+			<code class="text-xs">next_cursor</code> gave you verbatim, don't parse or construct one
+			yourself. A <code class="text-xs">null</code> <code class="text-xs">next_cursor</code> means
+			you're on the last page.
 		</p>
 		{#each listEndpoints as e (e.path)}
 			<div class="rounded-lg border border-border p-3">
@@ -189,7 +211,12 @@
 			<code class="text-xs">{'{ data: [...] }'}</code>, one row per item below. Pass multiple
 			<code class="text-xs">hotel_id</code> values to get one consolidated report across them
 			(<code class="text-xs">income-statement</code> is the one built specifically for this: one
-			column per hotel, plus a total).
+			column per hotel, plus a total). <code class="text-xs">date_from</code>/<code class="text-xs"
+				>date_to</code
+			> are plain calendar dates, each already resolved against that row's own hotel's timezone at
+			posting time &mdash; not a UTC instant range re-interpreted per request. There's no enforced
+			cap on the date range or hotel count, so keep it to what you actually need; a very wide,
+			multi-year, multi-hotel request will just be slow.
 		</p>
 		{#each reportEndpoints as e (e.path)}
 			<div class="rounded-lg border border-border p-3">
@@ -221,8 +248,8 @@
 		<h2 class="text-sm font-semibold uppercase tracking-wide text-ink-muted">Errors</h2>
 		<pre class="overflow-x-auto rounded-lg bg-ink px-3 py-2 text-xs text-white">{`{ "error": { "message": "..." } }`}</pre>
 		<p class="text-sm text-ink-muted">
-			401 (bad/missing/revoked/expired key), 403 (hotel outside the key's scope), or 400 (a bad
-			query param, e.g. an unparseable date).
+			401 (bad/missing/revoked/expired key), 403 (hotel outside the key's scope), 429 (rate limit
+			exceeded &mdash; see Rate limits above), or 400 (a bad query param, e.g. an unparseable date).
 		</p>
 	</section>
 

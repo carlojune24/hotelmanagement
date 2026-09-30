@@ -6,6 +6,7 @@
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
+	import CopyIcon from '@lucide/svelte/icons/copy';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -14,6 +15,15 @@
 		if (form && 'ok' in form && form.ok) toast.success(form.ok);
 		if (form && 'error' in form && form.error) toast.error(form.error);
 	});
+
+	async function copyText(label: string, value: string) {
+		try {
+			await navigator.clipboard.writeText(value);
+			toast.success(`${label} copied`);
+		} catch {
+			toast.error(`Could not copy — select the ${label.toLowerCase()} and copy it manually.`);
+		}
+	}
 </script>
 
 <div class="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
@@ -55,11 +65,33 @@
 						{#each data.keys as k (k.id)}
 							<Table.Row class={k.revokedAt ? 'opacity-50' : ''}>
 								<Table.Cell class="font-medium text-ink">{k.name}</Table.Cell>
-								<Table.Cell><code class="text-xs">{k.keyPrefix}…</code></Table.Cell>
+								<Table.Cell>
+									<button
+										type="button"
+										title="Copy key prefix — the full key is only ever shown once, right after creation"
+										class="inline-flex items-center gap-1 rounded text-xs text-ink hover:text-brand"
+										onclick={() => copyText('Key prefix', k.keyPrefix)}
+									>
+										<code>{k.keyPrefix}…</code>
+										<CopyIcon class="size-3" />
+									</button>
+								</Table.Cell>
 								<Table.Cell>
 									<div class="flex flex-wrap gap-1">
 										{#each k.hotels as h (h.id)}
-											<Badge variant="outline">{h.name}</Badge>
+											<button
+												type="button"
+												title="Copy hotel ID (for the API's hotel_id query param): {h.id}"
+												onclick={() => copyText('Hotel ID', h.id)}
+											>
+												<Badge
+													variant="outline"
+													class="inline-flex items-center gap-1 hover:border-brand hover:text-brand"
+												>
+													{h.name}
+													<CopyIcon class="size-3" />
+												</Badge>
+											</button>
 										{/each}
 									</div>
 								</Table.Cell>
@@ -116,8 +148,20 @@
 
 	{#if form && 'rawKey' in form && form.rawKey}
 		<div class="mt-6 rounded-lg border border-border bg-muted/40 p-3 text-sm">
-			<p class="mb-1 font-medium text-ink">Copy this key now — it won't be shown again:</p>
-			<code class="break-all text-xs">{form.rawKey}</code>
+			<p class="mb-2 font-medium text-ink">Copy this key now — it won't be shown again:</p>
+			<div class="flex items-center gap-2">
+				<code class="flex-1 break-all text-xs">{form.rawKey}</code>
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					class="shrink-0"
+					onclick={() => copyText('API key', form.rawKey)}
+				>
+					<CopyIcon class="size-3.5" />
+					Copy
+				</Button>
+			</div>
 		</div>
 	{/if}
 </div>

@@ -12,6 +12,7 @@ import {
 	loadHotelSlugByDomain
 } from '$lib/server/tenant';
 import { startJobRunner } from '$lib/server/jobs/boss';
+import { writeErrorLog } from '$lib/server/error-log';
 
 // Fire-and-forget at process boot — never blocks the server from serving
 // requests, and a startup failure (e.g. DB not reachable yet) is logged, not
@@ -131,5 +132,17 @@ export const handleError: HandleServerError = ({ error: err, event, status, mess
 		`route=${event.route.id ?? '-'} user=${event.locals.user?.id ?? '-'} hotel=${event.locals.hotel?.id ?? '-'}`,
 		err
 	);
+	// Fire-and-forget — never delays the error response, and writeErrorLog swallows
+	// its own failures so a logging problem can't produce a second error.
+	void writeErrorLog({
+		ref,
+		method: event.request.method,
+		path: event.url.pathname,
+		routeId: event.route.id,
+		userId: event.locals.user?.id ?? null,
+		hotelId: event.locals.hotel?.id ?? null,
+		message: err instanceof Error ? err.message : String(err),
+		stack: err instanceof Error ? (err.stack ?? null) : null
+	});
 	return { message: 'Something went wrong on our side.', ref };
 };
