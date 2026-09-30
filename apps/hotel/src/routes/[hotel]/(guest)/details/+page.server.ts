@@ -11,16 +11,18 @@ import {
 	hallBookings,
 	hallBookingStatusHistory,
 	orders,
-	orderStatusHistory
+	orderStatusHistory,
+	promoRedemptions
 } from '$lib/server/db/schema/index';
 import { priceEventHall, priceStay } from '$lib/server/pricing';
 import { computeDownpayment } from '$lib/downpayment';
-import { splitRoomLine } from '$lib/room-split';
+import { splitInteger, splitProportional, splitRoomLine } from '$lib/room-split';
 import { downpaymentBpsByRatePlan } from '$lib/server/downpayment-lookup';
 import { searchAvailability } from '$lib/server/availability';
 import { isOnlinePaymentEnabled } from '$lib/server/paymongo/client';
 import { checkHallAvailability } from '$lib/server/hall-availability';
 import { MAX_ROOMS_PER_LINE, addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
+import { findRedeemablePromoCode, MAX_PROMO_CODE_LENGTH } from '$lib/server/promo-codes';
 import type { Actions } from './$types';
 
 const roomItemSchema = z.object({
@@ -51,7 +53,10 @@ const detailsSchema = z.object({
 	email: z.string().email(),
 	phone: z.string().max(40).optional(),
 	specialRequests: z.string().max(1000).optional(),
-	cartJson: z.string()
+	cartJson: z.string(),
+	/** A whole-order discount code, not tied to any one cart line — re-verified and priced
+	 *  here, never trusted as proof by itself. */
+	promoCode: z.string().max(MAX_PROMO_CODE_LENGTH).optional()
 });
 
 /** Distinct, sorted advisory-lock keys for every product touched by the cart — sorted so
@@ -224,16 +229,51 @@ export const actions: Actions = {
 				}
 			}
 
+			// A whole-order discount, applied here — after every line is priced, but before
+			// totals are frozen and bookings are inserted — rather than as a later folio
+			// adjustment: `ensureFolio` seeds a folio's first charge straight from
+			// `bookings.totalCentavos`, so discounting after that point would double-count
+			// against a booking whose total is *also* already reduced. Rooms only (halls are
+			// never discounted), matching the "room's folio" framing in the promo_codes schema.
+			let discountCentavos = 0;
+			let lineDiscounts: number[] = roomLines.map(() => 0);
+			let redeemedPromoCodeId: string | null = null;
+			let redeemedPromoCodeText: string | null = null;
+			const rawPromoCode = d.promoCode?.trim();
+			if (rawPromoCode) {
+				const promo = await findRedeemablePromoCode(hotelId, rawPromoCode, new Date());
+				if (!promo) {
+					return { ok: false as const, error: "That promo code isn't valid for this stay." };
+				}
+				const eligibleCentavos = roomLines.reduce((sum, l) => sum + l.price.totalCentavos, 0);
+				discountCentavos =
+					promo.discountType === 'percentage'
+						? Math.min(
+								eligibleCentavos,
+								Math.round((eligibleCentavos * (promo.discountBps ?? 0)) / 10000)
+							)
+						: Math.min(eligibleCentavos, promo.discountAmountCentavos ?? 0);
+				if (discountCentavos > 0) {
+					lineDiscounts = splitProportional(
+						discountCentavos,
+						roomLines.map((l) => l.price.totalCentavos)
+					);
+				}
+				redeemedPromoCodeId = promo.id;
+				redeemedPromoCodeText = promo.code;
+			}
+
 			// What the guest pays online to confirm: each room line's policy downpayment (halls
 			// have no policy, so they pay in full), snapshotted on the order now so a later
-			// policy edit can't change what an already-created order owes.
+			// policy edit can't change what an already-created order owes. Uses each line's
+			// already-discounted total so the downpayment percentage lands on the real charge.
 			const bpsByPlan = await downpaymentBpsByRatePlan(
 				hotelId,
 				roomLines.map((l) => l.item.ratePlanId)
 			);
 			const { dueNowCentavos } = computeDownpayment([
-				...roomLines.map((l) => ({
-					totalCentavos: l.price.totalCentavos,
+				...roomLines.map((l, i) => ({
+					totalCentavos: l.price.totalCentavos - (lineDiscounts[i] ?? 0),
 					downpaymentBps: bpsByPlan.get(l.item.ratePlanId) ?? null
 				})),
 				...hallLines.map((l) => ({ totalCentavos: l.price.totalCentavos, downpaymentBps: null }))
@@ -251,6 +291,10 @@ export const actions: Actions = {
 				})
 				.returning({ id: guests.id });
 
+			// subtotal/fees/vat stay at their true, undiscounted values — a promo discount is
+			// shown as its own line (Review page) rather than folded silently into a subtotal
+			// that would then no longer reconcile with the stated VAT.
+			const discountedTotalCentavos = totalCentavos - discountCentavos;
 			const [order] = await tx
 				.insert(orders)
 				.values({
@@ -259,10 +303,11 @@ export const actions: Actions = {
 					subtotalCentavos,
 					feesCentavos,
 					vatCentavos,
-					totalCentavos,
+					totalCentavos: discountedTotalCentavos,
+					discountCentavos: discountCentavos > 0 ? discountCentavos : null,
 					// Null (not the total) when paying in full, so full-pay orders stay
 					// indistinguishable from every order created before downpayments existed.
-					amountDueNowCentavos: dueNowCentavos < totalCentavos ? dueNowCentavos : null,
+					amountDueNowCentavos: dueNowCentavos < discountedTotalCentavos ? dueNowCentavos : null,
 					accessToken
 				})
 				.returning({ id: orders.id });
@@ -277,7 +322,7 @@ export const actions: Actions = {
 			// One booking PER ROOM, not one per cart line: "2 × Deluxe" becomes two bookings so each room
 			// has its own folio, security deposit and charges. The line's price, guests and extra beds
 			// are split exactly across them.
-			for (const { item, price, extraBeds } of roomLines) {
+			for (const [lineIndex, { item, price, extraBeds }] of roomLines.entries()) {
 				const lineFees = price.fees.reduce((sum, f) => sum + f.amountCentavos, 0);
 				const shares = splitRoomLine(
 					{
@@ -290,7 +335,11 @@ export const actions: Actions = {
 					extraBeds,
 					item.roomCount
 				);
-				for (const share of shares) {
+				// Each room's own slice of this line's discount, if any — whole-centavo-safe
+				// split, same scheme `splitRoomLine` already uses for everything else here.
+				const bookingDiscounts = splitInteger(lineDiscounts[lineIndex] ?? 0, item.roomCount);
+				for (const [shareIndex, share] of shares.entries()) {
+					const bookingDiscountCentavos = bookingDiscounts[shareIndex] ?? 0;
 					const [booking] = await tx
 						.insert(bookings)
 						.values({
@@ -300,10 +349,11 @@ export const actions: Actions = {
 							checkOut: item.checkOut,
 							occupancy: share.occupancy,
 							status: 'pending_payment',
-							subtotalCentavos: share.subtotalCentavos,
+							subtotalCentavos: share.subtotalCentavos - bookingDiscountCentavos,
 							feesCentavos: share.feesCentavos,
 							vatCentavos: share.vatCentavos,
-							totalCentavos: share.totalCentavos
+							totalCentavos: share.totalCentavos - bookingDiscountCentavos,
+							discountCentavos: bookingDiscountCentavos > 0 ? bookingDiscountCentavos : null
 						})
 						.returning({ id: bookings.id });
 
@@ -323,6 +373,16 @@ export const actions: Actions = {
 								? `Booking created — ${share.extraBeds} extra bed(s) added`
 								: 'Booking created'
 					});
+					if (bookingDiscountCentavos > 0) {
+						await tx.insert(promoRedemptions).values({
+							hotelId,
+							promoCodeId: redeemedPromoCodeId!,
+							bookingId: booking!.id,
+							code: redeemedPromoCodeText!,
+							discountCentavos: bookingDiscountCentavos,
+							folioChargeId: null
+						});
+					}
 				}
 			}
 

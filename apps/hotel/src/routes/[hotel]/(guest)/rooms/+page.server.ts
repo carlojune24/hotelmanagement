@@ -13,7 +13,6 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const children = Number(url.searchParams.get('children') ?? 0) || 0;
 	const accessibleOnly = url.searchParams.get('accessible') === '1';
 	const highlightRoomTypeId = url.searchParams.get('roomTypeId');
-	const promo = url.searchParams.get('promo');
 
 	if (!checkIn || !checkOut || checkIn >= checkOut) {
 		// Nothing sane to show without valid dates — send the guest to collect them.
@@ -21,6 +20,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	}
 
 	const hotelId = locals.hotel!.id;
+
 	const results = await searchAvailability({
 		hotelId,
 		checkIn,
@@ -37,7 +37,6 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		children,
 		accessibleOnly,
 		highlightRoomTypeId,
-		promo,
 		nights: Math.round((+new Date(checkOut) - +new Date(checkIn)) / 86_400_000)
 	};
 };

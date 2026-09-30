@@ -23,6 +23,7 @@
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
 	import PaymentFields from '$lib/components/staff/payment-fields.svelte';
 	import WalkinPaymentFields from '$lib/components/staff/walkin-payment-fields.svelte';
+	import FolioPromoTrail from '$lib/components/staff/folio-promo-trail.svelte';
 	import IdCameraCapture from '$lib/components/staff/id-camera-capture.svelte';
 	import AvailabilityCalendarSheet, {
 		type AvailabilityTarget
@@ -52,7 +53,7 @@
 	import type { PriceBreakdown } from '$lib/server/pricing';
 	import { MAX_ROOMS_PER_LINE, addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
 	import { resolveOccupancyPlan } from '$lib/occupancy';
-	import { suggestedExtensionHours } from '$lib/extension-hours';
+	import { suggestedExtensionHours, MAX_EXTENSION_HOURS } from '$lib/extension-hours';
 	import { AMENITY_CATEGORY_LABELS, AMENITY_CATEGORY_ORDER } from '$lib/amenity-categories';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -521,6 +522,12 @@
 	}
 	function humanize(s: string): string {
 		return s.replace(/_/g, ' ');
+	}
+	function guestInitials(name: string): string {
+		const parts = name.trim().split(/\s+/).filter(Boolean);
+		const first = parts[0]?.[0] ?? '';
+		const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? '') : '';
+		return (first + last).toUpperCase() || '?';
 	}
 
 	// --- Walk-in drawer ---
@@ -1797,14 +1804,15 @@
 						{@const nights = Math.round(
 							(Date.parse(o.checkOut) - Date.parse(o.checkIn)) / 86_400_000
 						)}
-						<!-- The one-glance guest card: who, how many, how long, when they must leave,
-						     and anything they asked for — zero clicks. Everything else is one away. -->
+						<!-- One guest card: identity + the zero-click facts (departure, balance,
+						     request) up top; contact/dates/rate plan/total sit behind one toggle
+						     below instead of duplicating the header in a second card. -->
 						<div class="mb-4 rounded-lg border border-border p-3">
 							<div class="flex items-center gap-2.5">
 								<span
-									class="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand/15 text-xs font-semibold text-brand"
+									class="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand/15 text-sm font-semibold text-brand"
 								>
-									{o.guestName.slice(0, 1).toUpperCase()}
+									{guestInitials(o.guestName)}
 								</span>
 								<div class="min-w-0">
 									<div class="truncate text-sm font-semibold text-ink">{o.guestName}</div>
@@ -1840,6 +1848,47 @@
 									</div>
 								{/if}
 							</dl>
+							<Accordion.Root type="single" class="mt-2 border-t border-border pt-1">
+								<Accordion.Item value="guest-details">
+									<Accordion.Trigger
+										class="px-0 py-1.5 text-xs font-medium text-ink-muted hover:text-ink hover:no-underline"
+									>
+										More details
+									</Accordion.Trigger>
+									<Accordion.Content class="pb-0">
+										<div class="pt-1 text-sm">
+											<div class="mb-3 space-y-0.5">
+												<div class="truncate text-ink">{o.guestEmail}</div>
+												{#if o.guestPhone}
+													<div class="text-ink-muted">{o.guestPhone}</div>
+												{/if}
+											</div>
+											<div class="grid grid-cols-2 gap-2">
+												<div class="rounded-lg bg-surface-2 px-3 py-2">
+													<div class="text-[11px] text-ink-muted">Check-in</div>
+													<div class="font-medium text-ink">{o.checkIn}</div>
+												</div>
+												<div class="rounded-lg bg-surface-2 px-3 py-2">
+													<div class="text-[11px] text-ink-muted">Check-out</div>
+													<div class="font-medium text-ink">{o.checkOut}</div>
+												</div>
+												<div class="rounded-lg bg-surface-2 px-3 py-2">
+													<div class="text-[11px] text-ink-muted">Occupancy</div>
+													<div class="font-medium text-ink">{o.occupancy} guests</div>
+												</div>
+												<div class="rounded-lg bg-surface-2 px-3 py-2">
+													<div class="text-[11px] text-ink-muted">Rate plan</div>
+													<div class="truncate font-medium text-ink">{o.ratePlanName}</div>
+												</div>
+											</div>
+											<div class="mt-3 flex items-center justify-between border-t border-border pt-3">
+												<span class="text-ink-muted">Total</span>
+												<span class="font-semibold text-ink">{peso(o.totalCentavos)}</span>
+											</div>
+										</div>
+									</Accordion.Content>
+								</Accordion.Item>
+							</Accordion.Root>
 						</div>
 					{/if}
 
@@ -1909,63 +1958,6 @@
 
 					{#if selectedRoom.occupant}
 						{@const o = selectedRoom.occupant}
-						{@const deadline = checkoutDeadline(o.checkoutAtIso, nowMs, data.timezone)}
-						<Accordion.Root type="single" class="mb-4">
-							<Accordion.Item value="guest-details" class="rounded-lg border border-border">
-								<Accordion.Trigger class="px-3 py-2 text-sm font-semibold text-ink hover:no-underline"
-									>Guest & stay details</Accordion.Trigger
-								>
-								<Accordion.Content class="pb-0">
-									<dl class="divide-y divide-border border-t border-border text-sm">
-										<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-											<dt class="text-ink-muted">Guest</dt>
-											<dd class="text-right font-medium text-ink">{o.guestName}</dd>
-										</div>
-										<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-											<dt class="text-ink-muted">Email</dt>
-											<dd class="truncate text-right text-ink">{o.guestEmail}</dd>
-										</div>
-										{#if o.guestPhone}
-											<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-												<dt class="text-ink-muted">Phone</dt>
-												<dd class="text-right text-ink">{o.guestPhone}</dd>
-											</div>
-										{/if}
-										<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-											<dt class="text-ink-muted">Check-in</dt>
-											<dd class="text-right text-ink">{o.checkIn}</dd>
-										</div>
-										<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-											<dt class="text-ink-muted">Check-out</dt>
-											<dd class="text-right text-ink">{o.checkOut}</dd>
-										</div>
-										<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-											<dt class="flex items-center gap-1 text-ink-muted">
-												<ClockIcon class="size-3.5" />
-												{deadline.overdue ? 'Overdue since' : 'Checkout due'}
-											</dt>
-											<dd
-												class="text-right font-medium {deadline.overdue ? 'text-danger' : 'text-ink'}"
-											>
-												{deadline.label}
-											</dd>
-										</div>
-										<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-											<dt class="text-ink-muted">Occupancy</dt>
-											<dd class="text-right text-ink">{o.occupancy} guests</dd>
-										</div>
-										<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-											<dt class="text-ink-muted">Rate plan</dt>
-											<dd class="text-right text-ink">{o.ratePlanName}</dd>
-										</div>
-										<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-											<dt class="text-ink-muted">Total</dt>
-											<dd class="text-right font-semibold text-ink">{peso(o.totalCentavos)}</dd>
-										</div>
-									</dl>
-								</Accordion.Content>
-							</Accordion.Item>
-						</Accordion.Root>
 						{#if selectedRoom.status === 'occupied'}
 							{#if selectedHousekeeping?.status === 'dirty' || selectedHousekeeping?.status === 'in_progress'}
 								<p class="mb-3 flex items-center gap-1.5 text-xs text-ink-muted">
@@ -2234,6 +2226,12 @@
 									</Badge>
 								</div>
 
+								{#if formFolio.promo}
+									<div class="mb-2">
+										<FolioPromoTrail promo={formFolio.promo} />
+									</div>
+								{/if}
+
 								<div class="divide-y divide-border text-sm">
 									{#each formFolio.charges as c (c.id)}
 										<div class="flex items-start justify-between gap-2 py-1.5">
@@ -2288,12 +2286,14 @@
 									</div>
 									{#if formRoomDetail}
 										<div class="py-1.5">
-											<a
+											<Button
+												variant="outline"
+												size="sm"
+												class="w-full"
 												href="{staffBase}/transactions/{formRoomDetail.order.id}?roomId={selectedRoomId ?? ''}"
-												class="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
 											>
-												Open booking transaction →
-											</a>
+												Open booking transaction
+											</Button>
 										</div>
 									{/if}
 								</div>
@@ -2406,13 +2406,15 @@
 												</div>
 											</form>
 										{:else}
-											<button
+											<Button
 												type="button"
+												variant="outline"
+												size="sm"
+												class="w-full"
 												onclick={() => (checkoutCityLedger = true)}
-												class="text-xs font-medium text-ink-muted underline underline-offset-2 hover:text-ink"
 											>
-												Check out with balance → charge to city ledger
-											</button>
+												Check out with balance → city ledger
+											</Button>
 										{/if}
 									</div>
 								{/if}
@@ -2586,6 +2588,7 @@
 														type="number"
 														min="0.5"
 														step="0.5"
+														max={MAX_EXTENSION_HOURS}
 														bind:value={lateFeeHours}
 														class="w-16"
 													/>
@@ -2616,6 +2619,7 @@
 														type="number"
 														min="0.5"
 														step="0.5"
+														max={MAX_EXTENSION_HOURS}
 														bind:value={earlyFeeHours}
 														class="w-16"
 													/>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { splitInteger, splitRoomLine } from './room-split';
+import { splitInteger, splitProportional, splitRoomLine } from './room-split';
 
 describe('splitInteger', () => {
 	it('adds up exactly and differs by at most one', () => {
@@ -7,6 +7,24 @@ describe('splitInteger', () => {
 		expect(splitInteger(9, 3)).toEqual([3, 3, 3]);
 		expect(splitInteger(0, 2)).toEqual([0, 0]);
 		expect(splitInteger(5, 0)).toEqual([]);
+	});
+});
+
+describe('splitProportional', () => {
+	it('splits proportionally to weight and adds up exactly', () => {
+		expect(splitProportional(100, [1, 1])).toEqual([50, 50]);
+		expect(splitProportional(100, [1, 3])).toEqual([25, 75]);
+	});
+	it('handles amounts that do not divide evenly, still summing exactly', () => {
+		const parts = splitProportional(100, [1, 1, 1]);
+		expect(parts.reduce((a, b) => a + b, 0)).toBe(100);
+		expect(parts.every((p) => p === 33 || p === 34)).toBe(true);
+	});
+	it('an all-zero weight set splits to all zeros instead of dividing by zero', () => {
+		expect(splitProportional(100, [0, 0])).toEqual([0, 0]);
+	});
+	it('a single weight takes the whole amount', () => {
+		expect(splitProportional(500, [7])).toEqual([500]);
 	});
 });
 

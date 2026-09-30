@@ -39,6 +39,14 @@ export const orders = pgTable(
 		 */
 		amountDueNowCentavos: bigint('amount_due_now_centavos', { mode: 'number' }),
 		/**
+		 * A redeemed promo code's total discount, already subtracted out of `totalCentavos`
+		 * (and thus `amountDueNowCentavos`) above — kept here only so the Review page can show
+		 * an honest "Subtotal + Fees + VAT − Promo discount = Total" breakdown instead of a
+		 * subtotal/VAT that no longer reconciles with the total. Null = no code redeemed
+		 * (every order made before this existed, and any order without one).
+		 */
+		discountCentavos: bigint('discount_centavos', { mode: 'number' }),
+		/**
 		 * Opaque token required (alongside the row id) on every guest-facing order
 		 * URL (`/review/[id]?t=...`, `/confirmation/[id]?t=...`) — the
 		 * same IDOR guard `bookings.accessToken` used to provide, moved up a level

@@ -241,7 +241,6 @@ export const ratePlans = pgTable(
 		/** Stay-length limits for this plan to be bookable. Null = unbounded. */
 		minStayNights: integer('min_stay_nights'),
 		maxStayNights: integer('max_stay_nights'),
-		promoCode: text('promo_code'),
 		isActive: boolean('is_active').notNull().default(true),
 		sortOrder: integer('sort_order').notNull().default(0),
 		createdAt: createdAt(),
@@ -250,8 +249,7 @@ export const ratePlans = pgTable(
 	},
 	(t) => [
 		index('rate_plans_hotel_idx').on(t.hotelId),
-		index('rate_plans_room_type_idx').on(t.roomTypeId),
-		uniqueIndex('rate_plans_promo_code_idx').on(t.hotelId, t.promoCode)
+		index('rate_plans_room_type_idx').on(t.roomTypeId)
 	]
 );
 

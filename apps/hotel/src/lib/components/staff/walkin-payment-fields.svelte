@@ -59,6 +59,9 @@
 					? 'A room was given more than its bill.'
 					: null
 	);
+	function addTender(n: number) {
+		tendered = (Math.max(0, tenderedCentavos) / 100 + n).toFixed(2);
+	}
 	const cashBlocked = $derived(
 		method === 'cash' && cashier.requireOpenShiftForCashPayment && !cashier.openShift
 	);
@@ -96,6 +99,27 @@
 			</div>
 		{/if}
 	</div>
+
+	{#if method === 'cash'}
+		<div class="flex flex-wrap gap-1">
+			{#each [1000, 500, 200, 100, 50, 20] as d (d)}
+				<button
+					type="button"
+					onclick={() => addTender(d)}
+					class="rounded border border-border px-1.5 py-0.5 text-[11px] tabular-nums hover:bg-surface"
+				>
+					+{d}
+				</button>
+			{/each}
+			<button
+				type="button"
+				onclick={() => (tendered = '')}
+				class="rounded border border-border px-1.5 py-0.5 text-[11px] hover:bg-surface"
+			>
+				clear
+			</button>
+		</div>
+	{/if}
 
 	{#if method === 'cash' && tendered !== '' && totalCentavos != null}
 		<p class="text-sm font-semibold {changeCentavos < 0 ? 'text-danger' : 'text-ok'}">

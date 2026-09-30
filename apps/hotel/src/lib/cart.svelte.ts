@@ -47,6 +47,10 @@ export type CartItem =
  */
 export class CartStore {
 	items = $state<CartItem[]>([]);
+	/** A real, guest-facing discount code applied to the whole order (not tied to any one
+	 *  cart line) — entered in the Booking Summary sidebar, re-verified and priced
+	 *  server-side at checkout. Null means none applied. */
+	promoCode = $state<string | null>(null);
 	#storageKey: string;
 
 	constructor(hotelSlug: string) {
@@ -54,7 +58,17 @@ export class CartStore {
 		if (browser) {
 			try {
 				const raw = sessionStorage.getItem(this.#storageKey);
-				if (raw) this.items = JSON.parse(raw);
+				if (raw) {
+					const parsed = JSON.parse(raw);
+					// Legacy shape was a bare items array — keep reading it (promoCode stays null)
+					// rather than throwing away an in-progress cart saved before this existed.
+					if (Array.isArray(parsed)) {
+						this.items = parsed;
+					} else {
+						this.items = parsed.items ?? [];
+						this.promoCode = parsed.promoCode ?? null;
+					}
+				}
 			} catch {
 				// Corrupt or stale-shape data — start empty rather than throw.
 			}
@@ -64,12 +78,20 @@ export class CartStore {
 	#persist() {
 		if (browser) {
 			try {
-				sessionStorage.setItem(this.#storageKey, JSON.stringify(this.items));
+				sessionStorage.setItem(
+					this.#storageKey,
+					JSON.stringify({ items: this.items, promoCode: this.promoCode })
+				);
 			} catch {
 				// Storage full/unavailable (private browsing, quota) — the in-memory
 				// cart still works for this page load, just won't survive a reload.
 			}
 		}
+	}
+
+	setPromoCode(code: string | null) {
+		this.promoCode = code?.trim().slice(0, 40) || null;
+		this.#persist();
 	}
 
 	/** One line per room type + rate plan + date range — re-adding the *same* rate plan
@@ -104,6 +126,7 @@ export class CartStore {
 
 	clear() {
 		this.items = [];
+		this.promoCode = null;
 		this.#persist();
 	}
 

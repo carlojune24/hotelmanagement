@@ -2,6 +2,10 @@
 
 const HALF_HOUR_MS = 30 * 60 * 1000;
 
+/** Upper bound for a single late-checkout / early-check-in fee entry. Generous (30 days) so a
+ *  guest who overstays for days can still be billed; it exists only to catch typos. */
+export const MAX_EXTENSION_HOURS = 24 * 30;
+
 /**
  * Whole half-hours from `fromMs` to `toMs`, rounded DOWN — the odd minutes past a half hour
  * go the guest's way (a 12:00 checkout left at 5:07 PM suggests 5h, not 5.5h). 0 when the

@@ -59,7 +59,7 @@
 							</div>
 						</Table.Cell>
 						<Table.Cell class="ledger-data text-right align-top"
-							>{peso(r.subtotalCentavos)}</Table.Cell
+							>{peso(r.subtotalCentavos + (r.discountCentavos ?? 0))}</Table.Cell
 						>
 					</Table.Row>
 				{/each}
@@ -96,6 +96,14 @@
 					<Table.Cell class="text-[var(--ledger-ink-muted)]">VAT</Table.Cell>
 					<Table.Cell class="ledger-data text-right">{peso(data.order.vatCentavos)}</Table.Cell>
 				</Table.Row>
+				{#if data.order.discountCentavos}
+					<Table.Row>
+						<Table.Cell class="text-[var(--ledger-ink-muted)]">Promo discount</Table.Cell>
+						<Table.Cell class="ledger-data text-right" style="color: var(--hotel-accent)"
+							>−{peso(data.order.discountCentavos)}</Table.Cell
+						>
+					</Table.Row>
+				{/if}
 				<Table.Row>
 					<Table.Cell class="text-base font-semibold">Total</Table.Cell>
 					<Table.Cell class="ledger-data text-right text-lg font-semibold"

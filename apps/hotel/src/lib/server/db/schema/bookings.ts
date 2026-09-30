@@ -77,6 +77,11 @@ export const bookings = pgTable(
 		feesCentavos: bigint('fees_centavos', { mode: 'number' }).notNull(),
 		vatCentavos: bigint('vat_centavos', { mode: 'number' }).notNull(),
 		totalCentavos: bigint('total_centavos', { mode: 'number' }).notNull(),
+		/** This room's pro-rata share of a redeemed promo code, already subtracted out of
+		 *  `subtotalCentavos`/`totalCentavos` above (see `promo_redemptions` for the audit
+		 *  trail) — kept here only so a receipt can show this room's gross price plus a
+		 *  discount line instead of a subtotal that looks unexplained. Null = no code redeemed. */
+		discountCentavos: bigint('discount_centavos', { mode: 'number' }),
 		/** A photo of the guest's valid ID, captured live from the front-desk camera at
 		 *  check-in (never a file picker — see `checkInBooking`'s own comment). Optional:
 		 *  check-in never blocks on it. Stored via `lib/server/uploads.ts`, same convention

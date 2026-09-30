@@ -89,7 +89,6 @@ const updateSchema = z.object({
 	extraBedFeePhp: optMoney,
 	minStayNights: optNights,
 	maxStayNights: optNights,
-	promoCode: z.string().max(40).optional(),
 	cancellationPolicyId: z.string().uuid().optional(),
 	securityDepositPolicyId: z.string().uuid().optional(),
 	isActive: z.coerce.boolean().optional()
@@ -154,7 +153,6 @@ export const actions: Actions = {
 				extraBedFeeCentavos: toCentavos(parsed.data.extraBedFeePhp),
 				minStayNights: parsed.data.minStayNights ?? null,
 				maxStayNights: parsed.data.maxStayNights ?? null,
-				promoCode: parsed.data.promoCode?.trim() || null,
 				cancellationPolicyId: parsed.data.cancellationPolicyId || null,
 				securityDepositPolicyId: parsed.data.securityDepositPolicyId || null,
 				isActive: parsed.data.isActive ?? false,
