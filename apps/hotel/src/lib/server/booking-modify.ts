@@ -125,7 +125,13 @@ async function priceNights(
 		db
 			.select({ date: dailyRates.date, priceCentavos: dailyRates.priceCentavos })
 			.from(dailyRates)
-			.where(and(eq(dailyRates.ratePlanId, ratePlanId), inArray(dailyRates.date, nights))),
+			.where(
+				and(
+					eq(dailyRates.ratePlanId, ratePlanId),
+					eq(dailyRates.hotelId, hotelId),
+					inArray(dailyRates.date, nights)
+				)
+			),
 		db
 			.select({
 				startDate: seasonalRates.startDate,
@@ -134,7 +140,14 @@ async function priceNights(
 				multiplierBps: seasonalRates.multiplierBps
 			})
 			.from(seasonalRates)
-			.where(and(eq(seasonalRates.ratePlanId, ratePlanId), lte(seasonalRates.startDate, last), gte(seasonalRates.endDate, first)))
+			.where(
+				and(
+					eq(seasonalRates.ratePlanId, ratePlanId),
+					eq(seasonalRates.hotelId, hotelId),
+					lte(seasonalRates.startDate, last),
+					gte(seasonalRates.endDate, first)
+				)
+			)
 	]);
 
 	const nightly = resolveNightlyRates(

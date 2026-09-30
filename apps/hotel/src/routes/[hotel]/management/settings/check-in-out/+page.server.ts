@@ -5,6 +5,7 @@ import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { db } from '$lib/server/db/index';
 import { hotels } from '$lib/server/db/schema/index';
+import { friendlyIssue, timeOfDay } from '$lib/rate-validation';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -19,8 +20,9 @@ export const load: PageServerLoad = async ({ locals }) => {
 };
 
 const formSchema = z.object({
-	checkInTime: z.string().regex(/^\d{2}:\d{2}$/),
-	checkOutTime: z.string().regex(/^\d{2}:\d{2}$/),
+	// A real 24-hour time: `99:99` used to pass the shape check and then fail in the database (RATES-005).
+	checkInTime: timeOfDay(),
+	checkOutTime: timeOfDay(),
 	lateCheckoutFeePerHour: z.coerce.number().min(0).max(1_000_000),
 	earlyCheckInFeePerHour: z.coerce.number().min(0).max(1_000_000)
 });
@@ -30,7 +32,8 @@ export const actions: Actions = {
 		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
 		const hotel = event.locals.hotel!;
 		const parsed = formSchema.safeParse(Object.fromEntries(await event.request.formData()));
-		if (!parsed.success) return fail(400, { error: 'Check the fields and try again.' });
+		if (!parsed.success)
+			return fail(400, { error: friendlyIssue(parsed.error, 'Check the fields and try again.') });
 		const d = parsed.data;
 
 		await db

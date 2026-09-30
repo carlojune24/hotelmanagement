@@ -31,6 +31,11 @@ export const promoCodes = pgTable(
 		 *  time at redemption, not the stay dates, so a code can run as a short-lived sale. */
 		validFrom: timestamp('valid_from', { withTimezone: true }),
 		validUntil: timestamp('valid_until', { withTimezone: true }),
+		/** Most orders that may ever redeem this code (RATES-002). Null = unlimited. Enforced
+		 *  inside the checkout transaction (`assertPromoWithinLimits`), never only in the UI. */
+		maxRedemptions: integer('max_redemptions'),
+		/** Most orders any one guest email may redeem it on. Null = unlimited. */
+		maxPerEmail: integer('max_per_email'),
 		isActive: boolean('is_active').notNull().default(true),
 		createdAt: createdAt(),
 		updatedAt: updatedAt(),

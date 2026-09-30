@@ -19,6 +19,7 @@
 	import ShieldIcon from '@lucide/svelte/icons/shield';
 	import TicketPercentIcon from '@lucide/svelte/icons/ticket-percent';
 	import InclusionsInput from '$lib/components/staff/inclusions-input.svelte';
+	import { MAX_PROMO_PERCENT, PROMO_MIN_CODE_LENGTH } from '$lib/rate-validation';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -132,6 +133,8 @@
 	let editPromoValidFrom = $state('');
 	let editPromoValidUntil = $state('');
 	let editPromoActive = $state(true);
+	let editPromoMaxRedemptions = $state('');
+	let editPromoMaxPerEmail = $state('');
 
 	function openEditPromo(p: (typeof data.promoCodes)[number]) {
 		editPromoId = p.id;
@@ -143,6 +146,8 @@
 		editPromoValidFrom = toDatetimeLocalUtc(p.validFrom);
 		editPromoValidUntil = toDatetimeLocalUtc(p.validUntil);
 		editPromoActive = p.isActive;
+		editPromoMaxRedemptions = p.maxRedemptions != null ? String(p.maxRedemptions) : '';
+		editPromoMaxPerEmail = p.maxPerEmail != null ? String(p.maxPerEmail) : '';
 		editPromoOpen = true;
 	}
 
@@ -371,6 +376,13 @@
 									{#if promoWindowLabel(p.validFrom, p.validUntil)}
 										<div class="text-[11px] text-ink-muted/80">
 											{promoWindowLabel(p.validFrom, p.validUntil)}
+										</div>
+									{/if}
+									{#if p.maxRedemptions != null || p.maxPerEmail != null}
+										<div class="text-[11px] text-ink-muted/80">
+											{#if p.maxRedemptions != null}Max {p.maxRedemptions} use{p.maxRedemptions === 1 ? '' : 's'}{/if}{#if p.maxRedemptions != null && p.maxPerEmail != null}
+												·
+											{/if}{#if p.maxPerEmail != null}{p.maxPerEmail} per guest email{/if}
 										</div>
 									{/if}
 								</Table.Cell>
@@ -906,6 +918,7 @@
 					id="promoCode"
 					name="code"
 					required
+					minlength={PROMO_MIN_CODE_LENGTH}
 					maxlength={40}
 					placeholder="WELCOME10"
 					class="mt-1 uppercase"
@@ -935,7 +948,7 @@
 						name="discountPct"
 						type="number"
 						min="0.01"
-						max="100"
+						max={MAX_PROMO_PERCENT}
 						step="0.01"
 						required
 						class="mt-1"
@@ -966,6 +979,36 @@
 				</div>
 			</div>
 			<p class="text-xs text-ink-muted">Leave both blank for no time limit.</p>
+			<div class="grid grid-cols-2 gap-3">
+				<div>
+					<Label for="promoMaxRedemptions">Max total uses</Label>
+					<Input
+						id="promoMaxRedemptions"
+						name="maxRedemptions"
+						type="number"
+						min="1"
+						step="1"
+						placeholder="Unlimited"
+						class="mt-1"
+					/>
+				</div>
+				<div>
+					<Label for="promoMaxPerEmail">Max uses per guest email</Label>
+					<Input
+						id="promoMaxPerEmail"
+						name="maxPerEmail"
+						type="number"
+						min="1"
+						step="1"
+						placeholder="Unlimited"
+						class="mt-1"
+					/>
+				</div>
+			</div>
+			<p class="text-xs text-ink-muted">
+				A use is one booking. Codes are at least {PROMO_MIN_CODE_LENGTH} characters, and percentage
+				discounts can be at most {MAX_PROMO_PERCENT}%.
+			</p>
 		</form>
 		<Dialog.Footer>
 			<Button variant="outline" onclick={() => (createPromoOpen = false)}>Cancel</Button>
@@ -994,6 +1037,7 @@
 					id="editPromoCode"
 					name="code"
 					required
+					minlength={PROMO_MIN_CODE_LENGTH}
 					maxlength={40}
 					bind:value={editPromoCode}
 					class="mt-1 uppercase"
@@ -1028,7 +1072,7 @@
 						name="discountPct"
 						type="number"
 						min="0.01"
-						max="100"
+						max={MAX_PROMO_PERCENT}
 						step="0.01"
 						required
 						bind:value={editPromoPercent}
@@ -1068,6 +1112,34 @@
 						name="validUntil"
 						type="datetime-local"
 						bind:value={editPromoValidUntil}
+						class="mt-1"
+					/>
+				</div>
+			</div>
+			<div class="grid grid-cols-2 gap-3">
+				<div>
+					<Label for="editPromoMaxRedemptions">Max total uses</Label>
+					<Input
+						id="editPromoMaxRedemptions"
+						name="maxRedemptions"
+						type="number"
+						min="1"
+						step="1"
+						placeholder="Unlimited"
+						bind:value={editPromoMaxRedemptions}
+						class="mt-1"
+					/>
+				</div>
+				<div>
+					<Label for="editPromoMaxPerEmail">Max uses per guest email</Label>
+					<Input
+						id="editPromoMaxPerEmail"
+						name="maxPerEmail"
+						type="number"
+						min="1"
+						step="1"
+						placeholder="Unlimited"
+						bind:value={editPromoMaxPerEmail}
 						class="mt-1"
 					/>
 				</div>

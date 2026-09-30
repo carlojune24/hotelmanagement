@@ -11,7 +11,13 @@ import {
 } from '$lib/server/db/schema/index';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
-import { listDistinctInclusions } from '$lib/server/rate-plans';
+import {
+	RatePlanScopeError,
+	assertPlanRefsInHotel,
+	assertRatePlanInHotel,
+	listDistinctInclusions
+} from '$lib/server/rate-plans';
+import { friendlyIssue, moneyPhp, optMoneyPhp, recordId } from '$lib/rate-validation';
 import type { Actions, PageServerLoad } from './$types';
 
 const toCentavos = (php: number | undefined) => (php != null ? Math.round(php * 100) : null);
@@ -23,7 +29,7 @@ const csvToArray = (csv: string | undefined) =>
 
 /** Empty form fields post `""`; treat that (and null) as "not provided" before coercion. */
 const blankToUndef = (v: unknown) => (v === '' || v == null ? undefined : v);
-const optMoney = z.preprocess(blankToUndef, z.coerce.number().min(0).optional());
+const optMoney = optMoneyPhp;
 const optNights = z.preprocess(blankToUndef, z.coerce.number().int().min(1).max(365).optional());
 
 export const load: PageServerLoad = async ({ locals, params }) => {
@@ -40,13 +46,13 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 	const overrides = await db
 		.select()
 		.from(dailyRates)
-		.where(eq(dailyRates.ratePlanId, params.ratePlanId))
+		.where(and(eq(dailyRates.ratePlanId, params.ratePlanId), eq(dailyRates.hotelId, hotelId)))
 		.orderBy(asc(dailyRates.date));
 
 	const seasons = await db
 		.select()
 		.from(seasonalRates)
-		.where(eq(seasonalRates.ratePlanId, params.ratePlanId))
+		.where(and(eq(seasonalRates.ratePlanId, params.ratePlanId), eq(seasonalRates.hotelId, hotelId)))
 		.orderBy(asc(seasonalRates.startDate));
 
 	const policies = await db
@@ -81,7 +87,7 @@ const updateSchema = z.object({
 	name: z.string().min(2).max(120),
 	description: z.string().max(2000).optional(),
 	inclusionsCsv: z.string().max(500).optional(),
-	basePricePhp: z.coerce.number().min(0),
+	basePricePhp: moneyPhp(),
 	weekendPricePhp: optMoney,
 	extraPersonFeePhp: optMoney,
 	extraChildFeePhp: optMoney,
@@ -96,7 +102,7 @@ const updateSchema = z.object({
 
 const overrideSchema = z.object({
 	date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-	pricePhp: z.coerce.number().min(0),
+	pricePhp: moneyPhp(),
 	minStayNights: optNights
 });
 
@@ -114,6 +120,19 @@ const seasonSchema = z
 		message: 'Set either a fixed price or a multiplier.'
 	});
 
+/** RATES-001: these actions take the rate plan id from the URL and can be POSTed to directly,
+ *  so each one confirms the plan is this hotel's before writing anything. Returns a ready
+ *  `fail(404)` for the action to return, or null when the plan is the caller's. */
+async function planScopeFailure(hotelId: string, ratePlanId: string) {
+	try {
+		await assertRatePlanInHotel(hotelId, ratePlanId);
+		return null;
+	} catch (e) {
+		if (e instanceof RatePlanScopeError) return fail(404, { error: e.message });
+		throw e;
+	}
+}
+
 export const actions: Actions = {
 	update: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
@@ -122,8 +141,25 @@ export const actions: Actions = {
 
 		const form = await event.request.formData();
 		const raw = Object.fromEntries(form);
+		const scopeFailure = await planScopeFailure(hotelId, ratePlanId);
+		if (scopeFailure) return scopeFailure;
+
 		const parsed = updateSchema.safeParse({ ...raw, isActive: raw.isActive === 'on' });
-		if (!parsed.success) return fail(400, { error: 'Check the rate plan details and try again.' });
+		if (!parsed.success)
+			return fail(400, {
+				error: friendlyIssue(parsed.error, 'Check the rate plan details and try again.')
+			});
+
+		// RATES-003: the policies this plan is pointed at must be this hotel's own.
+		try {
+			await assertPlanRefsInHotel(hotelId, {
+				cancellationPolicyId: parsed.data.cancellationPolicyId,
+				securityDepositPolicyId: parsed.data.securityDepositPolicyId
+			});
+		} catch (e) {
+			if (e instanceof RatePlanScopeError) return fail(400, { error: e.message });
+			throw e;
+		}
 
 		if (
 			parsed.data.minStayNights != null &&
@@ -138,7 +174,7 @@ export const actions: Actions = {
 			.filter((n) => Number.isInteger(n) && n >= 0 && n <= 6)
 			.sort((a, b) => a - b);
 
-		await db
+		const updated = await db
 			.update(ratePlans)
 			.set({
 				name: parsed.data.name.trim(),
@@ -158,7 +194,10 @@ export const actions: Actions = {
 				isActive: parsed.data.isActive ?? false,
 				updatedAt: new Date()
 			})
-			.where(and(eq(ratePlans.id, ratePlanId), eq(ratePlans.hotelId, hotelId)));
+			.where(and(eq(ratePlans.id, ratePlanId), eq(ratePlans.hotelId, hotelId)))
+			.returning({ id: ratePlans.id });
+		// RATES-007: nothing matched → don't claim success or write a misleading audit entry.
+		if (updated.length === 0) return fail(404, { error: 'Rate plan not found.' });
 
 		await writeAudit({
 			hotelId,
@@ -177,8 +216,14 @@ export const actions: Actions = {
 		const hotelId = event.locals.hotel!.id;
 		const ratePlanId = event.params.ratePlanId;
 
+		const scopeFailure = await planScopeFailure(hotelId, ratePlanId);
+		if (scopeFailure) return scopeFailure;
+
 		const parsed = overrideSchema.safeParse(Object.fromEntries(await event.request.formData()));
-		if (!parsed.success) return fail(400, { error: 'Check the date and price and try again.' });
+		if (!parsed.success)
+			return fail(400, {
+				error: friendlyIssue(parsed.error, 'Check the date and price and try again.')
+			});
 
 		await db
 			.insert(dailyRates)
@@ -216,9 +261,14 @@ export const actions: Actions = {
 
 		const data = await event.request.formData();
 		const id = String(data.get('id') ?? '');
-		if (!id) return fail(400, { error: 'Missing override.' });
+		if (!recordId().safeParse(id).success) return fail(400, { error: 'Missing override.' });
 
-		await db.delete(dailyRates).where(and(eq(dailyRates.id, id), eq(dailyRates.hotelId, hotelId)));
+		const removed = await db
+			.delete(dailyRates)
+			.where(and(eq(dailyRates.id, id), eq(dailyRates.hotelId, hotelId)))
+			.returning({ id: dailyRates.id });
+		// Nothing deleted (already gone, or not this hotel's row) → say so, don't claim "removed".
+		if (removed.length === 0) return fail(404, { error: 'Override not found.' });
 
 		await writeAudit({
 			hotelId,
@@ -235,6 +285,9 @@ export const actions: Actions = {
 		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
 		const hotelId = event.locals.hotel!.id;
 		const ratePlanId = event.params.ratePlanId;
+
+		const scopeFailure = await planScopeFailure(hotelId, ratePlanId);
+		if (scopeFailure) return scopeFailure;
 
 		const parsed = seasonSchema.safeParse(Object.fromEntries(await event.request.formData()));
 		if (!parsed.success) {
@@ -275,11 +328,14 @@ export const actions: Actions = {
 		const hotelId = event.locals.hotel!.id;
 
 		const id = String((await event.request.formData()).get('id') ?? '');
-		if (!id) return fail(400, { error: 'Missing seasonal range.' });
+		if (!recordId().safeParse(id).success)
+			return fail(400, { error: 'Missing seasonal range.' });
 
-		await db
+		const removed = await db
 			.delete(seasonalRates)
-			.where(and(eq(seasonalRates.id, id), eq(seasonalRates.hotelId, hotelId)));
+			.where(and(eq(seasonalRates.id, id), eq(seasonalRates.hotelId, hotelId)))
+			.returning({ id: seasonalRates.id });
+		if (removed.length === 0) return fail(404, { error: 'Seasonal range not found.' });
 
 		await writeAudit({
 			hotelId,

@@ -120,7 +120,8 @@ export const actions: Actions = {
 
 		const fd = await event.request.formData();
 		const id = fd.get('id');
-		if (typeof id !== 'string') return fail(400, { error: 'Missing invite.' });
+		if (typeof id !== 'string' || !z.string().uuid().safeParse(id).success)
+			return fail(400, { error: 'Missing invite.' });
 
 		await revokeInvite(id, hotelId);
 		await writeAudit({

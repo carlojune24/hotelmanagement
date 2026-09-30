@@ -1,6 +1,80 @@
-import { and, eq, gte, isNull, lte, or } from 'drizzle-orm';
+import { and, eq, gte, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db/index';
-import { bookings, promoCodes, promoRedemptions, type PromoCode } from '$lib/server/db/schema/index';
+import {
+	bookings,
+	guests,
+	orders,
+	promoCodes,
+	promoRedemptions,
+	type PromoCode
+} from '$lib/server/db/schema/index';
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+
+/** The discount a code gives on `eligibleCentavos` of room charges, never more than that
+ *  amount. Pure — shared by checkout and the tests. */
+export function computePromoDiscountCentavos(
+	promo: Pick<PromoCode, 'discountType' | 'discountBps' | 'discountAmountCentavos'>,
+	eligibleCentavos: number
+): number {
+	const raw =
+		promo.discountType === 'percentage'
+			? Math.round((eligibleCentavos * (promo.discountBps ?? 0)) / 10000)
+			: (promo.discountAmountCentavos ?? 0);
+	return Math.max(0, Math.min(eligibleCentavos, raw));
+}
+
+/** A code has hit its total or per-email limit. Checkout treats it like any other invalid
+ *  code, so it never confirms that the code exists. */
+export class PromoLimitError extends Error {}
+
+/**
+ * Enforces a code's `maxRedemptions` / `maxPerEmail` — call it inside the checkout
+ * transaction, before inserting the redemption (RATES-002).
+ *
+ * It first locks the code's row (`FOR UPDATE`), so two checkouts racing for the last use
+ * queue up: the second one waits for the first to commit, then counts it. A "use" is one
+ * order, however many rooms it covers; voided redemptions and cancelled/expired orders
+ * don't count, so an abandoned unpaid booking gives the use back.
+ */
+export async function assertPromoWithinLimits(
+	tx: Tx,
+	promoCodeId: string,
+	guestEmail: string
+): Promise<void> {
+	const [locked] = await tx
+		.select({ maxRedemptions: promoCodes.maxRedemptions, maxPerEmail: promoCodes.maxPerEmail })
+		.from(promoCodes)
+		.where(eq(promoCodes.id, promoCodeId))
+		.for('update');
+	if (!locked) throw new PromoLimitError('Promo code not found.');
+	if (locked.maxRedemptions == null && locked.maxPerEmail == null) return;
+
+	const email = guestEmail.trim().toLowerCase();
+	const ordersUsing = async (onlyThisEmail: boolean) => {
+		const [row] = await tx
+			.select({ n: sql<number>`count(distinct ${bookings.orderId})` })
+			.from(promoRedemptions)
+			.innerJoin(bookings, eq(bookings.id, promoRedemptions.bookingId))
+			.innerJoin(orders, eq(orders.id, bookings.orderId))
+			.innerJoin(guests, eq(guests.id, orders.guestId))
+			.where(
+				and(
+					eq(promoRedemptions.promoCodeId, promoCodeId),
+					isNull(promoRedemptions.voidedAt),
+					ne(orders.status, 'cancelled'),
+					onlyThisEmail ? sql`lower(${guests.email}) = ${email}` : undefined
+				)
+			);
+		return Number(row?.n ?? 0);
+	};
+
+	if (locked.maxRedemptions != null && (await ordersUsing(false)) >= locked.maxRedemptions)
+		throw new PromoLimitError('Promo code has reached its limit.');
+	if (locked.maxPerEmail != null && (await ordersUsing(true)) >= locked.maxPerEmail)
+		throw new PromoLimitError('Promo code has reached its per-guest limit.');
+}
 
 /** A real code is at most this long — capped before it touches anything else (query params,
  *  form fields, DB lookups) so a much longer guess is never worth carrying around uncapped. */

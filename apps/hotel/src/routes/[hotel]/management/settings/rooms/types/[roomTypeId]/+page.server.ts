@@ -151,6 +151,17 @@ export const actions: Actions = {
 			grabBars: raw.grabBars === 'on'
 		});
 		if (!parsed.success) return fail(400, { error: 'Check the room type details and try again.' });
+		// Confirm this room type is the caller's hotel's before doing anything. The update below is
+		// hotel-scoped and would silently match nothing for another hotel's room type, but the
+		// amenity delete/insert further down is keyed by room type id — so without this check an
+		// admin of another hotel could wipe and rewrite this room type's amenity links.
+		const [ownedRoomType] = await db
+			.select({ id: roomTypes.id })
+			.from(roomTypes)
+			.where(and(eq(roomTypes.id, roomTypeId), eq(roomTypes.hotelId, hotelId)))
+			.limit(1);
+		if (!ownedRoomType) return fail(404, { error: 'Room type not found.' });
+
 		if (parsed.data.maxOccupancy < parsed.data.baseOccupancy) {
 			return fail(400, { error: 'Max occupancy must be at least base occupancy.' });
 		}
@@ -213,7 +224,14 @@ export const actions: Actions = {
 					).map((r) => r.id);
 
 		await db.transaction(async (tx) => {
-			await tx.delete(roomTypeAmenities).where(eq(roomTypeAmenities.roomTypeId, roomTypeId));
+			await tx
+				.delete(roomTypeAmenities)
+				.where(
+					and(
+						eq(roomTypeAmenities.roomTypeId, roomTypeId),
+						eq(roomTypeAmenities.hotelId, hotelId)
+					)
+				);
 			if (validAmenityIds.length > 0) {
 				await tx.insert(roomTypeAmenities).values(
 					validAmenityIds.map((id, i) => ({

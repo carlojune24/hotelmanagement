@@ -13,7 +13,20 @@ import {
 } from '$lib/server/db/schema/index';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
-import { listDistinctInclusions } from '$lib/server/rate-plans';
+import {
+	RatePlanScopeError,
+	assertPlanRefsInHotel,
+	listDistinctInclusions
+} from '$lib/server/rate-plans';
+import {
+	MAX_PROMO_PERCENT,
+	PROMO_MIN_CODE_LENGTH,
+	RATE_MESSAGES,
+	friendlyIssue,
+	moneyPhp,
+	optMoneyPhp,
+	optUsageLimit
+} from '$lib/rate-validation';
 import { normalizePromoCode, MAX_PROMO_CODE_LENGTH } from '$lib/server/promo-codes';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -102,13 +115,13 @@ const updatePolicySchema = createPolicySchema.extend({ id: z.string().uuid() });
 const createDepositPolicySchema = z.object({
 	name: z.string().min(2).max(120),
 	description: z.string().max(2000).optional(),
-	amountPhp: z.coerce.number().min(0)
+	amountPhp: moneyPhp()
 });
 const updateDepositPolicySchema = createDepositPolicySchema.extend({ id: z.string().uuid() });
 
 /** Empty form fields post `""`; treat that (and null) as "not provided" before coercion. */
 const blankToUndef = (v: unknown) => (v === '' || v == null ? undefined : v);
-const optMoney = z.preprocess(blankToUndef, z.coerce.number().min(0).optional());
+const optMoney = optMoneyPhp;
 const optNights = z.preprocess(blankToUndef, z.coerce.number().int().min(1).max(365).optional());
 /** A `<input type="datetime-local">` value ("YYYY-MM-DDTHH:MM") → a UTC Date. Deliberately
  *  UTC rather than the hotel's own timezone (this app has no wall-time→zone conversion
@@ -126,7 +139,7 @@ const createPlanSchema = z.object({
 	name: z.string().min(2).max(120),
 	description: z.string().max(2000).optional(),
 	inclusionsCsv: z.string().max(500).optional(),
-	basePricePhp: z.coerce.number().min(0),
+	basePricePhp: moneyPhp(),
 	extraPersonFeePhp: optMoney,
 	extraBedFeePhp: optMoney,
 	minStayNights: optNights,
@@ -134,15 +147,29 @@ const createPlanSchema = z.object({
 });
 
 const promoCodeBaseSchema = z.object({
-	code: z.string().min(2).max(MAX_PROMO_CODE_LENGTH),
+	code: z
+		.string()
+		.min(PROMO_MIN_CODE_LENGTH, RATE_MESSAGES.promoCodeShort)
+		.max(MAX_PROMO_CODE_LENGTH),
 	description: z.string().max(2000).optional(),
 	discountType: z.enum(promoDiscountType.enumValues),
 	/** Percent off (1–100), required when `discountType` is `percentage`. */
-	discountPct: z.preprocess(blankToUndef, z.coerce.number().min(0.01).max(100).optional()),
+	discountPct: z.preprocess(
+		blankToUndef,
+		z.coerce
+			.number()
+			.min(0.01)
+			.max(MAX_PROMO_PERCENT, RATE_MESSAGES.promoPercentTooHigh)
+			.optional()
+	),
 	/** Flat ₱ off, required when `discountType` is `fixed_amount`. */
 	discountAmountPhp: optMoney,
 	validFrom: optUtcDateTime,
-	validUntil: optUtcDateTime
+	validUntil: optUtcDateTime,
+	/** Most orders that may ever redeem the code; blank = unlimited. */
+	maxRedemptions: optUsageLimit,
+	/** Most orders one guest email may redeem it on; blank = unlimited. */
+	maxPerEmail: optUsageLimit
 });
 function hasMatchingDiscountValue(d: z.infer<typeof promoCodeBaseSchema>): boolean {
 	return d.discountType === 'percentage' ? d.discountPct != null : d.discountAmountPhp != null;
@@ -245,7 +272,9 @@ export const actions: Actions = {
 			Object.fromEntries(await event.request.formData())
 		);
 		if (!parsed.success)
-			return fail(400, { error: 'Check the security deposit policy and try again.' });
+			return fail(400, {
+				error: friendlyIssue(parsed.error, 'Check the security deposit policy and try again.')
+			});
 
 		const [row] = await db
 			.insert(securityDepositPolicies)
@@ -276,7 +305,9 @@ export const actions: Actions = {
 		const raw = Object.fromEntries(await event.request.formData());
 		const parsed = updateDepositPolicySchema.safeParse(raw);
 		if (!parsed.success)
-			return fail(400, { error: 'Check the security deposit policy and try again.' });
+			return fail(400, {
+				error: friendlyIssue(parsed.error, 'Check the security deposit policy and try again.')
+			});
 
 		const [existing] = await db
 			.select({ id: securityDepositPolicies.id })
@@ -317,7 +348,23 @@ export const actions: Actions = {
 
 		const raw = Object.fromEntries(await event.request.formData());
 		const parsed = createPlanSchema.safeParse(raw);
-		if (!parsed.success) return fail(400, { error: 'Check the rate plan details and try again.' });
+		if (!parsed.success)
+			return fail(400, {
+				error: friendlyIssue(parsed.error, 'Check the rate plan details and try again.')
+			});
+
+		// RATES-003: the room type and policies must be this hotel's own — foreign keys only
+		// prove a row exists, not whose it is.
+		try {
+			await assertPlanRefsInHotel(hotelId, {
+				roomTypeId: parsed.data.roomTypeId,
+				cancellationPolicyId: parsed.data.cancellationPolicyId,
+				securityDepositPolicyId: parsed.data.securityDepositPolicyId
+			});
+		} catch (e) {
+			if (e instanceof RatePlanScopeError) return fail(400, { error: e.message });
+			throw e;
+		}
 
 		if (
 			parsed.data.minStayNights != null &&
@@ -362,7 +409,10 @@ export const actions: Actions = {
 		const hotelId = event.locals.hotel!.id;
 
 		const parsed = createPromoCodeSchema.safeParse(Object.fromEntries(await event.request.formData()));
-		if (!parsed.success) return fail(400, { error: 'Check the promo code details and try again.' });
+		if (!parsed.success)
+			return fail(400, {
+				error: friendlyIssue(parsed.error, 'Check the promo code details and try again.')
+			});
 
 		if (
 			parsed.data.validFrom &&
@@ -388,7 +438,9 @@ export const actions: Actions = {
 					discountAmountCentavos:
 						parsed.data.discountType === 'fixed_amount' ? toCentavos(parsed.data.discountAmountPhp) : null,
 					validFrom: parsed.data.validFrom ?? null,
-					validUntil: parsed.data.validUntil ?? null
+					validUntil: parsed.data.validUntil ?? null,
+					maxRedemptions: parsed.data.maxRedemptions ?? null,
+					maxPerEmail: parsed.data.maxPerEmail ?? null
 				})
 				.returning({ id: promoCodes.id });
 
@@ -416,7 +468,10 @@ export const actions: Actions = {
 
 		const raw = Object.fromEntries(await event.request.formData());
 		const parsed = updatePromoCodeSchema.safeParse({ ...raw, isActive: raw.isActive === 'on' });
-		if (!parsed.success) return fail(400, { error: 'Check the promo code details and try again.' });
+		if (!parsed.success)
+			return fail(400, {
+				error: friendlyIssue(parsed.error, 'Check the promo code details and try again.')
+			});
 
 		if (
 			parsed.data.validFrom &&
@@ -449,6 +504,8 @@ export const actions: Actions = {
 						parsed.data.discountType === 'fixed_amount' ? toCentavos(parsed.data.discountAmountPhp) : null,
 					validFrom: parsed.data.validFrom ?? null,
 					validUntil: parsed.data.validUntil ?? null,
+					maxRedemptions: parsed.data.maxRedemptions ?? null,
+					maxPerEmail: parsed.data.maxPerEmail ?? null,
 					isActive: parsed.data.isActive ?? false,
 					updatedAt: new Date()
 				})

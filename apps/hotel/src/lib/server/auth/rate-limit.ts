@@ -76,6 +76,10 @@ export const loginByAccount = new RateLimiter({ max: 5, windowMs: 15 * MIN });
 export const loginByIp = new RateLimiter({ max: 30, windowMs: 15 * MIN });
 /** Per ip, invite-accept: tokens are high-entropy, so this is just abuse damping. */
 export const inviteByIp = new RateLimiter({ max: 10, windowMs: 15 * MIN });
+/** Per (hotel, ip), guest checkout: only *failed* promo-code tries count, so a real guest with
+ *  one typo is never slowed but a script guessing codes is (RATES-002). Never reset on a
+ *  success — otherwise a known-good code could be used to clear the counter between guesses. */
+export const promoGuessByIp = new RateLimiter({ max: 8, windowMs: 15 * MIN });
 
 const accountKey = (ip: string, email: string) => `${ip}|${email.trim().toLowerCase()}`;
 

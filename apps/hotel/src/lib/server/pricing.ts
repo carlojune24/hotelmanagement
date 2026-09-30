@@ -167,6 +167,9 @@ export async function priceStay(params: {
 		.where(
 			and(
 				eq(dailyRates.ratePlanId, ratePlanId),
+				// A row must belong to the same hotel as the plan (RATES-001): defence in depth so a
+				// row written under another hotel can never price this one.
+				eq(dailyRates.hotelId, hotelId),
 				gte(dailyRates.date, checkIn),
 				lt(dailyRates.date, checkOut)
 			)
@@ -185,6 +188,7 @@ export async function priceStay(params: {
 		.where(
 			and(
 				eq(seasonalRates.ratePlanId, ratePlanId),
+				eq(seasonalRates.hotelId, hotelId),
 				lte(seasonalRates.startDate, lastNight),
 				gte(seasonalRates.endDate, checkIn)
 			)

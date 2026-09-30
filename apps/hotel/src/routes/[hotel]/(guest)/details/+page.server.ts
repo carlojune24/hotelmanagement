@@ -22,7 +22,14 @@ import { searchAvailability } from '$lib/server/availability';
 import { isOnlinePaymentEnabled } from '$lib/server/paymongo/client';
 import { checkHallAvailability } from '$lib/server/hall-availability';
 import { MAX_ROOMS_PER_LINE, addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
-import { findRedeemablePromoCode, MAX_PROMO_CODE_LENGTH } from '$lib/server/promo-codes';
+import {
+	MAX_PROMO_CODE_LENGTH,
+	PromoLimitError,
+	assertPromoWithinLimits,
+	computePromoDiscountCentavos,
+	findRedeemablePromoCode
+} from '$lib/server/promo-codes';
+import { promoGuessByIp, tooManyMessage } from '$lib/server/auth/rate-limit';
 import type { Actions } from './$types';
 
 const roomItemSchema = z.object({
@@ -83,6 +90,18 @@ export const actions: Actions = {
 		const parsed = detailsSchema.safeParse(raw);
 		if (!parsed.success) return fail(400, { error: 'Check your details and try again.' });
 		const d = parsed.data;
+
+		// RATES-002: slow down anyone guessing promo codes. Only failed tries are counted (below).
+		let promoAttemptKey = `${hotelId}|unknown`;
+		try {
+			promoAttemptKey = `${hotelId}|${event.getClientAddress()}`;
+		} catch {
+			// No client address available (some adapters/tests) — share one bucket per hotel.
+		}
+		if (d.promoCode?.trim()) {
+			const wait = promoGuessByIp.retryAfter(promoAttemptKey);
+			if (wait > 0) return fail(429, { error: tooManyMessage(wait) });
+		}
 
 		let items: CartLineInput[];
 		try {
@@ -243,16 +262,26 @@ export const actions: Actions = {
 			if (rawPromoCode) {
 				const promo = await findRedeemablePromoCode(hotelId, rawPromoCode, new Date());
 				if (!promo) {
+					promoGuessByIp.recordFailure(promoAttemptKey);
 					return { ok: false as const, error: "That promo code isn't valid for this stay." };
 				}
 				const eligibleCentavos = roomLines.reduce((sum, l) => sum + l.price.totalCentavos, 0);
-				discountCentavos =
-					promo.discountType === 'percentage'
-						? Math.min(
-								eligibleCentavos,
-								Math.round((eligibleCentavos * (promo.discountBps ?? 0)) / 10000)
-							)
-						: Math.min(eligibleCentavos, promo.discountAmountCentavos ?? 0);
+				discountCentavos = computePromoDiscountCentavos(promo, eligibleCentavos);
+				// A code that would cover the whole order leaves nothing to charge, and the payment
+				// provider can't take a zero-amount payment — refuse it here, before anything is saved.
+				if (discountCentavos > 0 && totalCentavos - discountCentavos <= 0) {
+					return { ok: false as const, error: "That promo code can't be applied to this stay." };
+				}
+				// Enforce the code's usage limits atomically, inside this transaction.
+				try {
+					await assertPromoWithinLimits(tx, promo.id, d.email);
+				} catch (e) {
+					if (e instanceof PromoLimitError) {
+						promoGuessByIp.recordFailure(promoAttemptKey);
+						return { ok: false as const, error: "That promo code isn't valid for this stay." };
+					}
+					throw e;
+				}
 				if (discountCentavos > 0) {
 					lineDiscounts = splitProportional(
 						discountCentavos,
