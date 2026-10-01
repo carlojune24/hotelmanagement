@@ -19,7 +19,11 @@
 		"db:studio": "drizzle-kit studio",
 		"db:seed": "tsx src/lib/server/db/seed.ts",
 		"dev:tunnel": "node scripts/dev-tunnel.mjs cloudflare",
-		"dev:tunnel:ngrok": "node scripts/dev-tunnel.mjs ngrok"
+		"dev:tunnel:ngrok": "node scripts/dev-tunnel.mjs ngrok",
+		"city:dev": "vite dev --mode city --port 5174",
+		"city:db:migrate-main": "tsx scripts/city-migrate.ts main",
+		"city:db:migrate": "tsx scripts/city-migrate.ts city",
+		"city:db:generate": "drizzle-kit generate --config drizzle.city.config.ts"
 	},
 	"dependencies": {
 		"@fontsource-variable/cormorant-garamond": "^5.3.0",

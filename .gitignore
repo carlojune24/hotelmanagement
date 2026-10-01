@@ -5,6 +5,9 @@ build/
 .env
 .env.*
 !.env.example
+!.env.city.example
+uploads-city/
+apps/*/uploads-city/
 *.log
 coverage/
 playwright-report/
