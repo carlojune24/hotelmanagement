@@ -23,7 +23,9 @@
 		"city:dev": "vite dev --mode city --port 5174",
 		"city:db:migrate-main": "tsx scripts/city-migrate.ts main",
 		"city:db:migrate": "tsx scripts/city-migrate.ts city",
-		"city:db:generate": "drizzle-kit generate --config drizzle.city.config.ts"
+		"city:db:generate": "drizzle-kit generate --config drizzle.city.config.ts",
+		"city:seed:demo": "tsx scripts/city-seed-demo.ts",
+		"city:seed:clear": "tsx scripts/city-seed-demo.ts clear"
 	},
 	"dependencies": {
 		"@fontsource-variable/cormorant-garamond": "^5.3.0",

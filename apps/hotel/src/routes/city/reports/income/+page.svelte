@@ -3,7 +3,7 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
-	import RevenueChart from '$lib/components/city/revenue-chart.svelte';
+	import MonthlyChart from '$lib/components/city/monthly-chart.svelte';
 	import { RANGE_LABEL, RANGE_PRESETS, formatPeso } from '$lib/city/income';
 	import type { PageData } from './$types';
 
@@ -90,7 +90,14 @@
 				payments in their Finance module.
 			</p>
 		{:else}
-			<RevenueChart months={report.months} />
+			<MonthlyChart
+				title="Revenue by month"
+				months={report.months.map((m) => ({ month: m.month, value: m.revenueCentavos }))}
+				unit={100}
+				formatValue={formatPeso}
+				formatAxis={(c) => `₱${(c / 100).toLocaleString('en-PH')}`}
+				valueHeader="Revenue"
+			/>
 		{/if}
 	</section>
 

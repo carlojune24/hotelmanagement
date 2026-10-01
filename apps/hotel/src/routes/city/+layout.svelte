@@ -13,6 +13,7 @@
 	import ClipboardListIcon from '@lucide/svelte/icons/clipboard-list';
 	import ChartColumnIcon from '@lucide/svelte/icons/chart-column';
 	import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
+	import UsersRoundIcon from '@lucide/svelte/icons/users-round';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import LandmarkIcon from '@lucide/svelte/icons/landmark';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
@@ -43,7 +44,10 @@
 		},
 		{
 			label: 'Reports',
-			items: [{ href: '/city/reports/income', label: 'Income', icon: ChartColumnIcon }]
+			items: [
+				{ href: '/city/reports/income', label: 'Income', icon: ChartColumnIcon },
+				{ href: '/city/reports/guests', label: 'Guests', icon: UsersRoundIcon }
+			]
 		},
 		{
 			label: 'Platform',
