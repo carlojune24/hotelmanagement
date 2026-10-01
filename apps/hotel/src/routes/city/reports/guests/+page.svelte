@@ -1,16 +1,13 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button/index.js';
-	import { Input } from '$lib/components/ui/input/index.js';
-	import { Label } from '$lib/components/ui/label/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
 	import MonthlyChart from '$lib/components/city/monthly-chart.svelte';
-	import { RANGE_LABEL, RANGE_PRESETS } from '$lib/city/range';
+	import PeriodFilter from '$lib/components/city/period-filter.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 
 	const { report } = $derived(data);
-	const presets = RANGE_PRESETS.filter((p) => p !== 'custom');
 	const day = new Intl.DateTimeFormat('en-PH', { dateStyle: 'medium', timeZone: 'UTC' });
 	const fmtDay = (s: string) => day.format(new Date(`${s}T00:00:00Z`));
 
@@ -33,39 +30,7 @@
 		<Button variant="outline" href={exportHref} data-sveltekit-reload>Export CSV</Button>
 	</div>
 
-	<!-- Filters: one row above everything they scope -->
-	<div class="mt-5 flex flex-wrap items-end gap-x-6 gap-y-3">
-		<nav class="flex flex-wrap gap-1" aria-label="Period">
-			{#each presets as p (p)}
-				<a
-					href="?range={p}"
-					aria-current={data.range.preset === p ? 'page' : undefined}
-					class="rounded-md px-2.5 py-1.5 text-sm {data.range.preset === p
-						? 'bg-brand/15 font-medium text-ink'
-						: 'text-ink-muted hover:bg-surface-2 hover:text-ink'}"
-				>
-					{RANGE_LABEL[p]}
-				</a>
-			{/each}
-		</nav>
-		<form method="GET" class="flex flex-wrap items-end gap-2">
-			<input type="hidden" name="range" value="custom" />
-			<div>
-				<Label for="from" class="text-xs text-ink-muted">From</Label>
-				<Input id="from" name="from" type="date" value={data.range.from} required class="mt-1 h-8 w-40" />
-			</div>
-			<div>
-				<Label for="to" class="text-xs text-ink-muted">To</Label>
-				<Input id="to" name="to" type="date" value={data.range.to} required class="mt-1 h-8 w-40" />
-			</div>
-			<Button type="submit" variant={data.range.preset === 'custom' ? 'default' : 'outline'} class="h-8">
-				Apply
-			</Button>
-		</form>
-	</div>
-	{#if data.range.error}
-		<p class="mt-2 text-sm text-danger" role="alert">{data.range.error} Showing the last 12 months.</p>
-	{/if}
+	<div class="mt-5"><PeriodFilter range={data.range} /></div>
 	<p class="mt-3 text-sm text-ink-muted">
 		Stays that checked in {fmtDay(data.range.from)} – {fmtDay(data.range.to)}
 	</p>

@@ -149,3 +149,95 @@ export function demoGuest(hotelSlug: string, index: number) {
 		email: `${first}.${last}.${index}@${hotelSlug}.demo.invalid`.toLowerCase()
 	};
 }
+
+// ---------------------------------------------------------------------------
+// Reviews
+
+export type DemoReview = {
+	/** Index into the array returned by `generateDemoBookings` — the stay being reviewed. */
+	bookingIndex: number;
+	rating: 1 | 2 | 3 | 4 | 5;
+	comment: string;
+	/** Guest-chosen display form, e.g. "Maria S." */
+	displayName: string;
+	status: 'approved' | 'pending' | 'rejected';
+	/** `YYYY-MM-DD` the review was submitted (after checkout, never in the future). */
+	submittedOn: string;
+};
+
+/** Target mean rating per demo hotel, so the roll-up shows a believable spread. */
+export const DEMO_QUALITY: Record<string, number> = {
+	'demo-seaside-inn': 4.3,
+	'demo-bayview-resort': 4.45,
+	'demo-highland-lodge': 4.65,
+	'demo-city-center-suites': 3.95,
+	'demo-garden-pension': 3.6
+};
+
+const COMMENTS: Record<number, string[]> = {
+	5: [
+		'Spotless room, warm staff and a great breakfast. We will be back.',
+		'Everything was exactly as promised. Check-in took two minutes.',
+		'Lovely stay, quiet, comfortable beds and a very helpful front desk.'
+	],
+	4: [
+		'Good value and a friendly team. The wifi was a bit slow in the evening.',
+		'Clean and comfortable. Breakfast could have more choices.',
+		'Nice location and room. Hot water took a while in the morning.'
+	],
+	3: [
+		'Decent for the price, but the room felt dated and the aircon was noisy.',
+		'Staff were polite; the room was smaller than the photos suggested.',
+		'Okay for one night. Check-in was slow because of a queue.'
+	],
+	2: [
+		'The room was not ready at check-in and we waited over an hour.',
+		'Bathroom needed cleaning and the shower pressure was weak.'
+	],
+	1: [
+		'Booked a deluxe room but was given a standard one with no explanation.',
+		'Very noisy at night and nobody at the front desk could help.'
+	]
+};
+
+/** Rough bell around `mean`, clamped to 1–5 — the sum of two uniforms gives a triangular spread. */
+const drawRating = (rng: () => number, mean: number): 1 | 2 | 3 | 4 | 5 => {
+	const noise = (rng() + rng() - 1) * 1.7;
+	return Math.min(5, Math.max(1, Math.round(mean + noise))) as 1 | 2 | 3 | 4 | 5;
+};
+
+/**
+ * About a quarter of completed stays leave a review. Recent ones are mostly still pending the hotel's
+ * approval (a visible backlog); older ones are mostly approved, with a few rejected and a few that were
+ * never actioned.
+ */
+export function generateDemoReviews(bookings: DemoBooking[], today: string, seed = 424242): DemoReview[] {
+	const rng = mulberry32(seed);
+	const out: DemoReview[] = [];
+	const todayMs = Date.parse(`${today}T00:00:00Z`);
+
+	bookings.forEach((b, bookingIndex) => {
+		if (b.status !== 'checked_out' || b.checkOut >= today || rng() > 0.25) return;
+		const rating = drawRating(rng, DEMO_QUALITY[b.hotelSlug] ?? 4);
+		const options = COMMENTS[rating]!;
+		const guest = demoGuest(b.hotelSlug, b.guestIndex);
+		const [first, last] = guest.fullName.split(' ') as [string, string];
+
+		const wait = 1 + Math.floor(rng() * 14);
+		const submitted = Math.min(todayMs, Date.parse(`${b.checkOut}T00:00:00Z`) + wait * 86_400_000);
+		const ageDays = Math.round((todayMs - submitted) / 86_400_000);
+		const r = rng();
+		const status: DemoReview['status'] =
+			ageDays <= 10 ? (r < 0.6 ? 'pending' : 'approved') : r < 0.03 ? 'pending' : r < 0.1 ? 'rejected' : 'approved';
+
+		out.push({
+			bookingIndex,
+			rating,
+			comment: options[Math.floor(rng() * options.length)]!,
+			displayName: `${first} ${last[0]}.`,
+			status,
+			submittedOn: toYmd(new Date(submitted))
+		});
+	});
+	return out;
+}

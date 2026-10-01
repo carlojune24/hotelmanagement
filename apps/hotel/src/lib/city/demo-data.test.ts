@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { DEMO_HOTELS, DEMO_SLUG_PREFIX, demoGuest, generateDemoBookings, guestPoolSize } from './demo-data';
+import {
+	DEMO_HOTELS,
+	DEMO_QUALITY,
+	DEMO_SLUG_PREFIX,
+	demoGuest,
+	generateDemoBookings,
+	generateDemoReviews,
+	guestPoolSize
+} from './demo-data';
 
 const TODAY = '2026-10-01';
 const bookings = generateDemoBookings(TODAY);
@@ -45,6 +53,50 @@ describe('generateDemoBookings', () => {
 		const big = bookings.filter((b) => b.hotelSlug === 'demo-city-center-suites' && b.status === 'checked_out');
 		const inMonth = (m: string) => big.filter((b) => b.checkIn.startsWith(m)).length;
 		expect(inMonth('2025-12')).toBeGreaterThan(inMonth('2025-11'));
+	});
+});
+
+describe('generateDemoReviews', () => {
+	const reviews = generateDemoReviews(bookings, TODAY);
+
+	it('is deterministic and reviews only completed stays, once each', () => {
+		expect(generateDemoReviews(bookings, TODAY)).toEqual(reviews);
+		const seen = new Set<number>();
+		for (const r of reviews) {
+			expect(bookings[r.bookingIndex]!.status).toBe('checked_out');
+			expect(seen.has(r.bookingIndex)).toBe(false);
+			seen.add(r.bookingIndex);
+		}
+	});
+
+	it('submits after checkout and never in the future, with a valid rating', () => {
+		for (const r of reviews) {
+			const b = bookings[r.bookingIndex]!;
+			expect(r.submittedOn >= b.checkOut).toBe(true);
+			expect(r.submittedOn <= TODAY).toBe(true);
+			expect([1, 2, 3, 4, 5]).toContain(r.rating);
+			expect(r.comment.length).toBeGreaterThan(10);
+			expect(r.displayName).toMatch(/^\S+ \S\.$/);
+		}
+	});
+
+	it('reviews roughly a quarter of completed stays and leaves a pending backlog', () => {
+		const done = bookings.filter((b) => b.status === 'checked_out').length;
+		expect(reviews.length / done).toBeGreaterThan(0.2);
+		expect(reviews.length / done).toBeLessThan(0.3);
+		const by = (s: string) => reviews.filter((r) => r.status === s).length;
+		expect(by('approved')).toBeGreaterThan(by('pending'));
+		expect(by('pending')).toBeGreaterThan(0);
+		expect(by('rejected')).toBeGreaterThan(0);
+	});
+
+	it('gives each hotel a mean close to its target quality, with best and worst ordered', () => {
+		const mean = (slug: string) => {
+			const rs = reviews.filter((r) => bookings[r.bookingIndex]!.hotelSlug === slug);
+			return rs.reduce((a, r) => a + r.rating, 0) / rs.length;
+		};
+		for (const [slug, q] of Object.entries(DEMO_QUALITY)) expect(Math.abs(mean(slug) - q)).toBeLessThan(0.4);
+		expect(mean('demo-highland-lodge')).toBeGreaterThan(mean('demo-garden-pension'));
 	});
 });
 

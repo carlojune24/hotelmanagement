@@ -20,6 +20,7 @@ import {
 	DEMO_SLUG_PREFIX,
 	demoGuest,
 	generateDemoBookings,
+	generateDemoReviews,
 	guestPoolSize,
 	roomsPerType
 } from '../src/lib/city/demo-data';
@@ -32,7 +33,7 @@ if (!/\/[^/]*_city(\?|$)/.test(url)) throw new Error('Refusing to run: DATABASE_
 
 const client = postgres(url, { max: 1, onnotice: () => {} });
 const db = drizzle(client, { schema, casing: 'snake_case' });
-const { hotels, roomTypes, ratePlans, rooms, guests, orders, bookings, bookingRooms } = schema;
+const { hotels, roomTypes, ratePlans, rooms, guests, orders, bookings, bookingRooms, reviews } = schema;
 
 const chunk = <T>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 const todayManila = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date());
@@ -52,6 +53,7 @@ async function seed() {
 
 	const today = todayManila();
 	const plan = generateDemoBookings(today);
+	const reviewPlan = generateDemoReviews(plan, today);
 
 	await db.transaction(async (tx) => {
 		const hotelRows = await tx
@@ -174,6 +176,23 @@ async function seed() {
 		for (const part of chunk(orderRows, 500)) await tx.insert(orders).values(part);
 		for (const part of chunk(bookingRows, 500)) await tx.insert(bookings).values(part);
 		for (const part of chunk(roomRows, 500)) await tx.insert(bookingRooms).values(part);
+
+		// Reviews of completed stays, linked to the bookings just created.
+		const reviewRows: (typeof reviews.$inferInsert)[] = reviewPlan.map((r) => {
+			const submittedAt = new Date(`${r.submittedOn}T05:00:00Z`);
+			const decidedAt = r.status === 'pending' ? null : new Date(Math.min(now, submittedAt.getTime() + 86_400_000));
+			return {
+				hotelId: bookingRows[r.bookingIndex]!.hotelId,
+				bookingId: bookingRows[r.bookingIndex]!.id!,
+				rating: r.rating,
+				comment: r.comment,
+				guestDisplayName: r.displayName,
+				status: r.status,
+				submittedAt,
+				moderatedAt: decidedAt
+			};
+		});
+		for (const part of chunk(reviewRows, 500)) await tx.insert(reviews).values(part);
 	});
 
 	const summary = await db.execute<{ slug: string; status: string; n: number; guests: number }>(sql`
@@ -181,7 +200,9 @@ async function seed() {
 		from bookings b join hotels h on h.id = b.hotel_id
 		where h.slug like ${DEMO_SLUG_PREFIX + '%'} group by 1,2 order by 1,2`);
 	console.table(summary);
-	console.log(`Seeded ${DEMO_HOTELS.length} demo hotels and ${plan.length} bookings (as of ${today}).`);
+	console.log(
+		`Seeded ${DEMO_HOTELS.length} demo hotels, ${plan.length} bookings and ${reviewPlan.length} reviews (as of ${today}).`
+	);
 }
 
 async function clear() {
@@ -193,6 +214,7 @@ async function clear() {
 	const ids = demo.map((h) => h.id);
 	await db.transaction(async (tx) => {
 		const demoBookings = tx.select({ id: bookings.id }).from(bookings).where(inArray(bookings.hotelId, ids));
+		await tx.delete(reviews).where(inArray(reviews.hotelId, ids));
 		await tx.delete(bookingRooms).where(inArray(bookingRooms.bookingId, demoBookings));
 		await tx.delete(bookings).where(inArray(bookings.hotelId, ids));
 		await tx.delete(orders).where(inArray(orders.hotelId, ids));
@@ -202,7 +224,7 @@ async function clear() {
 		await tx.delete(roomTypes).where(inArray(roomTypes.hotelId, ids));
 		await tx.delete(hotels).where(inArray(hotels.id, ids));
 	});
-	console.log(`Removed ${demo.length} demo hotels and their rooms, guests and bookings.`);
+	console.log(`Removed ${demo.length} demo hotels and their rooms, guests, bookings and reviews.`);
 }
 
 try {
