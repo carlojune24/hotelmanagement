@@ -15,6 +15,7 @@
 	import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
 	import UsersRoundIcon from '@lucide/svelte/icons/users-round';
 	import StarIcon from '@lucide/svelte/icons/star';
+	import BedDoubleIcon from '@lucide/svelte/icons/bed-double';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import LandmarkIcon from '@lucide/svelte/icons/landmark';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
@@ -48,7 +49,8 @@
 			items: [
 				{ href: '/city/reports/income', label: 'Income', icon: ChartColumnIcon },
 				{ href: '/city/reports/guests', label: 'Guests', icon: UsersRoundIcon },
-				{ href: '/city/reports/ratings', label: 'Ratings', icon: StarIcon }
+				{ href: '/city/reports/ratings', label: 'Ratings', icon: StarIcon },
+				{ href: '/city/reports/occupancy', label: 'Occupancy', icon: BedDoubleIcon }
 			]
 		},
 		{
