@@ -1,4 +1,4 @@
-import { error, type Handle, type HandleServerError, type Reroute } from '@sveltejs/kit';
+import { error, redirect, type Handle, type HandleServerError, type Reroute } from '@sveltejs/kit';
 import {
 	SESSION_COOKIE,
 	deleteSessionCookie,
@@ -70,6 +70,13 @@ export const reroute: Reroute = async ({ url }) => {
 };
 
 export const handle: Handle = async ({ event, resolve }) => {
+	// City branch: `/admin` is deferred — `/city` (a copy of it plus city features) is the platform-admin
+	// area here. Redirect rather than delete so main's admin files merge cleanly and this is one line to undo.
+	const { pathname, search } = event.url;
+	if (pathname === '/admin' || pathname.startsWith('/admin/')) {
+		redirect(302, `/city${pathname.slice('/admin'.length)}${search}`);
+	}
+
 	// 1. Session
 	const token = event.cookies.get(SESSION_COOKIE) ?? null;
 	event.locals.sessionToken = token;

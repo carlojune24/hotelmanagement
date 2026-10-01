@@ -13,6 +13,8 @@ A city/LGU layer on top of the hotel platform for:
 ## Branch rules (read first)
 1. `city` **only pulls from `main`. It is never merged into `main`.** No PRs from `city` to `main`.
 2. **Do not touch** `/admin` (platform admin) or `/{hotel}/management` (tenant). `/{hotel}` is unchanged.
+   On this branch `/admin` is **deferred**: its files are left as-is (so merges from `main` stay clean) but
+   `hooks.server.ts` redirects `/admin/*` to `/city/*`, which replaces it. To bring it back, delete that redirect block.
 3. Flow: `Jade -> main -> city`. Jade work reaches `city` only after it lands in `main`.
 4. Sync procedure (merge, not rebase — shared long-lived branch):
    ```
