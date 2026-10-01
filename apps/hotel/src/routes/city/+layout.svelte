@@ -12,6 +12,7 @@
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import ClipboardListIcon from '@lucide/svelte/icons/clipboard-list';
 	import ChartColumnIcon from '@lucide/svelte/icons/chart-column';
+	import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import LandmarkIcon from '@lucide/svelte/icons/landmark';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
@@ -36,7 +37,8 @@
 			label: 'Registration',
 			items: [
 				{ href: '/city/applications', label: 'Applications', icon: ClipboardListIcon },
-				{ href: '/city/apply', label: 'New application', icon: PlusIcon }
+				{ href: '/city/apply', label: 'New application', icon: PlusIcon },
+				{ href: '/city/permits', label: 'Permits', icon: ShieldCheckIcon }
 			]
 		},
 		{

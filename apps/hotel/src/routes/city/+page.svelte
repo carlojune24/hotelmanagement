@@ -7,7 +7,9 @@
 		{ label: 'Hotels registered', value: data.stats.hotels, href: '/city/hotels' },
 		{ label: 'Hotels published', value: data.stats.published, href: '/city/hotels' },
 		{ label: 'Rooms', value: data.stats.rooms, href: '/city/hotels' },
-		{ label: 'Users', value: data.stats.users, href: '/city/users' }
+		{ label: 'Users', value: data.stats.users, href: '/city/users' },
+		{ label: 'Permits expiring soon', value: data.permits.expiring, href: '/city/permits?status=expiring' },
+		{ label: 'Permits expired', value: data.permits.expired, href: '/city/permits?status=expired' }
 	]);
 </script>
 

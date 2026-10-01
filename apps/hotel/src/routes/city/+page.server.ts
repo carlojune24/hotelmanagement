@@ -1,6 +1,7 @@
 import { count, eq } from 'drizzle-orm';
 import { db } from '$lib/server/db/index';
 import { hotels, rooms, users } from '$lib/server/db/schema/index';
+import { permitOverview } from '$lib/server/city/permits';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async () => {
@@ -12,7 +13,10 @@ export const load: PageServerLoad = async () => {
 	const [roomCount] = await db.select({ n: count() }).from(rooms);
 	const [userCount] = await db.select({ n: count() }).from(users);
 
+	const { counts: permits } = await permitOverview();
+
 	return {
+		permits,
 		stats: {
 			hotels: hotelCount?.n ?? 0,
 			published: publishedCount?.n ?? 0,

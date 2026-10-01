@@ -1,6 +1,7 @@
 import { and, gte, lte, ne, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db/index';
 import { cashMovements, hotels } from '$lib/server/db/schema/index';
+import { todayManila } from '$lib/server/city/today';
 import {
 	REVENUE_CATEGORIES,
 	buildIncomeReport,
@@ -8,9 +9,6 @@ import {
 	resolveRange,
 	type IncomeRow
 } from '$lib/city/income';
-
-/** The city reports on Manila time — every hotel's own business date is already stored per movement. */
-const todayManila = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date());
 
 /**
  * Resolves the requested range and builds the income report across all non-archived hotels.

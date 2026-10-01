@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import { hotels } from '$lib/server/db/schema/index';
-import { cityApplications } from '$lib/server/db/schema/city';
+import { cityApplications, cityPermits } from '$lib/server/db/schema/city';
 import { writeAudit } from '$lib/server/audit';
 import { requirePlatformAdmin } from '$lib/server/auth/rbac';
 import { createHotelWithDefaults } from '$lib/server/city/create-hotel';
@@ -105,6 +105,17 @@ export const actions: Actions = {
 		if (linked.length === 0) {
 			return fail(409, {
 				error: `The hotel "${slug}" was created, but this application changed meanwhile and was not linked. Find it under Hotels.`
+			});
+		}
+
+		// Carry the application's permit onto the new hotel so the Permits page tracks it from day one.
+		if (app.permitNumber && app.permitExpiresOn) {
+			await db.insert(cityPermits).values({
+				hotelId: created.id,
+				permitNumber: app.permitNumber,
+				expiresOn: app.permitExpiresOn,
+				applicationId: app.id,
+				recordedBy: event.locals.user!.id
 			});
 		}
 
