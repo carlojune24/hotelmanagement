@@ -11,6 +11,7 @@
 	import KeyRoundIcon from '@lucide/svelte/icons/key-round';
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import ClipboardListIcon from '@lucide/svelte/icons/clipboard-list';
+	import ChartColumnIcon from '@lucide/svelte/icons/chart-column';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import LandmarkIcon from '@lucide/svelte/icons/landmark';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
@@ -37,6 +38,10 @@
 				{ href: '/city/applications', label: 'Applications', icon: ClipboardListIcon },
 				{ href: '/city/apply', label: 'New application', icon: PlusIcon }
 			]
+		},
+		{
+			label: 'Reports',
+			items: [{ href: '/city/reports/income', label: 'Income', icon: ChartColumnIcon }]
 		},
 		{
 			label: 'Platform',
