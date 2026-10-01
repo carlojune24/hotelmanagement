@@ -6,6 +6,7 @@
  */
 export const RESERVED_PREFIXES = new Set([
 	'admin',
+	'city',
 	'group',
 	'auth',
 	'api',
