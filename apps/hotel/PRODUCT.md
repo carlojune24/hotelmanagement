@@ -56,3 +56,7 @@ No real hotel photos, logos, or copy on hand yet — the demo/seed hotel (`hotel
 ## Accessibility & Inclusion
 
 No product-specific requirement established yet beyond general web accessibility (guests may book on low-end Android devices over mobile data — treat performance/lightweight-ness as an inclusion concern, not just aesthetics).
+
+## City branch exception
+
+On the `city` branch (never merged into `main`), `/` is a **public hotel directory** — the "Municipal Register": published hotels with their approved-review ratings, in the Woven Ledger vocabulary with one fixed city accent. This deliberately departs from "mmhotel invisible to guests" for that root page only; every `/{slug}` page is unchanged. `/city` is the staff operate-mode area for city superadmins (platform admins) and runs on the cloned `hotels_city` database — see `docs/city_wide_hotel_management_plan.md`.
