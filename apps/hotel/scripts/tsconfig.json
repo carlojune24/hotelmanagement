@@ -1,0 +1,13 @@
+{
+	// Used by city scripts that import real app code (finance, audit…) under tsx:
+	//   tsx --tsconfig scripts/tsconfig.json scripts/city-seed-income.ts
+	// Maps SvelteKit's `$lib` and `$env/dynamic/private` aliases, which tsx doesn't know about.
+	"extends": "../tsconfig.json",
+	"compilerOptions": {
+		"paths": {
+			"$lib": ["../src/lib"],
+			"$lib/*": ["../src/lib/*"],
+			"$env/dynamic/private": ["./shims/env-private.ts"]
+		}
+	}
+}

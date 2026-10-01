@@ -33,7 +33,23 @@ if (!/\/[^/]*_city(\?|$)/.test(url)) throw new Error('Refusing to run: DATABASE_
 
 const client = postgres(url, { max: 1, onnotice: () => {} });
 const db = drizzle(client, { schema, casing: 'snake_case' });
-const { hotels, roomTypes, ratePlans, rooms, guests, orders, bookings, bookingRooms, reviews } = schema;
+const {
+	hotels,
+	roomTypes,
+	ratePlans,
+	rooms,
+	guests,
+	orders,
+	bookings,
+	bookingRooms,
+	reviews,
+	payments,
+	paymentAllocations,
+	cashMovements,
+	journalEntries,
+	journalLines,
+	folios
+} = schema;
 
 const chunk = <T>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 const todayManila = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date());
@@ -213,6 +229,17 @@ async function clear() {
 	}
 	const ids = demo.map((h) => h.id);
 	await db.transaction(async (tx) => {
+		// Money first (added by city:seed:income): allocations → ledger → cash movements → payments → folios.
+		// Cash accounts, chart of accounts and finance settings then go with the hotel.
+		const demoOrders = tx.select({ id: orders.id }).from(orders).where(inArray(orders.hotelId, ids));
+		const demoPayments = tx.select({ id: payments.id }).from(payments).where(inArray(payments.orderId, demoOrders));
+		await tx.delete(paymentAllocations).where(inArray(paymentAllocations.paymentId, demoPayments));
+		await tx.delete(journalLines).where(inArray(journalLines.hotelId, ids));
+		await tx.delete(journalEntries).where(inArray(journalEntries.hotelId, ids));
+		await tx.delete(cashMovements).where(inArray(cashMovements.hotelId, ids));
+		await tx.delete(payments).where(inArray(payments.orderId, demoOrders));
+		await tx.delete(folios).where(inArray(folios.hotelId, ids));
+
 		const demoBookings = tx.select({ id: bookings.id }).from(bookings).where(inArray(bookings.hotelId, ids));
 		await tx.delete(reviews).where(inArray(reviews.hotelId, ids));
 		await tx.delete(bookingRooms).where(inArray(bookingRooms.bookingId, demoBookings));
@@ -224,7 +251,7 @@ async function clear() {
 		await tx.delete(roomTypes).where(inArray(roomTypes.hotelId, ids));
 		await tx.delete(hotels).where(inArray(hotels.id, ids));
 	});
-	console.log(`Removed ${demo.length} demo hotels and their rooms, guests, bookings and reviews.`);
+	console.log(`Removed ${demo.length} demo hotels and their rooms, guests, bookings, reviews and payments.`);
 }
 
 try {

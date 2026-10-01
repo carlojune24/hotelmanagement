@@ -25,7 +25,8 @@
 		"city:db:migrate": "tsx scripts/city-migrate.ts city",
 		"city:db:generate": "drizzle-kit generate --config drizzle.city.config.ts",
 		"city:seed:demo": "tsx scripts/city-seed-demo.ts",
-		"city:seed:clear": "tsx scripts/city-seed-demo.ts clear"
+		"city:seed:clear": "tsx scripts/city-seed-demo.ts clear",
+		"city:seed:income": "tsx --tsconfig scripts/tsconfig.json scripts/city-seed-income.ts"
 	},
 	"dependencies": {
 		"@fontsource-variable/cormorant-garamond": "^5.3.0",
