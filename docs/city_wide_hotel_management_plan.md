@@ -46,8 +46,12 @@ instance keeps `DATABASE_URL` = `mmhotel` and is unaffected.
   folder `apps/hotel/drizzle-city/` and migrations table. Main's `drizzle/` journal is never edited.
 
 ## Modules
-1. **Registration & central management** — registration applications, permits, approval; hotel/user
-   management copied from `/admin`.
+1. **Registration & central management** — `/city` has the same functions as `/admin` (hotels, users,
+   API keys), so the city creates hotels itself. Flow: a hotel submits an application (public form) →
+   the city reviews it in `/city` → once the city **approves and finalizes** it, the hotel is created
+   (via `/city`'s copy of the create-hotel action, which seeds amenities, finance defaults and roles) and the
+   application is linked to the new hotel. Permits are tracked per hotel. On the city instance this
+   creates the hotel in `hotels_city` (its own DB).
 2. **Tourism monitoring** — arrivals, occupancy, seasonality, per-district view.
 3. **Tourist statistics** — origin/nationality, length of stay, party size, trends.
 4. **Hotel ratings** — per-hotel and city-wide roll-up (approved reviews), shown on root `/`.
