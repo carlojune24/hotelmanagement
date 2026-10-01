@@ -10,6 +10,8 @@
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import KeyRoundIcon from '@lucide/svelte/icons/key-round';
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
+	import ClipboardListIcon from '@lucide/svelte/icons/clipboard-list';
+	import PlusIcon from '@lucide/svelte/icons/plus';
 	import LandmarkIcon from '@lucide/svelte/icons/landmark';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	import SunIcon from '@lucide/svelte/icons/sun';
@@ -27,6 +29,13 @@
 			items: [
 				{ href: '/city', label: 'Overview', icon: LayoutDashboardIcon },
 				{ href: '/city/hotels', label: 'Hotels', icon: BuildingIcon }
+			]
+		},
+		{
+			label: 'Registration',
+			items: [
+				{ href: '/city/applications', label: 'Applications', icon: ClipboardListIcon },
+				{ href: '/city/apply', label: 'New application', icon: PlusIcon }
 			]
 		},
 		{
