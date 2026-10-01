@@ -28,7 +28,9 @@ A city/LGU layer on top of the hotel platform for:
 6. Protect `main` on GitHub (require PR + review) to prevent an accidental merge/push from `city`.
 
 ## Architecture
-- `apps/city` — new SvelteKit app (own routes, layout, auth, design world).
+- `apps/city` — new SvelteKit app (own routes, layout, auth, design world), run as its own server/port.
+  Only city-management routes live here; hotels stay at `/{slug}` in `apps/hotel`. A reverse proxy can
+  put both under one domain in production.
 - `packages/city-core` — shared city types, snapshot contract, aggregation logic.
 - Existing packages (`hr-core`, `finance-core`, `integration`) are consumed, not modified.
 - **Database `hotels_city`**: new role, local PG18 on :5432, own `drizzle.config` + `migrations/`,
@@ -45,8 +47,12 @@ A city/LGU layer on top of the hotel platform for:
   API key (reuse `api-keys.ts` / `packages/integration` pattern), or city pulls from each hotel API.
 
 ## Modules
-1. **Registration & central management** — free sign-up creates a normal hotel tenant via main's
-   onboarding (so `/{slug}` is unchanged) plus a city registration record (status, permits, approval).
+1. **Registration & central management** — tenant creation stays in `/admin` of the hotel app
+   (unchanged, owned by `main`). City never creates tenants. The city app handles the free-registration
+   *application*: applicant details, permits, review/approval status. Once approved, a platform admin
+   creates the hotel in `/admin`; the city record is then linked to that hotel by its slug/id, and
+   the hotel starts sending snapshots. The hotel is served at `/{slug}` by the hotel app as usual.
+   Reserve `city` as a hotel slug in `main`.
 2. **Tourism monitoring** — arrivals, occupancy, seasonality, per-district view.
 3. **Tourist statistics** — origin/nationality, length of stay, party size, trends.
 4. **Hotel ratings** — per-hotel and city-wide roll-up, verified stays only.
