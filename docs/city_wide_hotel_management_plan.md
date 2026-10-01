@@ -47,29 +47,56 @@ instance keeps `DATABASE_URL` = `mmhotel` and is unaffected.
   `src/lib/server/db/schema/city/` (not re-exported from `schema/index.ts`) with their own migrations
   folder `apps/hotel/drizzle-city/` and migrations table. Main's `drizzle/` journal is never edited.
 
-## Modules
-1. **Registration & central management** — `/city` has the same functions as `/admin` (hotels, users,
-   API keys), so the city creates hotels itself. Flow: a hotel submits an application (public form) →
-   the city reviews it in `/city` → once the city **approves and finalizes** it, the hotel is created
-   (via `/city`'s copy of the create-hotel action, which seeds amenities, finance defaults and roles) and the
-   application is linked to the new hotel. Permits are tracked per hotel. On the city instance this
-   creates the hotel in `hotels_city` (its own DB).
-2. **Tourism monitoring** — arrivals, occupancy, seasonality, per-district view.
-3. **Tourist statistics** — origin/nationality, length of stay, party size, trends.
-4. **Hotel ratings** — per-hotel and city-wide roll-up (approved reviews), shown on root `/`.
-5. **Income analysis & reports** — revenue, ADR, RevPAR, tax-relevant totals; exports.
+## Modules (status)
+1. **Registration & central management — built.** `/city` has the same functions as `/admin` (hotels, users,
+   API keys), so the city creates hotels itself. Flow: city staff enter an application at `/city/apply` →
+   review it in `/city/applications` → once the city **approves and finalizes** it, the hotel is created
+   (via the copy of the create-hotel action, which seeds amenities, finance defaults and roles) and the
+   application is linked to the new hotel. **Permits** (`/city/permits`) track each hotel's current permit
+   (the one expiring latest), renewals as history, and Valid / Expiring soon / Expired / None status; a
+   finalized application's permit is copied across automatically. On the city instance this creates the
+   hotel in `hotels_city` (its own DB). *Not built:* approval/rejection emails, permit-scan uploads,
+   expiry reminders, a public application form (applications are entered by city staff).
+2. **Tourism monitoring — built.** `/city` **Overview** pulls the headline figures from every report onto one
+   dashboard (guests, occupancy, revenue, rating, charts, "needs attention", hotels at a glance), and
+   `/city/reports/occupancy` has occupancy, **ADR and RevPAR** (moved here from income: they are stay-night
+   measures, not cash), seasonality by month and per hotel. *Not built:* per-district view (hotels only
+   have a free-text `city`).
+3. **Tourist statistics — partly built.** `/city/reports/guests`: guests, stays, guest-nights, average
+   stay, per-hotel and consolidated charts, CSV. *Not built:* origin/nationality — guests have no such field,
+   so it would need a change to the booking form in `main`.
+4. **Hotel ratings — built.** Public register at `/` (published hotels, rooms, rating) and
+   `/city/reports/ratings` (ranking, distribution, hotel-approval backlog, latest reviews). Ratings are the
+   mean of approved reviews, the same rule everywhere.
+5. **Income analysis & reports — built.** `/city/reports/income`: cash-basis revenue by hotel and month,
+   same definition as each hotel's own Finance report (voided excluded, deposits included, refunds shown
+   separately), chart, table, CSV.
+
+All reports share one period filter (presets or a custom range, up to 5 years) and a CSV export.
 
 ## Design
 Run the `impeccable` skill and get direction approved before building any UI (root hotel list and the
 `/city` shell/dashboards). Record it in `apps/hotel/PRODUCT.md` / `DESIGN.md` for this branch.
 
 ## Roadmap
-- **Phase 0** — branch, this doc, `hotels_city` DB (cloned), city drizzle config + `city:dev`.
-- **Phase 1** — design direction; `/city` copy of admin; root hotel list + ratings.
-- **Phase 2** — registration applications; income and tourist-statistics reports.
-- **Phase 3** — ratings roll-up; tourism dashboard; exports.
+- **Phase 0 — done:** branch, this doc, `hotels_city` DB (cloned), city drizzle config + `city:dev`.
+- **Phase 1 — done:** design direction; `/city` copy of admin (with `/admin` redirected to it); root hotel list + ratings.
+- **Phase 2 — done:** registration applications and permits; income, guests, ratings and occupancy reports.
+- **Phase 3 — done:** overview dashboard; demo data (hotels, bookings, reviews, payments).
+- **Next:** real data feed from hotels into `hotels_city`; nationality capture (needs `main`); per-district
+  grouping; emails and reminders; deploying the city instance.
+
+## Running it
+- Start the city instance: `cd apps/hotel && pnpm city:dev` (port 5174, database from `.env.city`). A plain
+  `vite dev` uses `.env` (the `mmhotel` database), which has none of the city tables.
+- After merging `main`: `pnpm city:db:migrate-main` then `pnpm city:db:migrate`.
+- Demo data (only `demo-*` hotels, only on a `*_city` database, never touches `mmhotel`):
+  `pnpm city:seed:demo` (hotels, rooms, guests, bookings, reviews), then `pnpm city:seed:income` (payments and
+  refunds, written through the app's own `recordCashMovement` with back-dated business dates, so cash balances
+  and the ledger stay correct); `pnpm city:seed:clear` removes all of it.
 
 ## Open questions
-- Signed-in users currently redirect away from `/`; show the hotel list to everyone with a "my dashboard" link?
 - How does real hotel data reach `hotels_city` after the one-time clone (sync, push, or each hotel's API)?
-- Who is the city user (LGU tourism office, DOT, private association)?
+- Who is the city user (LGU tourism office, DOT, private association)? Drives the auth model.
+- Nationality / origin statistics need a guest field added in `main`'s booking form — wanted?
+- Signed-in users are no longer redirected away from `/`; they get a "My dashboard" link instead (decided; revisit if unwanted).

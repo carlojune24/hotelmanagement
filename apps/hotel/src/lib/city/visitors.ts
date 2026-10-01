@@ -14,6 +14,9 @@ export type VisitorRow = {
 	month: string;
 	guests: number;
 	stays: number;
+	/** Nights summed over the stays themselves (check-out minus check-in), regardless of party size. */
+	nights: number;
+	/** Party size × nights, summed — person-nights. */
 	guestNights: number;
 };
 
@@ -23,8 +26,9 @@ export type HotelVisitors = {
 	slug: string;
 	guests: number;
 	stays: number;
+	nights: number;
 	guestNights: number;
-	/** Average length of stay in nights per stay, 1 decimal; null with no stays. */
+	/** Average length of stay in nights (stay nights ÷ stays), 1 decimal; null with no stays. */
 	avgNights: number | null;
 	monthly: { month: string; guests: number }[];
 };
@@ -32,7 +36,7 @@ export type HotelVisitors = {
 export type VisitorReport = {
 	months: { month: string; guests: number }[];
 	hotels: HotelVisitors[];
-	totals: { guests: number; stays: number; guestNights: number; avgNights: number | null };
+	totals: { guests: number; stays: number; nights: number; guestNights: number; avgNights: number | null };
 	/** Hotels with at least one visitor in the range. */
 	reporting: number;
 	/** Highest single-month guest count across every hotel — a shared scale for per-hotel charts. */
@@ -50,7 +54,7 @@ export function buildVisitorReport(
 	const byHotel = new Map(
 		hotels.map((h) => [
 			h.id,
-			{ ...h, guests: 0, stays: 0, guestNights: 0, perMonth: blank() }
+			{ ...h, guests: 0, stays: 0, nights: 0, guestNights: 0, perMonth: blank() }
 		])
 	);
 	const all = blank();
@@ -60,6 +64,7 @@ export function buildVisitorReport(
 		if (!h || !h.perMonth.has(r.month)) continue;
 		h.guests += r.guests;
 		h.stays += r.stays;
+		h.nights += r.nights;
 		h.guestNights += r.guestNights;
 		h.perMonth.set(r.month, h.perMonth.get(r.month)! + r.guests);
 		all.set(r.month, all.get(r.month)! + r.guests);
@@ -73,7 +78,8 @@ export function buildVisitorReport(
 			guests: h.guests,
 			stays: h.stays,
 			guestNights: h.guestNights,
-			avgNights: avg(h.guestNights, h.stays),
+			nights: h.nights,
+			avgNights: avg(h.nights, h.stays),
 			monthly: months.map((month) => ({ month, guests: h.perMonth.get(month) ?? 0 }))
 		}))
 		.sort((a, b) => b.guests - a.guests || a.name.localeCompare(b.name));
@@ -82,16 +88,17 @@ export function buildVisitorReport(
 		(t, h) => ({
 			guests: t.guests + h.guests,
 			stays: t.stays + h.stays,
+			nights: t.nights + h.nights,
 			guestNights: t.guestNights + h.guestNights
 		}),
-		{ guests: 0, stays: 0, guestNights: 0 }
+		{ guests: 0, stays: 0, nights: 0, guestNights: 0 }
 	);
 
 	return {
 		months: months.map((month) => ({ month, guests: all.get(month) ?? 0 })),
 		hotels: list,
-		// Length of stay is per stay (a booking), so average it over stays, not guests.
-		totals: { ...totals, avgNights: avg(totals.guestNights, totals.stays) },
+		// Length of stay is per stay (a booking): nights of the stays ÷ number of stays.
+		totals: { ...totals, avgNights: avg(totals.nights, totals.stays) },
 		reporting: list.filter((h) => h.guests > 0).length,
 		maxHotelMonth: list.reduce((m, h) => h.monthly.reduce((mm, x) => Math.max(mm, x.guests), m), 0)
 	};

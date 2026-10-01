@@ -28,7 +28,8 @@ export async function visitorsForRequest(params: URLSearchParams) {
 			month: monthExpr,
 			guests: sql<number>`coalesce(sum(${bookings.occupancy}), 0)::int`,
 			stays: sql<number>`count(*)::int`,
-			// date - date is an integer number of nights in Postgres
+			// date - date is an integer number of nights in Postgres; the stay's own length, not × party size
+			nights: sql<number>`coalesce(sum(${bookings.checkOut} - ${bookings.checkIn}), 0)::int`,
 			guestNights: sql<number>`coalesce(sum(${bookings.occupancy} * (${bookings.checkOut} - ${bookings.checkIn})), 0)::int`
 		})
 		.from(bookings)
@@ -46,6 +47,7 @@ export async function visitorsForRequest(params: URLSearchParams) {
 		month: r.month,
 		guests: Number(r.guests),
 		stays: Number(r.stays),
+		nights: Number(r.nights),
 		guestNights: Number(r.guestNights)
 	}));
 
