@@ -139,7 +139,7 @@ async function seed() {
 		const bookingRows: (typeof bookings.$inferInsert)[] = [];
 		const roomRows: (typeof bookingRooms.$inferInsert)[] = [];
 
-		for (const b of plan) {
+		for (const [planIndex, b] of plan.entries()) {
 			const hid = hotelId.get(b.hotelSlug)!;
 			const nights = Math.round((Date.parse(b.checkOut) - Date.parse(b.checkIn)) / 86_400_000);
 			const subtotal = b.nightlyCentavos * nights * b.roomCount;
@@ -173,6 +173,12 @@ async function seed() {
 				checkIn: b.checkIn,
 				checkOut: b.checkOut,
 				occupancy: b.occupancy,
+				// Optional at check-in: ~70% of stays that arrived have a count, a little off the booked
+				// occupancy (a hash of the plan index, so the seeded stream above is untouched).
+				touristCount:
+					(b.status === 'checked_in' || b.status === 'checked_out') && planIndex % 10 < 7
+						? Math.max(1, b.occupancy + [0, 0, 0, -1, 1][planIndex % 5]!)
+						: null,
 				status: b.status,
 				subtotalCentavos: subtotal,
 				feesCentavos: 0,

@@ -18,6 +18,10 @@ export type VisitorRow = {
 	nights: number;
 	/** Party size × nights, summed — person-nights. */
 	guestNights: number;
+	/** Tourists staff recorded at check-in (`bookings.tourist_count`), summed over stays that have one. */
+	tourists: number;
+	/** How many of `stays` carry a recorded tourist count — the rest are simply not counted. */
+	touristStays: number;
 };
 
 export type HotelVisitors = {
@@ -28,6 +32,8 @@ export type HotelVisitors = {
 	stays: number;
 	nights: number;
 	guestNights: number;
+	tourists: number;
+	touristStays: number;
 	/** Average length of stay in nights (stay nights ÷ stays), 1 decimal; null with no stays. */
 	avgNights: number | null;
 	monthly: { month: string; guests: number }[];
@@ -35,8 +41,18 @@ export type HotelVisitors = {
 
 export type VisitorReport = {
 	months: { month: string; guests: number }[];
+	/** Recorded tourists per month, all hotels — only stays with a count at check-in. */
+	touristMonths: { month: string; tourists: number }[];
 	hotels: HotelVisitors[];
-	totals: { guests: number; stays: number; nights: number; guestNights: number; avgNights: number | null };
+	totals: {
+		guests: number;
+		stays: number;
+		nights: number;
+		guestNights: number;
+		tourists: number;
+		touristStays: number;
+		avgNights: number | null;
+	};
 	/** Hotels with at least one visitor in the range. */
 	reporting: number;
 	/** Highest single-month guest count across every hotel — a shared scale for per-hotel charts. */
@@ -54,10 +70,11 @@ export function buildVisitorReport(
 	const byHotel = new Map(
 		hotels.map((h) => [
 			h.id,
-			{ ...h, guests: 0, stays: 0, nights: 0, guestNights: 0, perMonth: blank() }
+			{ ...h, guests: 0, stays: 0, nights: 0, guestNights: 0, tourists: 0, touristStays: 0, perMonth: blank() }
 		])
 	);
 	const all = blank();
+	const allTourists = blank();
 
 	for (const r of rows) {
 		const h = byHotel.get(r.hotelId);
@@ -66,6 +83,9 @@ export function buildVisitorReport(
 		h.stays += r.stays;
 		h.nights += r.nights;
 		h.guestNights += r.guestNights;
+		h.tourists += r.tourists;
+		h.touristStays += r.touristStays;
+		allTourists.set(r.month, allTourists.get(r.month)! + r.tourists);
 		h.perMonth.set(r.month, h.perMonth.get(r.month)! + r.guests);
 		all.set(r.month, all.get(r.month)! + r.guests);
 	}
@@ -79,6 +99,8 @@ export function buildVisitorReport(
 			stays: h.stays,
 			guestNights: h.guestNights,
 			nights: h.nights,
+			tourists: h.tourists,
+			touristStays: h.touristStays,
 			avgNights: avg(h.nights, h.stays),
 			monthly: months.map((month) => ({ month, guests: h.perMonth.get(month) ?? 0 }))
 		}))
@@ -89,13 +111,16 @@ export function buildVisitorReport(
 			guests: t.guests + h.guests,
 			stays: t.stays + h.stays,
 			nights: t.nights + h.nights,
-			guestNights: t.guestNights + h.guestNights
+			guestNights: t.guestNights + h.guestNights,
+			tourists: t.tourists + h.tourists,
+			touristStays: t.touristStays + h.touristStays
 		}),
-		{ guests: 0, stays: 0, nights: 0, guestNights: 0 }
+		{ guests: 0, stays: 0, nights: 0, guestNights: 0, tourists: 0, touristStays: 0 }
 	);
 
 	return {
 		months: months.map((month) => ({ month, guests: all.get(month) ?? 0 })),
+		touristMonths: months.map((month) => ({ month, tourists: allTourists.get(month) ?? 0 })),
 		hotels: list,
 		// Length of stay is per stay (a booking): nights of the stays ÷ number of stays.
 		totals: { ...totals, avgNights: avg(totals.nights, totals.stays) },
@@ -106,10 +131,19 @@ export function buildVisitorReport(
 
 export function visitorsCsvRows(report: VisitorReport): { headers: string[]; rows: (string | number)[][] } {
 	return {
-		headers: ['Hotel', 'Slug', 'Guests', 'Stays', 'Guest-nights', 'Average nights per stay'],
+		headers: [
+			'Hotel',
+			'Slug',
+			'Guests',
+			'Stays',
+			'Guest-nights',
+			'Average nights per stay',
+			'Tourists recorded',
+			'Stays with a tourist count'
+		],
 		rows: [
-			...report.hotels.map((h) => [h.name, h.slug, h.guests, h.stays, h.guestNights, h.avgNights ?? '']),
-			['All hotels', '', report.totals.guests, report.totals.stays, report.totals.guestNights, report.totals.avgNights ?? '']
+			...report.hotels.map((h) => [h.name, h.slug, h.guests, h.stays, h.guestNights, h.avgNights ?? '', h.tourists, h.touristStays]),
+			['All hotels', '', report.totals.guests, report.totals.stays, report.totals.guestNights, report.totals.avgNights ?? '', report.totals.tourists, report.totals.touristStays]
 		]
 	};
 }

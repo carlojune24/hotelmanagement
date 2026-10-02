@@ -30,7 +30,10 @@ export async function visitorsForRequest(params: URLSearchParams) {
 			stays: sql<number>`count(*)::int`,
 			// date - date is an integer number of nights in Postgres; the stay's own length, not × party size
 			nights: sql<number>`coalesce(sum(${bookings.checkOut} - ${bookings.checkIn}), 0)::int`,
-			guestNights: sql<number>`coalesce(sum(${bookings.occupancy} * (${bookings.checkOut} - ${bookings.checkIn})), 0)::int`
+			guestNights: sql<number>`coalesce(sum(${bookings.occupancy} * (${bookings.checkOut} - ${bookings.checkIn})), 0)::int`,
+			// Recorded at check-in and optional: sum()/count(col) both skip NULLs, so stays without a count drop out.
+			tourists: sql<number>`coalesce(sum(${bookings.touristCount}), 0)::int`,
+			touristStays: sql<number>`count(${bookings.touristCount})::int`
 		})
 		.from(bookings)
 		.where(
@@ -48,7 +51,9 @@ export async function visitorsForRequest(params: URLSearchParams) {
 		guests: Number(r.guests),
 		stays: Number(r.stays),
 		nights: Number(r.nights),
-		guestNights: Number(r.guestNights)
+		guestNights: Number(r.guestNights),
+		tourists: Number(r.tourists),
+		touristStays: Number(r.touristStays)
 	}));
 
 	return { range, report: buildVisitorReport(hotelRows, rows, monthsBetween(range.from, range.to)) };

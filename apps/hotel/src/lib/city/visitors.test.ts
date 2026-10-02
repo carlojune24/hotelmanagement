@@ -8,11 +8,11 @@ const hotels = [
 ];
 const months = ['2026-08', '2026-09'];
 const rows: VisitorRow[] = [
-	{ hotelId: 'a', month: '2026-08', guests: 10, stays: 4, nights: 8, guestNights: 20 },
-	{ hotelId: 'a', month: '2026-09', guests: 6, stays: 2, nights: 5, guestNights: 9 },
-	{ hotelId: 'b', month: '2026-09', guests: 30, stays: 10, nights: 24, guestNights: 45 },
-	{ hotelId: 'zzz', month: '2026-09', guests: 99, stays: 9, nights: 99, guestNights: 99 },
-	{ hotelId: 'a', month: '2025-01', guests: 50, stays: 5, nights: 50, guestNights: 50 }
+	{ hotelId: 'a', month: '2026-08', guests: 10, stays: 4, nights: 8, guestNights: 20, tourists: 7, touristStays: 3 },
+	{ hotelId: 'a', month: '2026-09', guests: 6, stays: 2, nights: 5, guestNights: 9, tourists: 0, touristStays: 0 },
+	{ hotelId: 'b', month: '2026-09', guests: 30, stays: 10, nights: 24, guestNights: 45, tourists: 28, touristStays: 9 },
+	{ hotelId: 'zzz', month: '2026-09', guests: 99, stays: 9, nights: 99, guestNights: 99, tourists: 99, touristStays: 9 },
+	{ hotelId: 'a', month: '2025-01', guests: 50, stays: 5, nights: 50, guestNights: 50, tourists: 50, touristStays: 5 }
 ];
 const report = buildVisitorReport(hotels, rows, months);
 
@@ -40,12 +40,20 @@ describe('buildVisitorReport', () => {
 			{ month: '2026-09', guests: 36 }
 		]);
 	});
+	it('counts only recorded tourists, with coverage, per hotel, month and in total', () => {
+		expect(report.hotels.find((h) => h.id === 'a')).toMatchObject({ tourists: 7, touristStays: 3 });
+		expect(report.totals).toMatchObject({ tourists: 35, touristStays: 12 });
+		expect(report.touristMonths).toEqual([
+			{ month: '2026-08', tourists: 7 },
+			{ month: '2026-09', tourists: 28 }
+		]);
+	});
 	it('exposes the highest single hotel-month as a shared chart scale', () => {
 		expect(report.maxHotelMonth).toBe(30);
 	});
 	it('exports a CSV with a consolidated row', () => {
 		const csv = visitorsCsvRows(report);
-		expect(csv.rows[0]).toEqual(['Bravo', 'bravo', 30, 10, 45, 2.4]);
-		expect(csv.rows.at(-1)).toEqual(['All hotels', '', 46, 16, 74, 2.3]);
+		expect(csv.rows[0]).toEqual(['Bravo', 'bravo', 30, 10, 45, 2.4, 28, 9]);
+		expect(csv.rows.at(-1)).toEqual(['All hotels', '', 46, 16, 74, 2.3, 35, 12]);
 	});
 });

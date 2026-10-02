@@ -59,6 +59,19 @@
 		</div>
 	</dl>
 
+	<dl class="grid divide-y divide-border border-b border-border sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+		<div class="py-3 sm:pr-5">
+			<dt class="text-sm text-ink-muted">Tourists recorded at check-in</dt>
+			<dd class="mt-0.5 font-mono text-lg font-medium tabular-nums text-ink">{fmt(report.totals.tourists)}</dd>
+		</div>
+		<div class="py-3 sm:pl-5">
+			<dt class="text-sm text-ink-muted">Stays with a tourist count</dt>
+			<dd class="mt-0.5 font-mono text-lg font-medium tabular-nums text-ink">
+				{fmt(report.totals.touristStays)}<span class="text-sm font-normal text-ink-muted"> of {fmt(report.totals.stays)}</span>
+			</dd>
+		</div>
+	</dl>
+
 	<section class="mt-8">
 		{#if report.totals.guests === 0}
 			<p class="rounded-md border border-dashed border-border px-4 py-10 text-center text-sm text-ink-muted">
@@ -73,6 +86,21 @@
 				formatAxis={compact}
 				valueHeader="Guests"
 			/>
+			<div class="mt-8">
+				{#if report.totals.touristStays === 0}
+					<p class="rounded-md border border-dashed border-border px-4 py-8 text-center text-sm text-ink-muted">
+						No tourist counts recorded yet. Front desk can enter the number of tourists when checking a guest in.
+					</p>
+				{:else}
+					<MonthlyChart
+						title="Tourists by month, all hotels (stays with a recorded count)"
+						months={report.touristMonths.map((m) => ({ month: m.month, value: m.tourists }))}
+						formatValue={(v) => `${fmt(v)} ${v === 1 ? 'tourist' : 'tourists'}`}
+						formatAxis={compact}
+						valueHeader="Tourists"
+					/>
+				{/if}
+			</div>
 		{/if}
 	</section>
 
@@ -113,6 +141,7 @@
 						<Table.Head class="text-right">Guests</Table.Head>
 						<Table.Head class="text-right">Stays</Table.Head>
 						<Table.Head class="text-right">Guest-nights</Table.Head>
+						<Table.Head class="text-right">Tourists</Table.Head>
 						<Table.Head class="text-right">Avg nights per stay</Table.Head>
 					</Table.Row>
 				</Table.Header>
@@ -125,6 +154,7 @@
 							<Table.Cell class="text-right font-mono text-xs font-medium tabular-nums text-ink">{h.guests ? fmt(h.guests) : '—'}</Table.Cell>
 							<Table.Cell class="text-right font-mono text-xs tabular-nums">{h.stays ? fmt(h.stays) : '—'}</Table.Cell>
 							<Table.Cell class="text-right font-mono text-xs tabular-nums">{h.guestNights ? fmt(h.guestNights) : '—'}</Table.Cell>
+							<Table.Cell class="text-right font-mono text-xs tabular-nums">{h.touristStays ? fmt(h.tourists) : '—'}</Table.Cell>
 							<Table.Cell class="text-right font-mono text-xs tabular-nums">{h.avgNights ?? '—'}</Table.Cell>
 						</Table.Row>
 					{/each}
@@ -135,6 +165,7 @@
 						<Table.Cell class="text-right font-mono text-xs font-semibold tabular-nums">{fmt(report.totals.guests)}</Table.Cell>
 						<Table.Cell class="text-right font-mono text-xs tabular-nums">{fmt(report.totals.stays)}</Table.Cell>
 						<Table.Cell class="text-right font-mono text-xs tabular-nums">{fmt(report.totals.guestNights)}</Table.Cell>
+						<Table.Cell class="text-right font-mono text-xs tabular-nums">{report.totals.touristStays ? fmt(report.totals.tourists) : '—'}</Table.Cell>
 						<Table.Cell class="text-right font-mono text-xs tabular-nums">{report.totals.avgNights ?? '—'}</Table.Cell>
 					</Table.Row>
 				</Table.Footer>
@@ -146,6 +177,7 @@
 		A guest is a person on a stay that has checked in or out, counted by the stay's check-in date. A
 		stay's party size is the head-count recorded on the booking, so a guest who stays twice counts
 		twice. Cancelled, no-show, unpaid and not-yet-arrived bookings are not counted. Guest-nights are
-		party size × nights.
+		party size × nights. Tourists are the number front desk recorded at check-in; it is optional, so
+		stays without one are not counted in that figure.
 	</p>
 </div>

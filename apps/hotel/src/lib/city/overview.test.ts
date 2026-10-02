@@ -23,8 +23,8 @@ const income = buildIncomeReport(
 const visitors = buildVisitorReport(
 	hotels,
 	[
-		{ hotelId: 'a', month: '2026-09', guests: 40, stays: 15, nights: 30, guestNights: 60 },
-		{ hotelId: 'b', month: '2026-09', guests: 10, stays: 4, nights: 8, guestNights: 12 }
+		{ hotelId: 'a', month: '2026-09', guests: 40, stays: 15, nights: 30, guestNights: 60, tourists: 0, touristStays: 0 },
+		{ hotelId: 'b', month: '2026-09', guests: 10, stays: 4, nights: 8, guestNights: 12, tourists: 0, touristStays: 0 }
 	],
 	months
 );
