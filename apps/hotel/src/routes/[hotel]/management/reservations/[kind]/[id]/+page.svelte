@@ -347,6 +347,22 @@
 			<!-- Stay / Event details -->
 			<div class="rounded-xl border border-border p-4">
 		{#if data.kind === 'room'}
+			{#snippet touristCountField()}
+				<div class="mt-3 flex items-center gap-3">
+					<Label for="touristCount" class="text-sm">Number of tourists</Label>
+					<Input
+						id="touristCount"
+						name="touristCount"
+						type="number"
+						inputmode="numeric"
+						min="1"
+						max="99"
+						value={data.detail.booking.occupancy}
+						class="w-20"
+					/>
+					<span class="text-xs text-ink-muted">Booked for {data.detail.booking.occupancy}</span>
+				</div>
+			{/snippet}
 			{#snippet securityDepositFields()}
 				{#if data.kind === 'room' && data.securityDeposit?.status === 'held'}
 					<p class="mt-3 text-sm text-ink-muted">
@@ -462,6 +478,12 @@
 					<div class="text-xs text-ink-muted">Occupancy</div>
 					<div class="text-ink">{data.detail.booking.occupancy} guests</div>
 				</div>
+				{#if data.detail.booking.touristCount}
+					<div>
+						<div class="text-xs text-ink-muted">Tourists at check-in</div>
+						<div class="text-ink">{data.detail.booking.touristCount}</div>
+					</div>
+				{/if}
 				<div>
 					<div class="text-xs text-ink-muted">Rooms</div>
 					<div class="text-ink">{data.detail.bookingRoom.quantity}</div>
@@ -517,6 +539,7 @@
 								</span>
 							{/each}
 						</div>
+						{@render touristCountField()}
 						<div class="mt-3">
 							<IdCameraCapture />
 						</div>
@@ -548,6 +571,7 @@
 									</select>
 								{/each}
 							</div>
+							{@render touristCountField()}
 							<div class="mt-3">
 								<IdCameraCapture />
 							</div>

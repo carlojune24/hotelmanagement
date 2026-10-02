@@ -111,7 +111,9 @@ export async function checkInBooking(
 	/** A live camera capture of the guest's ID, already saved via `saveUpload` by the
 	 *  caller (never a raw file upload — the check-in form only offers a camera capture
 	 *  widget). Optional: check-in never blocks on it. */
-	guestIdPhotoUrl?: string | null
+	guestIdPhotoUrl?: string | null,
+	/** Optional headcount recorded at check-in; null/undefined = not recorded. */
+	touristCount?: number | null
 ): Promise<{ roomIds: string[] }> {
 	const uniqueRoomIds = [...new Set(roomIds)];
 	if (uniqueRoomIds.length !== roomIds.length) {
@@ -215,15 +217,20 @@ export async function checkInBooking(
 			.set({
 				status: 'checked_in',
 				updatedAt: new Date(),
-				...(guestIdPhotoUrl ? { guestIdPhotoUrl } : {})
+				...(guestIdPhotoUrl ? { guestIdPhotoUrl } : {}),
+				...(touristCount ? { touristCount } : {})
 			})
 			.where(eq(bookings.id, bookingId));
 
+		const notes = [
+			guestIdPhotoUrl ? 'ID photo captured at check-in' : null,
+			touristCount ? `${touristCount} tourist${touristCount === 1 ? '' : 's'}` : null
+		].filter(Boolean);
 		await tx.insert(bookingStatusHistory).values({
 			bookingId,
 			fromStatus: 'confirmed',
 			toStatus: 'checked_in',
-			note: guestIdPhotoUrl ? 'ID photo captured at check-in' : null
+			note: notes.length ? notes.join(' · ') : null
 		});
 
 		return finalRoomIds;
@@ -235,7 +242,11 @@ export async function checkInBooking(
 		action: 'booking.check_in',
 		entityType: 'booking',
 		entityId: bookingId,
-		after: { roomIds: finalRoomIds, idPhotoCaptured: !!guestIdPhotoUrl }
+		after: {
+			roomIds: finalRoomIds,
+			idPhotoCaptured: !!guestIdPhotoUrl,
+			touristCount: touristCount || null
+		}
 	});
 
 	return { roomIds: finalRoomIds };
