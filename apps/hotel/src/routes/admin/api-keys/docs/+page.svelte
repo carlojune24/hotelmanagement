@@ -245,6 +245,40 @@ Retry-After: 42
 	</section>
 
 	<section class="mb-8 space-y-3 rounded-xl border border-border bg-surface-2 p-5">
+		<h2 class="text-sm font-semibold uppercase tracking-wide text-ink-muted">
+			Operating stats — for a city or tourism office
+		</h2>
+		<p class="text-sm text-ink">
+			Daily counts per hotel: rooms, room-nights sold, guests, tourists recorded at check-in and
+			cash by category. Aggregates only &mdash; no guest names or contact details leave the hotel.
+			Not paginated: one bounded range per request, one row per hotel per business date (a quiet
+			day is a row of zeros). Re-pull a recent window to pick up late changes.
+		</p>
+		<div class="rounded-lg border border-border p-3">
+			<p class="font-mono text-sm text-ink">
+				<span class="rounded bg-brand/15 px-1.5 py-0.5 text-xs font-semibold text-brand">GET</span>
+				/api/v1/stats/daily
+			</p>
+			<ul class="mt-2 space-y-0.5 text-xs text-ink-muted">
+				<li><code class="text-xs text-ink">from</code>, <code class="text-xs text-ink">to</code> — YYYY-MM-DD, default the last 31 days; at most 400 days</li>
+			</ul>
+			<pre class="mt-2 overflow-x-auto rounded-lg bg-ink px-3 py-2 text-xs text-white">{`{
+  "hotel_id": "uuid",
+  "date": "2026-09-14",
+  "rooms_available": 20,
+  "room_nights_sold": 14,
+  "room_revenue_minor": 3500000,
+  "guest_nights": 31,
+  "stays_arrived": 5,
+  "guests_arrived": 12,
+  "tourists_recorded": 9,
+  "stays_with_tourist_count": 4,
+  "cash": [{ "category": "room_revenue", "direction": "in", "amount_minor": 3500000 }]
+}`}</pre>
+		</div>
+	</section>
+
+	<section class="mb-8 space-y-3 rounded-xl border border-border bg-surface-2 p-5">
 		<h2 class="text-sm font-semibold uppercase tracking-wide text-ink-muted">Errors</h2>
 		<pre class="overflow-x-auto rounded-lg bg-ink px-3 py-2 text-xs text-white">{`{ "error": { "message": "..." } }`}</pre>
 		<p class="text-sm text-ink-muted">
