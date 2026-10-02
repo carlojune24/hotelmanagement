@@ -198,13 +198,20 @@ export const actions: Actions = {
 			}
 		}
 
+		// Optional headcount — anything that isn't a whole number 1–99 is dropped, never
+		// rejected, so a stray value can't block check-in.
+		const touristRaw = Number(raw.get('touristCount'));
+		const touristCount =
+			Number.isInteger(touristRaw) && touristRaw >= 1 && touristRaw <= 99 ? touristRaw : null;
+
 		try {
 			const result = await checkInBooking(
 				hotelId,
 				event.params.id,
 				parsed.data,
 				event.locals.user,
-				guestIdPhotoUrl
+				guestIdPhotoUrl,
+				touristCount
 			);
 
 			// Optional — a refundable security deposit hold, amount pre-filled from the

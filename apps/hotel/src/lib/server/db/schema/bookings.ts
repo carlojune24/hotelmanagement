@@ -87,6 +87,10 @@ export const bookings = pgTable(
 		 *  check-in never blocks on it. Stored via `lib/server/uploads.ts`, same convention
 		 *  as every other uploaded image (`/uploads/<hotelId>/<file>`). */
 		guestIdPhotoUrl: text('guest_id_photo_url'),
+		/** Actual headcount of tourists recorded by front desk at check-in. Optional — null
+		 *  means it wasn't recorded. Distinct from `occupancy` (the booked guest count that
+		 *  drives pricing/availability), which this never changes. */
+		touristCount: integer('tourist_count'),
 		createdAt: createdAt(),
 		updatedAt: updatedAt()
 	},
