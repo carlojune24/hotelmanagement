@@ -21,19 +21,58 @@
 	let confirmingRemoveEmail = $state(false);
 
 	/** Shared enhance: marks which action is running, resets confirmations afterwards. */
-	const run = (name: string) => () => {
-		busy = name;
-		return async ({ update }: { update: () => Promise<void> }) => {
-			await update();
-			busy = null;
-			confirmingDisconnect = false;
-			confirmingRemoveEmail = false;
+	const run =
+		(name: string) =>
+		({ action }: { action: URL }) => {
+			busy = action.search.includes('testWebhook') ? 'test-webhook' : name;
+			return async ({ update }: { update: () => Promise<void> }) => {
+				await update();
+				busy = null;
+				confirmingDisconnect = false;
+				confirmingRemoveEmail = false;
+			};
 		};
-	};
+
+	let publicUrl = $state(data.publicUrl);
 
 	const when = (iso: string) =>
 		new Date(iso).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' });
 </script>
+
+{#snippet urlField()}
+	<Label for="publicUrl">Public address</Label>
+	<div class="mt-1 flex flex-col gap-2 sm:flex-row">
+		<div class="flex min-w-0 flex-1 items-stretch rounded-md border border-input">
+			<Input
+				id="publicUrl"
+				name="publicUrl"
+				type="url"
+				autocomplete="off"
+				spellcheck="false"
+				placeholder="https://your-tunnel.ngrok-free.app"
+				bind:value={publicUrl}
+				class="min-w-0 flex-1 rounded-r-none border-0 font-mono text-xs shadow-none"
+			/>
+			<span
+				class="flex items-center rounded-r-md border-l border-input bg-muted px-2 font-mono text-xs break-all text-ink-muted"
+				>{data.webhookPath}</span
+			>
+		</div>
+		<Button
+			type="submit"
+			formaction="?/testWebhook"
+			variant="outline"
+			disabled={busy !== null || !publicUrl.trim()}
+			class="shrink-0"
+		>
+			{busy === 'test-webhook' ? 'Testing…' : 'Test'}
+		</Button>
+	</div>
+	<p class="mt-1 text-xs text-ink-muted">
+		Paste your site's public https address (e.g. from ngrok). The rest is fixed. Leave it blank to
+		use the server's own address.
+	</p>
+{/snippet}
 
 <div class="mx-auto w-full max-w-2xl px-4 py-8 sm:px-6">
 	<div class="mb-6 flex items-center justify-between gap-4">
@@ -90,12 +129,18 @@
 				<p class="mt-3 text-sm text-danger">{data.paymongo.lastError}</p>
 			{/if}
 
+			<form
+				method="POST"
+				action="?/reconnectPaymongo"
+				use:enhance={run('reconnect')}
+				class="mt-4 border-t border-border pt-4"
+			>
+				{@render urlField()}
+				<Button type="submit" size="sm" class="mt-2" disabled={busy !== null}>
+					{busy === 'reconnect' ? 'Updating…' : 'Update webhook'}
+				</Button>
+			</form>
 			<div class="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
-				<form method="POST" action="?/reconnectPaymongo" use:enhance={run('reconnect')}>
-					<Button type="submit" variant="outline" size="sm" disabled={busy !== null}>
-						{busy === 'reconnect' ? 'Reconnecting…' : 'Reconnect'}
-					</Button>
-				</form>
 				{#if !confirmingDisconnect}
 					<Button
 						type="button"
@@ -126,8 +171,8 @@
 				{/if}
 			</div>
 			<p class="mt-2 text-xs text-ink-muted">
-				Reconnect re-points PayMongo at this server — use it after the site's address changes. To
-				switch between test and live, paste the other key below.
+				Update webhook re-points PayMongo at the address above — use it whenever the tunnel's
+				address changes. To switch between test and live, paste the other key below.
 			</p>
 		{:else}
 			<p class="mb-3 text-sm text-ink-muted">
@@ -142,6 +187,9 @@
 			use:enhance={run('connect')}
 			class="mt-4 {data.paymongo ? 'border-t border-border pt-4' : ''}"
 		>
+			{#if !data.paymongo}
+				<div class="mb-4">{@render urlField()}</div>
+			{/if}
 			<Label for="secretKey">{data.paymongo ? 'Replace secret key' : 'Secret key'}</Label>
 			<div class="mt-1 flex flex-col gap-2 sm:flex-row">
 				<Input

@@ -11,6 +11,17 @@ import { handlePaymongoEvent } from '$lib/server/paymongo/webhook-handler';
  * Settings → Payments & email (`lib/server/paymongo/connection.ts`), signed with the webhook
  * secret stored for it. Events are then scoped to the hotel by `handlePaymongoEvent`.
  */
+/** Reachability probe for Settings → Payments & email's "Test" button — reveals nothing secret. */
+export async function GET({ params }) {
+	const [h] = await db
+		.select({ id: hotels.id })
+		.from(hotels)
+		.where(and(eq(hotels.slug, params.hotel), isNull(hotels.deletedAt)))
+		.limit(1);
+	if (!h) throw error(404, 'Unknown hotel');
+	return json({ service: 'mmhotel-paymongo-webhook' });
+}
+
 export async function POST({ request, params }) {
 	const [row] = await db
 		.select({ hotelId: hotels.id, webhookSecretEnc: paymongoSettings.webhookSecretEnc })

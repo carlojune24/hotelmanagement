@@ -7,6 +7,7 @@ import { decryptSecret, encryptSecret, maskSecret } from '../secrets';
 import { writeAudit } from '../audit';
 import { forgetPaymongoClient } from './client';
 import { pickReusableWebhook } from './webhook-reuse';
+import { normalizePublicUrl, originOfWebhookUrl, webhookPathFor } from './webhook-url';
 import type { SessionUser } from '../auth/session';
 
 /**
@@ -34,15 +35,42 @@ function modeOf(secretKey: string): 'test' | 'live' {
 	);
 }
 
-/** PayMongo must be able to reach the webhook, so the app's public origin has to be https. */
-function webhookUrlFor(slug: string): string {
-	const origin = (env.ORIGIN ?? '').replace(/\/$/, '');
-	if (!/^https:\/\//.test(origin) || /\/\/(localhost|127\.|0\.0\.0\.0)/.test(origin)) {
+/**
+ * PayMongo must be able to reach the webhook, so the public address has to be https. The admin
+ * pastes it in settings (a dev tunnel changes it constantly); when left blank the site's own
+ * `ORIGIN` is used, which is what production wants.
+ */
+function webhookUrlFor(slug: string, publicUrl?: string | null): string {
+	const parsed = normalizePublicUrl(publicUrl?.trim() ? publicUrl : (env.ORIGIN ?? ''));
+	if ('error' in parsed) throw new PaymongoConnectionError(parsed.error);
+	return `${parsed.origin}${webhookPathFor(slug)}`;
+}
+
+/**
+ * Ask the address the admin pasted whether it really reaches this app's webhook for the hotel.
+ * Works before connecting, so a bad tunnel is caught before the key is saved.
+ */
+export async function testWebhookReachable(hotelId: string, publicUrl: string): Promise<string> {
+	const url = webhookUrlFor(await hotelSlug(hotelId), publicUrl);
+	let res: Response;
+	try {
+		res = await fetch(url, {
+			// ngrok's free tier answers browsers with an interstitial page unless told not to.
+			headers: { 'ngrok-skip-browser-warning': '1' },
+			signal: AbortSignal.timeout(8000)
+		});
+	} catch {
 		throw new PaymongoConnectionError(
-			`PayMongo can't reach this server at "${origin || '(ORIGIN not set)'}". Set ORIGIN to the site's public https address (or a dev tunnel) and try again.`
+			`Couldn't reach ${url} — is the tunnel running and pointing at this app?`
 		);
 	}
-	return `${origin}/api/webhooks/paymongo/${slug}`;
+	const body = (await res.json().catch(() => null)) as { service?: string } | null;
+	if (!res.ok || body?.service !== 'mmhotel-paymongo-webhook') {
+		throw new PaymongoConnectionError(
+			`${new URL(url).origin} answered (${res.status}) but it isn't this app's webhook — check the tunnel's target port.`
+		);
+	}
+	return url;
 }
 
 function friendly(e: unknown): Error {
@@ -122,18 +150,23 @@ async function saveConnection(
 export async function connectPaymongo(
 	hotelId: string,
 	rawSecretKey: string,
-	actor: SessionUser | null
+	actor: SessionUser | null,
+	publicUrl?: string | null
 ): Promise<{ mode: 'test' | 'live' }> {
 	const secretKey = rawSecretKey.trim();
 	const mode = modeOf(secretKey);
 	const slug = await hotelSlug(hotelId);
-	const url = webhookUrlFor(slug);
 
 	const [previous] = await db
 		.select()
 		.from(paymongoSettings)
 		.where(eq(paymongoSettings.hotelId, hotelId))
 		.limit(1);
+	// Replacing the key keeps the address already in use unless a new one is given.
+	const url = webhookUrlFor(
+		slug,
+		publicUrl?.trim() || originOfWebhookUrl(previous?.webhookUrl ?? null)
+	);
 
 	let hook: Webhook;
 	try {
@@ -169,15 +202,30 @@ export async function connectPaymongo(
 	return { mode };
 }
 
-/** Re-point the webhook at the current ORIGIN (a dev tunnel's URL changes every restart). */
-export async function reconnectPaymongo(hotelId: string, actor: SessionUser | null) {
+/**
+ * Re-point the webhook at `publicUrl` (a dev tunnel's URL changes every restart); without one,
+ * keep the address it already uses.
+ */
+export async function reconnectPaymongo(
+	hotelId: string,
+	actor: SessionUser | null,
+	publicUrl?: string | null
+) {
 	const [row] = await db
-		.select({ secretKeyEnc: paymongoSettings.secretKeyEnc })
+		.select({
+			secretKeyEnc: paymongoSettings.secretKeyEnc,
+			webhookUrl: paymongoSettings.webhookUrl
+		})
 		.from(paymongoSettings)
 		.where(eq(paymongoSettings.hotelId, hotelId))
 		.limit(1);
 	if (!row) throw new PaymongoConnectionError('PayMongo is not connected yet.');
-	return connectPaymongo(hotelId, decryptSecret(row.secretKeyEnc), actor);
+	return connectPaymongo(
+		hotelId,
+		decryptSecret(row.secretKeyEnc),
+		actor,
+		publicUrl?.trim() || originOfWebhookUrl(row.webhookUrl)
+	);
 }
 
 /** Turn online payment off for the hotel: disable its webhook and forget the keys. */
