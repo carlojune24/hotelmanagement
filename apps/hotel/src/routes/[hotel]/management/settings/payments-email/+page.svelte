@@ -74,7 +74,18 @@
 				<dd class="min-w-0 font-mono text-xs break-all text-ink">
 					{data.paymongo.webhookUrl ?? '—'}
 				</dd>
+				<dt class="text-ink-muted">Events</dt>
+				<dd class="min-w-0">
+					<ul class="space-y-0.5 font-mono text-xs text-ink">
+						{#each data.webhookEvents as event (event)}
+							<li>{event}</li>
+						{/each}
+					</ul>
+				</dd>
 			</dl>
+			<p class="mt-2 text-xs text-ink-muted">
+				Created automatically when you saved the key — nothing to set up in the PayMongo dashboard.
+			</p>
 			{#if data.paymongo.lastError}
 				<p class="mt-3 text-sm text-danger">{data.paymongo.lastError}</p>
 			{/if}
@@ -149,8 +160,8 @@
 			</div>
 			<p class="mt-2 text-xs text-ink-muted">
 				From the PayMongo dashboard → Developers → API keys. Use the secret key (sk_…), not the
-				public key. The webhook is set up for you, and the key is stored encrypted and never shown
-				again.
+				public key. Saving it automatically creates the webhook in your PayMongo account (URL and
+				events are listed above once connected). The key is stored encrypted and never shown again.
 			</p>
 		</form>
 	</section>

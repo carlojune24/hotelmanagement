@@ -2,6 +2,7 @@ import { fail } from '@sveltejs/kit';
 import { z } from 'zod';
 import { requireCap } from '$lib/server/auth/rbac';
 import {
+	PAYMONGO_WEBHOOK_EVENTS,
 	PaymongoConnectionError,
 	connectPaymongo,
 	disconnectPaymongo,
@@ -31,6 +32,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 	]);
 	return {
 		paymongo: paymongo ? { ...paymongo, connectedAt: paymongo.connectedAt.toISOString() } : null,
+		webhookEvents: PAYMONGO_WEBHOOK_EVENTS,
 		email: email.settings,
 		platformEmailConfigured: email.platformConfigured,
 		userEmail: locals.user?.email ?? ''
