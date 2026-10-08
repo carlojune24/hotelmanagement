@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import { Checkbox } from '$lib/components/ui/checkbox/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
@@ -261,10 +262,10 @@
 						class="mt-1 tabular-nums"
 					/>
 				</div>
-				<label class="flex items-center gap-2 text-sm text-ink">
-					<input type="checkbox" name="isAvailable" checked={addon.isAvailable} class="size-4" />
+				<Label class="flex items-center gap-2 text-sm font-normal text-ink">
+					<Checkbox name="isAvailable" checked={addon.isAvailable} value="on" />
 					Available today
-				</label>
+				</Label>
 			</form>
 			<Dialog.Footer class="sm:justify-between">
 				<form method="POST" action="?/deleteAddon" use:enhance>

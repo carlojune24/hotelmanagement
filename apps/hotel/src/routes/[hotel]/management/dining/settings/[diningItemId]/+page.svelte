@@ -3,6 +3,8 @@
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import { Textarea } from '$lib/components/ui/textarea/index.js';
+	import { Checkbox } from '$lib/components/ui/checkbox/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import * as Select from '$lib/components/ui/select/index.js';
@@ -76,33 +78,20 @@
 		</div>
 		<div>
 			<Label for="description">Description</Label>
-			<textarea
-				id="description"
-				name="description"
-				rows="3"
-				class="mt-1 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm"
-				>{item.description ?? ''}</textarea
-			>
+			<Textarea id="description" name="description" rows={3} class="mt-1" value={item.description ?? ''} />
 		</div>
 		<div>
 			<Label for="highlights">Highlights (optional)</Label>
-			<textarea
-				id="highlights"
-				name="highlights"
-				rows="4"
-				placeholder={'Live coffee brewing bar\nAll-day breakfast\nOutdoor seating'}
-				class="mt-1 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm"
-				>{(item.highlights as string[] | null)?.join('\n') ?? ''}</textarea
-			>
+			<Textarea id="highlights" name="highlights" rows={4} placeholder={'Live coffee brewing bar\nAll-day breakfast\nOutdoor seating'} class="mt-1" value={(item.highlights as string[] | null)?.join('\n') ?? ''} />
 			<p class="mt-1 text-xs text-ink-muted">
 				One per line, up to 6 — shown as a short checklist on the page.
 			</p>
 		</div>
 
 		<div class="grid grid-cols-2 gap-3">
-			<label class="flex items-center gap-2 text-sm text-ink">
-				<input type="checkbox" name="isActive" checked={item.isActive} /> Shown on public page
-			</label>
+			<Label class="flex items-center gap-2 text-sm font-normal text-ink">
+				<Checkbox name="isActive" checked={item.isActive} value="on" /> Shown on public page
+			</Label>
 			<div>
 				<Label for="sortOrder">Sort order</Label>
 				<Input id="sortOrder" name="sortOrder" type="number" min="0" value={item.sortOrder} class="mt-1" />

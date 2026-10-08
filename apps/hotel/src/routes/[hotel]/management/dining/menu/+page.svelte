@@ -3,9 +3,12 @@
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import { Textarea } from '$lib/components/ui/textarea/index.js';
+	import { Checkbox } from '$lib/components/ui/checkbox/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
+	import * as Select from '$lib/components/ui/select/index.js';
 	import UtensilsIcon from '@lucide/svelte/icons/utensils';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import PencilIcon from '@lucide/svelte/icons/pencil';
@@ -32,6 +35,19 @@
 		name: ''
 	});
 	let newCategory = $state('');
+	// Select values for the item dialog ('none' = unassigned; the server maps it to null).
+	let itemCategory = $state('none');
+	let itemStation = $state('none');
+	const categoryLabel = $derived(
+		menu?.categories.find((c) => c.id === itemCategory)?.name ?? 'Uncategorised'
+	);
+	const stationLabel = $derived(data.stations.find((st) => st.id === itemStation)?.name ?? 'None');
+
+	function openItem(item: MenuItemWithAddons | null) {
+		itemCategory = item?.categoryId ?? 'none';
+		itemStation = item?.stationId ?? 'none';
+		itemDialog = { open: true, item };
+	}
 
 	const visibleItems = $derived(
 		(menu?.items ?? []).filter((i) =>
@@ -172,7 +188,7 @@
 						{filter ? `in ${filter === 'none' ? 'Uncategorised' : categoryName(filter)}` : `on ${venue.title}'s menu`}
 					</p>
 					{#if data.canManageMenu}
-						<Button onclick={() => (itemDialog = { open: true, item: null })}>
+						<Button onclick={() => openItem(null)}>
 							<PlusIcon class="size-4" /> New item
 						</Button>
 					{/if}
@@ -235,7 +251,7 @@
 										variant="ghost"
 										size="icon"
 										aria-label="Edit {item.name}"
-										onclick={() => (itemDialog = { open: true, item })}
+										onclick={() => openItem(item)}
 									>
 										<PencilIcon class="size-4" />
 									</Button>
@@ -269,15 +285,7 @@
 				</div>
 				<div>
 					<Label for="itemDescription">Description (optional)</Label>
-					<textarea
-						id="itemDescription"
-						name="description"
-						rows="2"
-						maxlength="500"
-						placeholder="Slow-braised in coconut vinegar, garlic rice."
-						class="mt-1 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm"
-						>{item?.description ?? ''}</textarea
-					>
+					<Textarea id="itemDescription" name="description" rows={2} maxlength={500} placeholder="Slow-braised in coconut vinegar, garlic rice." class="mt-1" value={item?.description ?? ''} />
 				</div>
 				<div class="grid grid-cols-2 gap-3">
 					<div>
@@ -295,31 +303,29 @@
 					</div>
 					<div>
 						<Label for="itemCategory">Category</Label>
-						<select
-							id="itemCategory"
-							name="categoryId"
-							class="mt-1 h-9 w-full rounded-md border border-border bg-transparent px-2 text-sm"
-						>
-							<option value="" selected={!item?.categoryId}>Uncategorised</option>
-							{#each menu.categories as c (c.id)}
-								<option value={c.id} selected={item?.categoryId === c.id}>{c.name}</option>
-							{/each}
-						</select>
+						<Select.Root type="single" name="categoryId" bind:value={itemCategory}>
+							<Select.Trigger id="itemCategory" class="mt-1 w-full">{categoryLabel}</Select.Trigger>
+							<Select.Content>
+								<Select.Item value="none" label="Uncategorised" />
+								{#each menu.categories as c (c.id)}
+									<Select.Item value={c.id} label={c.name} />
+								{/each}
+							</Select.Content>
+						</Select.Root>
 					</div>
 				</div>
 				<div class="grid grid-cols-2 gap-3">
 					<div>
 						<Label for="itemStation">Station (optional)</Label>
-						<select
-							id="itemStation"
-							name="stationId"
-							class="mt-1 h-9 w-full rounded-md border border-border bg-transparent px-2 text-sm"
-						>
-							<option value="" selected={!item?.stationId}>None</option>
-							{#each data.stations as s (s.id)}
-								<option value={s.id} selected={item?.stationId === s.id}>{s.name}</option>
-							{/each}
-						</select>
+						<Select.Root type="single" name="stationId" bind:value={itemStation}>
+							<Select.Trigger id="itemStation" class="mt-1 w-full">{stationLabel}</Select.Trigger>
+							<Select.Content>
+								<Select.Item value="none" label="None" />
+								{#each data.stations as st (st.id)}
+									<Select.Item value={st.id} label={st.name} />
+								{/each}
+							</Select.Content>
+						</Select.Root>
 						{#if data.stations.length === 0}
 							<p class="mt-1 text-xs text-ink-muted">
 								<a class="underline" href="{base}/stations">Set up stations</a> (Kitchen, Bar…) to track sales by them.
@@ -340,32 +346,26 @@
 						</p>
 					{:else}
 						{#each menu.groups as g (g.id)}
-							<label class="flex items-center gap-2 text-sm text-ink">
-								<input
-									type="checkbox"
-									name="addonGroupIds"
-									value={g.id}
-									checked={item?.addonGroupIds.includes(g.id) ?? false}
-									class="size-4"
-								/>
+							<Label class="flex items-center gap-2 text-sm font-normal text-ink">
+								<Checkbox name="addonGroupIds" value={g.id} checked={item?.addonGroupIds.includes(g.id) ?? false} />
 								{g.name}
 								<span class="text-xs text-ink-muted">
 									{g.minChoices > 0 ? 'required' : 'optional'}
 								</span>
-							</label>
+							</Label>
 						{/each}
 					{/if}
 				</fieldset>
 
 				<div class="flex flex-col gap-1.5">
-					<label class="flex items-center gap-2 text-sm text-ink">
-						<input type="checkbox" name="taxable" checked={item?.taxable ?? true} class="size-4" />
+					<Label class="flex items-center gap-2 text-sm font-normal text-ink">
+						<Checkbox name="taxable" checked={item?.taxable ?? true} value="on" />
 						Subject to VAT
-					</label>
-					<label class="flex items-center gap-2 text-sm text-ink">
-						<input type="checkbox" name="isActive" checked={item?.isActive ?? true} class="size-4" />
+					</Label>
+					<Label class="flex items-center gap-2 text-sm font-normal text-ink">
+						<Checkbox name="isActive" checked={item?.isActive ?? true} value="on" />
 						Show on the menu
-					</label>
+					</Label>
 				</div>
 			</form>
 			<Dialog.Footer class="sm:justify-between">

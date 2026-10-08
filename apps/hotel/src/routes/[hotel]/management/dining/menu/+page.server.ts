@@ -159,9 +159,9 @@ export const actions: Actions = {
 		const raw = Object.fromEntries(form);
 		const parsed = itemSchema.safeParse({
 			...raw,
-			categoryId: raw.categoryId || undefined,
+			categoryId: raw.categoryId && raw.categoryId !== 'none' ? raw.categoryId : undefined,
 			description: raw.description || undefined,
-			stationId: raw.stationId || undefined,
+			stationId: raw.stationId && raw.stationId !== 'none' ? raw.stationId : undefined,
 			sortOrder: raw.sortOrder || '0'
 		});
 		if (!parsed.success) {
