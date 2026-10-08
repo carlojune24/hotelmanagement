@@ -4,13 +4,17 @@ import {
 	index,
 	integer,
 	jsonb,
+	pgEnum,
 	pgTable,
 	primaryKey,
 	text,
+	timestamp,
 	uniqueIndex,
 	uuid
 } from 'drizzle-orm/pg-core';
 import { createdAt, deletedAt, pk, updatedAt } from './_shared';
+import { users } from './auth';
+import { bookings } from './bookings';
 import { hotels } from './hotels';
 
 /** One `{ url, tag }` photo in a dining venue's gallery — same shape as `RoomPhoto`
@@ -53,6 +57,21 @@ export const diningItems = pgTable(
 		operatingHours: text('operating_hours'),
 		isActive: boolean('is_active').notNull().default(true),
 		sortOrder: integer('sort_order').notNull().default(0),
+		/** Online/staff table reservations for this venue. Off until the venue is set up
+		 *  (tables added, seating hours chosen) so guests never see an empty booking form. */
+		reservationsEnabled: boolean('reservations_enabled').notNull().default(false),
+		/** Seating hours as `HH:MM` in the hotel's timezone: first and last seating start. */
+		seatingOpen: text('seating_open'),
+		lastSeating: text('last_seating'),
+		/** Gap between offered start times (minutes). */
+		slotMinutes: integer('slot_minutes').notNull().default(30),
+		/** How long a party holds its table (minutes) — the turn time conflicts are checked against. */
+		turnMinutes: integer('turn_minutes').notNull().default(90),
+		/** Largest party a guest may book online. */
+		maxPartySize: integer('max_party_size').notNull().default(8),
+		/** How far ahead (days) and how late (minutes before the slot) a guest may book. */
+		advanceDays: integer('advance_days').notNull().default(60),
+		minNoticeMinutes: integer('min_notice_minutes').notNull().default(60),
 		createdAt: createdAt(),
 		updatedAt: updatedAt(),
 		deletedAt: deletedAt()
@@ -206,3 +225,99 @@ export type DiningMenuCategory = typeof diningMenuCategories.$inferSelect;
 export type DiningMenuItem = typeof diningMenuItems.$inferSelect;
 export type DiningAddonGroup = typeof diningAddonGroups.$inferSelect;
 export type DiningAddon = typeof diningAddons.$inferSelect;
+
+/** A named table on a venue's floor plan. `x`/`y` are grid cells on the plan canvas. */
+export const diningTables = pgTable(
+	'dining_tables',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		diningItemId: uuid('dining_item_id')
+			.notNull()
+			.references(() => diningItems.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		seats: integer('seats').notNull(),
+		/** Optional zone label, e.g. "Terrace", "Indoor". */
+		area: text('area'),
+		x: integer('x').notNull().default(0),
+		y: integer('y').notNull().default(0),
+		isActive: boolean('is_active').notNull().default(true),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [
+		index('dining_tables_venue_idx').on(t.hotelId, t.diningItemId),
+		uniqueIndex('dining_tables_venue_name_uq').on(t.diningItemId, t.name)
+	]
+);
+
+export const diningReservationStatus = pgEnum('dining_reservation_status', [
+	'pending',
+	'confirmed',
+	'seated',
+	'completed',
+	'no_show',
+	'cancelled'
+]);
+
+/**
+ * A table reservation. `code` is the short reference the guest quotes (`TB-7K4Q`),
+ * unique per hotel; `accessToken` guards the guest's own confirmation/tracking page.
+ * `bookingId` links an in-house guest's stay (traceability: staff see booking code and
+ * guest name). Times are absolute instants; the hotel's timezone only matters for display.
+ */
+export const diningReservations = pgTable(
+	'dining_reservations',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		diningItemId: uuid('dining_item_id')
+			.notNull()
+			.references(() => diningItems.id, { onDelete: 'cascade' }),
+		code: text('code').notNull(),
+		accessToken: uuid('access_token').notNull().defaultRandom(),
+		status: diningReservationStatus('status').notNull().default('pending'),
+		guestName: text('guest_name').notNull(),
+		guestPhone: text('guest_phone'),
+		guestEmail: text('guest_email'),
+		partySize: integer('party_size').notNull(),
+		startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
+		endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
+		remarks: text('remarks'),
+		/** 'online' (guest) or 'staff' (phone / walk-in). */
+		source: text('source').notNull().default('online'),
+		bookingId: uuid('booking_id').references(() => bookings.id, { onDelete: 'set null' }),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id, {
+			onDelete: 'set null'
+		}),
+		cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [
+		uniqueIndex('dining_reservations_code_uq').on(t.hotelId, t.code),
+		index('dining_reservations_venue_time_idx').on(t.hotelId, t.diningItemId, t.startsAt)
+	]
+);
+
+/** The table(s) a reservation holds. Usually one; staff may join tables for a large party. */
+export const diningReservationTables = pgTable(
+	'dining_reservation_tables',
+	{
+		reservationId: uuid('reservation_id')
+			.notNull()
+			.references(() => diningReservations.id, { onDelete: 'cascade' }),
+		tableId: uuid('table_id')
+			.notNull()
+			.references(() => diningTables.id, { onDelete: 'cascade' })
+	},
+	(t) => [primaryKey({ columns: [t.reservationId, t.tableId] }), index('dining_res_tables_table_idx').on(t.tableId)]
+);
+
+export type DiningTable = typeof diningTables.$inferSelect;
+export type DiningReservation = typeof diningReservations.$inferSelect;
+export type DiningReservationStatus = (typeof diningReservationStatus.enumValues)[number];
