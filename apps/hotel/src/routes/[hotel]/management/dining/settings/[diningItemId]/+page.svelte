@@ -9,6 +9,8 @@
 	import { Label } from '$lib/components/ui/label/index.js';
 	import * as Select from '$lib/components/ui/select/index.js';
 	import ImageIcon from '@lucide/svelte/icons/image';
+	import CalendarClockIcon from '@lucide/svelte/icons/calendar-clock';
+	import { Switch } from '$lib/components/ui/switch/index.js';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import type { DiningPhoto } from '$lib/server/db/schema/dining';
 	import type { ActionData, PageData } from './$types';
@@ -18,6 +20,21 @@
 	const base = $derived(`/${page.params.hotel}/management`);
 	const item = data.item;
 	const photos = $derived((item.photos as DiningPhoto[]) ?? []);
+
+	// Reservation settings (controlled so the preview line updates as you type).
+	let resEnabled = $state(item.reservationsEnabled);
+	let seatingOpen = $state(item.seatingOpen ?? '');
+	let lastSeating = $state(item.lastSeating ?? '');
+	let slotMinutes = $state(String(item.slotMinutes));
+	let turnMinutes = $state(item.turnMinutes);
+	let maxPartySize = $state(item.maxPartySize);
+	let advanceDays = $state(item.advanceDays);
+	let minNoticeMinutes = $state(item.minNoticeMinutes);
+	const preview = $derived(
+		seatingOpen && lastSeating
+			? `Guests can book from ${seatingOpen} to ${lastSeating} every ${slotMinutes} minutes, parties of up to ${maxPartySize}, each holding a table for ${turnMinutes} minutes. They can book up to ${advanceDays} days ahead, with at least ${minNoticeMinutes} minutes of notice.`
+			: 'Set the first and last seating times to see what guests will be offered.'
+	);
 
 	let photoFileInput = $state<HTMLInputElement | undefined>(undefined);
 	let photoTag = $state<'cover' | 'gallery'>('cover');
@@ -100,6 +117,68 @@
 
 		<Button type="submit">Save dining item</Button>
 	</form>
+
+	<div class="mt-8 border-t border-border pt-6">
+		<h3 class="flex items-center gap-2 text-sm font-semibold text-ink">
+			<CalendarClockIcon class="size-4 text-brand" /> Table reservations
+		</h3>
+		<p class="mt-1 text-xs text-ink-muted">
+			Let guests book a table online and let staff take phone bookings. Tables are set up on the
+			<a class="underline" href="{base}/dining/floor-plan?venue={item.id}">Floor plan</a>
+			({data.tableCount} active {data.tableCount === 1 ? 'table' : 'tables'}).
+		</p>
+
+		<form method="POST" action="?/updateReservations" use:enhance class="mt-4 space-y-4">
+			<div class="flex items-center justify-between rounded-lg border border-border px-3 py-2.5">
+				<div>
+					<Label for="resEnabled" class="text-sm font-medium text-ink">Take reservations</Label>
+					<p class="text-xs text-ink-muted">Needs seating hours and at least one table.</p>
+				</div>
+				<Switch id="resEnabled" name="reservationsEnabled" bind:checked={resEnabled} />
+			</div>
+
+			<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+				<div>
+					<Label for="seatingOpen">First seating</Label>
+					<Input id="seatingOpen" name="seatingOpen" type="time" bind:value={seatingOpen} class="mt-1" />
+				</div>
+				<div>
+					<Label for="lastSeating">Last seating</Label>
+					<Input id="lastSeating" name="lastSeating" type="time" bind:value={lastSeating} class="mt-1" />
+				</div>
+				<div>
+					<Label for="slotMinutes">Times every</Label>
+					<Select.Root type="single" name="slotMinutes" bind:value={slotMinutes}>
+						<Select.Trigger id="slotMinutes" class="mt-1 w-full">{slotMinutes} min</Select.Trigger>
+						<Select.Content>
+							<Select.Item value="15" label="15 min" />
+							<Select.Item value="30" label="30 min" />
+							<Select.Item value="60" label="60 min" />
+						</Select.Content>
+					</Select.Root>
+				</div>
+				<div>
+					<Label for="turnMinutes">Table held (min)</Label>
+					<Input id="turnMinutes" name="turnMinutes" type="number" min="30" max="300" step="15" bind:value={turnMinutes} class="mt-1" />
+				</div>
+				<div>
+					<Label for="maxPartySize">Largest party online</Label>
+					<Input id="maxPartySize" name="maxPartySize" type="number" min="1" max="50" bind:value={maxPartySize} class="mt-1" />
+				</div>
+				<div>
+					<Label for="advanceDays">Book up to (days ahead)</Label>
+					<Input id="advanceDays" name="advanceDays" type="number" min="1" max="365" bind:value={advanceDays} class="mt-1" />
+				</div>
+				<div>
+					<Label for="minNoticeMinutes">Minimum notice (min)</Label>
+					<Input id="minNoticeMinutes" name="minNoticeMinutes" type="number" min="0" max="10080" step="15" bind:value={minNoticeMinutes} class="mt-1" />
+				</div>
+			</div>
+
+			<p class="text-sm text-ink-muted" aria-live="polite">{preview}</p>
+			<Button type="submit" size="sm">Save reservation settings</Button>
+		</form>
+	</div>
 
 	<div class="mt-8 border-t border-border pt-6">
 		<h3 class="flex items-center gap-2 text-sm font-semibold text-ink">
