@@ -158,7 +158,7 @@ describe.skipIf(!hasDb)('guest dining order pages (live DB)', async () => {
 		expect(out.venue).toMatchObject({ id: venue, title: 'Cafe' });
 		expect(out.cfg).toMatchObject({ orderOpen: '00:00', orderClose: '23:45', prepMinutes: 20, pickupNote: 'Collect at the counter', canPayOnline: true, canPayAtVenue: true });
 		expect(out.menu.items.map((i: any) => i.name).sort()).toEqual(['Adobo', 'Soda']); // the hidden dish is not offered
-		expect(Object.keys(out.menu.items[0]).sort()).toEqual(['addonGroupIds', 'categoryId', 'description', 'id', 'isAvailable', 'name', 'priceCentavos']); // no station, tax flag or sort data
+		expect(Object.keys(out.menu.items[0]).sort()).toEqual(['addonGroupIds', 'categoryId', 'description', 'id', 'imageUrl', 'isAvailable', 'name', 'priceCentavos']); // no station, tax flag or sort data
 		expect(out.menu.groups[0]).toMatchObject({ name: 'Sides', minChoices: 1, maxChoices: 1 });
 		expect(out.reservation).toBeNull();
 		expect(out.venues.map((v: any) => v.title).sort()).toEqual(['Bar', 'Cafe']);

@@ -29,7 +29,11 @@
 		return sections;
 	}
 
-	const venuePhotos = (photos: unknown) => (photos as DiningPhoto[] | null) ?? [];
+	/** Every dish photo on a venue's menu, in menu order, for the lightbox. */
+	const dishPhotos = (venueId: string) =>
+		(data.diningMenus[venueId]?.items ?? []).flatMap((i) => (i.imageUrl ? [i.imageUrl] : []));
+
+	const venuePhotos =(photos: unknown) => (photos as DiningPhoto[] | null) ?? [];
 	const coverPhoto = (photos: unknown) => {
 		const list = venuePhotos(photos);
 		return list.find((p) => p.tag === 'cover')?.url ?? list[0]?.url ?? null;
@@ -208,7 +212,7 @@
 							{/if}
 							<ul>
 								{#each section.items as dish (dish.id)}
-									<li class="storefront-menu-row" class:is-sold-out={!dish.isAvailable}>
+									<li class="storefront-menu-row" class:has-photo={dish.imageUrl} class:is-sold-out={!dish.isAvailable}>
 										<div>
 											<p class="storefront-menu-name">
 												{dish.name}
@@ -216,6 +220,17 @@
 											</p>
 											{#if dish.description}<p class="storefront-menu-desc">{dish.description}</p>{/if}
 										</div>
+										{#if dish.imageUrl}
+											{@const photos = dishPhotos(item.id)}
+											<button
+												type="button"
+												class="storefront-menu-photo"
+												onclick={() => openLightbox(photos, photos.indexOf(dish.imageUrl!))}
+												aria-label="View photo of {dish.name}"
+											>
+												<img src={dish.imageUrl} alt="" loading="lazy" onerror={hidePhoto} />
+											</button>
+										{/if}
 										<span class="ledger-data">{peso(dish.priceCentavos)}</span>
 									</li>
 								{/each}

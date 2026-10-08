@@ -512,6 +512,13 @@
       "when": 1791445892635,
       "tag": "0072_lazy_night_nurse",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1791457627304,
+      "tag": "0073_sleepy_silver_fox",
+      "breakpoints": true
     }
   ]
 }

@@ -110,6 +110,7 @@ export interface PublicMenuItem {
 	id: string;
 	name: string;
 	description: string | null;
+	imageUrl: string | null;
 	priceCentavos: number;
 	isAvailable: boolean;
 	categoryId: string | null;
@@ -156,6 +157,7 @@ export async function listPublicMenus(hotelId: string): Promise<Record<string, P
 			id: item.id,
 			name: item.name,
 			description: item.description,
+			imageUrl: item.imageUrl,
 			priceCentavos: item.priceCentavos,
 			isAvailable: item.isAvailable,
 			categoryId: item.categoryId,

@@ -13,6 +13,7 @@ import {
 import { roleCan } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
+import { deleteUploadIfOwned, saveResizedImage, UploadValidationError } from '$lib/server/uploads';
 import { listStations, loadVenueMenu, venueBelongsToHotel } from '$lib/server/dining-menu';
 import { friendlyIssue, moneyPhp, recordId } from '$lib/rate-validation';
 import type { RequestEvent } from '@sveltejs/kit';
@@ -219,7 +220,31 @@ export const actions: Actions = {
 			}
 		}
 
+		// Image: a new file replaces the old one; "remove" clears it; otherwise keep as is.
+		let previousImage: string | null = null;
+		if (itemId) {
+			const [existing] = await db
+				.select({ imageUrl: diningMenuItems.imageUrl })
+				.from(diningMenuItems)
+				.where(and(eq(diningMenuItems.id, itemId), eq(diningMenuItems.hotelId, hotelId)))
+				.limit(1);
+			previousImage = existing?.imageUrl ?? null;
+		}
+		let imageUrl = previousImage;
+		const imageFile = form.get('image');
+		if (imageFile instanceof File && imageFile.size > 0) {
+			try {
+				imageUrl = await saveResizedImage(hotelId, imageFile);
+			} catch (e) {
+				if (e instanceof UploadValidationError) return fail(400, { error: e.message });
+				throw e;
+			}
+		} else if (raw.removeImage === 'on') {
+			imageUrl = null;
+		}
+
 		const values = {
+			imageUrl,
 			name: d.name,
 			description: d.description ?? null,
 			priceCentavos: toCentavos(d.pricePhp),
@@ -264,7 +289,11 @@ export const actions: Actions = {
 			}
 			return menuItemId;
 		});
-		if (!savedId) return fail(404, { error: 'That item could not be found.' });
+		if (!savedId) {
+			if (imageUrl && imageUrl !== previousImage) await deleteUploadIfOwned(imageUrl);
+			return fail(404, { error: 'That item could not be found.' });
+		}
+		if (previousImage && previousImage !== imageUrl) await deleteUploadIfOwned(previousImage);
 
 		await writeAudit({
 			hotelId,

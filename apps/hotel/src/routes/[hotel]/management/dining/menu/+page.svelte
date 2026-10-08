@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
@@ -61,12 +62,17 @@
 		menu?.categories.find((c) => c.id === id)?.name ?? 'Uncategorised';
 
 	$effect(() => {
-		if (form?.error) toast.error(form.error);
-		if (form?.ok) {
-			toast.success(form.ok);
-			itemDialog.open = false;
-			categoryDialog.open = false;
-			newCategory = '';
+		// `form` lingers after a submit, so only the dialog writes are untracked; otherwise
+		// reopening a dialog re-runs this effect and the stale `form.ok` closes it again.
+		const f = form;
+		if (f?.error) toast.error(f.error);
+		if (f?.ok) {
+			toast.success(f.ok);
+			untrack(() => {
+				itemDialog.open = false;
+				categoryDialog.open = false;
+				newCategory = '';
+			});
 		}
 	});
 
@@ -205,6 +211,9 @@
 					<ul class="divide-y divide-border overflow-hidden rounded-xl border border-border">
 						{#each visibleItems as item (item.id)}
 							<li class="flex items-center gap-3 px-4 py-3 {item.isActive ? '' : 'bg-surface-2/60'}">
+								{#if item.imageUrl}
+									<img src={item.imageUrl} alt="" loading="lazy" class="size-12 shrink-0 rounded-md border border-border object-cover" />
+								{/if}
 								<div class="min-w-0 flex-1">
 									<div class="flex flex-wrap items-center gap-x-2 gap-y-0.5">
 										<span class="font-medium text-ink {item.isAvailable ? '' : 'line-through decoration-ink-muted'}"
@@ -276,7 +285,7 @@
 					Prices are what the guest pays{item ? '' : '; you can add photos and more later'}.
 				</Dialog.Description>
 			</Dialog.Header>
-			<form id="itemForm" method="POST" action="?/saveItem" use:enhance class="space-y-3">
+			<form id="itemForm" method="POST" action="?/saveItem" enctype="multipart/form-data" use:enhance class="space-y-3">
 				<input type="hidden" name="diningItemId" value={venue.id} />
 				{#if item}<input type="hidden" name="itemId" value={item.id} />{/if}
 				<div>
@@ -286,6 +295,25 @@
 				<div>
 					<Label for="itemDescription">Description (optional)</Label>
 					<Textarea id="itemDescription" name="description" rows={2} maxlength={500} placeholder="Slow-braised in coconut vinegar, garlic rice." class="mt-1" value={item?.description ?? ''} />
+				</div>
+				<div>
+					<Label for="itemImage">Photo (optional)</Label>
+					<div class="mt-1 flex items-center gap-3">
+						{#if item?.imageUrl}
+							<img src={item.imageUrl} alt="" class="size-16 shrink-0 rounded-md border border-border object-cover" />
+						{/if}
+						<div class="min-w-0 flex-1 space-y-1.5">
+							<Input id="itemImage" name="image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" />
+							<p class="text-xs text-ink-muted">
+								JPEG, PNG, WebP or GIF, up to 8 MB.{item?.imageUrl ? ' Choosing a file replaces the current photo.' : ''}
+							</p>
+							{#if item?.imageUrl}
+								<Label class="flex items-center gap-2 text-xs font-normal text-ink">
+									<Checkbox name="removeImage" value="on" /> Remove current photo
+								</Label>
+							{/if}
+						</div>
+					</div>
 				</div>
 				<div class="grid grid-cols-2 gap-3">
 					<div>

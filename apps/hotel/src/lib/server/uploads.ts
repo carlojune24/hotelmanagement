@@ -77,6 +77,35 @@ export async function saveUpload(
 	return writeUpload(hotelId, file, ext);
 }
 
+/**
+ * Like `saveUpload` for images, but re-encodes to WebP with the longest edge capped at
+ * `maxEdge` (EXIF rotation applied, metadata dropped). For photos shown small many times
+ * on one page, e.g. menu dishes, so a phone's 6 MB original never reaches a guest.
+ */
+export async function saveResizedImage(hotelId: string, file: File, maxEdge = 960): Promise<string> {
+	if (file.size === 0) throw new UploadValidationError('The file is empty.');
+	if (file.size > MAX_UPLOAD_BYTES) throw new UploadValidationError('Images must be 8 MB or smaller.');
+	if (!ALLOWED_TYPES[file.type]) {
+		throw new UploadValidationError('Use a JPEG, PNG, WebP, or GIF image.');
+	}
+	let resized: Buffer;
+	try {
+		const { default: sharp } = await import('sharp');
+		resized = await sharp(Buffer.from(await file.arrayBuffer()))
+			.rotate()
+			.resize({ width: maxEdge, height: maxEdge, fit: 'inside', withoutEnlargement: true })
+			.webp({ quality: 80 })
+			.toBuffer();
+	} catch {
+		throw new UploadValidationError('That image could not be read. Try a different file.');
+	}
+	const dir = path.join(UPLOADS_DIR, hotelId);
+	await mkdir(dir, { recursive: true });
+	const filename = `${ulid()}.webp`;
+	await writeFile(path.join(dir, filename), resized);
+	return `/uploads/${hotelId}/${filename}`;
+}
+
 async function writeUpload(hotelId: string, file: File, ext: string): Promise<string> {
 	const dir = path.join(UPLOADS_DIR, hotelId);
 	await mkdir(dir, { recursive: true });

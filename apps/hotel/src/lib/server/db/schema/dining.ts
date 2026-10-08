@@ -163,6 +163,8 @@ export const diningMenuItems = pgTable(
 		stationId: uuid('station_id').references(() => diningStations.id, { onDelete: 'set null' }),
 		name: text('name').notNull(),
 		description: text('description'),
+		/** Served from the local uploads store (`/uploads/<hotelId>/<file>`). */
+		imageUrl: text('image_url'),
 		priceCentavos: integer('price_centavos').notNull(),
 		taxable: boolean('taxable').notNull().default(true),
 		isAvailable: boolean('is_available').notNull().default(true),
