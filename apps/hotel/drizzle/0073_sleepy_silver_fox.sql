@@ -1,0 +1,1 @@
+ALTER TABLE "dining_menu_items" ADD COLUMN "image_url" text;

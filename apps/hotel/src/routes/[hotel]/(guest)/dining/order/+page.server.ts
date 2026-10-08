@@ -66,6 +66,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 					id: i.id,
 					name: i.name,
 					description: i.description,
+					imageUrl: i.imageUrl,
 					priceCentavos: i.priceCentavos,
 					isAvailable: i.isAvailable,
 					categoryId: i.categoryId,

@@ -755,6 +755,51 @@
 	color: var(--ledger-ink-muted);
 	text-decoration: line-through;
 }
+/* Optional dish photo: a small plate tipped into the ruled row, between the text and the
+   price. Rows without a photo reserve nothing. Flat: hairline border, no shadow. */
+.storefront-menu-row.has-photo,
+.order-row.has-photo {
+	align-items: center;
+}
+.storefront-menu-row > div:first-child,
+.order-row > .min-w-0 {
+	flex: 1;
+	min-width: 0;
+}
+.storefront-menu-photo {
+	display: block;
+	flex-shrink: 0;
+	width: 4.5rem;
+	height: 4.5rem;
+	padding: 0;
+	overflow: hidden;
+	border: 1px solid var(--ledger-rule);
+	border-radius: var(--radius-sm, 4px);
+	background: var(--ledger-paper-2);
+}
+@media (min-width: 640px) {
+	.storefront-menu-photo {
+		width: 5.5rem;
+		height: 5.5rem;
+	}
+}
+.storefront-menu-photo img {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+button.storefront-menu-photo {
+	cursor: zoom-in;
+}
+button.storefront-menu-photo:focus-visible {
+	outline: 2px solid var(--hotel-accent);
+	outline-offset: 2px;
+}
+.is-sold-out .storefront-menu-photo img {
+	filter: grayscale(1);
+	opacity: 0.55;
+}
 .storefront-menu-flag {
 	margin-left: 0.5rem;
 	font-size: 0.75rem;

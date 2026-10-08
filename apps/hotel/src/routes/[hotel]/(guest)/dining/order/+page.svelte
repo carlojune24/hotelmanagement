@@ -217,11 +217,16 @@
 						{#each section.items as item (item.id)}
 							{@const open = editing?.item.id === item.id}
 							<li class="order-dish" class:is-sold-out={!item.isAvailable}>
-								<button type="button" class="order-row" disabled={!item.isAvailable} aria-expanded={open} onclick={() => startItem(item)}>
+								<button type="button" class="order-row" class:has-photo={item.imageUrl} disabled={!item.isAvailable} aria-expanded={open} onclick={() => startItem(item)}>
 									<span class="min-w-0 flex-1">
 										<span class="storefront-menu-name">{item.name}{#if !item.isAvailable}<span class="storefront-menu-flag">Sold out today</span>{/if}</span>
 										{#if item.description}<span class="storefront-menu-desc block">{item.description}</span>{/if}
 									</span>
+									{#if item.imageUrl}
+										<span class="storefront-menu-photo" aria-hidden="true">
+											<img src={item.imageUrl} alt="" loading="lazy" onerror={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')} />
+										</span>
+									{/if}
 									<span class="ledger-data">{peso(item.priceCentavos)}</span>
 									{#if item.isAvailable}
 										<span class="order-add" aria-hidden="true">{#if groupsFor(item).length > 0}{open ? '−' : '+'}{:else}+{/if}</span>
