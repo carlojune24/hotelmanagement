@@ -184,11 +184,18 @@
 					</div>
 				{/if}
 
-				{#if item.reservationsEnabled}
-					<div class="mt-8">
-						<a href="/{data.hotel.slug}/dining/reserve?venue={item.id}" class="ledger-btn-primary inline-flex min-h-12 items-center px-6">
-							Reserve a table
-						</a>
+				{#if item.reservationsEnabled || data.orderableVenueIds.includes(item.id)}
+					<div class="mt-8 flex flex-wrap gap-3">
+						{#if item.reservationsEnabled}
+							<a href="/{data.hotel.slug}/dining/reserve?venue={item.id}" class="ledger-btn-primary inline-flex min-h-12 items-center px-6">
+								Reserve a table
+							</a>
+						{/if}
+						{#if data.orderableVenueIds.includes(item.id)}
+							<a href="/{data.hotel.slug}/dining/order?venue={item.id}" class="ledger-btn-primary inline-flex min-h-12 items-center px-6">
+								Order for pickup
+							</a>
+						{/if}
 					</div>
 				{/if}
 

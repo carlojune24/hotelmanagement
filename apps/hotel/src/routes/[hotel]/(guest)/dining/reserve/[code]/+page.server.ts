@@ -1,5 +1,6 @@
 import { error, fail } from '@sveltejs/kit';
 import { ReservationError, getReservationForGuest, setReservationStatus } from '$lib/server/dining-reservations';
+import { loadOnlineOrderingConfig } from '$lib/server/dining-online';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, params, url, depends }) => {
@@ -9,7 +10,15 @@ export const load: PageServerLoad = async ({ locals, params, url, depends }) => 
 	const reservation = await getReservationForGuest(locals.hotel!.id, locals.hotel!.timezone, params.code, token);
 	if (!reservation) error(404, 'Not found');
 
+	// A pre-order is offered while the table is still in the future by more than the kitchen's prep time.
+	const ordering = await loadOnlineOrderingConfig(locals.hotel!.id, reservation.venueId);
+	const canPreOrder =
+		!!ordering?.enabled &&
+		(reservation.status === 'confirmed' || reservation.status === 'pending') &&
+		reservation.startsAt.getTime() > Date.now() + ordering.prepMinutes * 60_000;
+
 	return {
+		canPreOrder,
 		reservation: {
 			...reservation,
 			startsAt: reservation.startsAt.toISOString(),

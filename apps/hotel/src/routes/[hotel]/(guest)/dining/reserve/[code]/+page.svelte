@@ -170,6 +170,11 @@
 			<button type="button" onclick={() => window.print()} class="ledger-btn-ghost inline-flex min-h-11 items-center gap-1.5 text-sm">
 				<PrinterIcon class="size-4" aria-hidden="true" /> Print
 			</button>
+			{#if data.canPreOrder}
+				<a href="/{page.params.hotel}/dining/order?venue={r.venueId}&reservation={r.code}&t={data.token}" class="ledger-btn-ghost inline-flex min-h-11 items-center gap-1.5 text-sm">
+					Pre-order your meal
+				</a>
+			{/if}
 			{#if data.canCancel}
 				<button type="button" onclick={() => (confirmOpen = true)} class="ledger-btn-ghost inline-flex min-h-11 items-center text-sm">
 					Cancel reservation
