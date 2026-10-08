@@ -1181,6 +1181,22 @@ export async function listDiningOrderDocuments(
 		.orderBy(asc(documents.issuedAt));
 }
 
+/** Live documents for many dining orders at once (the board shows each card's receipt number). */
+export async function listDiningDocumentsForOrders(
+	hotelId: string,
+	orderIds: string[]
+): Promise<Record<string, { id: string; type: DocType; formattedNo: string }[]>> {
+	const out: Record<string, { id: string; type: DocType; formattedNo: string }[]> = {};
+	if (orderIds.length === 0) return out;
+	const rows = await db
+		.select({ orderId: documents.diningOrderId, id: documents.id, type: documents.type, formattedNo: documents.formattedNo })
+		.from(documents)
+		.where(and(eq(documents.hotelId, hotelId), inArray(documents.diningOrderId, orderIds), eq(documents.status, 'issued')))
+		.orderBy(asc(documents.issuedAt));
+	for (const r of rows) (out[r.orderId!] ??= []).push({ id: r.id, type: r.type, formattedNo: r.formattedNo });
+	return out;
+}
+
 /** Cancels the live Official Receipt of a dining order whose payment was voided, so no
  *  receipt stays in force for money that was reversed. The serial is kept (BIR). */
 export async function cancelDiningReceipt(

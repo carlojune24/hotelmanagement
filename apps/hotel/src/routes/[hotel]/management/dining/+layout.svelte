@@ -6,14 +6,16 @@
 
 	const base = $derived(`/${page.params.hotel}/management/dining`);
 
-	// Orders joins this strip when it ships.
+	// Kitchen board joins this strip when it ships.
 	const tabs = $derived(
 		[
+			{ seg: 'orders', label: 'Orders', show: true },
 			{ seg: 'reservations', label: 'Reservations', show: true },
 			{ seg: 'floor-plan', label: 'Floor plan', show: true },
 			{ seg: 'menu', label: 'Menu', show: true },
 			{ seg: 'addons', label: 'Add-ons', show: true },
 			{ seg: 'stations', label: 'Stations', show: true },
+			{ seg: 'sales', label: 'Sales', show: true },
 			{ seg: 'settings', label: 'Venues & page', show: data.canEditSettings }
 		].filter((t) => t.show)
 	);
