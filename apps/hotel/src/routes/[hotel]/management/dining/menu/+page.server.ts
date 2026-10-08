@@ -7,12 +7,13 @@ import {
 	diningItems,
 	diningMenuCategories,
 	diningMenuItemAddonGroups,
-	diningMenuItems
+	diningMenuItems,
+	diningStations
 } from '$lib/server/db/schema/index';
 import { roleCan } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
-import { loadVenueMenu, venueBelongsToHotel } from '$lib/server/dining-menu';
+import { listStations, loadVenueMenu, venueBelongsToHotel } from '$lib/server/dining-menu';
 import { friendlyIssue, moneyPhp, recordId } from '$lib/rate-validation';
 import type { RequestEvent } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -30,9 +31,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const requested = url.searchParams.get('venue');
 	const venue = venues.find((v) => v.id === requested) ?? venues[0] ?? null;
 	const menu = venue ? await loadVenueMenu(hotelId, venue.id) : null;
-	const stations = menu
-		? [...new Set(menu.items.map((i) => i.station).filter((s): s is string => !!s))].sort()
-		: [];
+	const stations = await listStations(hotelId);
 
 	return { venues, venue, menu, stations };
 };
@@ -58,7 +57,7 @@ const itemSchema = z.object({
 	description: z.string().trim().max(500).optional(),
 	pricePhp: moneyPhp(),
 	categoryId: z.string().uuid().optional(),
-	station: z.string().trim().max(40).optional(),
+	stationId: z.string().uuid().optional(),
 	sortOrder: z.coerce.number().int().min(0).max(100000)
 });
 
@@ -162,7 +161,7 @@ export const actions: Actions = {
 			...raw,
 			categoryId: raw.categoryId || undefined,
 			description: raw.description || undefined,
-			station: raw.station || undefined,
+			stationId: raw.stationId || undefined,
 			sortOrder: raw.sortOrder || '0'
 		});
 		if (!parsed.success) {
@@ -192,6 +191,15 @@ export const actions: Actions = {
 			if (!cat) return fail(400, { error: 'Pick a category from this venue.' });
 		}
 
+		if (d.stationId) {
+			const [st] = await db
+				.select({ id: diningStations.id })
+				.from(diningStations)
+				.where(and(eq(diningStations.id, d.stationId), eq(diningStations.hotelId, hotelId)))
+				.limit(1);
+			if (!st) return fail(400, { error: 'Pick a station from your list.' });
+		}
+
 		const groupIds = [...new Set(form.getAll('addonGroupIds').map(String))].filter(
 			(g) => z.string().uuid().safeParse(g).success
 		);
@@ -216,7 +224,7 @@ export const actions: Actions = {
 			description: d.description ?? null,
 			priceCentavos: toCentavos(d.pricePhp),
 			categoryId: d.categoryId ?? null,
-			station: d.station ?? null,
+			stationId: d.stationId ?? null,
 			taxable: raw.taxable === 'on',
 			isActive: raw.isActive === 'on',
 			sortOrder: d.sortOrder

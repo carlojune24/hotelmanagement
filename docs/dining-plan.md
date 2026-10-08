@@ -85,3 +85,5 @@ Run `impeccable` for: (a) staff Dining module (operate mode, shadcn), (b) guest 
 ### Decisions confirmed (addendum)
 - **Kitchen:** one kitchen board. Menu items carry an optional `station` tag (nullable text, e.g. kitchen/bar/pastry) stored from Phase 1 so splitting into per-station boards later needs no data migration. The board ignores it for now (later: filter/tab per station).
 - **Guest alerts:** email + live tracking page only. No SMS/push in this release.
+
+- **Stations (changed after Phase 1):** `station` is now a managed hotel-wide list (`dining_stations`, set up in Dining -> Venues & page -> Stations) and menu items point to it via `station_id`, so reports can group by station without spelling drift. Still one kitchen board for now.

@@ -40,6 +40,7 @@
 	);
 	const uncategorisedCount = $derived((menu?.items ?? []).filter((i) => !i.categoryId).length);
 	const countFor = (id: string) => (menu?.items ?? []).filter((i) => i.categoryId === id).length;
+	const stationName = (id: string | null) => data.stations.find((s) => s.id === id)?.name ?? '';
 	const categoryName = (id: string | null) =>
 		menu?.categories.find((c) => c.id === id)?.name ?? 'Uncategorised';
 
@@ -193,8 +194,10 @@
 										<span class="font-medium text-ink {item.isAvailable ? '' : 'line-through decoration-ink-muted'}"
 											>{item.name}</span
 										>
-										{#if item.station}
-											<span class="rounded border border-border px-1.5 text-xs text-ink-muted">{item.station}</span>
+										{#if item.stationId}
+											<span class="rounded border border-border px-1.5 text-xs text-ink-muted"
+												>{stationName(item.stationId)}</span
+											>
 										{/if}
 										{#if !item.isActive}
 											<span class="text-xs text-ink-muted">Hidden</span>
@@ -307,18 +310,21 @@
 				<div class="grid grid-cols-2 gap-3">
 					<div>
 						<Label for="itemStation">Station (optional)</Label>
-						<Input
+						<select
 							id="itemStation"
-							name="station"
-							list="stationOptions"
-							value={item?.station ?? ''}
-							placeholder="kitchen, bar…"
-							class="mt-1"
-							autocomplete="off"
-						/>
-						<datalist id="stationOptions">
-							{#each data.stations as s (s)}<option value={s}></option>{/each}
-						</datalist>
+							name="stationId"
+							class="mt-1 h-9 w-full rounded-md border border-border bg-transparent px-2 text-sm"
+						>
+							<option value="" selected={!item?.stationId}>None</option>
+							{#each data.stations as s (s.id)}
+								<option value={s.id} selected={item?.stationId === s.id}>{s.name}</option>
+							{/each}
+						</select>
+						{#if data.stations.length === 0}
+							<p class="mt-1 text-xs text-ink-muted">
+								<a class="underline" href="{base}/settings#stations">Set up stations</a> (Kitchen, Bar…) to track sales by them.
+							</p>
+						{/if}
 					</div>
 					<div>
 						<Label for="itemSort">Sort order</Label>

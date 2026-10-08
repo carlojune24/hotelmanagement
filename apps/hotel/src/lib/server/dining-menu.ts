@@ -7,10 +7,12 @@ import {
 	diningMenuCategories,
 	diningMenuItemAddonGroups,
 	diningMenuItems,
+	diningStations,
 	type DiningAddon,
 	type DiningAddonGroup,
 	type DiningMenuCategory,
-	type DiningMenuItem
+	type DiningMenuItem,
+	type DiningStation
 } from './db/schema/index';
 
 export interface MenuItemWithAddons extends DiningMenuItem {
@@ -25,6 +27,15 @@ export interface VenueMenu {
 	categories: DiningMenuCategory[];
 	items: MenuItemWithAddons[];
 	groups: AddonGroupWithAddons[];
+}
+
+/** The hotel's prep stations, in display order. */
+export async function listStations(hotelId: string): Promise<DiningStation[]> {
+	return db
+		.select()
+		.from(diningStations)
+		.where(eq(diningStations.hotelId, hotelId))
+		.orderBy(asc(diningStations.sortOrder), asc(diningStations.name));
 }
 
 /** True when the venue exists and belongs to the hotel — every menu write checks this first

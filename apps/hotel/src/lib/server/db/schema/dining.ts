@@ -7,6 +7,7 @@ import {
 	pgTable,
 	primaryKey,
 	text,
+	uniqueIndex,
 	uuid
 } from 'drizzle-orm/pg-core';
 import { createdAt, deletedAt, pk, updatedAt } from './_shared';
@@ -66,6 +67,25 @@ export const diningItemsRelations = relations(diningItems, ({ one }) => ({
 export type DiningItem = typeof diningItems.$inferSelect;
 export type NewDiningItem = typeof diningItems.$inferInsert;
 
+/**
+ * A prep/production station — "Kitchen", "Bar", "Pastry". Hotel-wide (not per venue) so
+ * reports can compare stations across venues. Deleting one leaves its dishes unassigned.
+ */
+export const diningStations = pgTable(
+	'dining_stations',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		sortOrder: integer('sort_order').notNull().default(0),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [uniqueIndex('dining_stations_hotel_name_uq').on(t.hotelId, t.name)]
+);
+
 /** A section of a venue's menu ("Mains", "Drinks"). Hard-deleting one leaves its items
  *  uncategorised (`category_id` set null) rather than deleting them. */
 export const diningMenuCategories = pgTable(
@@ -89,9 +109,9 @@ export const diningMenuCategories = pgTable(
 /**
  * One sellable dish/drink on a venue's menu. Money is integer centavos. `isAvailable` is
  * the quick "sold out today" switch staff flip during service; `isActive` hides an item
- * from the menu entirely. `station` is an optional free-text tag ("kitchen", "bar") — the
- * kitchen board ignores it today, but storing it now means splitting the board per station
- * later needs no data migration.
+ * from the menu entirely. `stationId` optionally routes the dish to a prep station (kitchen,
+ * bar…) — the kitchen board ignores it today, but sales reports can already group by it and
+ * splitting the board per station later needs no data migration.
  */
 export const diningMenuItems = pgTable(
 	'dining_menu_items',
@@ -106,11 +126,11 @@ export const diningMenuItems = pgTable(
 		categoryId: uuid('category_id').references(() => diningMenuCategories.id, {
 			onDelete: 'set null'
 		}),
+		stationId: uuid('station_id').references(() => diningStations.id, { onDelete: 'set null' }),
 		name: text('name').notNull(),
 		description: text('description'),
 		priceCentavos: integer('price_centavos').notNull(),
 		taxable: boolean('taxable').notNull().default(true),
-		station: text('station'),
 		isAvailable: boolean('is_available').notNull().default(true),
 		isActive: boolean('is_active').notNull().default(true),
 		sortOrder: integer('sort_order').notNull().default(0),
@@ -181,6 +201,7 @@ export const diningMenuItemAddonGroups = pgTable(
 	(t) => [primaryKey({ columns: [t.menuItemId, t.addonGroupId] })]
 );
 
+export type DiningStation = typeof diningStations.$inferSelect;
 export type DiningMenuCategory = typeof diningMenuCategories.$inferSelect;
 export type DiningMenuItem = typeof diningMenuItems.$inferSelect;
 export type DiningAddonGroup = typeof diningAddonGroups.$inferSelect;
