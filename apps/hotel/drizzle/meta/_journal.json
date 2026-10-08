@@ -435,6 +435,13 @@
       "when": 1790913346130,
       "tag": "0061_tourist_count",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1791425930687,
+      "tag": "0062_chief_chamber",
+      "breakpoints": true
     }
   ]
 }

@@ -29,6 +29,7 @@
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MoonIcon from '@lucide/svelte/icons/moon';
 	import StarIcon from '@lucide/svelte/icons/star';
+	import UtensilsIcon from '@lucide/svelte/icons/utensils';
 
 	let { data, children }: { data: LayoutData; children: import('svelte').Snippet } = $props();
 

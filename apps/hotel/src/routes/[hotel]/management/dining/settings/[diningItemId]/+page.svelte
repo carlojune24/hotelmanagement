@@ -32,7 +32,7 @@
 			<h1 class="text-xl font-semibold tracking-tight text-ink">{item.title}</h1>
 			<p class="text-sm text-ink-muted">Details shown on your public "Dining" page.</p>
 		</div>
-		<Button variant="outline" href="{base}/settings/dining">← Dining</Button>
+		<Button variant="outline" href="{base}/dining/settings">← Venues</Button>
 	</div>
 
 	<form method="POST" action="?/update" use:enhance class="space-y-5">

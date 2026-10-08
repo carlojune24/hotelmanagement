@@ -716,6 +716,52 @@
 	color: var(--hotel-accent-deep);
 	flex-shrink: 0;
 }
+/* Dining — a venue's printed-menu block: category heading, then ruled rows (name + muted
+   description left, price in the manifest register right-aligned). Flat, no shadow. */
+.storefront-menu {
+	margin-top: 2.5rem;
+}
+.storefront-menu-title {
+	font-size: 1.5rem;
+	line-height: 1.15;
+}
+.storefront-menu-category {
+	margin-top: 1.75rem;
+	font-size: 1.125rem;
+	line-height: 1.2;
+	padding-bottom: 0.5rem;
+	border-bottom: 1px solid var(--ledger-ink);
+}
+.storefront-menu-row {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 1.5rem;
+	padding: 0.875rem 0;
+	border-bottom: 1px solid var(--ledger-rule);
+}
+.storefront-menu-name {
+	font-weight: 500;
+	color: var(--ledger-ink);
+}
+.storefront-menu-desc {
+	margin-top: 0.125rem;
+	max-width: 52ch;
+	font-size: 0.875rem;
+	color: var(--ledger-ink-muted);
+}
+.storefront-menu-row.is-sold-out .storefront-menu-name,
+.storefront-menu-row.is-sold-out .ledger-data {
+	color: var(--ledger-ink-muted);
+	text-decoration: line-through;
+}
+.storefront-menu-flag {
+	margin-left: 0.5rem;
+	font-size: 0.75rem;
+	font-weight: 400;
+	color: var(--ledger-ink-muted);
+	text-decoration: none;
+}
 .storefront-amenity-note {
 	color: var(--ledger-ink-muted);
 }

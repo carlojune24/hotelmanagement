@@ -12,6 +12,23 @@
 	const menuImages = $derived(data.dining.menuImages ?? []);
 	const hasIntro = $derived(Boolean(data.dining.introEyebrow || data.dining.introHeading || data.dining.introBody));
 
+	const peso = (centavos: number) =>
+		`₱${(centavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+	/** A venue's menu grouped by category, uncategorised dishes last. */
+	function menuSections(venueId: string) {
+		const menu = data.diningMenus[venueId];
+		if (!menu) return [];
+		const sections = menu.categories.map((c) => ({
+			id: c.id,
+			name: c.name,
+			items: menu.items.filter((i) => i.categoryId === c.id)
+		}));
+		const loose = menu.items.filter((i) => !menu.categories.some((c) => c.id === i.categoryId));
+		if (loose.length) sections.push({ id: 'other', name: sections.length ? 'Also' : '', items: loose });
+		return sections;
+	}
+
 	const venuePhotos = (photos: unknown) => (photos as DiningPhoto[] | null) ?? [];
 	const coverPhoto = (photos: unknown) => {
 		const list = venuePhotos(photos);
@@ -164,6 +181,31 @@
 							<ClockIcon aria-hidden="true" />
 							<span>{item.operatingHours}</span>
 						</span>
+					</div>
+				{/if}
+
+				{#if menuSections(item.id).length > 0}
+					<div class="storefront-menu" aria-label="{item.title} menu">
+						<h3 class="storefront-menu-title ledger-display">Menu</h3>
+						{#each menuSections(item.id) as section (section.id)}
+							{#if section.name}
+								<h4 class="storefront-menu-category ledger-display">{section.name}</h4>
+							{/if}
+							<ul>
+								{#each section.items as dish (dish.id)}
+									<li class="storefront-menu-row" class:is-sold-out={!dish.isAvailable}>
+										<div>
+											<p class="storefront-menu-name">
+												{dish.name}
+												{#if !dish.isAvailable}<span class="storefront-menu-flag">Sold out today</span>{/if}
+											</p>
+											{#if dish.description}<p class="storefront-menu-desc">{dish.description}</p>{/if}
+										</div>
+										<span class="ledger-data">{peso(dish.priceCentavos)}</span>
+									</li>
+								{/each}
+							</ul>
+						{/each}
 					</div>
 				{/if}
 			</section>

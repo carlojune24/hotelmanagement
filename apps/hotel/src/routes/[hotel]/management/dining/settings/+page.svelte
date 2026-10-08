@@ -30,16 +30,6 @@
 </script>
 
 <div class="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6">
-	<div class="mb-6 flex items-center justify-between">
-		<div>
-			<h1 class="text-xl font-semibold tracking-tight text-ink">Dining</h1>
-			<p class="text-sm text-ink-muted">
-				Restaurants, bars, and cafés shown on your public "Dining" page.
-			</p>
-		</div>
-		<Button variant="outline" href="{base}/settings">← Settings</Button>
-	</div>
-
 	<div class="rounded-xl border border-border bg-surface p-4 shadow-sm">
 		<h2 class="text-base font-semibold text-ink">Intro block</h2>
 		<p class="text-sm text-ink-muted">
@@ -141,7 +131,7 @@
 								<Button
 									variant="ghost"
 									size="icon"
-									href="{base}/settings/dining/{item.id}"
+									href="{base}/dining/settings/{item.id}"
 									aria-label="Edit {item.title}"
 								>
 									<PencilIcon class="size-4" />

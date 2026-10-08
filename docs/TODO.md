@@ -376,3 +376,7 @@ finance/report routes onto it.
 - [ ] Accessibility & responsive: staff app usable on a front-desk tablet; booking flow mobile-first
 - [ ] `@mm/integration` payload conformance tests against `docs/standards` schemas
 - [ ] Migrate `zod` v4 deprecations (`z.string().email()` → `z.email()`, `.uuid()` → `z.uuid()`)
+
+- [~] **Dining: ordering, reservations, kitchen board, finance (planned 2026-10-08)** — full plan in `docs/dining-plan.md`. Hybrid folio decision (own order/payment record, optional charge-to-room), new `dining_revenue` cash category, full floor-plan reservations, PayMongo online payment, guest tracking page + email, single kitchen board with optional `station` tag.
+  - [x] **Phase 1 (2026-10-08):** Dining sidebar section + tabs, settings moved to `/dining/settings` (old URL redirects), `dining:read/write/manage` caps, menu tables (`0062_chief_chamber`: categories, items with `station`, add-on groups/add-ons), menu + add-on editors, read-only menu on the guest Dining page. Grant `dining:*` to existing custom roles in Team & Access (only `front_desk` seed gets read/write for new hotels). Venue ordering/slot columns deferred to the phase that uses them.
+  - [ ] Phase 2 floor plan + reservations · [ ] Phase 3 orders, cashier pay, finance category · [ ] Phase 4 online ordering + PayMongo · [ ] Phase 5 charge to room

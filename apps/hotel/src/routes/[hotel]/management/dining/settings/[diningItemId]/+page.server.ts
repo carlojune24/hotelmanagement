@@ -211,6 +211,6 @@ export const actions: Actions = {
 			entityId: diningItemId
 		});
 
-		redirect(303, `/${event.params.hotel}/management/settings/dining`);
+		redirect(303, `/${event.params.hotel}/management/dining/settings`);
 	}
 };

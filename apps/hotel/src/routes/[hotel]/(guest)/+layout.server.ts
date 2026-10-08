@@ -4,6 +4,7 @@ import { darken, lighten, wovenPatternDataUri } from '$lib/woven-pattern';
 import { listFunctionHalls } from '$lib/server/hall-availability';
 import { listApprovedReviews } from '$lib/server/reviews';
 import { listDiningItems, parseDiningConfig } from '$lib/server/dining';
+import { listPublicMenus } from '$lib/server/dining-menu';
 import { listHotelAmenities } from '$lib/server/availability';
 import { expirePendingOrders } from '$lib/server/orders';
 import type { LayoutServerLoad } from './$types';
@@ -27,11 +28,12 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 		console.error('guest layout: expirePendingOrders failed', e)
 	);
 
-	const [functionHalls, reviews, diningItems, hotelAmenities] = await Promise.all([
+	const [functionHalls, reviews, diningItems, hotelAmenities, diningMenus] = await Promise.all([
 		listFunctionHalls(hotelId),
 		listApprovedReviews(hotelId),
 		listDiningItems(hotelId),
-		listHotelAmenities(hotelId)
+		listHotelAmenities(hotelId),
+		listPublicMenus(hotelId)
 	]);
 	const dining = parseDiningConfig(locals.hotel.config);
 
@@ -59,6 +61,7 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 		reviews,
 		diningItems,
 		dining,
+		diningMenus,
 		hotelAmenities
 	};
 };
