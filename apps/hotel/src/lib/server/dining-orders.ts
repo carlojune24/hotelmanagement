@@ -32,6 +32,7 @@ import {
 	listDiningOrderDocuments
 } from './finance/documents';
 import { venueBelongsToHotel } from './dining-menu';
+import { sendDiningOrderEmail } from './email/send-dining-order';
 import { canMoveOrder, checkAddonSelection, priceLine, sumLines, type AddonGroupRule } from '../dining-orders';
 
 /** A rule or conflict to show the user (an unavailable dish, a missing choice), not a bug. */
@@ -62,6 +63,12 @@ export interface CreateOrderInput {
 	guestEmail?: string | null;
 	remarks?: string | null;
 	source?: 'staff' | 'online';
+	/** Takeaway pickup time (or the table time of a pre-order). */
+	pickupAt?: Date | null;
+	/** How an online order is being paid: 'online' (PayMongo) or 'venue' (at pickup). */
+	payMode?: 'online' | 'venue' | null;
+	/** `pending_payment` for an online order that must be paid before the kitchen sees it. */
+	initialStatus?: 'new' | 'pending_payment';
 	actor?: Actor;
 }
 
@@ -227,6 +234,9 @@ export async function createDiningOrder(
 					guestPhone: input.guestPhone?.trim() || null,
 					guestEmail: input.guestEmail?.trim() || null,
 					remarks: input.remarks?.trim() || null,
+					pickupAt: input.pickupAt ?? null,
+					payMode: input.payMode ?? null,
+					status: input.initialStatus ?? 'new',
 					source: input.source ?? 'staff',
 					totalCentavos: totals.totalCentavos,
 					vatCentavos: totals.vatCentavos,
@@ -297,10 +307,10 @@ async function loadOrderForUpdate(tx: Parameters<Parameters<typeof db.transactio
 export async function setDiningOrderStatus(args: {
 	hotelId: string;
 	orderId: string;
-	to: Exclude<DiningOrderStatus, 'cancelled'>;
+	to: Exclude<DiningOrderStatus, 'cancelled' | 'pending_payment'>;
 	actor?: Actor;
 }): Promise<DiningOrder> {
-	return db.transaction(async (tx) => {
+	const updated = await db.transaction(async (tx) => {
 		const order = await loadOrderForUpdate(tx, args.hotelId, args.orderId);
 		if (!canMoveOrder(order.status, args.to)) {
 			throw new OrderError(`A ${order.status} order can't be marked ${args.to}.`);
@@ -328,6 +338,9 @@ export async function setDiningOrderStatus(args: {
 		});
 		return updated!;
 	});
+	// An online guest hears when their order is ready (best-effort, after the move is saved).
+	if (args.to === 'ready' && updated.source === 'online') void sendDiningOrderEmail(updated.id, 'ready');
+	return updated;
 }
 
 /** Cancels an order that has not been paid (a paid order must have its payment voided first). */

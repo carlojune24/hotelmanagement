@@ -30,7 +30,9 @@
 		booking_cancelled: 'Cancellation notice',
 		guest_message_reply: 'Message reply notice',
 		payment_link: 'Payment link (unpaid booking)',
-		dining_reservation: 'Table reservation'
+		dining_reservation: 'Table reservation',
+		dining_order: 'Dining order confirmation',
+		dining_order_ready: 'Dining order ready'
 	};
 	const typeLabel = (t: string) => TYPE_LABELS[t] ?? t.replace(/_/g, ' ');
 

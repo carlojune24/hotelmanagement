@@ -1,4 +1,4 @@
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 import {
 	bigint,
 	boolean,
@@ -75,6 +75,16 @@ export const diningItems = pgTable(
 		/** How far ahead (days) and how late (minutes before the slot) a guest may book. */
 		advanceDays: integer('advance_days').notNull().default(60),
 		minNoticeMinutes: integer('min_notice_minutes').notNull().default(60),
+		/** Guests may order takeaway online from this venue. Off until the venue is set up. */
+		onlineOrdersEnabled: boolean('online_orders_enabled').notNull().default(false),
+		/** 'online_only' (reaches the kitchen once PayMongo confirms) or 'online_or_venue'
+		 *  (the guest may instead pay at the restaurant and the order goes straight to the kitchen). */
+		onlinePayment: text('online_payment').notNull().default('online_only'),
+		/** `HH:MM` in the hotel's timezone: earliest and latest pickup time offered. */
+		orderOpen: text('order_open'),
+		orderClose: text('order_close'),
+		/** Minimum minutes between ordering and pickup. */
+		prepMinutes: integer('prep_minutes').notNull().default(20),
 		createdAt: createdAt(),
 		updatedAt: updatedAt(),
 		deletedAt: deletedAt()
@@ -331,6 +341,7 @@ export type DiningReservationStatus = (typeof diningReservationStatus.enumValues
 
 /** Kitchen flow. Paid/unpaid is tracked separately (`dining_payment_status`). */
 export const diningOrderStatus = pgEnum('dining_order_status', [
+	'pending_payment',
 	'new',
 	'accepted',
 	'preparing',
@@ -342,7 +353,7 @@ export const diningOrderStatus = pgEnum('dining_order_status', [
 export const diningOrderType = pgEnum('dining_order_type', ['dine_in', 'takeaway', 'pre_order']);
 
 /** `room_charged` is reserved for charge-to-room (a later phase); nothing sets it yet. */
-export const diningPaymentStatus = pgEnum('dining_payment_status', ['unpaid', 'paid', 'room_charged']);
+export const diningPaymentStatus = pgEnum('dining_payment_status', ['unpaid', 'paid', 'room_charged', 'refunded']);
 
 /**
  * One dining order. Money is integer centavos and VAT-inclusive: `totalCentavos` is what the
@@ -377,6 +388,13 @@ export const diningOrders = pgTable(
 		guestPhone: text('guest_phone'),
 		guestEmail: text('guest_email'),
 		remarks: text('remarks'),
+		/** When a takeaway guest will collect. Null for dine-in. */
+		pickupAt: timestamp('pickup_at', { withTimezone: true }),
+		/** How an online order is being paid: 'online' (PayMongo) or 'venue' (at pickup). */
+		payMode: text('pay_mode'),
+		/** A guest asked to cancel an order they had already paid for; staff answer it. */
+		cancelRequestedAt: timestamp('cancel_requested_at', { withTimezone: true }),
+		cancelRequestNote: text('cancel_request_note'),
 		/** 'staff' (taken at the venue/cashier) or 'online' (guest ordered). */
 		source: text('source').notNull().default('staff'),
 		totalCentavos: bigint('total_centavos', { mode: 'number' }).notNull(),
@@ -455,3 +473,72 @@ export type DiningOrder = typeof diningOrders.$inferSelect;
 export type DiningOrderItem = typeof diningOrderItems.$inferSelect;
 export type DiningOrderStatus = (typeof diningOrderStatus.enumValues)[number];
 export type DiningOrderType = (typeof diningOrderType.enumValues)[number];
+
+/**
+ * Money movements on a dining order that did not happen at the cashier: the guest's online
+ * (PayMongo) payment attempts, and manual refunds recorded by staff. Amounts are positive;
+ * `kind` says which way the money went. A paid online `payment` row has a `cash_movement_id`
+ * (cash-in to Undeposited Funds, `dining_revenue`); a `refund` row has the cash-out (`refund`).
+ * Kept apart from `payments`, which is bound to room orders.
+ */
+export const diningPayments = pgTable(
+	'dining_payments',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		orderId: uuid('order_id')
+			.notNull()
+			.references(() => diningOrders.id, { onDelete: 'cascade' }),
+		kind: text('kind').notNull(),
+		/** 'pending' (checkout started), 'paid', or 'failed'. A refund row is 'paid' once recorded. */
+		status: text('status').notNull().default('pending'),
+		provider: text('provider').notNull(),
+		/** For a manual refund: how the money went back (cash, gcash, bank_transfer, paymongo_dashboard, other). */
+		method: text('method'),
+		amountCentavos: bigint('amount_centavos', { mode: 'number' }).notNull(),
+		paymongoCheckoutSessionId: text('paymongo_checkout_session_id'),
+		paymongoPaymentId: text('paymongo_payment_id'),
+		/** The webhook event that created this row: makes a redelivered event a no-op. */
+		paymongoEventId: text('paymongo_event_id'),
+		referenceNo: text('reference_no'),
+		/** An uploaded photo of the refund receipt or transfer screenshot. */
+		proofUrl: text('proof_url'),
+		note: text('note'),
+		cashMovementId: uuid('cash_movement_id'),
+		rawPayload: jsonb('raw_payload'),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		paidAt: timestamp('paid_at', { withTimezone: true }),
+		createdAt: createdAt()
+	},
+	(t) => [
+		index('dining_payments_order_idx').on(t.orderId),
+		uniqueIndex('dining_payments_event_uq').on(t.paymongoEventId).where(sql`paymongo_event_id is not null`)
+	]
+);
+
+/** A short thread between the guest and the restaurant about one order. */
+export const diningOrderMessages = pgTable(
+	'dining_order_messages',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		orderId: uuid('order_id')
+			.notNull()
+			.references(() => diningOrders.id, { onDelete: 'cascade' }),
+		/** 'guest' or 'staff'. */
+		direction: text('direction').notNull(),
+		body: text('body').notNull(),
+		authorUserId: uuid('author_user_id').references(() => users.id, { onDelete: 'set null' }),
+		/** Staff have seen a guest message. Null on staff messages. */
+		readAt: timestamp('read_at', { withTimezone: true }),
+		createdAt: createdAt()
+	},
+	(t) => [index('dining_order_messages_order_idx').on(t.orderId, t.createdAt)]
+);
+
+export type DiningPayment = typeof diningPayments.$inferSelect;
+export type DiningOrderMessage = typeof diningOrderMessages.$inferSelect;

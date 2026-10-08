@@ -491,6 +491,13 @@
       "when": 1791432674915,
       "tag": "0069_special_felicia_hardy",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1791434542323,
+      "tag": "0070_reflective_tiger_shark",
+      "breakpoints": true
     }
   ]
 }

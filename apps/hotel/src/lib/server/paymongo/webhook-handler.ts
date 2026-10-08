@@ -16,6 +16,7 @@ import { getBirSettings, issueOfficialReceipt } from '$lib/server/finance/docume
 import { businessDateFor } from '$lib/server/finance/shared';
 import { sendBookingConfirmation } from '$lib/server/email/send-booking-confirmation';
 import { writeAudit } from '$lib/server/audit';
+import { confirmDiningPayment, diningEventHotelId, recordDiningPaymentFailure } from '$lib/server/dining-online';
 
 /**
  * PayMongo webhook event handling, shared by the per-hotel endpoint
@@ -51,6 +52,28 @@ export async function handlePaymongoEvent(
 			// The webhook's resource is the Checkout Session itself, carrying our
 			// `metadata.orderId` and its associated Payment(s) — not a bare payment object.
 			const checkoutSession = event?.data?.attributes?.data;
+
+			// A restaurant order's checkout carries `metadata.kind = 'dining'`: it has its own
+			// payment record and finance posting, and never touches room orders or `payments`.
+			if (checkoutSession?.attributes?.metadata?.kind === 'dining') {
+				const diningOrderId = checkoutSession.attributes.metadata.diningOrderId as string | undefined;
+				const diningPayment = checkoutSession.attributes.payments?.[0];
+				const diningAmount = diningPayment?.attributes?.amount as number | undefined;
+				if (!diningOrderId || !eventId || diningAmount == null) {
+					console.error('paymongo webhook: missing diningOrderId/eventId/amount on payload', eventId);
+					break;
+				}
+				await confirmDiningPayment({
+					eventId,
+					orderId: diningOrderId,
+					sessionId: (checkoutSession.id as string | undefined) ?? null,
+					paymentId: (diningPayment?.id as string | undefined) ?? null,
+					amountCentavos: diningAmount,
+					payload: event
+				});
+				break;
+			}
+
 			const orderId = checkoutSession?.attributes?.metadata?.orderId as string | undefined;
 			const payment = checkoutSession?.attributes?.payments?.[0];
 			const paymentId = payment?.id as string | undefined;
@@ -302,6 +325,24 @@ export async function handlePaymongoEvent(
 			// record the failed attempt for staff visibility, when it carries our
 			// checkout-session metadata (a bare `payment.failed` may not).
 			const checkoutSession = event?.data?.attributes?.data;
+
+			if (checkoutSession?.attributes?.metadata?.kind === 'dining') {
+				const diningOrderId = checkoutSession.attributes.metadata.diningOrderId as string | undefined;
+				const failed = checkoutSession.attributes.payments?.[0] ?? checkoutSession;
+				const failedAmount = failed?.attributes?.amount as number | undefined;
+				if (diningOrderId && eventId && failedAmount != null) {
+					await recordDiningPaymentFailure({
+						eventId,
+						orderId: diningOrderId,
+						sessionId: (checkoutSession.id as string | undefined) ?? null,
+						paymentId: (failed?.id as string | undefined) ?? null,
+						amountCentavos: failedAmount,
+						payload: event
+					});
+				}
+				break;
+			}
+
 			const orderId = checkoutSession?.attributes?.metadata?.orderId as string | undefined;
 			const payment = checkoutSession?.attributes?.payments?.[0] ?? checkoutSession;
 			const paymentId = payment?.id as string | undefined;
@@ -476,6 +517,10 @@ export async function handlePaymongoEvent(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function eventHotelId(event: any): Promise<string | null> {
 	const resource = event?.data?.attributes?.data;
+	if (resource?.attributes?.metadata?.kind === 'dining') {
+		const diningOrderId = resource.attributes.metadata.diningOrderId as string | undefined;
+		return diningOrderId ? await diningEventHotelId(diningOrderId) : null;
+	}
 	const orderId = resource?.attributes?.metadata?.orderId as string | undefined;
 	if (orderId) {
 		const [o] = await db

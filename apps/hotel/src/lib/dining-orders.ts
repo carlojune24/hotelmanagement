@@ -73,10 +73,13 @@ export function checkAddonSelection(
 // Status flow
 // ---------------------------------------------------------------------------
 
-export type OrderStatus = 'new' | 'accepted' | 'preparing' | 'ready' | 'served' | 'cancelled';
+/** `pending_payment` is an online order waiting for PayMongo to confirm; it is invisible to the
+ *  kitchen and only the payment confirmation (or an expiry/cancel) moves it on. */
+export type OrderStatus = 'pending_payment' | 'new' | 'accepted' | 'preparing' | 'ready' | 'served' | 'cancelled';
 
 /** Where an order can go next. The kitchen may skip "accepted"; served and cancelled are final. */
 export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
+	pending_payment: ['new', 'cancelled'],
 	new: ['accepted', 'preparing', 'cancelled'],
 	accepted: ['preparing', 'cancelled'],
 	preparing: ['ready', 'cancelled'],
@@ -97,6 +100,7 @@ export const NEXT_STEP: Partial<Record<OrderStatus, OrderStatus>> = {
 };
 
 export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
+	pending_payment: 'Awaiting payment',
 	new: 'New',
 	accepted: 'Accepted',
 	preparing: 'Preparing',
