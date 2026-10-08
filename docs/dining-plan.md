@@ -50,6 +50,9 @@ Run `impeccable` for: (a) staff Dining module (operate mode, shadcn), (b) guest 
 - Unpaid online dining orders expire on a sweep like `expirePendingOrders`, scoped to dining.
 - Official Receipt: decide with BIR settings whether dining online payments issue ORs (`issueOfficialReceipt` is payment/order-bound today).
 
+### Kitchen display board
+> **Built 2026-10-08** as `Dining → Kitchen` (single board, station filter, whole-ticket Start/Ready, dark, polling). See `apps/hotel/DESIGN.md`.
+
 ### Phase 5 - In-house guests: charge to room
 > **Built 2026-10-08 as a simplified, staff-only version** (cashier picks the guest at Take payment; one folio line; pro-rata revenue split at settlement). The notes below are the original sketch.
 - Add nullable `source` (e.g. `'dining'`) + `dining_order_id` to `folio_charges`.
