@@ -1,14 +1,12 @@
 import { fail } from '@sveltejs/kit';
-import { and, asc, eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
-import { diningItems, diningStations, hotels } from '$lib/server/db/schema/index';
+import { diningItems, hotels } from '$lib/server/db/schema/index';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { deleteUploadIfOwned, saveUpload, UploadValidationError } from '$lib/server/uploads';
 import { MAX_GALLERY_IMAGES } from '$lib/branding';
-import { listStations } from '$lib/server/dining-menu';
-import { recordId } from '$lib/rate-validation';
 import { diningConfigSchema, parseDiningConfig, mergeDiningConfigIntoConfig } from '$lib/server/dining';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -22,7 +20,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 		.where(eq(diningItems.hotelId, hotelId))
 		.orderBy(asc(diningItems.sortOrder), asc(diningItems.title));
 
-	return { items, dining: parseDiningConfig(locals.hotel!.config), stations: await listStations(hotelId) };
+	return { items, dining: parseDiningConfig(locals.hotel!.config) };
 };
 
 const createSchema = z.object({
@@ -41,92 +39,7 @@ const introSchema = diningConfigSchema.pick({
 	introBody: true
 });
 
-const stationName = z.string().trim().min(1, 'Give the station a name.').max(40);
-
-/** Postgres unique-violation, whether drizzle surfaces it directly or on `cause`. */
-const isDuplicate = (e: unknown) =>
-	(e as { code?: string })?.code === '23505' || (e as { cause?: { code?: string } })?.cause?.code === '23505';
-
 export const actions: Actions = {
-	createStation: async (event) => {
-		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
-		const hotelId = event.locals.hotel!.id;
-		const parsed = z
-			.object({ name: stationName })
-			.safeParse(Object.fromEntries(await event.request.formData()));
-		if (!parsed.success) return fail(400, { error: parsed.error.issues[0]?.message ?? 'Give the station a name.' });
-		try {
-			const [row] = await db
-				.insert(diningStations)
-				.values({ hotelId, name: parsed.data.name })
-				.returning({ id: diningStations.id });
-			await writeAudit({
-				hotelId,
-				actor: event.locals.user,
-				action: 'dining_station.create',
-				entityType: 'dining_station',
-				entityId: row!.id,
-				after: parsed.data
-			});
-		} catch (e) {
-			if (isDuplicate(e)) return fail(400, { error: `You already have a station called "${parsed.data.name}".` });
-			throw e;
-		}
-		return { ok: `Added station "${parsed.data.name}".` };
-	},
-
-	renameStation: async (event) => {
-		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
-		const hotelId = event.locals.hotel!.id;
-		const parsed = z
-			.object({ stationId: recordId(), name: stationName })
-			.safeParse(Object.fromEntries(await event.request.formData()));
-		if (!parsed.success) return fail(400, { error: parsed.error.issues[0]?.message ?? 'Check the station name.' });
-		try {
-			const updated = await db
-				.update(diningStations)
-				.set({ name: parsed.data.name, updatedAt: new Date() })
-				.where(and(eq(diningStations.id, parsed.data.stationId), eq(diningStations.hotelId, hotelId)))
-				.returning({ id: diningStations.id });
-			if (updated.length === 0) return fail(404, { error: 'Station not found.' });
-		} catch (e) {
-			if (isDuplicate(e)) return fail(400, { error: `You already have a station called "${parsed.data.name}".` });
-			throw e;
-		}
-		await writeAudit({
-			hotelId,
-			actor: event.locals.user,
-			action: 'dining_station.update',
-			entityType: 'dining_station',
-			entityId: parsed.data.stationId,
-			after: { name: parsed.data.name }
-		});
-		return { ok: 'Station renamed.' };
-	},
-
-	deleteStation: async (event) => {
-		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
-		const hotelId = event.locals.hotel!.id;
-		const parsed = z
-			.object({ stationId: recordId() })
-			.safeParse(Object.fromEntries(await event.request.formData()));
-		if (!parsed.success) return fail(400, { error: 'Station not found.' });
-		// Dishes on this station become unassigned (FK is ON DELETE SET NULL).
-		const deleted = await db
-			.delete(diningStations)
-			.where(and(eq(diningStations.id, parsed.data.stationId), eq(diningStations.hotelId, hotelId)))
-			.returning({ id: diningStations.id });
-		if (deleted.length === 0) return fail(404, { error: 'Station not found.' });
-		await writeAudit({
-			hotelId,
-			actor: event.locals.user,
-			action: 'dining_station.delete',
-			entityType: 'dining_station',
-			entityId: parsed.data.stationId
-		});
-		return { ok: 'Station deleted. Its dishes are now unassigned.' };
-	},
-
 	create: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
 		const hotelId = event.locals.hotel!.id;

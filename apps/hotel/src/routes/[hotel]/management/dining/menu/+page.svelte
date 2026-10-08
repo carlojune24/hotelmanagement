@@ -322,7 +322,7 @@
 						</select>
 						{#if data.stations.length === 0}
 							<p class="mt-1 text-xs text-ink-muted">
-								<a class="underline" href="{base}/settings#stations">Set up stations</a> (Kitchen, Bar…) to track sales by them.
+								<a class="underline" href="{base}/stations">Set up stations</a> (Kitchen, Bar…) to track sales by them.
 							</p>
 						{/if}
 					</div>

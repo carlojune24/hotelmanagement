@@ -72,35 +72,6 @@
 		</form>
 	</div>
 
-	<div id="stations" class="mt-8 scroll-mt-24 rounded-xl border border-border bg-surface p-4 shadow-sm">
-		<h2 class="text-base font-semibold text-ink">Stations</h2>
-		<p class="text-sm text-ink-muted">
-			Where dishes are prepared: Kitchen, Bar, Pastry. Tag each menu item with one so sales
-			can be reported by station, and the kitchen board can be split later.
-		</p>
-		{#if data.stations.length > 0}
-			<ul class="mt-3 divide-y divide-border rounded-md border border-border">
-				{#each data.stations as st (st.id)}
-					<li class="flex items-center gap-2 px-3 py-2">
-						<form method="POST" action="?/renameStation" use:enhance class="flex flex-1 items-center gap-2">
-							<input type="hidden" name="stationId" value={st.id} />
-							<Input name="name" value={st.name} maxlength={40} aria-label="Station name" class="h-8" />
-							<Button type="submit" size="sm" variant="outline" class="h-8">Rename</Button>
-						</form>
-						<form method="POST" action="?/deleteStation" use:enhance>
-							<input type="hidden" name="stationId" value={st.id} />
-							<Button type="submit" size="sm" variant="ghost" class="h-8 text-danger hover:text-danger">Delete</Button>
-						</form>
-					</li>
-				{/each}
-			</ul>
-		{/if}
-		<form method="POST" action="?/createStation" use:enhance class="mt-3 flex items-center gap-2">
-			<Input name="name" required maxlength={40} placeholder="Kitchen" aria-label="New station name" class="h-8" />
-			<Button type="submit" size="sm" class="h-8">Add station</Button>
-		</form>
-	</div>
-
 	<div class="mt-8 flex items-center justify-between gap-4">
 		<div>
 			<h2 class="text-base font-semibold text-ink">Venues</h2>

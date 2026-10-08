@@ -11,6 +11,7 @@
 		[
 			{ seg: 'menu', label: 'Menu', show: true },
 			{ seg: 'addons', label: 'Add-ons', show: true },
+			{ seg: 'stations', label: 'Stations', show: true },
 			{ seg: 'settings', label: 'Venues & page', show: data.canEditSettings }
 		].filter((t) => t.show)
 	);
