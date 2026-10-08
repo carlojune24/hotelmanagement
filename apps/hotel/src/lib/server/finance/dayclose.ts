@@ -38,6 +38,7 @@ export async function daySnapshot(hotelId: string, businessDate: string) {
 		'room_revenue',
 		'hall_revenue',
 		'incidental_sale',
+		'dining_revenue',
 		'other_revenue',
 		'deposit'
 	]);

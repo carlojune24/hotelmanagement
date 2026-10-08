@@ -1,0 +1,1 @@
+ALTER TYPE "public"."cash_category" ADD VALUE 'dining_revenue' BEFORE 'deposit';

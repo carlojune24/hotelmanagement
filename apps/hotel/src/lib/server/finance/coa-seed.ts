@@ -64,6 +64,13 @@ export const COA_SEED: CoaSeedAccount[] = [
 	{ code: '4010', name: 'Room Revenue', type: 'income', subtype: 'room_revenue', normalBalance: 'credit' },
 	{ code: '4020', name: 'Function Hall Revenue', type: 'income', subtype: 'hall_revenue', normalBalance: 'credit' },
 	{
+		code: '4040',
+		name: 'Food & Beverage Revenue',
+		type: 'income',
+		subtype: 'other_operating_revenue',
+		normalBalance: 'credit'
+	},
+	{
 		code: '4030',
 		name: 'Other Operating Revenue',
 		type: 'income',
@@ -128,6 +135,7 @@ export const CASH_CATEGORY_TO_COA_CODE: Record<CashCategory, string> = {
 	room_revenue: '4010',
 	hall_revenue: '4020',
 	incidental_sale: '4030',
+	dining_revenue: '4040',
 	deposit: '2040',
 	deposit_refund: '2040',
 	refund: '4090',

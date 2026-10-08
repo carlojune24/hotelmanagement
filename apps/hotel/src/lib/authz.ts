@@ -58,7 +58,11 @@ export const ROLE_CAPS: Record<MembershipRole, string[]> = {
 		// manual cash movements, receivable write-offs, or Finance settings.
 		'payment:*',
 		'shift:*',
-		'finance:read'
+		'finance:read',
+		// Front desk sees the Dining section and runs orders/reservations; editing the menu
+		// itself (`dining:manage`) stays with hotel_admin.
+		'dining:read',
+		'dining:write'
 	],
 	housekeeping: ['housekeeping:*', 'room:read'],
 	accountant: [
@@ -113,6 +117,7 @@ export const PERMISSION_SECTIONS = [
 	'Team & Access',
 	'HR & Employees',
 	'Payroll',
+	'Dining',
 	'Settings'
 ] as const;
 
@@ -172,6 +177,10 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 	{ cap: 'dtr:*', label: 'Manage time records / biometric import', section: 'HR & Employees' },
 
 	{ cap: 'payroll:*', label: 'Run payroll, manage payslips and cash advances', section: 'Payroll' },
+
+	{ cap: 'dining:read', label: 'See the Dining section (menu, orders, reservations)', section: 'Dining' },
+	{ cap: 'dining:write', label: 'Take and update dining orders and reservations', section: 'Dining' },
+	{ cap: 'dining:manage', label: 'Edit the dining menu, add-ons, and floor plan', section: 'Dining' },
 
 	{
 		cap: 'hotel:admin',

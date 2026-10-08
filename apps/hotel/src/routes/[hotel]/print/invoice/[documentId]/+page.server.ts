@@ -2,7 +2,7 @@ import { error } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import { roleCan } from '$lib/authz';
 import { db } from '$lib/server/db/index';
-import { orders } from '$lib/server/db/schema/index';
+import { diningOrders, orders } from '$lib/server/db/schema/index';
 import { parseBranding } from '$lib/server/branding';
 import { getBirSettings, getDocumentForRender } from '$lib/server/finance/documents';
 import type { PageServerLoad } from './$types';
@@ -18,9 +18,15 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 	const isStaff =
 		(locals.user?.isPlatformAdmin ?? false) ||
 		(locals.role ? roleCan(locals.role.capabilities, 'folio:read') : false);
-	if (!isStaff) {
+	// Dining staff may open the receipts and invoices of restaurant sales without folio access.
+	const isDiningStaff =
+		Boolean(rendered.document.diningOrderId) &&
+		(locals.role ? roleCan(locals.role.capabilities, 'dining:read') : false);
+
+	if (!isStaff && !isDiningStaff) {
 		const token = url.searchParams.get('t');
 		const orderId = rendered.document.orderId;
+		const diningOrderId = rendered.document.diningOrderId;
 		const stored = orderId
 			? (
 					await db
@@ -29,7 +35,15 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 						.where(eq(orders.id, orderId))
 						.limit(1)
 				)[0]?.token
-			: null;
+			: diningOrderId
+				? (
+						await db
+							.select({ token: diningOrders.accessToken })
+							.from(diningOrders)
+							.where(eq(diningOrders.id, diningOrderId))
+							.limit(1)
+					)[0]?.token
+				: null;
 		if (!token || !stored || token !== stored) error(403, 'This document link is not valid.');
 	}
 

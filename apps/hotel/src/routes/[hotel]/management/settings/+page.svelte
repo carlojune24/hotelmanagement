@@ -5,7 +5,6 @@
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import PaletteIcon from '@lucide/svelte/icons/palette';
 	import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
-	import UtensilsIcon from '@lucide/svelte/icons/utensils';
 	import ClockIcon from '@lucide/svelte/icons/clock';
 	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
 	import GemIcon from '@lucide/svelte/icons/gem';
@@ -45,12 +44,6 @@
 			icon: PartyPopperIcon,
 			label: 'Function hall',
 			desc: 'The event space you rent by the hour, its pricing, and included services.'
-		},
-		{
-			href: 'dining',
-			icon: UtensilsIcon,
-			label: 'Dining',
-			desc: 'Restaurants, bars, and menu photos shown on your public "Dining" page.'
 		},
 		{
 			href: 'check-in-out',

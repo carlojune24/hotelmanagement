@@ -1,5 +1,5 @@
 import { relations, sql } from 'drizzle-orm';
-import { bigint, boolean, check, index, integer, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, index, integer, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, deletedAt, pk, updatedAt } from './_shared';
 import { hotels } from './hotels';
 import { bookings, hallBookings, payments } from './bookings';
@@ -101,9 +101,21 @@ export const folioCharges = pgTable(
 		voidedByUserId: uuid('voided_by_user_id').references(() => users.id, { onDelete: 'set null' }),
 		voidReason: text('void_reason'),
 		addedByUserId: uuid('added_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		/** What kind of charge this is when it is not a plain catalog item: `'dining'` for a restaurant
+		 *  order charged to the room. Null for everything else (so existing lines are untouched). */
+		source: text('source'),
+		/** The `dining_orders` row a `source = 'dining'` line was charged for. Plain uuid (no FK), same
+		 *  posture as `payments.folio_id`, to avoid a hard dependency on the dining schema. */
+		diningOrderId: uuid('dining_order_id'),
 		createdAt: createdAt()
 	},
-	(t) => [index('folio_charges_folio_idx').on(t.folioId)]
+	(t) => [
+		index('folio_charges_folio_idx').on(t.folioId),
+		// An order can sit on a folio once at a time (a voided line frees it to be charged again).
+		uniqueIndex('folio_charges_one_live_per_dining_order_idx')
+			.on(t.diningOrderId)
+			.where(sql`dining_order_id is not null and voided_at is null`)
+	]
 );
 
 export const amenityItemsRelations = relations(amenityItems, ({ one, many }) => ({
@@ -149,6 +161,9 @@ export const paymentAllocations = pgTable(
 			onDelete: 'cascade'
 		}),
 		amountCentavos: bigint('amount_centavos', { mode: 'number' }).notNull(),
+		/** The part of this room's share that settled restaurant charges (revenue is posted as dining,
+		 *  not room). Zero when nothing dining was owed on the room. */
+		diningCentavos: bigint('dining_centavos', { mode: 'number' }).notNull().default(0),
 		createdAt: createdAt()
 	},
 	(t) => [

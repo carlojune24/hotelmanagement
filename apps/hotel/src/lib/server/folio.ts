@@ -5,6 +5,7 @@ import { db } from './db/index';
 import {
 	amenityItems,
 	bookings,
+	diningOrders,
 	folioCharges,
 	folios,
 	functionHalls,
@@ -642,6 +643,21 @@ export async function voidFolioCharge(
 				voidReason: reason?.trim() || null
 			})
 			.where(eq(folioCharges.id, chargeId));
+
+		// A restaurant order charged to this room goes back to unpaid, so the cashier can charge
+		// it again or take payment another way. Same transaction: the bill and the order never disagree.
+		if (charge.diningOrderId) {
+			await tx
+				.update(diningOrders)
+				.set({ paymentStatus: 'unpaid', bookingId: null, roomLabel: null, folioChargeId: null, updatedAt: new Date() })
+				.where(
+					and(
+						eq(diningOrders.id, charge.diningOrderId),
+						eq(diningOrders.hotelId, hotelId),
+						eq(diningOrders.paymentStatus, 'room_charged')
+					)
+				);
+		}
 	});
 
 	await writeAudit({

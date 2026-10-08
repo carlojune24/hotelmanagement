@@ -11,7 +11,10 @@ export const emailType = pgEnum('email_type', [
 	'guest_message_reply',
 	'staff_invite',
 	'review_requested',
-	'payment_link'
+	'payment_link',
+	'dining_reservation',
+	'dining_order',
+	'dining_order_ready'
 ]);
 
 /** Delivery outcome as reported by the transport. `sent` means the transport

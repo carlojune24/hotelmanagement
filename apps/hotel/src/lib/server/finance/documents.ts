@@ -4,6 +4,9 @@ import { db } from '../db/index';
 import {
 	birSettings,
 	bookings,
+	diningOrderItemAddons,
+	diningOrderItems,
+	diningOrders,
 	documentSeries,
 	documents,
 	folios,
@@ -956,6 +959,265 @@ export async function issueOfficialReceipt(
 		after: { documentId: row.id, formattedNo: row.formattedNo }
 	});
 	return row;
+}
+
+// ---------------------------------------------------------------------------
+// Restaurant sales (dining orders)
+// ---------------------------------------------------------------------------
+
+export interface DiningBillTo {
+	name?: string | null;
+	address?: string | null;
+	tin?: string | null;
+}
+
+/**
+ * The body of an Invoice or Official Receipt for one dining order: its dishes as the lines
+ * (add-ons folded into the description), the VATable / VAT-exempt split, the VAT inside the
+ * VAT-inclusive prices, and for a receipt the payment and change. Lines come from the order's
+ * own snapshotted items, so a later menu edit can't change a reprint.
+ */
+export async function buildDiningSnapshot(
+	hotelId: string,
+	orderId: string,
+	type: DocType,
+	opts: { billTo?: DiningBillTo; appliedToInvoiceNo?: string | null } = {}
+): Promise<DocumentSnapshot> {
+	const [hotel, s] = await Promise.all([hotelIdentity(hotelId), getBirSettings(hotelId)]);
+	const base = baseSnapshot(hotel, s);
+
+	const [order] = await db
+		.select()
+		.from(diningOrders)
+		.where(and(eq(diningOrders.id, orderId), eq(diningOrders.hotelId, hotelId)))
+		.limit(1);
+	if (!order) throw new DocumentError('Order not found.');
+
+	const items = await db
+		.select()
+		.from(diningOrderItems)
+		.where(eq(diningOrderItems.orderId, order.id))
+		.orderBy(asc(diningOrderItems.sortOrder));
+	const addons = items.length
+		? await db
+				.select()
+				.from(diningOrderItemAddons)
+				.where(inArray(diningOrderItemAddons.orderItemId, items.map((i) => i.id)))
+		: [];
+
+	const lines: DocumentSnapshotLine[] = items.map((i) => {
+		const extras = addons.filter((a) => a.orderItemId === i.id).map((a) => a.name);
+		return {
+			description: extras.length ? `${i.name} (${extras.join(', ')})` : i.name,
+			quantity: i.quantity,
+			unitPriceCentavos: i.unitPriceCentavos + i.addonsCentavos,
+			amountCentavos: i.lineTotalCentavos,
+			vatable: i.taxable
+		};
+	});
+
+	const vatableGross = items.filter((i) => i.taxable).reduce((sum, i) => sum + i.lineTotalCentavos, 0);
+	const exemptGross = items.filter((i) => !i.taxable).reduce((sum, i) => sum + i.lineTotalCentavos, 0);
+	const vat = items.reduce((sum, i) => sum + i.vatCentavos, 0);
+	const gross = order.totalCentavos;
+	const paid = order.paymentStatus === 'paid';
+	const isInvoice = type === 'invoice';
+
+	return {
+		...base,
+		document: {
+			type,
+			typeLabel: TYPE_LABEL[type],
+			formattedNo: '',
+			issuedAtIso: '',
+			businessDate: order.businessDate ?? businessDateFor(hotel.timezone),
+			preparedBy: null,
+			isReprint: false
+		},
+		billTo: {
+			name: opts.billTo?.name?.trim() || order.guestName || null,
+			address: opts.billTo?.address?.trim() || null,
+			tin: opts.billTo?.tin?.trim() || null
+		},
+		reference: {
+			folioRef: null,
+			bookingRef: null,
+			stayDates: null,
+			orderRef: order.code,
+			appliedToInvoiceNo: opts.appliedToInvoiceNo ?? null
+		},
+		lines,
+		totals: {
+			vatableSalesCentavos: vatableGross - vat,
+			vatExemptSalesCentavos: exemptGross,
+			zeroRatedSalesCentavos: 0,
+			vatCentavos: vat,
+			grossCentavos: gross,
+			lessPaymentsCentavos: isInvoice ? (paid ? gross : 0) : null,
+			balanceDueCentavos: isInvoice ? (paid ? 0 : gross) : null,
+			amountPaidCentavos: isInvoice ? null : gross,
+			paymentMethod: isInvoice ? null : (METHOD_LABEL[order.paymentMethod ?? ''] ?? order.paymentMethod ?? null),
+			paymentReferenceNo: null,
+			tenderedCentavos: isInvoice ? null : order.tenderedCentavos,
+			changeCentavos: isInvoice ? null : order.changeCentavos,
+			balanceCarriedCentavos: null
+		},
+		amountInWords: amountInWords(gross)
+	};
+}
+
+/**
+ * Issues (or returns the already-issued) Invoice or Official Receipt for a dining order.
+ * Idempotent per order and type. A receipt needs a paid order; an invoice can be issued any
+ * time before cancellation (a bill the guest or a company asks for). The serial comes from
+ * the hotel's active BIR series, so the range is consumed gaplessly like any other document.
+ */
+export async function issueDiningDocument(
+	hotelId: string,
+	orderId: string,
+	type: DocType,
+	actor: SessionUser | null,
+	opts: { billTo?: DiningBillTo } = {}
+): Promise<IssuedDocument> {
+	const [existing] = await db
+		.select()
+		.from(documents)
+		.where(
+			and(
+				eq(documents.hotelId, hotelId),
+				eq(documents.diningOrderId, orderId),
+				eq(documents.type, type),
+				eq(documents.status, 'issued')
+			)
+		)
+		.limit(1);
+	if (existing) return existing;
+
+	const [order] = await db
+		.select({ status: diningOrders.status, paymentStatus: diningOrders.paymentStatus })
+		.from(diningOrders)
+		.where(and(eq(diningOrders.id, orderId), eq(diningOrders.hotelId, hotelId)))
+		.limit(1);
+	if (!order) throw new DocumentError('Order not found.');
+	if (order.status === 'cancelled') throw new DocumentError('A cancelled order cannot be invoiced or receipted.');
+	if (type === 'official_receipt' && order.paymentStatus !== 'paid') {
+		throw new DocumentError('Take payment before issuing an official receipt.');
+	}
+
+	// A receipt references the order's Invoice if one was issued; it never issues one itself.
+	let appliesToDocumentId: string | null = null;
+	let appliedToInvoiceNo: string | null = null;
+	if (type === 'official_receipt') {
+		const [inv] = await db
+			.select({ id: documents.id, formattedNo: documents.formattedNo })
+			.from(documents)
+			.where(
+				and(
+					eq(documents.hotelId, hotelId),
+					eq(documents.diningOrderId, orderId),
+					eq(documents.type, 'invoice'),
+					eq(documents.status, 'issued')
+				)
+			)
+			.limit(1);
+		if (inv) {
+			appliesToDocumentId = inv.id;
+			appliedToInvoiceNo = inv.formattedNo;
+		}
+	}
+
+	const settings = await getBirSettings(hotelId);
+	const padWidth = settings?.serialPadWidth ?? 6;
+	const snapshot = await buildDiningSnapshot(hotelId, orderId, type, { billTo: opts.billTo, appliedToInvoiceNo });
+
+	const row = await db.transaction(async (tx) => {
+		const alloc = await allocateSerial(tx, hotelId, type, padWidth);
+		const [series] = await tx.select().from(documentSeries).where(eq(documentSeries.id, alloc.seriesId)).limit(1);
+		snapshot.document.formattedNo = alloc.formattedNo;
+		snapshot.document.issuedAtIso = new Date().toISOString();
+		snapshot.document.preparedBy = actor?.name ?? null;
+		if (series) fillSerialRange(snapshot, series);
+
+		const [inserted] = await tx
+			.insert(documents)
+			.values({
+				hotelId,
+				type,
+				seriesId: alloc.seriesId,
+				serialNo: alloc.serialNo,
+				formattedNo: alloc.formattedNo,
+				diningOrderId: orderId,
+				appliesToDocumentId,
+				billToName: snapshot.billTo.name,
+				billToAddress: snapshot.billTo.address,
+				billToTin: snapshot.billTo.tin,
+				snapshot,
+				issuedByUserId: actor?.id ?? null
+			})
+			.returning();
+		return inserted!;
+	});
+
+	await writeAudit({
+		hotelId,
+		actor,
+		action: type === 'invoice' ? 'bir.issue_invoice' : 'bir.issue_official_receipt',
+		entityType: 'dining_order',
+		entityId: orderId,
+		after: { documentId: row.id, formattedNo: row.formattedNo }
+	});
+	return row;
+}
+
+/** The live (issued) documents of a dining order, for showing "Receipt OR-000123" on a card. */
+export async function listDiningOrderDocuments(
+	hotelId: string,
+	orderId: string
+): Promise<{ id: string; type: DocType; formattedNo: string }[]> {
+	return db
+		.select({ id: documents.id, type: documents.type, formattedNo: documents.formattedNo })
+		.from(documents)
+		.where(and(eq(documents.hotelId, hotelId), eq(documents.diningOrderId, orderId), eq(documents.status, 'issued')))
+		.orderBy(asc(documents.issuedAt));
+}
+
+/** Live documents for many dining orders at once (the board shows each card's receipt number). */
+export async function listDiningDocumentsForOrders(
+	hotelId: string,
+	orderIds: string[]
+): Promise<Record<string, { id: string; type: DocType; formattedNo: string }[]>> {
+	const out: Record<string, { id: string; type: DocType; formattedNo: string }[]> = {};
+	if (orderIds.length === 0) return out;
+	const rows = await db
+		.select({ orderId: documents.diningOrderId, id: documents.id, type: documents.type, formattedNo: documents.formattedNo })
+		.from(documents)
+		.where(and(eq(documents.hotelId, hotelId), inArray(documents.diningOrderId, orderIds), eq(documents.status, 'issued')))
+		.orderBy(asc(documents.issuedAt));
+	for (const r of rows) (out[r.orderId!] ??= []).push({ id: r.id, type: r.type, formattedNo: r.formattedNo });
+	return out;
+}
+
+/** Cancels the live Official Receipt of a dining order whose payment was voided, so no
+ *  receipt stays in force for money that was reversed. The serial is kept (BIR). */
+export async function cancelDiningReceipt(
+	hotelId: string,
+	orderId: string,
+	reason: string,
+	actor: SessionUser | null
+): Promise<void> {
+	const [doc] = await db
+		.select({ id: documents.id })
+		.from(documents)
+		.where(
+			and(
+				eq(documents.hotelId, hotelId),
+				eq(documents.diningOrderId, orderId),
+				eq(documents.type, 'official_receipt'),
+				eq(documents.status, 'issued')
+			)
+		)
+		.limit(1);
+	if (doc) await cancelDocument(hotelId, doc.id, reason, actor);
 }
 
 // ---------------------------------------------------------------------------

@@ -33,6 +33,7 @@
 		room_revenue: 'Rooms',
 		hall_revenue: 'Function halls',
 		incidental_sale: 'Incidentals',
+		dining_revenue: 'Dining',
 		other_revenue: 'Other',
 		deposit: 'Deposits'
 	};

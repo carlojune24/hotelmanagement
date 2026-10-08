@@ -2,11 +2,13 @@ import { fail } from '@sveltejs/kit';
 import { z } from 'zod';
 import { requireCap } from '$lib/server/auth/rbac';
 import {
+	PAYMONGO_WEBHOOK_EVENTS,
 	PaymongoConnectionError,
 	connectPaymongo,
 	disconnectPaymongo,
 	getPaymongoConnection,
-	reconnectPaymongo
+	reconnectPaymongo,
+	testWebhookReachable
 } from '$lib/server/paymongo/connection';
 import {
 	EmailSettingsError,
@@ -15,6 +17,7 @@ import {
 	saveEmailSettings,
 	sendTestEmail
 } from '$lib/server/email/settings';
+import { WEBHOOK_PATH, originOfWebhookUrl } from '$lib/server/paymongo/webhook-url';
 import { SecretsError } from '$lib/server/secrets';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -31,6 +34,9 @@ export const load: PageServerLoad = async ({ locals }) => {
 	]);
 	return {
 		paymongo: paymongo ? { ...paymongo, connectedAt: paymongo.connectedAt.toISOString() } : null,
+		webhookEvents: PAYMONGO_WEBHOOK_EVENTS,
+		webhookPath: `${WEBHOOK_PATH}/${locals.hotel!.slug}`,
+		publicUrl: originOfWebhookUrl(paymongo?.webhookUrl ?? null),
 		email: email.settings,
 		platformEmailConfigured: email.platformConfigured,
 		userEmail: locals.user?.email ?? ''
@@ -58,10 +64,16 @@ const emailSchema = z.object({
 export const actions: Actions = {
 	connectPaymongo: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
-		const secretKey = String((await event.request.formData()).get('secretKey') ?? '');
+		const formData = await event.request.formData();
+		const secretKey = String(formData.get('secretKey') ?? '');
 		if (!secretKey.trim()) return fail(400, { error: 'Paste the PayMongo secret key.' });
 		try {
-			const { mode } = await connectPaymongo(event.locals.hotel!.id, secretKey, event.locals.user);
+			const { mode } = await connectPaymongo(
+				event.locals.hotel!.id,
+				secretKey,
+				event.locals.user,
+				String(formData.get('publicUrl') ?? '')
+			);
 			return {
 				ok:
 					mode === 'live'
@@ -78,8 +90,22 @@ export const actions: Actions = {
 	reconnectPaymongo: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
 		try {
-			await reconnectPaymongo(event.locals.hotel!.id, event.locals.user);
-			return { ok: 'Webhook re-pointed to this server.' };
+			const publicUrl = String((await event.request.formData()).get('publicUrl') ?? '');
+			await reconnectPaymongo(event.locals.hotel!.id, event.locals.user, publicUrl);
+			return { ok: 'Webhook re-pointed to the new address.' };
+		} catch (e) {
+			const msg = userFacing(e);
+			if (msg) return fail(400, { error: msg });
+			throw e;
+		}
+	},
+
+	testWebhook: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		try {
+			const publicUrl = String((await event.request.formData()).get('publicUrl') ?? '');
+			const url = await testWebhookReachable(event.locals.hotel!.id, publicUrl);
+			return { ok: `Reachable — ${url} answers.` };
 		} catch (e) {
 			const msg = userFacing(e);
 			if (msg) return fail(400, { error: msg });

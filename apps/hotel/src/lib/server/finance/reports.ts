@@ -11,6 +11,7 @@ const REVENUE_CATEGORIES = [
 	'room_revenue',
 	'hall_revenue',
 	'incidental_sale',
+	'dining_revenue',
 	'other_revenue'
 ] as const;
 
@@ -203,7 +204,7 @@ export async function revenueBySourceReport(hotelId: string, from: string, to: s
 				gte(cashMovements.businessDate, from),
 				lte(cashMovements.businessDate, to),
 				sql`${cashMovements.voidedAt} is null`,
-				sql`${cashMovements.category} in ('room_revenue','hall_revenue','incidental_sale','other_revenue','deposit')`
+				sql`${cashMovements.category} in ('room_revenue','hall_revenue','incidental_sale','dining_revenue','other_revenue','deposit')`
 			)
 		)
 		.groupBy(cashMovements.category);

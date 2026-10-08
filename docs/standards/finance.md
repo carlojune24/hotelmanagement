@@ -55,7 +55,7 @@ and day-close.
 | `id` | uuid | |
 | `org_ref` | | |
 | `direction` | enum | `in \| out` |
-| `category` | enum | `room_revenue \| hall_revenue \| incidental_sale \| deposit \| deposit_refund \| refund \| other_revenue \| expense \| payroll \| statutory_remittance \| bank_deposit \| transfer_in \| transfer_out \| owner_contribution \| owner_draw \| adjustment` — verbatim mirror of the hotel app's `cash_category` pgEnum (`apps/hotel/src/lib/server/db/schema/finance.ts`); any producing app maps its own domain events onto exactly these |
+| `category` | enum | `room_revenue \| hall_revenue \| incidental_sale \| dining_revenue \| deposit \| deposit_refund \| refund \| other_revenue \| expense \| payroll \| statutory_remittance \| bank_deposit \| transfer_in \| transfer_out \| owner_contribution \| owner_draw \| adjustment` — verbatim mirror of the hotel app's `cash_category` pgEnum (`apps/hotel/src/lib/server/db/schema/finance.ts`); any producing app maps its own domain events onto exactly these |
 | `account_ref` | `acct_<ULID>` | the cash/bank/e-wallet account moved |
 | `counterparty_ref` | `cpty_<ULID>` \| null | guest, vendor, employee, agency |
 | `amount` | `{ amount_minor, currency }` | always positive; `direction` carries the sign |

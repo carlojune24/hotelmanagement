@@ -4,6 +4,8 @@ import { darken, lighten, wovenPatternDataUri } from '$lib/woven-pattern';
 import { listFunctionHalls } from '$lib/server/hall-availability';
 import { listApprovedReviews } from '$lib/server/reviews';
 import { listDiningItems, parseDiningConfig } from '$lib/server/dining';
+import { listPublicMenus } from '$lib/server/dining-menu';
+import { expirePendingDiningOrders, loadOnlineOrderingConfig } from '$lib/server/dining-online';
 import { listHotelAmenities } from '$lib/server/availability';
 import { expirePendingOrders } from '$lib/server/orders';
 import type { LayoutServerLoad } from './$types';
@@ -27,17 +29,28 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 		console.error('guest layout: expirePendingOrders failed', e)
 	);
 
-	const [functionHalls, reviews, diningItems, hotelAmenities] = await Promise.all([
+	// Same for online dining orders whose payment never arrived.
+	void expirePendingDiningOrders({ hotelId }).catch((e) => console.error('guest layout: expirePendingDiningOrders failed', e));
+
+	const [functionHalls, reviews, diningItems, hotelAmenities, diningMenus] = await Promise.all([
 		listFunctionHalls(hotelId),
 		listApprovedReviews(hotelId),
 		listDiningItems(hotelId),
-		listHotelAmenities(hotelId)
+		listHotelAmenities(hotelId),
+		listPublicMenus(hotelId)
 	]);
 	const dining = parseDiningConfig(locals.hotel.config);
+
+	// Venues a guest can really order from right now (switched on, hours set, a way to pay).
+	const orderableVenueIds: string[] = [];
+	for (const v of diningItems.filter((d) => d.onlineOrdersEnabled)) {
+		if ((await loadOnlineOrderingConfig(hotelId, v.id))?.enabled) orderableVenueIds.push(v.id);
+	}
 
 	return {
 		hotel: {
 			slug: locals.hotel.slug,
+			timezone: locals.hotel.timezone,
 			name: locals.hotel.name,
 			city: locals.hotel.city,
 			currency: locals.hotel.currency,
@@ -59,6 +72,8 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 		reviews,
 		diningItems,
 		dining,
+		diningMenus,
+		orderableVenueIds,
 		hotelAmenities
 	};
 };

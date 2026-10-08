@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import { Textarea } from '$lib/components/ui/textarea/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
@@ -30,16 +31,6 @@
 </script>
 
 <div class="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6">
-	<div class="mb-6 flex items-center justify-between">
-		<div>
-			<h1 class="text-xl font-semibold tracking-tight text-ink">Dining</h1>
-			<p class="text-sm text-ink-muted">
-				Restaurants, bars, and cafés shown on your public "Dining" page.
-			</p>
-		</div>
-		<Button variant="outline" href="{base}/settings">← Settings</Button>
-	</div>
-
 	<div class="rounded-xl border border-border bg-surface p-4 shadow-sm">
 		<h2 class="text-base font-semibold text-ink">Intro block</h2>
 		<p class="text-sm text-ink-muted">
@@ -69,14 +60,7 @@
 			</div>
 			<div>
 				<Label for="introBody">Intro paragraph (optional)</Label>
-				<textarea
-					id="introBody"
-					name="introBody"
-					rows="3"
-					placeholder="Indulge in exceptional dining — whether you're craving a freshly brewed coffee, a delightful meal, or handcrafted cocktails, we offer the perfect destination for every occasion."
-					class="mt-1 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm"
-					>{data.dining.introBody ?? ''}</textarea
-				>
+				<Textarea id="introBody" name="introBody" rows={3} placeholder="Indulge in exceptional dining — whether you're craving a freshly brewed coffee, a delightful meal, or handcrafted cocktails, we offer the perfect destination for every occasion." class="mt-1" value={data.dining.introBody ?? ''} />
 			</div>
 			<Button type="submit" size="sm">Save intro block</Button>
 		</form>
@@ -141,7 +125,7 @@
 								<Button
 									variant="ghost"
 									size="icon"
-									href="{base}/settings/dining/{item.id}"
+									href="{base}/dining/settings/{item.id}"
 									aria-label="Edit {item.title}"
 								>
 									<PencilIcon class="size-4" />
@@ -219,13 +203,7 @@
 			</div>
 			<div>
 				<Label for="description">Description</Label>
-				<textarea
-					id="description"
-					name="description"
-					rows="3"
-					placeholder="All-day dining with Filipino and international favorites."
-					class="mt-1 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm"
-				></textarea>
+				<Textarea id="description" name="description" rows={3} placeholder="All-day dining with Filipino and international favorites." class="mt-1" />
 			</div>
 			<div>
 				<Label for="operatingHours">Operating hours (optional)</Label>

@@ -716,6 +716,52 @@
 	color: var(--hotel-accent-deep);
 	flex-shrink: 0;
 }
+/* Dining — a venue's printed-menu block: category heading, then ruled rows (name + muted
+   description left, price in the manifest register right-aligned). Flat, no shadow. */
+.storefront-menu {
+	margin-top: 2.5rem;
+}
+.storefront-menu-title {
+	font-size: 1.5rem;
+	line-height: 1.15;
+}
+.storefront-menu-category {
+	margin-top: 1.75rem;
+	font-size: 1.125rem;
+	line-height: 1.2;
+	padding-bottom: 0.5rem;
+	border-bottom: 1px solid var(--ledger-ink);
+}
+.storefront-menu-row {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 1.5rem;
+	padding: 0.875rem 0;
+	border-bottom: 1px solid var(--ledger-rule);
+}
+.storefront-menu-name {
+	font-weight: 500;
+	color: var(--ledger-ink);
+}
+.storefront-menu-desc {
+	margin-top: 0.125rem;
+	max-width: 52ch;
+	font-size: 0.875rem;
+	color: var(--ledger-ink-muted);
+}
+.storefront-menu-row.is-sold-out .storefront-menu-name,
+.storefront-menu-row.is-sold-out .ledger-data {
+	color: var(--ledger-ink-muted);
+	text-decoration: line-through;
+}
+.storefront-menu-flag {
+	margin-left: 0.5rem;
+	font-size: 0.75rem;
+	font-weight: 400;
+	color: var(--ledger-ink-muted);
+	text-decoration: none;
+}
 .storefront-amenity-note {
 	color: var(--ledger-ink-muted);
 }
@@ -2173,4 +2219,329 @@
 .storefront-room-card-rates-count {
 	color: var(--hotel-accent-deep);
 	font-weight: 500;
+}
+
+/* Dining reservation ticket: print only the ticket itself. */
+@media print {
+	.no-print {
+		display: none !important;
+	}
+	.woven-ledger .ledger-ticket-frame {
+		box-shadow: none;
+		-webkit-print-color-adjust: exact;
+		print-color-adjust: exact;
+	}
+}
+
+/* Dining reservation: time slots as a radio group drawn like ruled ledger cells. */
+.dining-slot-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr));
+	gap: 0.5rem;
+}
+.dining-slot {
+	position: relative;
+	display: block;
+}
+.dining-slot input {
+	position: absolute;
+	inset: 0;
+	opacity: 0;
+	cursor: pointer;
+}
+.dining-slot span {
+	display: flex;
+	min-height: 2.75rem;
+	align-items: center;
+	justify-content: center;
+	border: 1px solid var(--ledger-rule);
+	border-radius: 2px;
+	background: var(--ledger-paper);
+	color: var(--ledger-ink);
+	font-size: 0.875rem;
+	transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+.dining-slot input:hover:not(:disabled) + span {
+	border-color: var(--hotel-accent);
+}
+.dining-slot input:checked + span {
+	background: var(--hotel-accent);
+	border-color: var(--hotel-accent);
+	color: var(--ledger-paper);
+}
+.dining-slot input:focus-visible + span {
+	outline: 2px solid var(--hotel-accent);
+	outline-offset: 2px;
+}
+.dining-slot input:disabled {
+	cursor: not-allowed;
+}
+.dining-slot input:disabled + span {
+	background: transparent;
+	color: var(--ledger-ink-muted);
+	text-decoration: line-through;
+}
+
+/* Dining online ordering: ruled dish rows that open inline, a ledger-style order panel, a floating
+   summary pill on phones. Flat (no shadows), like the rest of the guest world. */
+.order-chip {
+	min-height: 2.25rem;
+	padding: 0 0.875rem;
+	border: 1px solid var(--ledger-rule);
+	border-radius: 2px;
+	background: var(--ledger-paper);
+	color: var(--ledger-ink);
+	font-size: 0.875rem;
+	cursor: pointer;
+}
+.order-chip:hover {
+	border-color: var(--hotel-accent);
+}
+.order-chip.is-on {
+	background: var(--hotel-accent);
+	border-color: var(--hotel-accent);
+	color: var(--ledger-paper);
+}
+.order-chip:focus-visible {
+	outline: 2px solid var(--hotel-accent);
+	outline-offset: 2px;
+}
+.order-dish {
+	border-bottom: 1px solid var(--ledger-rule);
+}
+.order-row {
+	display: flex;
+	width: 100%;
+	align-items: baseline;
+	gap: 1rem;
+	padding: 0.875rem 0;
+	text-align: left;
+	cursor: pointer;
+	background: none;
+	border: 0;
+	color: inherit;
+}
+.order-row:disabled {
+	cursor: not-allowed;
+}
+.order-dish.is-sold-out .storefront-menu-name,
+.order-dish.is-sold-out .ledger-data {
+	color: var(--ledger-ink-muted);
+	text-decoration: line-through;
+}
+.order-row:hover:not(:disabled) .storefront-menu-name {
+	color: var(--hotel-accent-deep);
+}
+.order-row:focus-visible {
+	outline: 2px solid var(--hotel-accent);
+	outline-offset: 2px;
+}
+.order-add {
+	display: inline-flex;
+	width: 1.75rem;
+	height: 1.75rem;
+	flex-shrink: 0;
+	align-items: center;
+	justify-content: center;
+	border: 1px solid var(--hotel-accent);
+	border-radius: 2px;
+	color: var(--hotel-accent-deep);
+	font-size: 1.125rem;
+	line-height: 1;
+}
+.order-addons {
+	display: grid;
+	gap: 1rem;
+	margin: 0 0 1rem;
+	padding: 1rem;
+	background: var(--ledger-paper-2);
+	border-top: 1px solid var(--ledger-rule);
+}
+.order-choice {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.5rem 0.75rem;
+	border: 1px solid var(--ledger-rule);
+	border-radius: 2px;
+	background: var(--ledger-paper);
+	font-size: 0.875rem;
+	font-weight: 400;
+	color: var(--ledger-ink);
+}
+.order-choice.is-off {
+	opacity: 0.5;
+}
+.order-stepper {
+	display: inline-flex;
+	align-items: center;
+	border: 1px solid var(--ledger-rule);
+	border-radius: 2px;
+	background: var(--ledger-paper);
+}
+.order-stepper button {
+	display: inline-flex;
+	width: 2rem;
+	height: 2rem;
+	align-items: center;
+	justify-content: center;
+	background: none;
+	border: 0;
+	cursor: pointer;
+	color: var(--ledger-ink);
+}
+.order-stepper button:hover {
+	color: var(--hotel-accent-deep);
+}
+.order-stepper > span {
+	min-width: 1.75rem;
+	text-align: center;
+	font-size: 0.875rem;
+}
+.order-ledger {
+	align-self: start;
+	padding: 1rem 1.125rem 1.25rem;
+	border: 1px solid var(--ledger-rule);
+	background: var(--ledger-paper);
+}
+@media (min-width: 1024px) {
+	.order-ledger {
+		position: sticky;
+		top: 5.5rem;
+	}
+}
+.order-line {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.75rem;
+	padding: 0.875rem 0;
+	border-bottom: 1px solid var(--ledger-rule);
+}
+.order-remove {
+	display: inline-flex;
+	width: 1.5rem;
+	height: 1.5rem;
+	align-items: center;
+	justify-content: center;
+	background: none;
+	border: 0;
+	cursor: pointer;
+	color: var(--ledger-ink-muted);
+}
+.order-remove:hover {
+	color: var(--ledger-danger);
+}
+.order-total {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	margin-top: 0.875rem;
+	padding-top: 0.75rem;
+	border-top: 1px solid var(--ledger-ink);
+	font-weight: 500;
+}
+.order-pay-option {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.75rem;
+	padding: 0.875rem 1rem;
+	border: 1px solid var(--ledger-rule);
+	border-radius: 2px;
+	background: var(--ledger-paper);
+	cursor: pointer;
+}
+.order-pay-option:has(input:checked) {
+	border-color: var(--hotel-accent);
+	background: var(--ledger-paper-2);
+}
+.order-pay-option input {
+	margin-top: 0.25rem;
+	accent-color: var(--hotel-accent);
+}
+.order-pay-option:has(input:focus-visible) {
+	outline: 2px solid var(--hotel-accent);
+	outline-offset: 2px;
+}
+.order-pill {
+	position: fixed;
+	right: 1rem;
+	bottom: 1rem;
+	z-index: 40;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.625rem;
+	min-height: 3rem;
+	padding: 0 1.125rem;
+	border: 1px solid var(--hotel-accent);
+	border-radius: 2px;
+	background: var(--hotel-accent);
+	color: var(--ledger-paper);
+	font-size: 0.875rem;
+	text-decoration: none;
+}
+
+/* Order tracking: a ruled progress strip (dots joined by a hairline) and a message thread. */
+.order-progress {
+	position: relative;
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.order-progress li {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.5rem;
+	text-align: center;
+	color: var(--ledger-ink-muted);
+	font-size: 0.8125rem;
+}
+.order-progress li::before {
+	content: '';
+	position: absolute;
+	top: 0.5rem;
+	left: -50%;
+	width: 100%;
+	height: 1px;
+	background: var(--ledger-rule);
+}
+.order-progress li:first-child::before {
+	display: none;
+}
+.order-progress li.is-done::before {
+	background: var(--hotel-accent);
+}
+.order-progress-dot {
+	position: relative;
+	z-index: 1;
+	width: 1rem;
+	height: 1rem;
+	border: 1px solid var(--ledger-rule);
+	border-radius: 50%;
+	background: var(--ledger-paper);
+}
+.order-progress li.is-done .order-progress-dot {
+	background: var(--hotel-accent);
+	border-color: var(--hotel-accent);
+}
+.order-progress li.is-current .order-progress-dot {
+	outline: 2px solid var(--hotel-accent);
+	outline-offset: 2px;
+}
+.order-progress li.is-done {
+	color: var(--ledger-ink);
+}
+.order-progress li.is-current .order-progress-label {
+	font-weight: 600;
+}
+.order-message {
+	padding: 0.875rem 0;
+	border-bottom: 1px solid var(--ledger-rule);
+}
+.order-message.is-staff {
+	padding-left: 0.875rem;
+	border-left: 1px solid var(--hotel-accent);
 }
