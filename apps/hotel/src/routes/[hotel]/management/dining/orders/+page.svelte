@@ -15,11 +15,15 @@
 	import NewOrderSheet from './new-order-sheet.svelte';
 	import PayDialog from './pay-dialog.svelte';
 	import OrderCard from './order-card.svelte';
+	import ThreadSheet from './thread-sheet.svelte';
+	import RefundDialog from './refund-dialog.svelte';
+	import BanknoteArrowUpIcon from '@lucide/svelte/icons/banknote-arrow-up';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
 	type Order = PageData['orders'][number];
+	const peso = (c: number) => `₱${(c / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 	const slug = $derived(page.params.hotel!);
 	const base = $derived(`/${slug}/management/dining`);
 
@@ -90,6 +94,15 @@
 		}
 	});
 
+	let threadOpen = $state(false);
+	let threadOrderId = $state<string | null>(null);
+	const threadOrder = $derived(data.orders.find((o) => o.id === threadOrderId) ?? null);
+	let respondFor = $state<Order | null>(null);
+	let refundOpen = $state(false);
+	let refundOrderId = $state<string | null>(null);
+	const refundOrder = $derived([...data.refundDue, ...data.orders].find((o) => o.id === refundOrderId) ?? null);
+	const refundOwed = (o: { totalCentavos: number; refundedCentavos: number }) => Math.max(0, o.totalCentavos - o.refundedCentavos);
+
 	let cancelFor = $state<Order | null>(null);
 	let voidFor = $state<Order | null>(null);
 	let invoiceFor = $state<Order | null>(null);
@@ -110,6 +123,8 @@
 		if (form?.ok) {
 			cancelFor = null;
 			voidFor = null;
+			respondFor = null;
+			refundOpen = false;
 		}
 		const issued = form?.issued as { id: string; type: string; formattedNo: string } | undefined;
 		if (issued) {
@@ -126,6 +141,11 @@
 	<div class="mb-4 flex flex-wrap items-center gap-3">
 		<p class="text-sm text-ink-muted" aria-live="polite">
 			{data.orders.length === 0 ? 'No open orders.' : `${data.orders.length} on the board`}{toPay > 0 ? ` · ${toPay} to pay` : ''}
+			{#if data.awaitingPayment > 0}
+				<span class="ml-1" title="Online orders the guest has not paid for yet. They reach the kitchen once payment is confirmed.">
+					· {data.awaitingPayment} awaiting online payment
+				</span>
+			{/if}
 			<span class="ml-1 text-xs">Updates every 20 seconds.</span>
 		</p>
 		<div class="ml-auto flex flex-wrap items-center gap-2">
@@ -145,6 +165,34 @@
 			{/if}
 		</div>
 	</div>
+
+	{#if data.refundDue.length > 0}
+		<section class="mb-5 rounded-xl border border-border bg-surface" aria-label="Refunds due">
+			<h2 class="flex items-center gap-2 border-b border-border px-4 py-2.5 text-sm font-semibold text-ink">
+				<BanknoteArrowUpIcon class="size-4 text-brand" aria-hidden="true" />
+				Refunds due <span class="font-normal tabular-nums text-ink-muted">· {data.refundDue.length}</span>
+			</h2>
+			<ul class="divide-y divide-border">
+				{#each data.refundDue as o (o.id)}
+					<li class="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-sm">
+						<span class="font-mono font-semibold text-ink">{o.code}</span>
+						<span class="min-w-0 flex-1 truncate text-ink-muted">
+							{o.guestName ?? 'Guest'}{o.guestPhone ? ` · ${o.guestPhone}` : ''} · cancelled{o.refundedCentavos > 0 ? ' · part refunded' : ''}
+						</span>
+						<span class="font-medium tabular-nums text-ink">{peso(refundOwed(o))}</span>
+						{#if o.unreadMessages > 0 || o.source === 'online'}
+							<Button variant="ghost" size="sm" onclick={() => { threadOrderId = o.id; threadOpen = true; }}>Messages{o.unreadMessages > 0 ? ` (${o.unreadMessages})` : ''}</Button>
+						{/if}
+						{#if data.canVoid}
+							<Button size="sm" onclick={() => { refundOrderId = o.id; refundOpen = true; }}>Record refund</Button>
+						{:else}
+							<span class="text-xs text-ink-muted">A manager records the refund</span>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
 
 	{#if data.venues.length === 0 || Object.keys(data.menus).length === 0}
 		<div class="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border p-12 text-center">
@@ -177,6 +225,7 @@
 								{order}
 								{nowMs}
 								{slug}
+								timezone={data.timezone}
 								canWrite={data.canWrite}
 								canVoid={data.canVoid}
 								onadvance={advance}
@@ -185,6 +234,8 @@
 								onvoid={(o) => (voidFor = o)}
 								oninvoice={(o) => (invoiceFor = o)}
 								onissuereceipt={issueReceipt}
+								ontalk={(o) => { threadOrderId = o.id; threadOpen = true; }}
+								onrespond={(o) => (respondFor = o)}
 							/>
 						{:else}
 							<p class="px-2 py-6 text-center text-sm text-ink-muted">{c.hint}</p>
@@ -198,6 +249,35 @@
 
 <NewOrderSheet bind:open={newOpen} {data} defaultVenueId={data.venueId} onplaced={placed} />
 <PayDialog bind:open={payOpen} order={payOrder} shiftOpen={data.shiftOpen} {slug} />
+<ThreadSheet bind:open={threadOpen} order={threadOrder ?? data.refundDue.find((o) => o.id === threadOrderId) ?? null} canWrite={data.canWrite} timezone={data.timezone} />
+<RefundDialog bind:open={refundOpen} order={refundOrder} />
+
+<!-- Answer a guest's request to cancel a paid order -->
+<Dialog.Root open={respondFor !== null} onOpenChange={(o) => { if (!o) respondFor = null; }}>
+	<Dialog.Content class="sm:max-w-md">
+		{#if respondFor}
+			<Dialog.Header>
+				<Dialog.Title>{respondFor.code}: cancellation request</Dialog.Title>
+				<Dialog.Description>
+					{respondFor.guestName ?? 'The guest'} paid {peso(respondFor.totalCentavos)} and asked to cancel{respondFor.cancelRequestNote ? `: “${respondFor.cancelRequestNote}”` : '.'}
+					If you approve, the order is cancelled and the amount appears under Refunds due.
+				</Dialog.Description>
+			</Dialog.Header>
+			<form method="POST" action="?/respondCancel" use:enhance class="space-y-3">
+				<input type="hidden" name="orderId" value={respondFor.id} />
+				<div>
+					<Label for="respMsg">Message to the guest (optional)</Label>
+					<Textarea id="respMsg" name="message" rows={2} maxlength={500} placeholder="A short note they will see on their order page" class="mt-1 min-h-0" />
+				</div>
+				<Dialog.Footer class="gap-2">
+					<Button type="button" variant="ghost" onclick={() => (respondFor = null)}>Not now</Button>
+					<Button type="submit" name="approve" value="false" variant="outline">Decline</Button>
+					<Button type="submit" name="approve" value="true">Approve and cancel</Button>
+				</Dialog.Footer>
+			</form>
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>
 
 <!-- Cancel an unpaid order -->
 <Dialog.Root open={cancelFor !== null} onOpenChange={(o) => { if (!o) cancelFor = null; }}>

@@ -1,5 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq, inArray } from 'drizzle-orm';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+// Refund proof photos written by these tests go to a throwaway folder, never the real uploads directory.
+const uploadsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mmhotel-orders-test-uploads-'));
+process.env.UPLOADS_DIR = uploadsDir;
+const filesIn = (dir: string): string[] =>
+	fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? filesIn(path.join(dir, e.name)) : [e.name])) : [];
 
 /**
  * Live-DB tests for the Orders page's server side (load + form actions): who may do what, the
@@ -102,6 +111,7 @@ describe.skipIf(!hasDb)('dining orders page: load and actions (live DB)', async 
 	afterAll(async () => {
 		if (hotelIds.length) await db.delete(s.hotels).where(inArray(s.hotels.id, hotelIds));
 		if (userId) await db.delete(s.users).where(eq(s.users.id, userId));
+		if (uploadsDir.startsWith(os.tmpdir())) fs.rmSync(uploadsDir, { recursive: true, force: true });
 	});
 
 	it('shows a role only what it may do, and nobody without dining access anything', async () => {
@@ -194,5 +204,105 @@ describe.skipIf(!hasDb)('dining orders page: load and actions (live DB)', async 
 
 		const board = (await page.load({ locals: cashier, url: new URL('http://x/'), depends: () => {} } as never)) as any;
 		expect(board.orders.find((x: any) => x.id === placed.id).documents.map((d: any) => d.type)).toEqual(['invoice']);
+	});
+
+	// ---- online orders: messages, cancellation requests, refunds -------------------------
+
+	const on = await import('$lib/server/dining-online');
+	const o = await import('$lib/server/dining-orders');
+	const online = () =>
+		o.createDiningOrder({ hotelId: hotelA.id, venueId: venueA, orderType: 'takeaway', source: 'online', guestName: 'Online Gina', guestPhone: '09170000000', lines: [{ menuItemId: soda, quantity: 1 }] });
+	const board = (locals: never) => page.load({ locals, url: new URL('http://x/'), depends: () => {} } as never) as Promise<any>;
+	const actWith = (name: string, locals: never, body: Record<string, string>, file?: File) =>
+		page.actions[name]!({
+			locals,
+			request: {
+				formData: async () => {
+					const f = fd(body);
+					if (file) f.set('proof', file);
+					return f;
+				}
+			}
+		} as never) as Promise<any>;
+	const png = () => new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], 'receipt.png', { type: 'image/png' });
+
+	it('opens a guest thread, marks it read, and lets staff reply', async () => {
+		const cashier = asUser(hotelA, CASHIER);
+		const order = await online();
+		await on.postGuestMessage(hotelA.id, order.code, order.accessToken, 'Where do I collect it?');
+		expect((await board(cashier)).orders.find((x: any) => x.id === order.id)).toMatchObject({ unreadMessages: 1, source: 'online' });
+
+		const opened = await act('openThread', cashier, { orderId: order.id });
+		expect(opened.thread.messages.map((m: any) => [m.direction, m.body])).toEqual([['guest', 'Where do I collect it?']]);
+		expect((await board(cashier)).orders.find((x: any) => x.id === order.id).unreadMessages).toBe(0);
+
+		expect((await act('reply', cashier, { orderId: order.id, body: 'At the counter, ground floor.' })).replied).toBe(true);
+		expect((await act('openThread', cashier, { orderId: order.id })).thread.messages.at(-1)).toMatchObject({ direction: 'staff', body: 'At the counter, ground floor.' });
+		expect((await act('reply', cashier, { orderId: order.id, body: '  ' })).status).toBe(400);
+		expect((await act('reply', asUser(hotelA, VIEWER), { orderId: order.id, body: 'hi' }).catch((e) => e)).status).toBe(403);
+		// another hotel can neither read nor answer the thread
+		const intruder = asUser(hotelB, CASHIER);
+		expect((await act('openThread', intruder, { orderId: order.id })).status).toBe(404);
+		expect((await act('reply', intruder, { orderId: order.id, body: 'hi' })).data.error).toMatch(/could not be found/);
+	});
+
+	it('answers a cancellation request: decline keeps the order, approve cancels it and puts the money under refunds due', async () => {
+		const cashier = asUser(hotelA, CASHIER);
+		const order = await online();
+		await act('pay', cashier, { orderId: order.id, method: 'card' });
+		await on.requestDiningCancellation(hotelA.id, order.code, order.accessToken, 'Plans changed');
+		expect((await board(cashier)).orders.find((x: any) => x.id === order.id)).toMatchObject({ cancelRequestNote: 'Plans changed' });
+
+		expect((await act('respondCancel', asUser(hotelA, VIEWER), { orderId: order.id, approve: 'false' }).catch((e) => e)).status).toBe(403);
+		expect((await act('respondCancel', cashier, { orderId: order.id, approve: 'maybe' })).status).toBe(400);
+		const declined = await act('respondCancel', cashier, { orderId: order.id, approve: 'false', message: 'Sorry, it is already being cooked.' });
+		expect(declined.ok).toMatch(/declined/);
+		expect((await board(cashier)).orders.find((x: any) => x.id === order.id)).toMatchObject({ status: 'new', cancelRequestedAt: null });
+
+		await on.requestDiningCancellation(hotelA.id, order.code, order.accessToken, 'Still cannot make it');
+		expect((await act('respondCancel', cashier, { orderId: order.id, approve: 'true' })).ok).toMatch(/Order cancelled/);
+		const after = await board(cashier);
+		expect(after.orders.find((x: any) => x.id === order.id)).toBeUndefined(); // off the live board
+		expect(after.refundDue.find((x: any) => x.id === order.id)).toMatchObject({ code: order.code, totalCentavos: 8_000, refundedCentavos: 0 });
+		expect((await act('respondCancel', cashier, { orderId: order.id, approve: 'true' })).data.error).toMatch(/no cancellation request/);
+	});
+
+	it('records a refund for a manager only, keeps the proof photo, and clears the order from refunds due', async () => {
+		const cashier = asUser(hotelA, CASHIER);
+		const manager = asUser(hotelA, MANAGER);
+		const order = await online();
+		await act('pay', cashier, { orderId: order.id, method: 'card' });
+		await on.requestDiningCancellation(hotelA.id, order.code, order.accessToken, 'x');
+		await act('respondCancel', cashier, { orderId: order.id, approve: 'true' });
+		const refund = (body: Record<string, string>, file?: File, who = manager) => actWith('recordRefund', who, { orderId: order.id, method: 'gcash', ...body }, file);
+
+		expect((await refund({ amountPhp: '30' }, undefined, cashier).catch((e) => e)).status).toBe(403); // a cashier cannot record a refund
+		expect((await refund({ amountPhp: '0' })).status).toBe(400);
+		expect((await refund({ amountPhp: '30', method: 'crypto' })).data.error).toMatch(/how the refund was sent/);
+		expect((await refund({ amountPhp: '30' }, new File(['hello'], 'x.txt', { type: 'text/plain' }))).data.error).toMatch(/JPEG, PNG, WebP, or GIF/);
+
+		// a refused refund must not leave its proof photo behind
+		const before = filesIn(uploadsDir).length;
+		expect((await refund({ amountPhp: '999' }, png())).data.error).toMatch(/At most ₱80\.00/);
+		expect(filesIn(uploadsDir).length).toBe(before);
+
+		const partial = await refund({ amountPhp: '30', referenceNo: 'GC-777', note: 'First part' }, png());
+		expect(partial.ok).toBe('Partial refund recorded.');
+		expect(filesIn(uploadsDir).length).toBe(before + 1); // the proof photo was kept
+		const [row] = await db.select().from(s.diningPayments).where(eq(s.diningPayments.orderId, order.id));
+		expect(row).toMatchObject({ kind: 'refund', amountCentavos: 3_000, method: 'gcash', referenceNo: 'GC-777', provider: 'manual' });
+		expect(row!.proofUrl).toMatch(/^\/uploads\/[0-9a-f-]+\/[0-9A-Za-z]+\.png$/);
+		expect((await board(manager)).refundDue.find((x: any) => x.id === order.id)).toMatchObject({ refundedCentavos: 3_000 }); // still owed ₱50.00
+
+		expect((await refund({ amountPhp: '50', method: 'paymongo_dashboard' })).ok).toBe('Refund recorded. The order is fully refunded.');
+		expect((await board(manager)).refundDue.find((x: any) => x.id === order.id)).toBeUndefined();
+	});
+
+	it('counts online orders still waiting for PayMongo, without putting them on the board', async () => {
+		const waiting = await o.createDiningOrder({ hotelId: hotelA.id, venueId: venueA, orderType: 'takeaway', source: 'online', guestName: 'Waiting', guestPhone: '09175550000', payMode: 'online', initialStatus: 'pending_payment', lines: [{ menuItemId: soda, quantity: 1 }] });
+		const out = await board(asUser(hotelA, CASHIER));
+		expect(out.awaitingPayment).toBeGreaterThanOrEqual(1);
+		expect(out.orders.map((x: any) => x.id)).not.toContain(waiting.id);
+		expect((await board(asUser(hotelB, CASHIER))).awaitingPayment).toBe(0);
 	});
 });

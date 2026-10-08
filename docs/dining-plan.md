@@ -94,3 +94,9 @@ Run `impeccable` for: (a) staff Dining module (operate mode, shadcn), (b) guest 
 - GCash/Maya/card are **recorded manually at the cashier** for now; PayMongo online payment is Phase 4.
 - **BIR documents reuse the existing system**: `documents.dining_order_id`; an Official Receipt is issued automatically on payment (if `autoIssueReceiptOnPayment`), an Invoice can be issued on request (with optional bill-to name/TIN/address); voiding a payment cancels its receipt and the serial is never reused. Printing reuses `/print/receipt/[documentId]` and `/print/invoice/[documentId]`. Dining content: dishes as lines, VATable vs VAT-exempt split, tender and change.
 - Chart-of-accounts subtype for 4040 reuses `other_operating_revenue` (a dining subtype would change the shared `@mm/finance-core` standard; decide separately).
+
+### Phase 4 decisions (confirmed)
+- Online order types: **takeaway pickup** and **pre-order on a table reservation**. Dine-in at the table stays staff-taken; in-house room delivery comes with charge-to-room. Button label: **Order for pickup**.
+- Payment per venue: **online only** or **online or at the restaurant**. Online-only orders reach the kitchen only once PayMongo confirms.
+- Cancellation: guests cancel unpaid orders themselves; for paid orders they **request** and staff answer. **Refunds are manual** (staff send the money back outside the app and record it with a reference and a proof photo) rather than through the PayMongo Refunds API; one-click PayMongo refunds can be added later without changing the data model.
+- Printing: the tracking page prints the ticket only; the BIR receipt is a separate link.

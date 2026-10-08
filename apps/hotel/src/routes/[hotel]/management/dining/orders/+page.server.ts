@@ -1,8 +1,8 @@
 import { fail } from '@sveltejs/kit';
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
-import { diningItems, diningTables } from '$lib/server/db/schema/index';
+import { diningItems, diningOrders, diningTables } from '$lib/server/db/schema/index';
 import { roleCan } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
 import { recordId } from '$lib/rate-validation';
@@ -10,12 +10,24 @@ import { loadVenueMenu } from '$lib/server/dining-menu';
 import {
 	OrderError,
 	cancelDiningOrder,
+	countAwaitingPayment,
 	createDiningOrder,
 	listBoardOrders,
+	listRefundDueOrders,
 	payDiningOrder,
 	setDiningOrderStatus,
 	voidDiningOrderPayment
 } from '$lib/server/dining-orders';
+import {
+	REFUND_METHODS,
+	expirePendingDiningOrders,
+	listOrderMessages,
+	markGuestMessagesRead,
+	postStaffMessage,
+	recordDiningRefund,
+	respondToDiningCancellation
+} from '$lib/server/dining-online';
+import { UploadValidationError, deleteUploadIfOwned, saveUpload } from '$lib/server/uploads';
 import { DocumentError, issueDiningDocument, listDiningDocumentsForOrders } from '$lib/server/finance/documents';
 import { FinanceError } from '$lib/server/finance/shared';
 import { getDefaultOpenShift } from '$lib/server/finance/shifts';
@@ -42,7 +54,11 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 	// table is still visible at the cashier.
 	const today = localParts(new Date(), timezone).date;
 	const servedSince = zonedToUtc(today, '00:00', timezone);
+	// Release online orders whose payment never arrived before showing the board.
+	await expirePendingDiningOrders({ hotelId }).catch((e) => console.error('orders: expirePendingDiningOrders failed', e));
 	const orders = await listBoardOrders(hotelId, { venueId, servedSince });
+	const refundDue = await listRefundDueOrders(hotelId, venueId);
+	const awaitingPayment = await countAwaitingPayment(hotelId, venueId);
 	const documents = await listDiningDocumentsForOrders(hotelId, orders.map((o) => o.id));
 
 	// Everything the New order sheet needs, for every venue that has a menu.
@@ -61,17 +77,24 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 		!!locals.user?.isPlatformAdmin || (!!locals.role && roleCan(locals.role.capabilities, cap));
 	const shift = await getDefaultOpenShift(hotelId).catch(() => null);
 
+	const serialize = <T extends (typeof orders)[number]>(o: T) => ({
+		...o,
+		createdAt: o.createdAt.toISOString(),
+		acceptedAt: o.acceptedAt?.toISOString() ?? null,
+		readyAt: o.readyAt?.toISOString() ?? null,
+		servedAt: o.servedAt?.toISOString() ?? null,
+		pickupAt: o.pickupAt?.toISOString() ?? null,
+		cancelRequestedAt: o.cancelRequestedAt?.toISOString() ?? null
+	});
+
 	return {
 		venues,
 		venueId,
-		orders: orders.map((o) => ({
-			...o,
-			createdAt: o.createdAt.toISOString(),
-			acceptedAt: o.acceptedAt?.toISOString() ?? null,
-			readyAt: o.readyAt?.toISOString() ?? null,
-			servedAt: o.servedAt?.toISOString() ?? null,
-			documents: documents[o.id] ?? []
-		})),
+		orders: orders.map((o) => ({ ...serialize(o), documents: documents[o.id] ?? [] })),
+		/** Cancelled orders the guest had paid for: money still owed back. */
+		refundDue: refundDue.map((o) => serialize(o)),
+		awaitingPayment,
+		timezone,
 		menus,
 		tables: tables.filter((t) => menus[t.venueId]),
 		vatRateBps: locals.hotel!.vatRateBps,
@@ -207,6 +230,106 @@ export const actions: Actions = {
 			await voidDiningOrderPayment({ hotelId: event.locals.hotel!.id, orderId: parsed.data.orderId, reason: parsed.data.reason, actor: event.locals.user });
 			return { ok: 'Payment voided. The receipt was cancelled.' };
 		} catch (e) {
+			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
+			throw e;
+		}
+	},
+
+	/** Opens a guest conversation: returns its messages and marks the guest's as read. */
+	openThread: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'dining:read');
+		const parsed = z.object({ orderId: recordId() }).safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: 'That order could not be found.' });
+		const hotelId = event.locals.hotel!.id;
+		const [o] = await db.select({ id: diningOrders.id }).from(diningOrders).where(and(eq(diningOrders.id, parsed.data.orderId), eq(diningOrders.hotelId, hotelId))).limit(1);
+		if (!o) return fail(404, { error: 'That order could not be found.' });
+		await markGuestMessagesRead(hotelId, o.id);
+		const messages = await listOrderMessages(hotelId, o.id);
+		return { thread: { orderId: o.id, messages: messages.map((m) => ({ id: m.id, direction: m.direction, body: m.body, createdAt: m.createdAt.toISOString() })) } };
+	},
+
+	reply: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'dining:write');
+		const parsed = z
+			.object({ orderId: recordId(), body: z.string().trim().min(1, 'Type a message first.').max(1000, 'Please keep messages under 1,000 characters.') })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: parsed.error.issues[0]?.message ?? 'Type a message first.' });
+		try {
+			await postStaffMessage({ hotelId: event.locals.hotel!.id, orderId: parsed.data.orderId, body: parsed.data.body, actor: event.locals.user });
+			return { replied: true };
+		} catch (e) {
+			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
+			throw e;
+		}
+	},
+
+	/** Approve or decline a guest's request to cancel an order they already paid for. */
+	respondCancel: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'dining:write');
+		const parsed = z
+			.object({ orderId: recordId(), approve: z.enum(['true', 'false']), message: z.string().trim().max(500).optional() })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: 'Choose to approve or decline.' });
+		try {
+			await respondToDiningCancellation({
+				hotelId: event.locals.hotel!.id,
+				orderId: parsed.data.orderId,
+				approve: parsed.data.approve === 'true',
+				message: parsed.data.message,
+				actor: event.locals.user
+			});
+			return { ok: parsed.data.approve === 'true' ? 'Order cancelled. Record the refund when you have sent it.' : 'Request declined. The guest was told.' };
+		} catch (e) {
+			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
+			throw e;
+		}
+	},
+
+	/** Records a refund already sent to the guest (manager action), with its reference and an optional proof photo. */
+	recordRefund: async (event) => {
+		const { user, role } = event.locals;
+		if (!user?.isPlatformAdmin && !(role && (roleCan(role.capabilities, 'dining:manage') || roleCan(role.capabilities, 'hotel:admin')))) {
+			requireCap(user, role, 'dining:manage');
+		}
+		const form = await event.request.formData();
+		const parsed = z
+			.object({
+				orderId: recordId(),
+				amountPhp: z.coerce.number().positive('Enter the refund amount.').max(10_000_000),
+				method: z.enum(REFUND_METHODS, { error: 'Choose how the refund was sent.' }),
+				referenceNo: z.string().trim().max(80).optional(),
+				note: z.string().trim().max(300).optional()
+			})
+			.safeParse(Object.fromEntries(form));
+		if (!parsed.success) return fail(400, { error: parsed.error.issues[0]?.message ?? 'Check the refund details.' });
+		const d = parsed.data;
+		const hotelId = event.locals.hotel!.id;
+
+		let proofUrl: string | null = null;
+		const file = form.get('proof');
+		if (file instanceof File && file.size > 0) {
+			try {
+				proofUrl = await saveUpload(hotelId, file);
+			} catch (e) {
+				if (e instanceof UploadValidationError) return fail(400, { error: e.message });
+				throw e;
+			}
+		}
+		try {
+			const r = await recordDiningRefund({
+				hotelId,
+				orderId: d.orderId,
+				amountCentavos: Math.round(d.amountPhp * 100),
+				method: d.method,
+				referenceNo: d.referenceNo || null,
+				note: d.note || null,
+				proofUrl,
+				actor: user
+			});
+			return { ok: r.fullyRefunded ? 'Refund recorded. The order is fully refunded.' : 'Partial refund recorded.' };
+		} catch (e) {
+			// Don't keep an uploaded proof for a refund that was refused.
+			if (proofUrl) await deleteUploadIfOwned(proofUrl).catch(() => {});
 			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
 			throw e;
 		}

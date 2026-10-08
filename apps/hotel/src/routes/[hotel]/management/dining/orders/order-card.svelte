@@ -4,6 +4,8 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
 	import ReceiptTextIcon from '@lucide/svelte/icons/receipt-text';
+	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
+	import GlobeIcon from '@lucide/svelte/icons/globe';
 	import BedDoubleIcon from '@lucide/svelte/icons/bed-double';
 	import { NEXT_STEP, ORDER_TYPE_LABEL, type OrderStatus } from '$lib/dining-orders';
 	import type { PageData } from './$types';
@@ -16,24 +18,30 @@
 		canWrite,
 		canVoid,
 		slug,
+		timezone,
 		onadvance,
 		onpay,
 		oncancel,
 		onvoid,
 		oninvoice,
-		onissuereceipt
+		onissuereceipt,
+		ontalk,
+		onrespond
 	}: {
 		order: Order;
 		nowMs: number;
 		canWrite: boolean;
 		canVoid: boolean;
 		slug: string;
+		timezone: string;
 		onadvance: (order: Order, to: string) => void;
 		onpay: (order: Order) => void;
 		oncancel: (order: Order) => void;
 		onvoid: (order: Order) => void;
 		oninvoice: (order: Order) => void;
 		onissuereceipt: (order: Order) => void;
+		ontalk: (order: Order) => void;
+		onrespond: (order: Order) => void;
 	} = $props();
 
 	const LATE_MINUTES = 20;
@@ -49,12 +57,22 @@
 	const receipt = $derived(order.documents.find((d) => d.type === 'official_receipt'));
 	const invoice = $derived(order.documents.find((d) => d.type === 'invoice'));
 	const unpaid = $derived(order.paymentStatus === 'unpaid');
+	const METHOD: Record<string, string> = { paymongo: 'Online', cash: 'Cash', card: 'Card', gcash: 'GCash', maya: 'Maya' };
+	const pickup = $derived(
+		order.pickupAt
+			? new Intl.DateTimeFormat('en-PH', { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZone: timezone }).format(new Date(order.pickupAt))
+			: null
+	);
+	const hasThread = $derived(order.source === 'online' || order.unreadMessages > 0);
 </script>
 
 <article class="rounded-xl border border-border bg-surface p-3.5" aria-label="Order {order.code}">
 	<header class="flex items-start justify-between gap-2">
 		<div class="min-w-0">
-			<p class="font-mono text-sm font-semibold text-ink">{order.code}</p>
+			<p class="flex items-center gap-1.5 font-mono text-sm font-semibold text-ink">
+				{order.code}
+				{#if order.source === 'online'}<span class="inline-flex items-center gap-0.5 font-sans text-[11px] font-medium text-ink-muted"><GlobeIcon class="size-3" aria-hidden="true" /> Online</span>{/if}
+			</p>
 			<p class="truncate text-xs text-ink-muted">
 				{order.tableLabel ? `Table ${order.tableLabel}` : ORDER_TYPE_LABEL[order.orderType]}{order.tableLabel && order.orderType === 'takeaway' ? ' · Takeaway' : ''}{order.guestName ? ` · ${order.guestName}` : ''}
 			</p>
@@ -63,6 +81,12 @@
 			{ageLabel}{late ? ' · late' : ''}
 		</span>
 	</header>
+
+	{#if pickup}
+		<p class="mt-1.5 text-xs text-ink">
+			{order.orderType === 'pre_order' ? 'At the table' : 'Pickup'} <span class="font-medium tabular-nums">{pickup}</span>
+		</p>
+	{/if}
 
 	{#if order.bookingCode}
 		<p class="mt-1.5 flex items-center gap-1 text-xs text-ink-muted">
@@ -84,13 +108,21 @@
 		<p class="mt-2 rounded-md bg-surface-2 px-2 py-1.5 text-xs text-ink">{order.remarks}</p>
 	{/if}
 
+	{#if order.cancelRequestedAt}
+		<div class="mt-3 rounded-lg border border-danger/40 bg-danger/5 p-2.5 text-xs" role="alert">
+			<p class="font-medium text-ink">The guest asked to cancel this paid order</p>
+			{#if order.cancelRequestNote}<p class="mt-0.5 text-ink-muted">“{order.cancelRequestNote}”</p>{/if}
+			{#if canWrite}<Button size="sm" variant="outline" class="mt-2" onclick={() => onrespond(order)}>Reply to request</Button>{/if}
+		</div>
+	{/if}
+
 	<footer class="mt-3 space-y-2.5 border-t border-border pt-2.5">
 		<div class="flex items-center justify-between gap-2">
 			<span class="font-medium tabular-nums text-ink">{peso(order.totalCentavos)}</span>
 			{#if unpaid}
 				<Badge variant="outline">Unpaid</Badge>
 			{:else}
-				<Badge variant="secondary">Paid · {order.paymentMethod ?? ''}</Badge>
+				<Badge variant="secondary">Paid · {METHOD[order.paymentMethod ?? ''] ?? order.paymentMethod ?? ''}</Badge>
 			{/if}
 		</div>
 
@@ -111,6 +143,14 @@
 				{/if}
 				{#if unpaid}
 					<Button size="sm" variant={next ? 'outline' : 'default'} class={next ? '' : 'flex-1'} onclick={() => onpay(order)}>Take payment</Button>
+				{/if}
+				{#if hasThread}
+					<Button variant="ghost" size="icon" class="relative size-8 shrink-0" aria-label={order.unreadMessages > 0 ? `${order.unreadMessages} unread messages for ${order.code}` : `Messages for ${order.code}`} onclick={() => ontalk(order)}>
+						<MessageSquareIcon class="size-4" />
+						{#if order.unreadMessages > 0}
+							<span class="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-brand text-[10px] font-semibold text-brand-ink">{order.unreadMessages}</span>
+						{/if}
+					</Button>
 				{/if}
 				<DropdownMenu.Root>
 					<DropdownMenu.Trigger>
