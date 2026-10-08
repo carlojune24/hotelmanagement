@@ -287,6 +287,10 @@ export const payments = pgTable(
 		voidedAt: timestamp('voided_at', { withTimezone: true }),
 		voidedByUserId: uuid('voided_by_user_id').references(() => users.id, { onDelete: 'set null' }),
 		voidReason: text('void_reason'),
+		/** The part of this payment that settled restaurant charges on the folio: posted to the cash
+		 *  ledger as `dining_revenue` (the rest keeps the usual room/hall category). Zero for a
+		 *  payment with no dining charges outstanding. Only set on a payment taken against one folio. */
+		diningCentavos: bigint('dining_centavos', { mode: 'number' }).notNull().default(0),
 
 		// --- Refund tracking (cancellation flow) ---
 		/** On a `purpose: 'refund'` row: the original payment it refunds. Plain uuid

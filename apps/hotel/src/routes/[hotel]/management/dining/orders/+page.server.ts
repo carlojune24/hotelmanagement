@@ -28,6 +28,7 @@ import {
 	respondToDiningCancellation
 } from '$lib/server/dining-online';
 import { UploadValidationError, deleteUploadIfOwned, saveUpload } from '$lib/server/uploads';
+import { chargeDiningOrderToRoom, listInHouseGuests, undoDiningRoomCharge } from '$lib/server/dining-room-charge';
 import { DocumentError, issueDiningDocument, listDiningDocumentsForOrders } from '$lib/server/finance/documents';
 import { FinanceError } from '$lib/server/finance/shared';
 import { getDefaultOpenShift } from '$lib/server/finance/shifts';
@@ -76,6 +77,8 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 	const can = (cap: string) =>
 		!!locals.user?.isPlatformAdmin || (!!locals.role && roleCan(locals.role.capabilities, cap));
 	const shift = await getDefaultOpenShift(hotelId).catch(() => null);
+	// Guests staying now, for the "Charge to room" picker (only needed by staff who take orders).
+	const inHouse = can('dining:write') ? await listInHouseGuests(hotelId) : [];
 
 	const serialize = <T extends (typeof orders)[number]>(o: T) => ({
 		...o,
@@ -99,6 +102,7 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 		tables: tables.filter((t) => menus[t.venueId]),
 		vatRateBps: locals.hotel!.vatRateBps,
 		shiftOpen: !!shift,
+		inHouse,
 		canWrite: can('dining:write'),
 		canVoid: can('dining:manage') || can('hotel:admin'),
 		nowIso: new Date().toISOString()
@@ -229,6 +233,46 @@ export const actions: Actions = {
 		try {
 			await voidDiningOrderPayment({ hotelId: event.locals.hotel!.id, orderId: parsed.data.orderId, reason: parsed.data.reason, actor: event.locals.user });
 			return { ok: 'Payment voided. The receipt was cancelled.' };
+		} catch (e) {
+			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
+			throw e;
+		}
+	},
+
+	/** Charges an order to an in-house guest's room bill (one line on their folio). */
+	chargeRoom: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'dining:write');
+		const parsed = z
+			.object({ orderId: recordId(), bookingId: recordId() })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: 'Choose the guest to charge.' });
+		try {
+			const r = await chargeDiningOrderToRoom({
+				hotelId: event.locals.hotel!.id,
+				orderId: parsed.data.orderId,
+				bookingId: parsed.data.bookingId,
+				actor: event.locals.user
+			});
+			return { charged: { orderId: parsed.data.orderId, roomLabel: r.roomLabel, guestName: r.guestName } };
+		} catch (e) {
+			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
+			throw e;
+		}
+	},
+
+	/** Takes an order off a guest's room bill (managers). */
+	undoRoomCharge: async (event) => {
+		const { user, role } = event.locals;
+		if (!user?.isPlatformAdmin && !(role && (roleCan(role.capabilities, 'dining:manage') || roleCan(role.capabilities, 'hotel:admin')))) {
+			requireCap(user, role, 'dining:manage');
+		}
+		const parsed = z
+			.object({ orderId: recordId(), reason: z.string().trim().min(1, 'Give a reason for taking this off the room bill.').max(300) })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: parsed.error.issues[0]?.message ?? 'Give a reason.' });
+		try {
+			await undoDiningRoomCharge({ hotelId: event.locals.hotel!.id, orderId: parsed.data.orderId, reason: parsed.data.reason, actor: user });
+			return { ok: 'Taken off the room bill. The order is unpaid again.' };
 		} catch (e) {
 			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
 			throw e;

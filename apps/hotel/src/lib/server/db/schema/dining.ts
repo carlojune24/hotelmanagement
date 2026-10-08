@@ -410,6 +410,10 @@ export const diningOrders = pgTable(
 		shiftId: uuid('shift_id').references(() => cashierShifts.id, { onDelete: 'set null' }),
 		/** No FK, same generic-link convention as `cash_movements.sourceId`. */
 		cashMovementId: uuid('cash_movement_id'),
+		/** When `payment_status = 'room_charged'`: the folio line this order was posted as, and the
+		 *  room number at that moment (a snapshot, so the card still reads right after the guest moves). */
+		folioChargeId: uuid('folio_charge_id'),
+		roomLabel: text('room_label'),
 		paidAt: timestamp('paid_at', { withTimezone: true }),
 		paidByUserId: uuid('paid_by_user_id').references(() => users.id, { onDelete: 'set null' }),
 		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),

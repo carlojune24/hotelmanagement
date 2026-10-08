@@ -356,6 +356,9 @@ export async function cancelDiningOrder(args: {
 	if (!reason) throw new OrderError('Give a reason for cancelling the order.');
 	await db.transaction(async (tx) => {
 		const order = await loadOrderForUpdate(tx, args.hotelId, args.orderId);
+		if (order.paymentStatus === 'room_charged') {
+			throw new OrderError('This order is charged to a room. Take it off the room bill first, then cancel it.');
+		}
 		if (order.paymentStatus !== 'unpaid') {
 			throw new OrderError('This order has been paid. Void its payment first, then cancel it.');
 		}
@@ -398,6 +401,7 @@ export async function payDiningOrder(args: {
 		.limit(1);
 	if (!order) throw new OrderError('That order could not be found.');
 	if (order.status === 'cancelled') throw new OrderError('A cancelled order cannot be paid.');
+	if (order.paymentStatus === 'room_charged') throw new OrderError('This order is charged to a room bill. Take it off the bill first to pay it another way.');
 	if (order.paymentStatus !== 'unpaid') throw new OrderError('This order is already paid.');
 
 	const [hotel] = await db.select({ timezone: hotels.timezone }).from(hotels).where(eq(hotels.id, args.hotelId)).limit(1);
@@ -562,6 +566,8 @@ export interface OrderView {
 	totalCentavos: number;
 	vatCentavos: number;
 	paymentMethod: string | null;
+	/** Room number when the order is charged to an in-house guest's room bill. */
+	roomLabel: string | null;
 	/** Takeaway collection time, or a pre-order's table time. */
 	pickupAt: Date | null;
 	payMode: string | null;
@@ -629,6 +635,7 @@ async function hydrate(rows: { o: DiningOrder; venueTitle: string; bookingOrderI
 		totalCentavos: o.totalCentavos,
 		vatCentavos: o.vatCentavos,
 		paymentMethod: o.paymentMethod,
+		roomLabel: o.roomLabel,
 		pickupAt: o.pickupAt,
 		payMode: o.payMode,
 		cancelRequestedAt: o.cancelRequestedAt,
@@ -740,9 +747,10 @@ export async function diningSalesReport(
 	to: string,
 	venueId?: string | null
 ): Promise<DiningSalesReport> {
+	// An order counts as a sale once it is paid or posted to a guest's room bill (by the day it was charged).
 	const where = and(
 		eq(diningOrders.hotelId, hotelId),
-		eq(diningOrders.paymentStatus, 'paid'),
+		inArray(diningOrders.paymentStatus, ['paid', 'room_charged']),
 		ne(diningOrders.status, 'cancelled'),
 		gte(diningOrders.businessDate, from),
 		lte(diningOrders.businessDate, to),
@@ -783,15 +791,16 @@ export async function diningSalesReport(
 		.groupBy(diningOrders.diningItemId, diningItems.title)
 		.orderBy(desc(sql`sum(${diningOrders.totalCentavos})`));
 
+	const methodExpr = sql<string>`coalesce(${diningOrders.paymentMethod}::text, case when ${diningOrders.paymentStatus} = 'room_charged' then 'room_charge' else 'unknown' end)`;
 	const byMethod = await db
 		.select({
-			method: diningOrders.paymentMethod,
+			method: methodExpr,
 			orders: sql<number>`count(*)`,
 			gross: sql<number>`coalesce(sum(${diningOrders.totalCentavos}), 0)`
 		})
 		.from(diningOrders)
 		.where(where)
-		.groupBy(diningOrders.paymentMethod)
+		.groupBy(methodExpr)
 		.orderBy(desc(sql`sum(${diningOrders.totalCentavos})`));
 
 	const itemRows = await db

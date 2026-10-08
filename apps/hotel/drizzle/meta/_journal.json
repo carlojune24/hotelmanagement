@@ -505,6 +505,13 @@
       "when": 1791438406963,
       "tag": "0071_lumpy_paper_doll",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1791445892635,
+      "tag": "0072_lazy_night_nurse",
+      "breakpoints": true
     }
   ]
 }

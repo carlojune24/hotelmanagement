@@ -109,7 +109,11 @@ describe.skipIf(!hasDb)('dining orders page: load and actions (live DB)', async 
 	});
 
 	afterAll(async () => {
-		if (hotelIds.length) await db.delete(s.hotels).where(inArray(s.hotels.id, hotelIds));
+		if (hotelIds.length) {
+			const stays = await db.select({ id: s.bookings.id }).from(s.bookings).where(inArray(s.bookings.hotelId, hotelIds));
+			if (stays.length) await db.delete(s.bookingRooms).where(inArray(s.bookingRooms.bookingId, stays.map((b) => b.id)));
+			await db.delete(s.hotels).where(inArray(s.hotels.id, hotelIds));
+		}
 		if (userId) await db.delete(s.users).where(eq(s.users.id, userId));
 		if (uploadsDir.startsWith(os.tmpdir())) fs.rmSync(uploadsDir, { recursive: true, force: true });
 	});
@@ -304,5 +308,65 @@ describe.skipIf(!hasDb)('dining orders page: load and actions (live DB)', async 
 		expect(out.awaitingPayment).toBeGreaterThanOrEqual(1);
 		expect(out.orders.map((x: any) => x.id)).not.toContain(waiting.id);
 		expect((await board(asUser(hotelB, CASHIER))).awaitingPayment).toBe(0);
+	});
+
+	// ---- charge to room ---------------------------------------------------------------------
+
+	/** A guest checked in to a room of `hotel`, with the base stay already paid. */
+	async function mkInHouse(hotel: any, name: string, roomNumber: string, status: 'checked_in' | 'confirmed' = 'checked_in') {
+		const [rt] = await db.insert(s.roomTypes).values({ hotelId: hotel.id, name: 'Room' }).returning();
+		const [rp] = await db.insert(s.ratePlans).values({ hotelId: hotel.id, roomTypeId: rt!.id, name: 'Plan', basePriceCentavos: 100_000 }).returning();
+		const [g] = await db.insert(s.guests).values({ hotelId: hotel.id, fullName: name, email: `${tag}@example.test` }).returning();
+		const [ord] = await db.insert(s.orders).values({ hotelId: hotel.id, guestId: g!.id, status: 'confirmed', subtotalCentavos: 100_000, feesCentavos: 0, vatCentavos: 0, totalCentavos: 100_000, accessToken: crypto.randomUUID() }).returning();
+		const [bk] = await db.insert(s.bookings).values({ hotelId: hotel.id, orderId: ord!.id, checkIn: '2020-01-01', checkOut: '2099-01-01', occupancy: 2, status, subtotalCentavos: 100_000, feesCentavos: 0, vatCentavos: 0, totalCentavos: 100_000 }).returning();
+		const [br] = await db.insert(s.bookingRooms).values({ bookingId: bk!.id, roomTypeId: rt!.id, ratePlanId: rp!.id, quantity: 1 } as never).returning();
+		const [room] = await db.insert(s.rooms).values({ hotelId: hotel.id, roomTypeId: rt!.id, roomNumber }).returning();
+		await db.insert(s.roomAssignments).values({ bookingRoomId: br!.id, roomId: room!.id, checkIn: '2020-01-01', checkOut: '2099-01-01' } as never);
+		await db.insert(s.payments).values({ orderId: ord!.id, provider: 'cash', method: 'cash', purpose: 'settlement', status: 'paid', amountCentavos: 100_000, paidAt: new Date() });
+		return bk!.id;
+	}
+
+	it('lists the guests staying now for staff who take orders, and only for them', async () => {
+		const here = await mkInHouse(hotelA, 'Room Charge Rita', 'RC-1');
+		await mkInHouse(hotelA, 'Not Yet Nina', 'RC-2', 'confirmed');
+		await mkInHouse(hotelB, 'Other Hotel Olga', 'RC-9');
+		const cashier = await board(asUser(hotelA, CASHIER));
+		expect(cashier.inHouse.map((g: any) => [g.guestName, g.roomNumber])).toEqual([['Room Charge Rita', 'RC-1']]);
+		expect(cashier.inHouse[0].bookingId).toBe(here);
+		expect((await board(asUser(hotelA, VIEWER))).inHouse).toEqual([]); // a read-only role cannot charge, so is not shown the list
+		expect((await board(asUser(hotelB, CASHIER))).inHouse.map((g: any) => g.guestName)).toEqual(['Other Hotel Olga']);
+	});
+
+	it('charges an order to a room for staff who take orders, and shows it on the board with the room', async () => {
+		const cashier = asUser(hotelA, CASHIER);
+		const bookingId = await mkInHouse(hotelA, 'Charge Chad', 'RC-3');
+		const order = await o.createDiningOrder({ hotelId: hotelA.id, venueId: venueA, orderType: 'dine_in', lines: [{ menuItemId: soda, quantity: 2 }] });
+
+		expect((await actWith('chargeRoom', asUser(hotelA, VIEWER), { orderId: order.id, bookingId }).catch((e) => e)).status).toBe(403);
+		expect((await actWith('chargeRoom', cashier, { orderId: order.id })).status).toBe(400); // no guest chosen
+		expect((await actWith('chargeRoom', cashier, { orderId: order.id, bookingId: crypto.randomUUID() })).data.error).toMatch(/not checked in/);
+
+		const out = await actWith('chargeRoom', cashier, { orderId: order.id, bookingId });
+		expect(out.charged).toEqual({ orderId: order.id, roomLabel: 'RC-3', guestName: 'Charge Chad' });
+		const card = (await board(cashier)).orders.find((x: any) => x.id === order.id);
+		expect(card).toMatchObject({ paymentStatus: 'room_charged', roomLabel: 'RC-3', guestName: 'Charge Chad', totalCentavos: 16_000 });
+		expect(card.bookingCode).toMatch(/^[0-9A-F]{8}$/);
+		expect((await actWith('chargeRoom', cashier, { orderId: order.id, bookingId })).data.error).toMatch(/already charged to a room/);
+		// the other hotel's staff cannot charge this hotel's order
+		expect((await actWith('chargeRoom', asUser(hotelB, CASHIER), { orderId: order.id, bookingId })).status).toBe(400);
+	});
+
+	it('lets only a manager take an order off a room bill', async () => {
+		const cashier = asUser(hotelA, CASHIER);
+		const manager = asUser(hotelA, MANAGER);
+		const bookingId = await mkInHouse(hotelA, 'Undo Una', 'RC-4');
+		const order = await o.createDiningOrder({ hotelId: hotelA.id, venueId: venueA, orderType: 'dine_in', lines: [{ menuItemId: soda, quantity: 1 }] });
+		await actWith('chargeRoom', cashier, { orderId: order.id, bookingId });
+
+		expect((await actWith('undoRoomCharge', cashier, { orderId: order.id, reason: 'x' }).catch((e) => e)).status).toBe(403);
+		expect((await actWith('undoRoomCharge', manager, { orderId: order.id, reason: ' ' })).status).toBe(400);
+		expect((await actWith('undoRoomCharge', manager, { orderId: order.id, reason: 'Wrong room' })).ok).toMatch(/unpaid again/);
+		expect((await board(manager)).orders.find((x: any) => x.id === order.id)).toMatchObject({ paymentStatus: 'unpaid', roomLabel: null });
+		expect((await actWith('undoRoomCharge', manager, { orderId: order.id, reason: 'again' })).data.error).toMatch(/not charged to a room/);
 	});
 });

@@ -22,12 +22,61 @@ import {
 } from '../folio';
 import { validateAllocations } from '$lib/allocation';
 import { FinanceError, businessDateFor, pesos, type Tx } from './shared';
-import { recordCashMovement } from './cash';
+import { recordCashMovement, type RecordMovementInput } from './cash';
 import { getFinanceSettings } from './settings';
 import { getDefaultOpenShift } from './shifts';
 import { getBirSettings, issueOfficialReceipt } from './documents';
 
 export type PaymentMethod = Payment['method'];
+
+/**
+ * How much of a payment taken against ONE folio settles restaurant charges on it. Dining is booked
+ * to Finance as `dining_revenue` when it is paid (cash basis), not when it is charged to the room.
+ * The share is pro-rata of what is still owed: `amount x diningOutstanding / balanceBefore`, where
+ * diningOutstanding is the live dining charges on the folio less the dining share of earlier,
+ * un-voided payments. It never exceeds the payment or what dining still owes, and a payment that
+ * clears the whole balance clears all dining exactly. Zero when the folio has no dining charges.
+ */
+export async function diningShareForFolio(
+	tx: Tx,
+	folioId: string,
+	amountCentavos: number,
+	balanceBeforeCentavos: number
+): Promise<number> {
+	if (amountCentavos <= 0 || balanceBeforeCentavos <= 0) return 0;
+	const rows = (await tx.execute(sql`
+		select
+			coalesce((select sum(c.total_centavos) from folio_charges c
+				where c.folio_id = ${folioId} and c.source = 'dining' and c.voided_at is null), 0)::bigint as charged,
+			(
+				coalesce((select sum(p.dining_centavos) from payments p
+					where p.folio_id = ${folioId} and p.voided_at is null), 0) +
+				coalesce((select sum(a.dining_centavos) from payment_allocations a
+					join payments p on p.id = a.payment_id
+					join folios f on f.booking_id = a.booking_id
+					where f.id = ${folioId} and p.voided_at is null), 0)
+			)::bigint as settled
+	`)) as unknown as { charged: string | number; settled: string | number }[];
+	const outstanding = Math.max(0, Number(rows[0]?.charged ?? 0) - Number(rows[0]?.settled ?? 0));
+	if (outstanding === 0) return 0;
+	return Math.min(outstanding, amountCentavos, Math.round((amountCentavos * outstanding) / balanceBeforeCentavos));
+}
+
+/** Posts a folio payment to the cash ledger, as two movements sharing the payment when part of it
+ *  settled dining charges (`dining_revenue`) and the rest keeps its usual category. */
+async function recordFolioMovements(
+	tx: Tx,
+	base: Omit<RecordMovementInput, 'category' | 'amountCentavos'>,
+	category: RecordMovementInput['category'],
+	amountCentavos: number,
+	diningCentavos: number
+): Promise<void> {
+	if (diningCentavos > 0) {
+		await recordCashMovement({ ...base, category: 'dining_revenue', amountCentavos: diningCentavos, memo: `${base.memo ?? ''} (dining charges)`.trim() }, tx);
+	}
+	const rest = amountCentavos - diningCentavos;
+	if (rest > 0) await recordCashMovement({ ...base, category, amountCentavos: rest }, tx);
+}
 export type PaymentPurpose = Payment['purpose'];
 
 /** Methods that physically hit a cash drawer (and therefore need an open shift). */
@@ -180,14 +229,17 @@ export async function recordPayment(input: RecordPaymentInput): Promise<RecordPa
 			})
 			.returning({ id: payments.id });
 
-		await recordCashMovement(
+		// Restaurant charges on this folio: that part of the payment is dining income.
+		const diningPart = await diningShareForFolio(tx, folioId, amount, folio.balanceCentavos);
+		if (diningPart > 0) await tx.update(payments).set({ diningCentavos: diningPart }).where(eq(payments.id, row!.id));
+
+		await recordFolioMovements(
+			tx,
 			{
 				hotelId: input.hotelId,
 				businessDate,
 				direction: 'in',
-				category,
 				cashAccountId: cashAccountId!,
-				amountCentavos: amount,
 				counterpartyType: 'guest',
 				counterpartyName: guestName,
 				sourceType: 'payment',
@@ -197,7 +249,9 @@ export async function recordPayment(input: RecordPaymentInput): Promise<RecordPa
 				memo: `${labelForMethod(input.method)} — ${input.target.kind} folio`,
 				actor: input.actor
 			},
-			tx
+			category,
+			amount,
+			diningPart
 		);
 
 		return row!.id;
@@ -308,7 +362,17 @@ export async function recordOrderPayment(
 	const guestName = await guestNameForOrder(input.orderId);
 
 	const paymentId = await db.transaction(async (tx: Tx) => {
-		for (const a of parts) await ensureFolio(tx, input.hotelId, a.target);
+		const folioIds: string[] = [];
+		for (const a of parts) folioIds.push(await ensureFolio(tx, input.hotelId, a.target));
+		// Each room's own share of the payment, and how much of that settles its restaurant charges.
+		const diningByPart = await Promise.all(
+			parts.map((a, i) =>
+				a.target.kind === 'room'
+					? diningShareForFolio(tx, folioIds[i]!, a.amountCentavos, ledger.lines.find((l) => l.id === lineId(a.target))?.balanceCentavos ?? 0)
+					: Promise.resolve(0)
+			)
+		);
+		const diningTotal = diningByPart.reduce((s, n) => s + n, 0);
 
 		const [row] = await tx
 			.insert(payments)
@@ -323,6 +387,7 @@ export async function recordOrderPayment(
 				shiftId,
 				tenderedCentavos: tendered,
 				changeCentavos: change,
+				diningCentavos: diningTotal,
 				referenceNo: input.referenceNo?.trim() || null,
 				bankName: input.bankName?.trim() || null,
 				chequeDate: input.chequeDate || null,
@@ -332,22 +397,22 @@ export async function recordOrderPayment(
 			.returning({ id: payments.id });
 
 		await tx.insert(paymentAllocations).values(
-			parts.map((a) => ({
+			parts.map((a, i) => ({
 				paymentId: row!.id,
 				bookingId: a.target.kind === 'room' ? a.target.bookingId : null,
 				hallBookingId: a.target.kind === 'hall' ? a.target.hallBookingId : null,
-				amountCentavos: a.amountCentavos
+				amountCentavos: a.amountCentavos,
+				diningCentavos: diningByPart[i] ?? 0
 			}))
 		);
 
-		await recordCashMovement(
+		await recordFolioMovements(
+			tx,
 			{
 				hotelId: input.hotelId,
 				businessDate,
 				direction: 'in',
-				category,
 				cashAccountId: cashAccountId!,
-				amountCentavos: amount,
 				counterpartyType: 'guest',
 				counterpartyName: guestName,
 				sourceType: 'payment',
@@ -357,7 +422,9 @@ export async function recordOrderPayment(
 				memo: `${labelForMethod(input.method)} — booking payment across ${parts.length} room${parts.length === 1 ? '' : 's'}`,
 				actor: input.actor
 			},
-			tx
+			category,
+			amount,
+			diningTotal
 		);
 		return row!.id;
 	});
