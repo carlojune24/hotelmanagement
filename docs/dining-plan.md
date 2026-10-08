@@ -51,6 +51,7 @@ Run `impeccable` for: (a) staff Dining module (operate mode, shadcn), (b) guest 
 - Official Receipt: decide with BIR settings whether dining online payments issue ORs (`issueOfficialReceipt` is payment/order-bound today).
 
 ### Phase 5 - In-house guests: charge to room
+> **Built 2026-10-08 as a simplified, staff-only version** (cashier picks the guest at Take payment; one folio line; pro-rata revenue split at settlement). The notes below are the original sketch.
 - Add nullable `source` (e.g. `'dining'`) + `dining_order_id` to `folio_charges`.
 - New `addDiningCharge(hotelId, target, order, actor)` wrapper over private `insertCharge` in `folio.ts` (one summarized line, audited); void via `voidFolioCharge` also voids/reopens the dining order payment state.
 - Guest identification: in-house guests order via `manage/[orderId]` (access token) or staff attach booking at the cashier (room lookup). Only `checked_in` bookings are eligible; show booking code + guest name.

@@ -103,6 +103,7 @@
 	const refundOrder = $derived([...data.refundDue, ...data.orders].find((o) => o.id === refundOrderId) ?? null);
 	const refundOwed = (o: { totalCentavos: number; refundedCentavos: number }) => Math.max(0, o.totalCentavos - o.refundedCentavos);
 
+	let undoRoomFor = $state<Order | null>(null);
 	let cancelFor = $state<Order | null>(null);
 	let voidFor = $state<Order | null>(null);
 	let invoiceFor = $state<Order | null>(null);
@@ -125,6 +126,7 @@
 			voidFor = null;
 			respondFor = null;
 			refundOpen = false;
+			undoRoomFor = null;
 		}
 		const issued = form?.issued as { id: string; type: string; formattedNo: string } | undefined;
 		if (issued) {
@@ -236,6 +238,7 @@
 								onissuereceipt={issueReceipt}
 								ontalk={(o) => { threadOrderId = o.id; threadOpen = true; }}
 								onrespond={(o) => (respondFor = o)}
+								onundoroom={(o) => (undoRoomFor = o)}
 							/>
 						{:else}
 							<p class="px-2 py-6 text-center text-sm text-ink-muted">{c.hint}</p>
@@ -248,7 +251,7 @@
 </div>
 
 <NewOrderSheet bind:open={newOpen} {data} defaultVenueId={data.venueId} onplaced={placed} />
-<PayDialog bind:open={payOpen} order={payOrder} shiftOpen={data.shiftOpen} {slug} />
+<PayDialog bind:open={payOpen} order={payOrder} shiftOpen={data.shiftOpen} {slug} inHouse={data.inHouse} />
 <ThreadSheet bind:open={threadOpen} order={threadOrder ?? data.refundDue.find((o) => o.id === threadOrderId) ?? null} canWrite={data.canWrite} timezone={data.timezone} />
 <RefundDialog bind:open={refundOpen} order={refundOrder} />
 
@@ -296,6 +299,31 @@
 				<Dialog.Footer>
 					<Button type="button" variant="outline" onclick={() => (cancelFor = null)}>Keep order</Button>
 					<Button type="submit" variant="destructive">Cancel order</Button>
+				</Dialog.Footer>
+			</form>
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>
+
+<!-- Take an order off a guest's room bill (managers) -->
+<Dialog.Root open={undoRoomFor !== null} onOpenChange={(o) => { if (!o) undoRoomFor = null; }}>
+	<Dialog.Content class="sm:max-w-sm">
+		{#if undoRoomFor}
+			<Dialog.Header>
+				<Dialog.Title>Take {undoRoomFor.code} off room {undoRoomFor.roomLabel}'s bill?</Dialog.Title>
+				<Dialog.Description>
+					The charge is removed from {undoRoomFor.guestName ?? "the guest"}'s room bill and the order goes back to unpaid, so you can charge it to another room or take payment now.
+				</Dialog.Description>
+			</Dialog.Header>
+			<form method="POST" action="?/undoRoomCharge" use:enhance class="space-y-3">
+				<input type="hidden" name="orderId" value={undoRoomFor.id} />
+				<div>
+					<Label for="undoReason">Reason</Label>
+					<Input id="undoReason" name="reason" required maxlength={300} placeholder="Wrong room, guest will pay now…" class="mt-1" />
+				</div>
+				<Dialog.Footer>
+					<Button type="button" variant="outline" onclick={() => (undoRoomFor = null)}>Keep on the bill</Button>
+					<Button type="submit" variant="destructive">Take off the bill</Button>
 				</Dialog.Footer>
 			</form>
 		{/if}

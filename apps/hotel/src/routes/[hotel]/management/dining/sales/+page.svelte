@@ -26,7 +26,7 @@
 	const r = $derived(data.report);
 	const average = $derived(r.orders ? Math.round(r.grossCentavos / r.orders) : 0);
 	const filterLabel = $derived(data.venues.find((v) => v.id === data.venueId)?.title ?? 'All venues');
-	const METHOD: Record<string, string> = { cash: 'Cash', card: 'Card', gcash: 'GCash', maya: 'Maya', unknown: 'Unknown' };
+	const METHOD: Record<string, string> = { cash: 'Cash', card: 'Card', gcash: 'GCash', maya: 'Maya', room_charge: 'Charged to room', unknown: 'Unknown' };
 
 	const query = (range: { from: string; to: string }, venue = data.venueId) => {
 		const q = new URLSearchParams({ from: range.from, to: range.to });
@@ -184,6 +184,6 @@
 				</div>
 			</section>
 		</div>
-		<p class="mt-4 text-xs text-ink-muted">Counts paid orders by the day they were paid. A voided payment is taken back out.</p>
+		<p class="mt-4 text-xs text-ink-muted">Counts paid orders by the day they were paid, and orders charged to a room by the day they were charged. A voided payment is taken back out. Room charges reach Finance as dining income when the guest pays their room bill.</p>
 	{/if}
 </div>

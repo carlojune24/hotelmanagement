@@ -26,7 +26,8 @@
 		oninvoice,
 		onissuereceipt,
 		ontalk,
-		onrespond
+		onrespond,
+		onundoroom
 	}: {
 		order: Order;
 		nowMs: number;
@@ -42,6 +43,7 @@
 		onissuereceipt: (order: Order) => void;
 		ontalk: (order: Order) => void;
 		onrespond: (order: Order) => void;
+		onundoroom: (order: Order) => void;
 	} = $props();
 
 	const LATE_MINUTES = 20;
@@ -57,7 +59,9 @@
 	const receipt = $derived(order.documents.find((d) => d.type === 'official_receipt'));
 	const invoice = $derived(order.documents.find((d) => d.type === 'invoice'));
 	const unpaid = $derived(order.paymentStatus === 'unpaid');
-	const METHOD: Record<string, string> = { paymongo: 'Online', cash: 'Cash', card: 'Card', gcash: 'GCash', maya: 'Maya' };
+	const roomCharged = $derived(order.paymentStatus === 'room_charged');
+	const paid = $derived(order.paymentStatus === 'paid');
+	const METHOD: Record<string, string> = { paymongo: 'Online', cash: 'Cash', card: 'Card', gcash: 'GCash', maya: 'Maya', room_charge: 'Room' };
 	const pickup = $derived(
 		order.pickupAt
 			? new Intl.DateTimeFormat('en-PH', { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZone: timezone }).format(new Date(order.pickupAt))
@@ -90,7 +94,8 @@
 
 	{#if order.bookingCode}
 		<p class="mt-1.5 flex items-center gap-1 text-xs text-ink-muted">
-			<BedDoubleIcon class="size-3" aria-hidden="true" /> In-house, booking <span class="font-mono">{order.bookingCode}</span>
+			<BedDoubleIcon class="size-3" aria-hidden="true" />
+			{#if roomCharged}Charged to room {order.roomLabel}{:else}In-house{/if}, booking <span class="font-mono">{order.bookingCode}</span>
 		</p>
 	{/if}
 
@@ -121,6 +126,8 @@
 			<span class="font-medium tabular-nums text-ink">{peso(order.totalCentavos)}</span>
 			{#if unpaid}
 				<Badge variant="outline">Unpaid</Badge>
+			{:else if roomCharged}
+				<Badge variant="secondary">Room {order.roomLabel ?? ''}</Badge>
 			{:else}
 				<Badge variant="secondary">Paid · {METHOD[order.paymentMethod ?? ''] ?? order.paymentMethod ?? ''}</Badge>
 			{/if}
@@ -161,14 +168,17 @@
 						{/snippet}
 					</DropdownMenu.Trigger>
 					<DropdownMenu.Content align="end">
-						{#if !receipt && !unpaid}
+						{#if !receipt && paid}
 							<DropdownMenu.Item onSelect={() => onissuereceipt(order)}>Issue official receipt</DropdownMenu.Item>
 						{/if}
-						{#if !invoice}
+						{#if !invoice && !roomCharged}
 							<DropdownMenu.Item onSelect={() => oninvoice(order)}>Issue invoice…</DropdownMenu.Item>
 						{/if}
-						{#if !unpaid && canVoid}
+						{#if paid && canVoid}
 							<DropdownMenu.Item variant="destructive" onSelect={() => onvoid(order)}>Void payment…</DropdownMenu.Item>
+						{/if}
+						{#if roomCharged && canVoid}
+							<DropdownMenu.Item variant="destructive" onSelect={() => onundoroom(order)}>Take off room bill…</DropdownMenu.Item>
 						{/if}
 						{#if unpaid && order.status !== 'served'}
 							<DropdownMenu.Separator />
