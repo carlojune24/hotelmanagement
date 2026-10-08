@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
@@ -33,12 +34,15 @@
 	let method = $state('gcash');
 	let submitting = $state(false);
 
+	// Only `open` is tracked: the board refreshes `order` every 20 s, which must not reset
+	// the amount or method the cashier is typing.
 	$effect(() => {
-		if (open) {
+		if (!open) return;
+		untrack(() => {
 			amount = (owed / 100).toFixed(2);
 			method = order?.paymentMethod === 'cash' ? 'cash' : 'gcash';
 			submitting = false;
-		}
+		});
 	});
 	const methodLabel = $derived(METHODS.find((m) => m.value === method)?.label ?? 'Choose');
 </script>

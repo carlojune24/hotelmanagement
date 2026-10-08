@@ -184,7 +184,7 @@ export const actions: Actions = {
 				);
 			if (n === 0) {
 				return fail(400, {
-					error: 'Add at least one table on the Floor plan before turning reservations on.'
+					error: 'Add at least one table on the Floor before turning reservations on.'
 				});
 			}
 		}

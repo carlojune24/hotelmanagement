@@ -125,7 +125,7 @@
 	});
 </script>
 
-<div class="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
+<div class="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
 	<div class="mb-4 flex flex-wrap items-center gap-3">
 		<Tabs.Root value={data.tab} onValueChange={(v) => go({ tab: v === 'today' ? null : v })}>
 			<Tabs.List>
@@ -180,12 +180,12 @@
 			</p>
 			{#if bookable.length === 0}
 				<p class="text-xs text-ink-muted">
-					Add tables on the <a class="underline" href="{base}/floor-plan">Floor plan</a> to take bookings.
+					Add tables on the <a class="underline" href="{base}/floor">Floor</a> to take bookings.
 				</p>
 			{/if}
 		</div>
 	{:else}
-		<div class="overflow-hidden rounded-xl border border-border">
+		<div class="overflow-x-auto rounded-xl border border-border">
 			<Table.Root>
 				<Table.Header>
 					<Table.Row>
@@ -244,7 +244,7 @@
 										{#if moves.length > 0}<DropdownMenu.Separator />{/if}
 										<DropdownMenu.Item>
 											{#snippet child({ props })}
-												<a {...props} href="{base}/floor-plan?date={r.startsAt.slice(0, 10)}">View on floor plan</a>
+												<a {...props} href="{base}/floor?date={r.startsAt.slice(0, 10)}">View on the floor</a>
 											{/snippet}
 										</DropdownMenu.Item>
 									</DropdownMenu.Content>

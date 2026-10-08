@@ -9,6 +9,7 @@ import { recordId } from '$lib/rate-validation';
 import { loadVenueMenu } from '$lib/server/dining-menu';
 import {
 	OrderError,
+	acceptQrOrder,
 	cancelDiningOrder,
 	countAwaitingPayment,
 	createDiningOrder,
@@ -28,6 +29,8 @@ import {
 	respondToDiningCancellation
 } from '$lib/server/dining-online';
 import { UploadValidationError, deleteUploadIfOwned, saveUpload } from '$lib/server/uploads';
+import { closeTableAction, settleTableAction } from '$lib/server/dining-check-actions';
+import { listOpenChecks } from '$lib/server/dining-checks';
 import { chargeDiningOrderToRoom, listInHouseGuests, undoDiningRoomCharge } from '$lib/server/dining-room-charge';
 import { DocumentError, issueDiningDocument, listDiningDocumentsForOrders } from '$lib/server/finance/documents';
 import { FinanceError } from '$lib/server/finance/shared';
@@ -57,7 +60,12 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 	const servedSince = zonedToUtc(today, '00:00', timezone);
 	// Release online orders whose payment never arrived before showing the board.
 	await expirePendingDiningOrders({ hotelId }).catch((e) => console.error('orders: expirePendingDiningOrders failed', e));
-	const orders = await listBoardOrders(hotelId, { venueId, servedSince });
+	const orders = await listBoardOrders(hotelId, { venueId, servedSince, includeAwaitingAcceptance: true });
+	const openChecks = (await listOpenChecks(hotelId, venueId)).map((c) => ({
+		...c,
+		openedAt: c.openedAt.toISOString(),
+		billRequestedAt: c.billRequestedAt?.toISOString() ?? null
+	}));
 	const refundDue = await listRefundDueOrders(hotelId, venueId);
 	const awaitingPayment = await countAwaitingPayment(hotelId, venueId);
 	const documents = await listDiningDocumentsForOrders(hotelId, orders.map((o) => o.id));
@@ -97,6 +105,7 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 		/** Cancelled orders the guest had paid for: money still owed back. */
 		refundDue: refundDue.map((o) => serialize(o)),
 		awaitingPayment,
+		openChecks,
 		timezone,
 		menus,
 		tables: tables.filter((t) => menus[t.venueId]),
@@ -164,11 +173,18 @@ export const actions: Actions = {
 		}
 	},
 
+	/**
+	 * Serving a ready order is the only step taken from the Orders board. Starting and finishing
+	 * dishes is the kitchen's, on the Kitchen tab (`kitchen/+page.server.ts`), so dining staff can
+	 * never mark food ready that has not been cooked.
+	 */
 	advance: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'dining:write');
-		const parsed = z
-			.object({ orderId: recordId(), to: z.enum(['accepted', 'preparing', 'ready', 'served']) })
-			.safeParse(Object.fromEntries(await event.request.formData()));
+		const raw = Object.fromEntries(await event.request.formData());
+		if (raw.to === 'accepted' || raw.to === 'preparing' || raw.to === 'ready') {
+			return fail(400, { error: 'Start and Ready are done on the Kitchen tab.' });
+		}
+		const parsed = z.object({ orderId: recordId(), to: z.literal('served') }).safeParse(raw);
 		if (!parsed.success) return fail(400, { error: 'That order could not be found.' });
 		try {
 			await setDiningOrderStatus({ hotelId: event.locals.hotel!.id, orderId: parsed.data.orderId, to: parsed.data.to, actor: event.locals.user });
@@ -178,6 +194,24 @@ export const actions: Actions = {
 			throw e;
 		}
 	},
+
+	/** A waiter accepts a table-QR order: it goes to the kitchen and the table becomes occupied. */
+	accept: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'dining:write');
+		const parsed = z.object({ orderId: recordId() }).safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: 'That order could not be found.' });
+		try {
+			const o = await acceptQrOrder({ hotelId: event.locals.hotel!.id, orderId: parsed.data.orderId, actor: event.locals.user });
+			return { ok: `Order ${o.code} accepted. The kitchen has it.` };
+		} catch (e) {
+			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
+			throw e;
+		}
+	},
+
+	/** Pays or room-charges every unpaid order on a table in one go. */
+	settle: settleTableAction,
+	closeTable: closeTableAction,
 
 	cancel: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'dining:write');

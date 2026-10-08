@@ -74,12 +74,14 @@ export function checkAddonSelection(
 // ---------------------------------------------------------------------------
 
 /** `pending_payment` is an online order waiting for PayMongo to confirm; it is invisible to the
- *  kitchen and only the payment confirmation (or an expiry/cancel) moves it on. */
-export type OrderStatus = 'pending_payment' | 'new' | 'accepted' | 'preparing' | 'ready' | 'served' | 'cancelled';
+ *  kitchen and only the payment confirmation (or an expiry/cancel) moves it on.
+ *  `pending_acceptance` is a table-QR order waiting for staff to accept or decline it. */
+export type OrderStatus = 'pending_payment' | 'pending_acceptance' | 'new' | 'accepted' | 'preparing' | 'ready' | 'served' | 'cancelled';
 
 /** Where an order can go next. The kitchen may skip "accepted"; served and cancelled are final. */
 export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
 	pending_payment: ['new', 'cancelled'],
+	pending_acceptance: ['new', 'cancelled'],
 	new: ['accepted', 'preparing', 'cancelled'],
 	accepted: ['preparing', 'cancelled'],
 	preparing: ['ready', 'cancelled'],
@@ -91,7 +93,10 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
 export const canMoveOrder = (from: string, to: string) =>
 	(ORDER_TRANSITIONS[from as OrderStatus] ?? []).includes(to as OrderStatus);
 
-/** The one forward step the board's primary button takes. */
+/** Steps only the kitchen takes, on the Kitchen tab. The Orders tab offers none of these. */
+export const KITCHEN_STEPS: readonly OrderStatus[] = ['accepted', 'preparing', 'ready'];
+
+/** The one forward step the board's primary button takes (the kitchen's steps are taken on the Kitchen tab). */
 export const NEXT_STEP: Partial<Record<OrderStatus, OrderStatus>> = {
 	new: 'preparing',
 	accepted: 'preparing',
@@ -101,6 +106,7 @@ export const NEXT_STEP: Partial<Record<OrderStatus, OrderStatus>> = {
 
 export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
 	pending_payment: 'Awaiting payment',
+	pending_acceptance: 'Awaiting staff',
 	new: 'New',
 	accepted: 'Accepted',
 	preparing: 'Preparing',
@@ -114,3 +120,76 @@ export const ORDER_TYPE_LABEL: Record<string, string> = {
 	takeaway: 'Takeaway',
 	pre_order: 'Pre-order'
 };
+
+// ---------------------------------------------------------------------------
+// Kitchen timing and per-station cooking
+// ---------------------------------------------------------------------------
+
+/** How long a ticket may wait before it is "late" when its station sets no target. */
+export const DEFAULT_TARGET_MINUTES = 20;
+
+export type WaitLevel = 'ok' | 'slow' | 'late';
+
+/** `late` at the station's target, `slow` at half of it. */
+export function waitLevel(minutes: number, targetMinutes?: number | null): WaitLevel {
+	const late = targetMinutes && targetMinutes > 0 ? targetMinutes : DEFAULT_TARGET_MINUTES;
+	const slow = Math.max(1, Math.floor(late / 2));
+	if (minutes >= late) return 'late';
+	return minutes >= slow ? 'slow' : 'ok';
+}
+
+/** `34 min`, then `1h 05m` once it passes the hour. */
+export function formatWait(minutes: number): string {
+	const m = Math.max(0, Math.floor(minutes));
+	if (m < 60) return `${m} min`;
+	return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+}
+
+export type StationState = 'waiting' | 'cooking' | 'ready';
+
+export interface StationLine {
+	stationName: string | null;
+	startedAt: Date | null;
+	readyAt: Date | null;
+}
+
+export interface StationGroup<T> {
+	/** The station name, or '' for dishes with no station. */
+	key: string;
+	label: string;
+	items: T[];
+	state: StationState;
+	startedAt: Date | null;
+	readyAt: Date | null;
+}
+
+/** An order's lines grouped by the station that cooks them, in first-seen order. A station is
+ *  ready when every one of its lines is, and cooking once any line has started. */
+export function groupByStation<T extends StationLine>(items: T[]): StationGroup<T>[] {
+	const byKey = new Map<string, T[]>();
+	for (const it of items) {
+		const key = it.stationName ?? '';
+		byKey.set(key, [...(byKey.get(key) ?? []), it]);
+	}
+	const hasNamed = [...byKey.keys()].some((k) => k !== '');
+	return [...byKey.entries()].map(([key, list]) => {
+		const allReady = list.every((i) => i.readyAt);
+		const anyStarted = list.some((i) => i.startedAt || i.readyAt);
+		const starts = list.map((i) => i.startedAt ?? i.readyAt).filter((d): d is Date => !!d);
+		const readies = list.map((i) => i.readyAt).filter((d): d is Date => !!d);
+		return {
+			key,
+			label: key || (hasNamed ? 'Unassigned' : 'Kitchen'),
+			items: list,
+			state: allReady ? 'ready' : anyStarted ? 'cooking' : 'waiting',
+			startedAt: starts.length ? new Date(Math.min(...starts.map((d) => new Date(d).getTime()))) : null,
+			readyAt: allReady && readies.length ? new Date(Math.max(...readies.map((d) => new Date(d).getTime()))) : null
+		};
+	});
+}
+
+/** What the order as a whole is doing, derived from its stations. */
+export function orderStateFromStations(groups: { state: StationState }[]): 'new' | 'preparing' | 'ready' {
+	if (groups.length > 0 && groups.every((g) => g.state === 'ready')) return 'ready';
+	return groups.some((g) => g.state !== 'waiting') ? 'preparing' : 'new';
+}

@@ -97,6 +97,37 @@ export const actions: Actions = {
 		return { ok: 'Station renamed.' };
 	},
 
+	/** How many minutes a ticket may wait at this station before the kitchen board calls it late. */
+	setTarget: async (event) => {
+		requireManage(event);
+		const hotelId = event.locals.hotel!.id;
+		const parsed = z
+			.object({
+				stationId: recordId(),
+				targetMinutes: z.preprocess(
+					(v) => (v === '' || v == null ? null : Number(v)),
+					z.number().int('Use whole minutes.').min(2, 'Use at least 2 minutes.').max(240, 'Use 240 minutes or fewer.').nullable()
+				)
+			})
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: parsed.error.issues[0]?.message ?? 'Check the minutes.' });
+		const updated = await db
+			.update(diningStations)
+			.set({ targetMinutes: parsed.data.targetMinutes, updatedAt: new Date() })
+			.where(and(eq(diningStations.id, parsed.data.stationId), eq(diningStations.hotelId, hotelId)))
+			.returning({ id: diningStations.id });
+		if (updated.length === 0) return fail(404, { error: 'Station not found.' });
+		await writeAudit({
+			hotelId,
+			actor: event.locals.user,
+			action: 'dining_station.update',
+			entityType: 'dining_station',
+			entityId: parsed.data.stationId,
+			after: { targetMinutes: parsed.data.targetMinutes }
+		});
+		return { ok: parsed.data.targetMinutes ? `Late after ${parsed.data.targetMinutes} min.` : 'Using the default (20 min).' };
+	},
+
 	deleteStation: async (event) => {
 		requireManage(event);
 		const hotelId = event.locals.hotel!.id;

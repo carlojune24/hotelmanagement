@@ -180,7 +180,7 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 
 	{ cap: 'dining:read', label: 'See the Dining section (menu, orders, reservations)', section: 'Dining' },
 	{ cap: 'dining:write', label: 'Take and update dining orders and reservations', section: 'Dining' },
-	{ cap: 'dining:manage', label: 'Edit the dining menu, add-ons, and floor plan', section: 'Dining' },
+	{ cap: 'dining:manage', label: 'Edit the dining menu, add-ons, and the floor', section: 'Dining' },
 
 	{
 		cap: 'hotel:admin',

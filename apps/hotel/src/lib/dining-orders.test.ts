@@ -3,6 +3,10 @@ import { inputVatOf } from './server/finance/calc';
 import {
 	canMoveOrder,
 	checkAddonSelection,
+	formatWait,
+	groupByStation,
+	orderStateFromStations,
+	waitLevel,
 	NEXT_STEP,
 	priceLine,
 	sumLines,
@@ -82,5 +86,65 @@ describe('order status flow', () => {
 		expect(NEXT_STEP.preparing).toBe('ready');
 		expect(NEXT_STEP.ready).toBe('served');
 		expect(NEXT_STEP.served).toBeUndefined();
+	});
+});
+
+describe('formatWait', () => {
+	it('shows minutes, then hours and zero-padded minutes', () => {
+		expect(formatWait(0)).toBe('0 min');
+		expect(formatWait(34)).toBe('34 min');
+		expect(formatWait(59.9)).toBe('59 min');
+		expect(formatWait(60)).toBe('1h 00m');
+		expect(formatWait(65)).toBe('1h 05m');
+		expect(formatWait(125)).toBe('2h 05m');
+		expect(formatWait(-3)).toBe('0 min');
+	});
+});
+
+describe('waitLevel', () => {
+	it('is slow at half the target and late at the target (default 20)', () => {
+		expect(waitLevel(9)).toBe('ok');
+		expect(waitLevel(10)).toBe('slow');
+		expect(waitLevel(19)).toBe('slow');
+		expect(waitLevel(20)).toBe('late');
+	});
+	it('uses a station target when it has one', () => {
+		expect(waitLevel(7, 8)).toBe('slow');
+		expect(waitLevel(8, 8)).toBe('late');
+		expect(waitLevel(3, 8)).toBe('ok');
+		expect(waitLevel(19, null)).toBe('slow');
+	});
+});
+
+describe('groupByStation', () => {
+	const t = (n: number) => new Date(2026, 9, 8, 12, n);
+	const line = (stationName: string | null, startedAt: Date | null = null, readyAt: Date | null = null) => ({ stationName, startedAt, readyAt });
+
+	it('groups lines by station in first-seen order and reads each station\'s state', () => {
+		const g = groupByStation([line('Grill', t(1), t(9)), line('Bar'), line('Grill', t(2), t(10)), line('Pastry', t(3))]);
+		expect(g.map((x) => [x.key, x.items.length, x.state])).toEqual([
+			['Grill', 2, 'ready'],
+			['Bar', 1, 'waiting'],
+			['Pastry', 1, 'cooking']
+		]);
+		expect(g[0]!.startedAt).toEqual(t(1));
+		expect(g[0]!.readyAt).toEqual(t(10));
+		expect(g[1]!.readyAt).toBeNull();
+	});
+
+	it('is only ready when every line is, and calls station-less dishes Kitchen or Unassigned', () => {
+		expect(groupByStation([line('Grill', t(1), t(9)), line('Grill', t(1))])[0]!.state).toBe('cooking');
+		expect(groupByStation([line(null)])[0]!.label).toBe('Kitchen');
+		expect(groupByStation([line(null), line('Bar')]).map((x) => x.label)).toEqual(['Unassigned', 'Bar']);
+	});
+});
+
+describe('orderStateFromStations', () => {
+	it('is ready only when all stations are, preparing once any has begun, otherwise new', () => {
+		expect(orderStateFromStations([{ state: 'ready' }, { state: 'ready' }])).toBe('ready');
+		expect(orderStateFromStations([{ state: 'ready' }, { state: 'waiting' }])).toBe('preparing');
+		expect(orderStateFromStations([{ state: 'cooking' }, { state: 'waiting' }])).toBe('preparing');
+		expect(orderStateFromStations([{ state: 'waiting' }])).toBe('new');
+		expect(orderStateFromStations([])).toBe('new');
 	});
 });

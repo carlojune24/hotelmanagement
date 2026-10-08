@@ -50,10 +50,12 @@
 		itemDialog = { open: true, item };
 	}
 
+	let noPhotoOnly = $state(false);
+	const withoutPhoto = $derived((menu?.items ?? []).filter((i) => !i.imageUrl).length);
 	const visibleItems = $derived(
-		(menu?.items ?? []).filter((i) =>
-			filter === '' ? true : filter === 'none' ? !i.categoryId : i.categoryId === filter
-		)
+		(menu?.items ?? [])
+			.filter((i) => (filter === '' ? true : filter === 'none' ? !i.categoryId : i.categoryId === filter))
+			.filter((i) => !noPhotoOnly || !i.imageUrl)
 	);
 	const uncategorisedCount = $derived((menu?.items ?? []).filter((i) => !i.categoryId).length);
 	const countFor = (id: string) => (menu?.items ?? []).filter((i) => i.categoryId === id).length;
@@ -83,7 +85,7 @@
 	});
 </script>
 
-<div class="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6">
+<div class="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
 	{#if data.venues.length === 0}
 		<div class="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border p-12 text-center">
 			<UtensilsIcon class="size-6 text-ink-muted" />
@@ -92,12 +94,11 @@
 		</div>
 	{:else if venue && menu}
 		{#if data.venues.length > 1}
-			<div class="mb-5 flex flex-wrap gap-2" role="tablist" aria-label="Venue">
+			<nav class="mb-5 flex flex-wrap gap-2" aria-label="Venue">
 				{#each data.venues as v (v.id)}
 					<a
 						href="?venue={v.id}"
-						role="tab"
-						aria-selected={v.id === venue.id}
+						aria-current={v.id === venue.id ? 'page' : undefined}
 						class="rounded-md border px-3 py-1.5 text-sm {v.id === venue.id
 							? 'border-brand bg-brand/10 font-medium text-ink'
 							: 'border-border text-ink-muted hover:text-ink'}"
@@ -105,7 +106,7 @@
 						{v.title}{v.isActive ? '' : ' (hidden)'}
 					</a>
 				{/each}
-			</div>
+			</nav>
 		{/if}
 
 		<div class="grid gap-6 md:grid-cols-[13rem_1fr]">
@@ -182,6 +183,12 @@
 						<PlusIcon class="size-4" />
 					</Button>
 				</form>
+				<form method="POST" action="?/seedCategories" use:enhance class="mt-2">
+					<input type="hidden" name="diningItemId" value={venue.id} />
+					<button type="submit" class="text-left text-xs text-ink-muted underline hover:text-ink">
+						Add the usual sections (Soup, Appetizers, Mains, Desserts, Beverages, Coffee)
+					</button>
+				</form>
 				{/if}
 			</aside>
 
@@ -193,11 +200,23 @@
 						{visibleItems.length === 1 ? 'item' : 'items'}
 						{filter ? `in ${filter === 'none' ? 'Uncategorised' : categoryName(filter)}` : `on ${venue.title}'s menu`}
 					</p>
-					{#if data.canManageMenu}
-						<Button onclick={() => openItem(null)}>
-							<PlusIcon class="size-4" /> New item
-						</Button>
-					{/if}
+					<div class="flex items-center gap-3">
+						{#if withoutPhoto > 0}
+							<button
+								type="button"
+								aria-pressed={noPhotoOnly}
+								class="rounded-md border px-2.5 py-1 text-xs {noPhotoOnly ? 'border-brand bg-brand/10 font-medium text-ink' : 'border-border text-ink-muted hover:text-ink'}"
+								onclick={() => (noPhotoOnly = !noPhotoOnly)}
+							>
+								Without a photo · {withoutPhoto}
+							</button>
+						{/if}
+						{#if data.canManageMenu}
+							<Button onclick={() => openItem(null)}>
+								<PlusIcon class="size-4" /> New item
+							</Button>
+						{/if}
+					</div>
 				</div>
 
 				{#if visibleItems.length === 0}
@@ -213,6 +232,8 @@
 							<li class="flex items-center gap-3 px-4 py-3 {item.isActive ? '' : 'bg-surface-2/60'}">
 								{#if item.imageUrl}
 									<img src={item.imageUrl} alt="" loading="lazy" class="size-12 shrink-0 rounded-md border border-border object-cover" />
+								{:else}
+									<span class="flex size-12 shrink-0 items-center justify-center rounded-md border border-dashed border-border text-[10px] leading-tight text-ink-muted" title="Guests see dishes with a photo first. Add one in Edit.">No photo</span>
 								{/if}
 								<div class="min-w-0 flex-1">
 									<div class="flex flex-wrap items-center gap-x-2 gap-y-0.5">

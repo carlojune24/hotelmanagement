@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -23,11 +24,14 @@
 		open = $bindable(false),
 		data,
 		defaultVenueId = null,
+		defaultTableId = null,
 		onplaced
 	}: {
 		open: boolean;
 		data: PageData;
 		defaultVenueId?: string | null;
+		/** A table to start the order on (from the Floor); its venue wins over `defaultVenueId`. */
+		defaultTableId?: string | null;
 		/** Called after an order is saved. `payNow` means the cashier asked to take payment next. */
 		onplaced: (order: { id: string; code: string }, payNow: boolean) => void;
 	} = $props();
@@ -64,20 +68,28 @@
 	let editing = $state<{ item: Item; picks: Record<string, string[]>; quantity: number; remarks: string } | null>(null);
 	let editError = $state('');
 
+	// Below the sheet's `@2xl` container width only one pane shows at a time.
+	let pane = $state<'menu' | 'cart'>('menu');
+
 	$effect(() => {
-		if (open) {
+		// Only `open` is tracked. The board refreshes `data` every 20 s, and re-running this on
+		// each refresh would wipe the cart mid-order.
+		if (!open) return;
+		untrack(() => {
 			// Reset each time the sheet opens, on the venue being worked in.
 			const preferred = defaultVenueId && data.menus[defaultVenueId] ? defaultVenueId : (venuesWithMenu[0]?.id ?? '');
-			venueId = preferred;
+			const startTable = defaultTableId ? data.tables.find((t) => t.id === defaultTableId && data.menus[t.venueId]) : undefined;
+			venueId = startTable ? startTable.venueId : preferred;
 			orderType = 'dine_in';
-			tableId = 'none';
+			tableId = startTable ? startTable.id : 'none';
 			guestName = '';
 			orderRemarks = '';
 			search = '';
 			category = 'all';
 			cart = [];
 			editing = null;
-		}
+			pane = 'menu';
+		});
 	});
 
 	// Switching venue empties the cart: dishes belong to one venue's menu.
@@ -188,9 +200,9 @@
 
 <Sheet.Root bind:open>
 	<Sheet.Content side="right" class="flex w-full flex-col gap-0 p-0 sm:max-w-4xl">
-		<Sheet.Header class="border-b border-border px-5 py-4">
+		<Sheet.Header class="border-b border-border py-4 pr-14 pl-5">
 			<Sheet.Title>New order</Sheet.Title>
-			<Sheet.Description>Pick dishes on the left. Prices include VAT.</Sheet.Description>
+			<Sheet.Description>Pick dishes, then review the order. Prices include VAT.</Sheet.Description>
 		</Sheet.Header>
 
 		{#if venuesWithMenu.length === 0}
@@ -199,9 +211,22 @@
 				<p class="text-sm text-ink-muted">No menu yet. Add dishes on the Menu tab first.</p>
 			</div>
 		{:else}
-			<div class="grid min-h-0 flex-1 md:grid-cols-[1fr_20rem]">
+			<!-- Narrow: Menu / Order switch. Wide (container ≥ 42rem): both panes side by side. -->
+			<div class="@container flex min-h-0 flex-1 flex-col">
+				<div class="border-b border-border px-5 py-2 @2xl:hidden">
+					<Tabs.Root bind:value={pane}>
+						<Tabs.List class="w-full">
+							<Tabs.Trigger value="menu" class="flex-1">Menu</Tabs.Trigger>
+							<Tabs.Trigger value="cart" class="flex-1">
+								Order
+								{#if itemCount > 0}<span class="ml-1.5 rounded-full bg-brand px-1.5 text-xs tabular-nums text-brand-ink">{itemCount}</span>{/if}
+							</Tabs.Trigger>
+						</Tabs.List>
+					</Tabs.Root>
+				</div>
+			<div class="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] @2xl:grid-cols-[minmax(0,1fr)_21rem]">
 				<!-- Menu -->
-				<section class="flex min-h-0 flex-col border-border md:border-r" aria-label="Menu">
+				<section class="min-h-0 flex-col border-border @2xl:flex @2xl:border-r {pane === 'menu' ? 'flex' : 'hidden'}" aria-label="Menu">
 					<div class="space-y-3 border-b border-border px-5 py-3">
 						{#if venuesWithMenu.length > 1}
 							<Select.Root type="single" value={venueId} onValueChange={changeVenue}>
@@ -237,6 +262,9 @@
 									aria-expanded={isEditing}
 									onclick={() => (isEditing ? (editing = null) : startItem(item))}
 								>
+									{#if item.imageUrl}
+										<img src={item.imageUrl} alt="" loading="lazy" class="size-12 shrink-0 rounded-md object-cover {item.isAvailable ? '' : 'grayscale'}" />
+									{/if}
 									<span class="min-w-0 flex-1">
 										<span class="block font-medium text-ink {item.isAvailable ? '' : 'line-through'}">{item.name}</span>
 										{#if item.description}<span class="line-clamp-1 text-xs text-ink-muted">{item.description}</span>{/if}
@@ -249,7 +277,7 @@
 									{:else}
 										<PlusIcon class="size-4 text-ink-muted" aria-hidden="true" />
 									{/if}
-									<span class="w-20 text-right text-sm font-medium tabular-nums text-ink">{peso(item.priceCentavos)}</span>
+									<span class="min-w-16 shrink-0 text-right text-sm font-medium tabular-nums text-ink">{peso(item.priceCentavos)}</span>
 								</button>
 
 								{#if isEditing && editing}
@@ -279,7 +307,7 @@
 											<Input id="lineRemarks" bind:value={editing.remarks} maxlength={300} placeholder="No onions, extra spicy…" class="mt-1" />
 										</div>
 										{#if editError}<p role="alert" class="text-sm text-danger">{editError}</p>{/if}
-										<div class="flex items-center justify-between gap-3">
+										<div class="sticky bottom-0 -mx-5 -mb-4 flex items-center justify-between gap-3 border-t border-border bg-popover px-5 py-3">
 											<div class="flex items-center gap-1" role="group" aria-label="Quantity">
 												<Button type="button" variant="outline" size="icon" class="size-8" aria-label="Fewer" onclick={() => editing && editing.quantity > 1 && editing.quantity--}><MinusIcon class="size-4" /></Button>
 												<span class="w-8 text-center text-sm tabular-nums">{editing.quantity}</span>
@@ -294,10 +322,19 @@
 							<li class="p-10 text-center text-sm text-ink-muted">Nothing matches.</li>
 						{/each}
 					</ul>
+
+					{#if itemCount > 0}
+						<div class="flex items-center justify-between gap-3 border-t border-border bg-popover px-5 py-3 @2xl:hidden">
+							<span class="text-sm text-ink-muted">
+								{itemCount} {itemCount === 1 ? 'item' : 'items'} · <span class="font-semibold tabular-nums text-ink">{peso(total)}</span>
+							</span>
+							<Button type="button" onclick={() => (pane = 'cart')}>View order</Button>
+						</div>
+					{/if}
 				</section>
 
 				<!-- Cart -->
-				<aside class="flex min-h-0 flex-col" aria-label="This order">
+				<aside class="min-h-0 flex-col @2xl:flex {pane === 'cart' ? 'flex' : 'hidden'}" aria-label="This order">
 					<div class="space-y-3 border-b border-border px-5 py-3">
 						<ToggleGroup.Root type="single" bind:value={orderType} variant="outline" class="w-full">
 							<ToggleGroup.Item value="dine_in" class="flex-1">Dine-in</ToggleGroup.Item>
@@ -305,7 +342,7 @@
 						</ToggleGroup.Root>
 						{#if orderType === 'dine_in' && venueTables.length > 0}
 							<Select.Root type="single" bind:value={tableId}>
-								<Select.Trigger class="w-full" aria-label="Table">{tableLabel}</Select.Trigger>
+								<Select.Trigger class="w-full [&>span]:truncate" aria-label="Table">{tableLabel}</Select.Trigger>
 								<Select.Content>
 									<Select.Item value="none" label="No table" />
 									{#each venueTables as t (t.id)}<Select.Item value={t.id} label="{t.name} ({t.seats})" />{/each}
@@ -370,6 +407,7 @@
 						</div>
 					</form>
 				</aside>
+			</div>
 			</div>
 		{/if}
 	</Sheet.Content>

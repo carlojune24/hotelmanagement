@@ -30,7 +30,7 @@
 	});
 </script>
 
-<div class="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6">
+<div class="mx-auto w-full max-w-7xl px-4 *:max-w-3xl py-8 sm:px-6">
 	<div class="rounded-xl border border-border bg-surface p-4 shadow-sm">
 		<h2 class="text-base font-semibold text-ink">Intro block</h2>
 		<p class="text-sm text-ink-muted">
@@ -76,7 +76,7 @@
 		</Button>
 	</div>
 
-	<div class="mt-4 overflow-hidden rounded-xl border border-border">
+	<div class="mt-4 overflow-x-auto rounded-xl border border-border">
 		{#if data.items.length === 0}
 			<div class="flex flex-col items-center gap-2 p-10 text-center">
 				<UtensilsIcon class="size-6 text-ink-muted" />
@@ -155,7 +155,7 @@
 							<button
 								type="submit"
 								aria-label="Remove photo"
-								class="absolute top-1 right-1 flex size-6 items-center justify-center rounded-full bg-black/60 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100"
+								class="absolute top-1 right-1 flex size-8 items-center justify-center rounded-full bg-black/60 text-xs text-white transition-opacity focus-visible:opacity-100 sm:size-6 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
 							>
 								✕
 							</button>
@@ -183,7 +183,7 @@
 				type="file"
 				multiple
 				accept="image/jpeg,image/png,image/webp,image/gif"
-				class="text-sm"
+				class="block w-full min-w-0 text-sm file:mr-3 file:rounded-md file:border file:border-border file:bg-surface-2 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-ink hover:file:bg-surface sm:w-auto"
 			/>
 			<Button type="submit" variant="outline" size="sm">Add photos</Button>
 		</form>

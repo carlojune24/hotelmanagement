@@ -113,6 +113,9 @@ export const diningStations = pgTable(
 			.notNull()
 			.references(() => hotels.id, { onDelete: 'cascade' }),
 		name: text('name').notNull(),
+		/** Minutes a ticket may wait at this station before the kitchen board marks it late
+		 *  (it warns at half of this). Null uses the board's default. */
+		targetMinutes: integer('target_minutes'),
 		sortOrder: integer('sort_order').notNull().default(0),
 		createdAt: createdAt(),
 		updatedAt: updatedAt()
@@ -243,6 +246,28 @@ export type DiningMenuItem = typeof diningMenuItems.$inferSelect;
 export type DiningAddonGroup = typeof diningAddonGroups.$inferSelect;
 export type DiningAddon = typeof diningAddons.$inferSelect;
 
+/**
+ * A zone of a venue's floor plan: "Public area", "VIP room", "2nd floor". Each area is its own
+ * canvas on the Floor tab. Deleting an area is only allowed once it has no tables.
+ */
+export const diningAreas = pgTable(
+	'dining_areas',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		diningItemId: uuid('dining_item_id')
+			.notNull()
+			.references(() => diningItems.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		sortOrder: integer('sort_order').notNull().default(0),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [uniqueIndex('dining_areas_venue_name_uq').on(t.diningItemId, t.name)]
+);
+
 /** A named table on a venue's floor plan. `x`/`y` are grid cells on the plan canvas. */
 export const diningTables = pgTable(
 	'dining_tables',
@@ -256,8 +281,12 @@ export const diningTables = pgTable(
 			.references(() => diningItems.id, { onDelete: 'cascade' }),
 		name: text('name').notNull(),
 		seats: integer('seats').notNull(),
-		/** Optional zone label, e.g. "Terrace", "Indoor". */
+		/** Legacy free-text zone label from before areas existed. Migration 0074 turned each
+		 *  distinct label into a `dining_areas` row and set `areaId`; nothing reads this now. */
 		area: text('area'),
+		areaId: uuid('area_id').references(() => diningAreas.id, { onDelete: 'set null' }),
+		/** The secret in the table's QR code (`/{slug}/dining/t/{qrToken}`). Rotate to retire a printed code. */
+		qrToken: uuid('qr_token').notNull().defaultRandom(),
 		x: integer('x').notNull().default(0),
 		y: integer('y').notNull().default(0),
 		isActive: boolean('is_active').notNull().default(true),
@@ -266,6 +295,7 @@ export const diningTables = pgTable(
 	},
 	(t) => [
 		index('dining_tables_venue_idx').on(t.hotelId, t.diningItemId),
+		uniqueIndex('dining_tables_qr_token_uq').on(t.qrToken),
 		uniqueIndex('dining_tables_venue_name_uq').on(t.diningItemId, t.name)
 	]
 );
@@ -336,16 +366,65 @@ export const diningReservationTables = pgTable(
 );
 
 export type DiningTable = typeof diningTables.$inferSelect;
+export type DiningArea = typeof diningAreas.$inferSelect;
 export type DiningReservation = typeof diningReservations.$inferSelect;
 export type DiningReservationStatus = (typeof diningReservationStatus.enumValues)[number];
+
+// ---------------------------------------------------------------------------
+// Table checks
+// ---------------------------------------------------------------------------
+
+export const diningCheckStatus = pgEnum('dining_check_status', ['open', 'closed']);
+
+/**
+ * The tab for one sitting at a table. Every dine-in order placed on a table joins the table's
+ * open check, so the cashier settles the whole table at once; closing the check is what frees
+ * the table. At most one check is open per table (partial unique index below).
+ */
+export const diningTableChecks = pgTable(
+	'dining_table_checks',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		diningItemId: uuid('dining_item_id')
+			.notNull()
+			.references(() => diningItems.id, { onDelete: 'cascade' }),
+		tableId: uuid('table_id')
+			.notNull()
+			.references(() => diningTables.id, { onDelete: 'cascade' }),
+		/** The seated reservation this sitting belongs to, completed when the check closes. */
+		reservationId: uuid('reservation_id').references(() => diningReservations.id, { onDelete: 'set null' }),
+		status: diningCheckStatus('status').notNull().default('open'),
+		openedAt: timestamp('opened_at', { withTimezone: true }).notNull().defaultNow(),
+		/** The guest asked for the bill from their phone. */
+		billRequestedAt: timestamp('bill_requested_at', { withTimezone: true }),
+		closedAt: timestamp('closed_at', { withTimezone: true }),
+		closedByUserId: uuid('closed_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		/** Set when a manager cleared the table without the usual settle (audited). */
+		forceClearedAt: timestamp('force_cleared_at', { withTimezone: true }),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [
+		uniqueIndex('dining_table_checks_open_uq').on(t.tableId).where(sql`${t.status} = 'open'`),
+		index('dining_table_checks_hotel_status_idx').on(t.hotelId, t.status)
+	]
+);
+
+export type DiningTableCheck = typeof diningTableChecks.$inferSelect;
 
 // ---------------------------------------------------------------------------
 // Orders
 // ---------------------------------------------------------------------------
 
-/** Kitchen flow. Paid/unpaid is tracked separately (`dining_payment_status`). */
+/** Kitchen flow. Paid/unpaid is tracked separately (`dining_payment_status`).
+ *  `pending_acceptance` is a table-QR order waiting for staff to accept it; like
+ *  `pending_payment` it is invisible to the kitchen. */
 export const diningOrderStatus = pgEnum('dining_order_status', [
 	'pending_payment',
+	'pending_acceptance',
 	'new',
 	'accepted',
 	'preparing',
@@ -385,6 +464,8 @@ export const diningOrders = pgTable(
 		tableId: uuid('table_id').references(() => diningTables.id, { onDelete: 'set null' }),
 		/** Snapshot of the table name so the ticket still reads right after a table is retired. */
 		tableLabel: text('table_label'),
+		/** The table check this order is part of (dine-in orders on a table). */
+		checkId: uuid('check_id').references(() => diningTableChecks.id, { onDelete: 'set null' }),
 		reservationId: uuid('reservation_id').references(() => diningReservations.id, { onDelete: 'set null' }),
 		/** An in-house guest's stay, for traceability (booking code + guest name on staff screens). */
 		bookingId: uuid('booking_id').references(() => bookings.id, { onDelete: 'set null' }),
@@ -399,7 +480,7 @@ export const diningOrders = pgTable(
 		/** A guest asked to cancel an order they had already paid for; staff answer it. */
 		cancelRequestedAt: timestamp('cancel_requested_at', { withTimezone: true }),
 		cancelRequestNote: text('cancel_request_note'),
-		/** 'staff' (taken at the venue/cashier) or 'online' (guest ordered). */
+		/** 'staff' (taken at the venue/cashier), 'online' (guest ordered for pickup) or 'qr' (guest ordered from the table's QR code). */
 		source: text('source').notNull().default('staff'),
 		totalCentavos: bigint('total_centavos', { mode: 'number' }).notNull(),
 		vatCentavos: bigint('vat_centavos', { mode: 'number' }).notNull().default(0),
@@ -430,6 +511,7 @@ export const diningOrders = pgTable(
 	(t) => [
 		uniqueIndex('dining_orders_code_uq').on(t.hotelId, t.code),
 		index('dining_orders_hotel_status_idx').on(t.hotelId, t.status),
+		index('dining_orders_check_idx').on(t.checkId),
 		index('dining_orders_hotel_date_idx').on(t.hotelId, t.businessDate),
 		index('dining_orders_venue_created_idx').on(t.hotelId, t.diningItemId, t.createdAt)
 	]
@@ -458,7 +540,10 @@ export const diningOrderItems = pgTable(
 		lineTotalCentavos: bigint('line_total_centavos', { mode: 'number' }).notNull(),
 		vatCentavos: bigint('vat_centavos', { mode: 'number' }).notNull().default(0),
 		remarks: text('remarks'),
-		sortOrder: integer('sort_order').notNull().default(0)
+		sortOrder: integer('sort_order').notNull().default(0),
+		/** Per-station cooking: when this line's station started it and when it was done. */
+		startedAt: timestamp('started_at', { withTimezone: true }),
+		readyAt: timestamp('ready_at', { withTimezone: true })
 	},
 	(t) => [index('dining_order_items_order_idx').on(t.orderId), index('dining_order_items_menu_idx').on(t.menuItemId)]
 );

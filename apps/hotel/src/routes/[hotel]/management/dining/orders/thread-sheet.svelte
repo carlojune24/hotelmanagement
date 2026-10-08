@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { applyAction, deserialize } from '$app/forms';
 	import { invalidate } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
@@ -53,12 +54,17 @@
 		}
 	}
 
+	// Keyed on the sheet opening or the order changing, never on the order object itself:
+	// `load()` invalidates the board, which hands back a fresh `order` object and would
+	// otherwise re-run this, clear a half-typed reply and fetch again in a loop.
 	$effect(() => {
-		if (open && order) {
+		const id = open ? (order?.id ?? null) : null;
+		if (!id) return;
+		untrack(() => {
 			draft = '';
 			messages = [];
 			void load();
-		}
+		});
 	});
 
 	async function send(e: SubmitEvent) {

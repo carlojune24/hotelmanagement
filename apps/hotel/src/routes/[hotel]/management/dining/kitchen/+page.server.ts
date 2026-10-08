@@ -7,7 +7,7 @@ import { roleCan } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
 import { recordId } from '$lib/rate-validation';
 import { listStations } from '$lib/server/dining-menu';
-import { OrderError, listBoardOrders, setDiningOrderStatus } from '$lib/server/dining-orders';
+import { OrderError, listBoardOrders, setStationStatus } from '$lib/server/dining-orders';
 import { expirePendingDiningOrders } from '$lib/server/dining-online';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -45,7 +45,7 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 		.orderBy(desc(diningOrders.cancelledAt))
 		.limit(5);
 
-	const stations = (await listStations(hotelId)).map((s) => s.name);
+	const stations = (await listStations(hotelId)).map((s) => ({ name: s.name, targetMinutes: s.targetMinutes }));
 	return {
 		venues,
 		venueId,
@@ -58,15 +58,25 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 };
 
 export const actions: Actions = {
-	/** Start cooking, or mark a ticket ready. Serving stays on the Orders board. */
+	/**
+	 * Start cooking, or mark a ticket ready. Serving stays on the Orders board. With a `station`
+	 * only that station's part moves (`__none` = dishes with no station); without one the whole
+	 * ticket does. The order is ready once every station is.
+	 */
 	advance: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'dining:write');
 		const parsed = z
-			.object({ orderId: recordId(), to: z.enum(['preparing', 'ready']) })
+			.object({ orderId: recordId(), to: z.enum(['preparing', 'ready']), station: z.string().max(80).optional() })
 			.safeParse(Object.fromEntries(await event.request.formData()));
 		if (!parsed.success) return fail(400, { error: 'That order could not be found.' });
 		try {
-			await setDiningOrderStatus({ hotelId: event.locals.hotel!.id, orderId: parsed.data.orderId, to: parsed.data.to, actor: event.locals.user });
+			await setStationStatus({
+				hotelId: event.locals.hotel!.id,
+				orderId: parsed.data.orderId,
+				station: parsed.data.station === undefined || parsed.data.station === '' ? undefined : parsed.data.station === '__none' ? null : parsed.data.station,
+				to: parsed.data.to,
+				actor: event.locals.user
+			});
 			return { moved: true };
 		} catch (e) {
 			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });

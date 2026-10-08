@@ -19,6 +19,8 @@ import { friendlyIssue, moneyPhp, recordId } from '$lib/rate-validation';
 import type { RequestEvent } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
+const STARTER_CATEGORIES = ['Soup', 'Appetizers', 'Mains', 'Desserts', 'Beverages', 'Coffee'];
+
 export const load: PageServerLoad = async ({ locals, url }) => {
 	requireCap(locals.user, locals.role, 'dining:read');
 	const hotelId = locals.hotel!.id;
@@ -88,6 +90,38 @@ export const actions: Actions = {
 			after: d
 		});
 		return { ok: `Added category "${d.name}".` };
+	},
+
+	/** Adds the sections most menus use (skipping any that already exist), so a new venue's menu
+	 *  reads Soup / Mains / Desserts… on the guest's phone from day one. */
+	seedCategories: async (event) => {
+		requireManage(event);
+		const hotelId = event.locals.hotel!.id;
+		const parsed = z.object({ diningItemId: recordId() }).safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(404, { error: 'Venue not found.' });
+		const venueId = parsed.data.diningItemId;
+		if (!(await venueBelongsToHotel(hotelId, venueId))) return fail(404, { error: 'Venue not found.' });
+
+		const existing = await db
+			.select({ name: diningMenuCategories.name, sortOrder: diningMenuCategories.sortOrder })
+			.from(diningMenuCategories)
+			.where(and(eq(diningMenuCategories.hotelId, hotelId), eq(diningMenuCategories.diningItemId, venueId)));
+		const have = new Set(existing.map((c) => c.name.trim().toLowerCase()));
+		const missing = STARTER_CATEGORIES.filter((n) => !have.has(n.toLowerCase()));
+		if (missing.length === 0) return { ok: 'You already have all the starter categories.' };
+		const start = existing.reduce((m, c) => Math.max(m, c.sortOrder), -1) + 1;
+		await db
+			.insert(diningMenuCategories)
+			.values(missing.map((name, i) => ({ hotelId, diningItemId: venueId, name, sortOrder: start + i })));
+		await writeAudit({
+			hotelId,
+			actor: event.locals.user,
+			action: 'dining_menu_category.seed',
+			entityType: 'dining_menu_category',
+			entityId: venueId,
+			after: { added: missing }
+		});
+		return { ok: `Added ${missing.join(', ')}.` };
 	},
 
 	renameCategory: async (event) => {

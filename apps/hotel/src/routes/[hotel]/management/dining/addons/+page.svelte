@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
@@ -38,16 +39,21 @@
 	};
 
 	$effect(() => {
-		if (form?.error) toast.error(form.error);
-		if (form?.ok) {
-			toast.success(form.ok);
-			groupDialog.open = false;
-			addonDialog.open = false;
+		// `form` lingers after a submit; untrack the dialog writes so reopening a dialog
+		// doesn't re-run this effect and let the stale `form.ok` close it again.
+		const f = form;
+		if (f?.error) toast.error(f.error);
+		if (f?.ok) {
+			toast.success(f.ok);
+			untrack(() => {
+				groupDialog.open = false;
+				addonDialog.open = false;
+			});
 		}
 	});
 </script>
 
-<div class="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6">
+<div class="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
 	{#if data.venues.length === 0}
 		<div class="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border p-12 text-center">
 			<LayersIcon class="size-6 text-ink-muted" />
@@ -57,12 +63,11 @@
 	{:else if data.venue}
 		{@const venue = data.venue}
 		{#if data.venues.length > 1}
-			<div class="mb-5 flex flex-wrap gap-2" role="tablist" aria-label="Venue">
+			<nav class="mb-5 flex flex-wrap gap-2" aria-label="Venue">
 				{#each data.venues as v (v.id)}
 					<a
 						href="?venue={v.id}"
-						role="tab"
-						aria-selected={v.id === venue.id}
+						aria-current={v.id === venue.id ? 'page' : undefined}
 						class="rounded-md border px-3 py-1.5 text-sm {v.id === venue.id
 							? 'border-brand bg-brand/10 font-medium text-ink'
 							: 'border-border text-ink-muted hover:text-ink'}"
@@ -70,7 +75,7 @@
 						{v.title}
 					</a>
 				{/each}
-			</div>
+			</nav>
 		{/if}
 
 		<div class="mb-4 flex items-start justify-between gap-4">
@@ -138,10 +143,10 @@
 								method="POST"
 								action="?/addAddon"
 								use:enhance
-								class="flex items-end gap-2 border-t border-border px-4 py-3"
+								class="flex flex-wrap items-end gap-2 border-t border-border px-4 py-3"
 							>
 								<input type="hidden" name="groupId" value={g.id} />
-								<div class="flex-1">
+								<div class="min-w-40 flex-1">
 									<Label for="addon-name-{g.id}" class="text-xs">Add an option</Label>
 									<Input id="addon-name-{g.id}" name="name" required maxlength={80} placeholder="Extra rice" class="mt-1 h-8" />
 								</div>

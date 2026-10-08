@@ -7,7 +7,15 @@
 	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
 	import GlobeIcon from '@lucide/svelte/icons/globe';
 	import BedDoubleIcon from '@lucide/svelte/icons/bed-double';
-	import { NEXT_STEP, ORDER_TYPE_LABEL, type OrderStatus } from '$lib/dining-orders';
+	import ClockIcon from '@lucide/svelte/icons/clock';
+	import CheckIcon from '@lucide/svelte/icons/check';
+	import ChefHatIcon from '@lucide/svelte/icons/chef-hat';
+	import {
+		ORDER_TYPE_LABEL,
+		formatWait,
+		groupByStation,
+		waitLevel
+	} from '$lib/dining-orders';
 	import type { PageData } from './$types';
 
 	type Order = PageData['orders'][number];
@@ -46,16 +54,20 @@
 		onundoroom: (order: Order) => void;
 	} = $props();
 
-	const LATE_MINUTES = 20;
 	const peso = (c: number) =>
 		`₱${(c / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 	const minutes = $derived(Math.max(0, Math.floor((nowMs - new Date(order.createdAt).getTime()) / 60_000)));
-	const ageLabel = $derived(minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`);
-	const late = $derived((order.status === 'new' || order.status === 'accepted' || order.status === 'preparing') && minutes >= LATE_MINUTES);
+	const ageLabel = $derived(formatWait(minutes));
+	const cooking = $derived(order.status === 'new' || order.status === 'accepted' || order.status === 'preparing');
+	const level = $derived(cooking ? waitLevel(minutes) : 'ok');
+	const late = $derived(level === 'late');
+	// Where each station is, once an order is split across more than one.
+	const stations = $derived(cooking ? groupByStation(order.items) : []);
 
-	const next = $derived(NEXT_STEP[order.status as OrderStatus]);
-	const NEXT_LABEL: Record<string, string> = { preparing: 'Start', ready: 'Mark ready', served: 'Mark served' };
+	// Start and Ready belong to the Kitchen tab. The one step dining staff take here is serving a ready order.
+	const next = $derived(order.status === 'ready' ? ('served' as const) : undefined);
+	const NEXT_LABEL: Record<string, string> = { served: 'Mark served' };
 	const receipt = $derived(order.documents.find((d) => d.type === 'official_receipt'));
 	const invoice = $derived(order.documents.find((d) => d.type === 'invoice'));
 	const unpaid = $derived(order.paymentStatus === 'unpaid');
@@ -81,8 +93,12 @@
 				{order.tableLabel ? `Table ${order.tableLabel}` : ORDER_TYPE_LABEL[order.orderType]}{order.tableLabel && order.orderType === 'takeaway' ? ' · Takeaway' : ''}{order.guestName ? ` · ${order.guestName}` : ''}
 			</p>
 		</div>
-		<span class="shrink-0 text-xs tabular-nums {late ? 'font-semibold text-danger' : 'text-ink-muted'}" title="Time since the order was placed">
-			{ageLabel}{late ? ' · late' : ''}
+		<span
+			class="inline-flex shrink-0 items-center gap-1 text-xs tabular-nums {late ? 'font-semibold text-danger' : level === 'slow' ? 'font-semibold text-warning' : 'text-ink-muted'}"
+			title="Time since the order was placed"
+		>
+			{#if level !== 'ok'}<ClockIcon class="size-3" aria-hidden="true" />{/if}
+			{ageLabel}{late ? ' · late' : level === 'slow' ? ' · slow' : ''}
 		</span>
 	</header>
 
@@ -108,6 +124,23 @@
 			</li>
 		{/each}
 	</ul>
+
+	{#if cooking}
+		<p class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-ink-muted" aria-label="Kitchen progress">
+			<span class="inline-flex items-center gap-1 font-medium text-ink">
+				<ChefHatIcon class="size-3.5" aria-hidden="true" />
+				{order.status === 'preparing' ? 'With the kitchen' : 'Waiting for the kitchen to start'}
+			</span>
+			{#if stations.length > 1}
+				{#each stations as g (g.key)}
+					<span class="inline-flex items-center gap-1 {g.state === 'ready' ? 'text-ink' : ''}">
+						{#if g.state === 'ready'}<CheckIcon class="size-3" aria-hidden="true" />{/if}
+						{g.label} · {g.state === 'ready' ? 'ready' : g.state === 'cooking' ? 'cooking' : 'waiting'}
+					</span>
+				{/each}
+			{/if}
+		</p>
+	{/if}
 
 	{#if order.remarks}
 		<p class="mt-2 rounded-md bg-surface-2 px-2 py-1.5 text-xs text-ink">{order.remarks}</p>
@@ -144,15 +177,15 @@
 		{#if canWrite}
 			<div class="flex items-center gap-2">
 				{#if next}
-					<Button size="sm" class="flex-1" variant={unpaid && order.status === 'served' ? 'outline' : 'default'} onclick={() => onadvance(order, next)}>
+					<Button size="sm" class="h-10 flex-1" variant={unpaid && order.status === 'served' ? 'outline' : 'default'} onclick={() => onadvance(order, next)}>
 						{NEXT_LABEL[next]}
 					</Button>
 				{/if}
 				{#if unpaid}
-					<Button size="sm" variant={next ? 'outline' : 'default'} class={next ? '' : 'flex-1'} onclick={() => onpay(order)}>Take payment</Button>
+					<Button size="sm" variant={next ? 'outline' : 'default'} class={next ? 'h-10' : 'h-10 flex-1'} onclick={() => onpay(order)}>Take payment</Button>
 				{/if}
 				{#if hasThread}
-					<Button variant="ghost" size="icon" class="relative size-8 shrink-0" aria-label={order.unreadMessages > 0 ? `${order.unreadMessages} unread messages for ${order.code}` : `Messages for ${order.code}`} onclick={() => ontalk(order)}>
+					<Button variant="ghost" size="icon" class="relative size-10 shrink-0" aria-label={order.unreadMessages > 0 ? `${order.unreadMessages} unread messages for ${order.code}` : `Messages for ${order.code}`} onclick={() => ontalk(order)}>
 						<MessageSquareIcon class="size-4" />
 						{#if order.unreadMessages > 0}
 							<span class="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-brand text-[10px] font-semibold text-brand-ink">{order.unreadMessages}</span>
@@ -162,7 +195,7 @@
 				<DropdownMenu.Root>
 					<DropdownMenu.Trigger>
 						{#snippet child({ props })}
-							<Button {...props} variant="ghost" size="icon" class="size-8 shrink-0" aria-label="More actions for {order.code}">
+							<Button {...props} variant="ghost" size="icon" class="size-10 shrink-0" aria-label="More actions for {order.code}">
 								<EllipsisIcon class="size-4" />
 							</Button>
 						{/snippet}

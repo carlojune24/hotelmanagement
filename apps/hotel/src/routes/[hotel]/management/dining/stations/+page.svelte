@@ -26,13 +26,14 @@
 	});
 </script>
 
-<div class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
+<div class="mx-auto w-full max-w-7xl px-4 *:max-w-3xl py-6 sm:px-6">
 	<div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
 		<div class="max-w-md">
 			<h2 class="text-base font-semibold text-ink">Stations</h2>
 			<p class="mt-1 text-sm text-ink-muted">
 				Where dishes are prepared. Tag menu items with a station to report sales by station.
-				Shared by every venue.
+				Shared by every venue. The minutes box is when a ticket at that station counts as late on the
+				kitchen board (blank = 20; it shows "slow" at half).
 			</p>
 		</div>
 
@@ -87,6 +88,31 @@
 					{/if}
 
 					<span class="shrink-0 text-xs tabular-nums text-ink-muted">{dishLabel(dishes)}</span>
+
+					{#if data.canManageMenu}
+						<!-- Late-after target: saved when the field loses focus. -->
+						<form method="POST" action="?/setTarget" use:enhance class="flex shrink-0 items-center gap-1.5">
+							<input type="hidden" name="stationId" value={st.id} />
+							<label class="sr-only" for="target-{st.id}">Late after (minutes)</label>
+							<Input
+								id="target-{st.id}"
+								name="targetMinutes"
+								type="number"
+								min="2"
+								max="240"
+								value={st.targetMinutes ?? ''}
+								placeholder="20"
+								class="h-9 w-16 text-right tabular-nums"
+								onblur={(e) => {
+									const el = e.currentTarget;
+									if (el.value !== String(st.targetMinutes ?? '')) el.form?.requestSubmit();
+								}}
+							/>
+							<span class="text-xs text-ink-muted">min</span>
+						</form>
+					{:else if st.targetMinutes}
+						<span class="shrink-0 text-xs tabular-nums text-ink-muted">late after {st.targetMinutes} min</span>
+					{/if}
 
 					{#if data.canManageMenu}
 						<Button

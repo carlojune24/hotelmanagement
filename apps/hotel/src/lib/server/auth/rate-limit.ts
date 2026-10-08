@@ -101,3 +101,9 @@ export function tooManyMessage(retryAfterSeconds: number): string {
 	const mins = Math.ceil(retryAfterSeconds / 60);
 	return `Too many attempts. Try again in ${mins} minute${mins === 1 ? '' : 's'}.`;
 }
+
+/** Per table QR code: a table seats a few people sending a handful of rounds, so this stops a
+ *  script flooding the Orders board with fake orders without ever getting in a real guest's way. */
+export const qrOrderByTable = new RateLimiter({ max: 12, windowMs: 10 * MIN });
+/** Per ip, across every table. */
+export const qrOrderByIp = new RateLimiter({ max: 25, windowMs: 10 * MIN });

@@ -13,8 +13,10 @@ import {
 	diningOrderMessages,
 	diningOrders,
 	diningPayments,
+	diningReservationTables,
 	diningReservations,
 	diningStations,
+	diningTableChecks,
 	diningTables,
 	hotels,
 	type DiningOrder,
@@ -35,7 +37,15 @@ import {
 } from './finance/documents';
 import { venueBelongsToHotel } from './dining-menu';
 import { sendDiningOrderEmail } from './email/send-dining-order';
-import { canMoveOrder, checkAddonSelection, priceLine, sumLines, type AddonGroupRule } from '../dining-orders';
+import {
+	canMoveOrder,
+	checkAddonSelection,
+	groupByStation,
+	orderStateFromStations,
+	priceLine,
+	sumLines,
+	type AddonGroupRule
+} from '../dining-orders';
 
 /** A rule or conflict to show the user (an unavailable dish, a missing choice), not a bug. */
 export class OrderError extends Error {}
@@ -64,13 +74,14 @@ export interface CreateOrderInput {
 	guestPhone?: string | null;
 	guestEmail?: string | null;
 	remarks?: string | null;
-	source?: 'staff' | 'online';
+	source?: 'staff' | 'online' | 'qr';
 	/** Takeaway pickup time (or the table time of a pre-order). */
 	pickupAt?: Date | null;
 	/** How an online order is being paid: 'online' (PayMongo) or 'venue' (at pickup). */
 	payMode?: 'online' | 'venue' | null;
-	/** `pending_payment` for an online order that must be paid before the kitchen sees it. */
-	initialStatus?: 'new' | 'pending_payment';
+	/** `pending_payment` for an online order that must be paid before the kitchen sees it;
+	 *  `pending_acceptance` for a table-QR order that staff must accept first. */
+	initialStatus?: 'new' | 'pending_payment' | 'pending_acceptance';
 	actor?: Actor;
 }
 
@@ -250,6 +261,13 @@ export async function createDiningOrder(
 		}
 		if (!order) throw new Error('Could not allocate an order code');
 
+		// A dine-in order on a table joins that table's check, so the table can be settled and
+		// freed as one. A QR order waits for staff to accept it first (see `acceptQrOrder`).
+		if (input.tableId && input.orderType === 'dine_in' && (input.initialStatus ?? 'new') === 'new') {
+			const checkId = await ensureOpenCheck(tx, { hotelId, venueId, tableId: input.tableId });
+			await tx.update(diningOrders).set({ checkId }).where(eq(diningOrders.id, order.id));
+		}
+
 		for (const r of resolved) {
 			const [oi] = await tx
 				.insert(diningOrderItems)
@@ -295,6 +313,50 @@ export async function createDiningOrder(
 	return { ...created, totalCentavos: totals.totalCentavos };
 }
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * The table's open check, opened if there isn't one. A seated reservation on the table is linked
+ * so closing the check can complete it. The partial unique index guarantees one open check per
+ * table, so two orders arriving together share the same one.
+ */
+export async function ensureOpenCheck(
+	tx: Tx,
+	args: { hotelId: string; venueId: string; tableId: string }
+): Promise<string> {
+	const find = async () => {
+		const [c] = await tx
+			.select({ id: diningTableChecks.id })
+			.from(diningTableChecks)
+			.where(and(eq(diningTableChecks.tableId, args.tableId), eq(diningTableChecks.status, 'open')))
+			.limit(1);
+		return c?.id ?? null;
+	};
+	const existing = await find();
+	if (existing) return existing;
+
+	const [seated] = await tx
+		.select({ id: diningReservations.id })
+		.from(diningReservations)
+		.innerJoin(diningReservationTables, eq(diningReservationTables.reservationId, diningReservations.id))
+		.where(
+			and(
+				eq(diningReservationTables.tableId, args.tableId),
+				eq(diningReservations.hotelId, args.hotelId),
+				eq(diningReservations.status, 'seated')
+			)
+		)
+		.orderBy(desc(diningReservations.startsAt))
+		.limit(1);
+	await tx
+		.insert(diningTableChecks)
+		.values({ hotelId: args.hotelId, diningItemId: args.venueId, tableId: args.tableId, reservationId: seated?.id ?? null })
+		.onConflictDoNothing();
+	const opened = await find();
+	if (!opened) throw new Error('Could not open a table check');
+	return opened;
+}
+
 async function loadOrderForUpdate(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], hotelId: string, orderId: string) {
 	const [order] = await tx
 		.select()
@@ -309,7 +371,7 @@ async function loadOrderForUpdate(tx: Parameters<Parameters<typeof db.transactio
 export async function setDiningOrderStatus(args: {
 	hotelId: string;
 	orderId: string;
-	to: Exclude<DiningOrderStatus, 'cancelled' | 'pending_payment'>;
+	to: Exclude<DiningOrderStatus, 'cancelled' | 'pending_payment' | 'pending_acceptance'>;
 	actor?: Actor;
 }): Promise<DiningOrder> {
 	const updated = await db.transaction(async (tx) => {
@@ -318,6 +380,18 @@ export async function setDiningOrderStatus(args: {
 			throw new OrderError(`A ${order.status} order can't be marked ${args.to}.`);
 		}
 		const now = new Date();
+		// Keep the per-station timestamps in step when the whole ticket is moved at once.
+		if (args.to === 'preparing') {
+			await tx
+				.update(diningOrderItems)
+				.set({ startedAt: now })
+				.where(and(eq(diningOrderItems.orderId, order.id), isNull(diningOrderItems.startedAt)));
+		} else if (args.to === 'ready') {
+			await tx
+				.update(diningOrderItems)
+				.set({ readyAt: now, startedAt: sql`coalesce(${diningOrderItems.startedAt}, ${now.toISOString()}::timestamptz)` })
+				.where(and(eq(diningOrderItems.orderId, order.id), isNull(diningOrderItems.readyAt)));
+		}
 		const [updated] = await tx
 			.update(diningOrders)
 			.set({
@@ -342,6 +416,77 @@ export async function setDiningOrderStatus(args: {
 	});
 	// An online guest hears when their order is ready (best-effort, after the move is saved).
 	if (args.to === 'ready' && updated.source === 'online') void sendDiningOrderEmail(updated.id, 'ready');
+	return updated;
+}
+
+/**
+ * One station starts or finishes its part of an order. `station` is a station name, `null` for
+ * dishes with no station, or `undefined` for every station at once. The order as a whole becomes
+ * `preparing` as soon as any station starts and `ready` only when every station is done; that is
+ * also the moment an online guest is emailed.
+ */
+export async function setStationStatus(args: {
+	hotelId: string;
+	orderId: string;
+	station?: string | null;
+	to: 'preparing' | 'ready';
+	actor?: Actor;
+}): Promise<DiningOrder> {
+	const { updated, becameReady } = await db.transaction(async (tx) => {
+		const order = await loadOrderForUpdate(tx, args.hotelId, args.orderId);
+		if (order.status !== 'new' && order.status !== 'accepted' && order.status !== 'preparing') {
+			throw new OrderError(`A ${order.status} order can't be ${args.to === 'ready' ? 'marked ready' : 'started'}.`);
+		}
+		const lines = await tx.select().from(diningOrderItems).where(eq(diningOrderItems.orderId, order.id));
+		const mine = lines.filter((i) =>
+			args.station === undefined ? true : args.station === null ? !i.stationName : i.stationName === args.station
+		);
+		if (mine.length === 0) throw new OrderError('There is nothing for that station on this order.');
+		// Ready follows start; a ticket moved as a whole before per-station times existed counts as started.
+		if (args.to === 'ready' && order.status !== 'preparing' && mine.some((i) => !i.readyAt && !i.startedAt)) {
+			throw new OrderError(`A ${order.status} order can't be marked ready. Start it first.`);
+		}
+
+		const now = new Date();
+		const ids = mine.map((i) => i.id);
+		if (args.to === 'preparing') {
+			await tx
+				.update(diningOrderItems)
+				.set({ startedAt: now })
+				.where(and(inArray(diningOrderItems.id, ids), isNull(diningOrderItems.startedAt)));
+		} else {
+			await tx
+				.update(diningOrderItems)
+				.set({ readyAt: now, startedAt: sql`coalesce(${diningOrderItems.startedAt}, ${now.toISOString()}::timestamptz)` })
+				.where(and(inArray(diningOrderItems.id, ids), isNull(diningOrderItems.readyAt)));
+		}
+
+		const after = await tx.select().from(diningOrderItems).where(eq(diningOrderItems.orderId, order.id));
+		const next = orderStateFromStations(groupByStation(after));
+		const becameReady = next === 'ready';
+		const status = next === 'new' ? order.status : next;
+		const [updated] = await tx
+			.update(diningOrders)
+			.set({
+				status,
+				acceptedAt: order.acceptedAt ?? now,
+				readyAt: next === 'ready' ? (order.readyAt ?? now) : order.readyAt,
+				updatedAt: now
+			})
+			.where(eq(diningOrders.id, order.id))
+			.returning();
+		await writeAudit({
+			hotelId: args.hotelId,
+			actor: args.actor ?? null,
+			action: 'dining_order.station',
+			entityType: 'dining_order',
+			entityId: order.id,
+			before: { status: order.status },
+			after: { status, station: args.station === undefined ? 'all' : (args.station ?? 'unassigned'), to: args.to }
+		});
+		return { updated: updated!, becameReady };
+	});
+	if (becameReady && updated.source === 'online') void sendDiningOrderEmail(updated.id, 'ready');
 	return updated;
 }
 
@@ -379,6 +524,50 @@ export async function cancelDiningOrder(args: {
 			after: { status: 'cancelled', reason }
 		});
 	});
+}
+
+/**
+ * Staff accept a table-QR order: it becomes a normal new ticket for the kitchen and joins the
+ * table's check (opening it, which is what makes the table "occupied"). Declining is just
+ * `cancelDiningOrder` with a reason the guest sees.
+ */
+export async function acceptQrOrder(args: { hotelId: string; orderId: string; actor?: Actor }): Promise<DiningOrder> {
+	return db.transaction(async (tx) => {
+		const order = await loadOrderForUpdate(tx, args.hotelId, args.orderId);
+		if (order.status !== 'pending_acceptance') throw new OrderError('This order is not waiting to be accepted.');
+		if (!order.tableId) throw new OrderError('This order has no table.');
+		const checkId = await ensureOpenCheck(tx, { hotelId: args.hotelId, venueId: order.diningItemId, tableId: order.tableId });
+		const [updated] = await tx
+			.update(diningOrders)
+			.set({ status: 'new', checkId, updatedAt: new Date() })
+			.where(eq(diningOrders.id, order.id))
+			.returning();
+		await writeAudit({
+			hotelId: args.hotelId,
+			actor: args.actor ?? null,
+			action: 'dining_order.accept',
+			entityType: 'dining_order',
+			entityId: order.id,
+			before: { status: 'pending_acceptance' },
+			after: { status: 'new', checkId }
+		});
+		return updated!;
+	});
+}
+
+/** Table-QR orders waiting for a waiter to accept them. */
+export async function countAwaitingAcceptance(hotelId: string, venueId?: string | null): Promise<number> {
+	const [row] = await db
+		.select({ n: sql<number>`count(*)` })
+		.from(diningOrders)
+		.where(
+			and(
+				eq(diningOrders.hotelId, hotelId),
+				eq(diningOrders.status, 'pending_acceptance'),
+				venueId ? eq(diningOrders.diningItemId, venueId) : undefined
+			)
+		);
+	return Number(row?.n ?? 0);
 }
 
 /**
@@ -557,6 +746,8 @@ export interface OrderView {
 	orderType: DiningOrderType;
 	venueId: string;
 	venueTitle: string;
+	tableId: string | null;
+	checkId: string | null;
 	tableLabel: string | null;
 	guestName: string | null;
 	guestPhone: string | null;
@@ -587,6 +778,8 @@ export interface OrderView {
 		quantity: number;
 		remarks: string | null;
 		stationName: string | null;
+		startedAt: Date | null;
+		readyAt: Date | null;
 		lineTotalCentavos: number;
 		addons: string[];
 	}[];
@@ -626,6 +819,8 @@ async function hydrate(rows: { o: DiningOrder; venueTitle: string; bookingOrderI
 		orderType: o.orderType,
 		venueId: o.diningItemId,
 		venueTitle,
+		tableId: o.tableId,
+		checkId: o.checkId,
 		tableLabel: o.tableLabel,
 		guestName: o.guestName,
 		guestPhone: o.guestPhone,
@@ -654,6 +849,8 @@ async function hydrate(rows: { o: DiningOrder; venueTitle: string; bookingOrderI
 				quantity: i.quantity,
 				remarks: i.remarks,
 				stationName: i.stationName,
+				startedAt: i.startedAt,
+				readyAt: i.readyAt,
 				lineTotalCentavos: i.lineTotalCentavos,
 				addons: addons.filter((a) => a.orderItemId === i.id).map((a) => a.name)
 			}))
@@ -668,14 +865,22 @@ const orderSelect = () =>
 
 /** The live board: everything still moving through the kitchen, plus orders served since
  *  `servedSince` (so a served-but-unpaid table is still visible at the cashier). */
-export async function listBoardOrders(hotelId: string, opts: { venueId?: string | null; servedSince: Date }): Promise<OrderView[]> {
+export async function listBoardOrders(
+	hotelId: string,
+	opts: { venueId?: string | null; servedSince: Date; /** The Orders board also lists table-QR orders awaiting staff; the kitchen must not. */ includeAwaitingAcceptance?: boolean }
+): Promise<OrderView[]> {
 	const rows = await orderSelect()
 		.where(
 			and(
 				eq(diningOrders.hotelId, hotelId),
 				opts.venueId ? eq(diningOrders.diningItemId, opts.venueId) : undefined,
 				or(
-					inArray(diningOrders.status, ['new', 'accepted', 'preparing', 'ready']),
+					inArray(
+						diningOrders.status,
+						opts.includeAwaitingAcceptance
+							? ['pending_acceptance', 'new', 'accepted', 'preparing', 'ready']
+							: ['new', 'accepted', 'preparing', 'ready']
+					),
 					and(eq(diningOrders.status, 'served'), gte(diningOrders.servedAt, opts.servedSince))
 				)
 			)

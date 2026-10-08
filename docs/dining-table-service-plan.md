@@ -177,3 +177,7 @@ The `impeccable` skill is required by `CLAUDE.md` for new or redesigned surfaces
   - Create Public Area, VIP Room and 2nd Floor, then place tables in each.
   - Print the QR sheet, scan it on a phone, order two rounds, accept them on the board, cook per station, request the bill, then **Settle & close** and confirm the table goes Free.
   - Leave the new-order sheet open for over 20 seconds and confirm the cart survives the poll.
+
+## Follow-up (2026-10-08): Floor, Kitchen lanes, kitchen-only Start/Ready
+
+The Floor plan tab was renamed **Floor**, made the first tab and redesigned (status bar, plan/list, table panel); the Kitchen board got one lane per station; and Start/Mark ready were removed from the Orders tab (the server refuses them there). See the entry in `docs/TODO.md` and the Dining paragraphs in `apps/hotel/DESIGN.md`.

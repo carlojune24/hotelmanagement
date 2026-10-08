@@ -60,7 +60,7 @@
 	});
 </script>
 
-<div class="mx-auto w-full max-w-2xl px-4 py-8 sm:px-6">
+<div class="mx-auto w-full max-w-7xl px-4 *:max-w-2xl py-8 sm:px-6">
 	<div class="mb-6 flex items-center justify-between">
 		<div>
 			<h1 class="text-xl font-semibold tracking-tight text-ink">{item.title}</h1>
@@ -205,7 +205,7 @@
 		</h3>
 		<p class="mt-1 text-xs text-ink-muted">
 			Let guests book a table online and let staff take phone bookings. Tables are set up on the
-			<a class="underline" href="{base}/dining/floor-plan?venue={item.id}">Floor plan</a>
+			<a class="underline" href="{base}/dining/floor?venue={item.id}">Floor</a>
 			({data.tableCount} active {data.tableCount === 1 ? 'table' : 'tables'}).
 		</p>
 
@@ -289,7 +289,7 @@
 							<button
 								type="submit"
 								aria-label="Remove photo"
-								class="absolute top-1 right-1 flex size-6 items-center justify-center rounded-full bg-black/60 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100"
+								class="absolute top-1 right-1 flex size-8 items-center justify-center rounded-full bg-black/60 text-xs text-white transition-opacity focus-visible:opacity-100 sm:size-6 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
 							>
 								✕
 							</button>
@@ -317,7 +317,7 @@
 				type="file"
 				multiple
 				accept="image/jpeg,image/png,image/webp,image/gif"
-				class="text-sm"
+				class="block w-full min-w-0 text-sm file:mr-3 file:rounded-md file:border file:border-border file:bg-surface-2 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-ink hover:file:bg-surface sm:w-auto"
 			/>
 			<Select.Root type="single" name="tag" bind:value={photoTag}>
 				<Select.Trigger class="w-32">{photoTag === 'cover' ? 'Cover' : 'Gallery'}</Select.Trigger>

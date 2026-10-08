@@ -88,7 +88,7 @@ describe.skipIf(!hasDb)('dining kitchen board (live DB)', async () => {
 			{ menuItemId: mojito, quantity: 1 }
 		]);
 		const cook = await board(asUser(hotelA, COOK));
-		expect(cook.stations).toEqual(['Bar', 'Grill']);
+		expect(cook.stations.map((x: any) => x.name)).toEqual(['Bar', 'Grill']);
 		const t = cook.orders.find((x: any) => x.id === order.id);
 		expect(t.items.map((i: any) => [i.name, i.stationName])).toEqual([['Steak', 'Grill'], ['Mojito', 'Bar']]);
 		expect(cook.canMove).toBe(true);
@@ -117,6 +117,47 @@ describe.skipIf(!hasDb)('dining kitchen board (live DB)', async () => {
 		await expect(advance(asUser(hotelA, VIEWER), { orderId: order.id, to: 'preparing' })).rejects.toMatchObject({ status: 403 });
 		expect((await advance(asUser(hotelA, COOK), { orderId: order.id, to: 'ready' })).data.error).toMatch(/can't be marked ready/);
 		expect((await advance(asUser(hotelB, COOK), { orderId: order.id, to: 'preparing' })).status).toBe(400);
+	});
+
+	it('is ready for the table only once every station has finished its part', async () => {
+		const cook = asUser(hotelA, COOK);
+		const order = await place([
+			{ menuItemId: steak, quantity: 1 },
+			{ menuItemId: mojito, quantity: 1 }
+		]);
+		const status = async () => (await board(cook)).orders.find((x: any) => x.id === order.id);
+
+		// the bar can't call it ready before starting
+		expect((await advance(cook, { orderId: order.id, to: 'ready', station: 'Bar' })).status).toBe(400);
+		expect((await advance(cook, { orderId: order.id, to: 'preparing', station: 'Bar' })).moved).toBe(true);
+		expect((await status()).status).toBe('preparing');
+		expect((await advance(cook, { orderId: order.id, to: 'ready', station: 'Bar' })).moved).toBe(true);
+
+		// the bar is done but the grill hasn't started: the ticket is still being prepared
+		let t = await status();
+		expect(t.status).toBe('preparing');
+		expect(t.items.find((i: any) => i.name === 'Mojito').readyAt).toBeTruthy();
+		expect(t.items.find((i: any) => i.name === 'Steak').startedAt).toBeNull();
+
+		expect((await advance(cook, { orderId: order.id, to: 'preparing', station: 'Grill' })).moved).toBe(true);
+		expect((await status()).status).toBe('preparing');
+		expect((await advance(cook, { orderId: order.id, to: 'ready', station: 'Grill' })).moved).toBe(true);
+		t = await status();
+		expect(t.status).toBe('ready');
+		expect(t.readyAt).toBeTruthy();
+	});
+
+	it('moves a whole ticket at once when no station is named', async () => {
+		const cook = asUser(hotelA, COOK);
+		const order = await place([
+			{ menuItemId: steak, quantity: 1 },
+			{ menuItemId: mojito, quantity: 1 }
+		]);
+		expect((await advance(cook, { orderId: order.id, to: 'preparing' })).moved).toBe(true);
+		expect((await advance(cook, { orderId: order.id, to: 'ready' })).moved).toBe(true);
+		const t = (await board(cook)).orders.find((x: any) => x.id === order.id);
+		expect(t.status).toBe('ready');
+		expect(t.items.every((i: any) => i.readyAt && i.startedAt)).toBe(true);
 	});
 
 	it('tells the kitchen about a ticket that was just cancelled', async () => {

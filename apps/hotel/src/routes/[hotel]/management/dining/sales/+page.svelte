@@ -44,7 +44,7 @@
 		new Intl.DateTimeFormat('en-PH', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${d}T00:00:00Z`));
 </script>
 
-<div class="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
+<div class="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
 	<div class="mb-5 flex flex-wrap items-end gap-3">
 		<div class="flex gap-1.5" role="group" aria-label="Date range">
 			{#each PRESETS as p (p.key)}
@@ -114,7 +114,7 @@
 		<div class="mt-6 grid gap-6 lg:grid-cols-2">
 			<section aria-labelledby="byDay">
 				<h2 id="byDay" class="mb-2 text-sm font-semibold text-ink">By day</h2>
-				<div class="overflow-hidden rounded-xl border border-border">
+				<div class="overflow-x-auto rounded-xl border border-border">
 					<Table.Root>
 						<Table.Header><Table.Row><Table.Head>Date</Table.Head><Table.Head class="text-right">Orders</Table.Head><Table.Head class="text-right">Sales</Table.Head></Table.Row></Table.Header>
 						<Table.Body>
@@ -128,7 +128,7 @@
 
 			<section aria-labelledby="byMethod">
 				<h2 id="byMethod" class="mb-2 text-sm font-semibold text-ink">By payment method</h2>
-				<div class="overflow-hidden rounded-xl border border-border">
+				<div class="overflow-x-auto rounded-xl border border-border">
 					<Table.Root>
 						<Table.Header><Table.Row><Table.Head>Method</Table.Head><Table.Head class="text-right">Orders</Table.Head><Table.Head class="text-right">Sales</Table.Head></Table.Row></Table.Header>
 						<Table.Body>
@@ -143,7 +143,7 @@
 			{#if r.byVenue.length > 1}
 				<section aria-labelledby="byVenue">
 					<h2 id="byVenue" class="mb-2 text-sm font-semibold text-ink">By venue</h2>
-					<div class="overflow-hidden rounded-xl border border-border">
+					<div class="overflow-x-auto rounded-xl border border-border">
 						<Table.Root>
 							<Table.Header><Table.Row><Table.Head>Venue</Table.Head><Table.Head class="text-right">Orders</Table.Head><Table.Head class="text-right">Sales</Table.Head></Table.Row></Table.Header>
 							<Table.Body>
@@ -158,7 +158,7 @@
 
 			<section aria-labelledby="byStation">
 				<h2 id="byStation" class="mb-2 text-sm font-semibold text-ink">By station</h2>
-				<div class="overflow-hidden rounded-xl border border-border">
+				<div class="overflow-x-auto rounded-xl border border-border">
 					<Table.Root>
 						<Table.Header><Table.Row><Table.Head>Station</Table.Head><Table.Head class="text-right">Items</Table.Head><Table.Head class="text-right">Sales</Table.Head></Table.Row></Table.Header>
 						<Table.Body>
@@ -172,7 +172,7 @@
 
 			<section aria-labelledby="byItem" class="lg:col-span-2">
 				<h2 id="byItem" class="mb-2 text-sm font-semibold text-ink">Top dishes</h2>
-				<div class="overflow-hidden rounded-xl border border-border">
+				<div class="overflow-x-auto rounded-xl border border-border">
 					<Table.Root>
 						<Table.Header><Table.Row><Table.Head>Dish</Table.Head><Table.Head class="text-right">Sold</Table.Head><Table.Head class="text-right">Sales</Table.Head></Table.Row></Table.Header>
 						<Table.Body>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { enhance, applyAction, deserialize } from '$app/forms';
 	import { goto, invalidate, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
@@ -17,6 +18,12 @@
 	import OrderCard from './order-card.svelte';
 	import ThreadSheet from './thread-sheet.svelte';
 	import RefundDialog from './refund-dialog.svelte';
+	import SettleDialog from '../floor/settle-dialog.svelte';
+	import QrCodeIcon from '@lucide/svelte/icons/qr-code';
+	import ArmchairIcon from '@lucide/svelte/icons/armchair';
+	import { Badge } from '$lib/components/ui/badge/index.js';
+	import { CHECK_STAGE_LABEL } from '$lib/dining-checks';
+	import { formatWait } from '$lib/dining-orders';
 	import BanknoteArrowUpIcon from '@lucide/svelte/icons/banknote-arrow-up';
 	import type { ActionData, PageData } from './$types';
 
@@ -28,16 +35,19 @@
 	const base = $derived(`/${slug}/management/dining`);
 
 	const COLUMNS = [
-		{ key: 'new', label: 'New', hint: 'Waiting for the kitchen', statuses: ['new', 'accepted'] },
-		{ key: 'preparing', label: 'Preparing', hint: 'In the kitchen', statuses: ['preparing'] },
-		{ key: 'ready', label: 'Ready', hint: 'Waiting to be served', statuses: ['ready'] },
+		{ key: 'new', label: 'New', hint: 'Waiting for the kitchen to start', statuses: ['new', 'accepted'] },
+		{ key: 'preparing', label: 'Preparing', hint: 'With the kitchen', statuses: ['preparing'] },
+		{ key: 'ready', label: 'Ready', hint: 'Ready to take to the table', statuses: ['ready'] },
 		{ key: 'served', label: 'Served today', hint: 'Served; unpaid ones still need payment', statuses: ['served'] }
 	] as const;
 
 	const byColumn = $derived(
 		Object.fromEntries(COLUMNS.map((c) => [c.key, data.orders.filter((o) => (c.statuses as readonly string[]).includes(o.status))])) as Record<string, Order[]>
 	);
-	const toPay = $derived(data.orders.filter((o) => o.paymentStatus === 'unpaid').length);
+	const toPay = $derived(data.orders.filter((o) => o.paymentStatus === 'unpaid' && o.status !== 'pending_acceptance').length);
+	// Table-QR orders a waiter has to accept before the kitchen sees them.
+	const awaitingQr = $derived(data.orders.filter((o) => o.status === 'pending_acceptance'));
+	const waitedMin = (o: Order) => Math.max(0, Math.floor((nowMs - new Date(o.createdAt).getTime()) / 60_000));
 
 	let mobileCol = $state('new');
 
@@ -61,6 +71,7 @@
 	}
 
 	// ---- actions ----------------------------------------------------------------------
+	// The only step taken here: serving an order the kitchen has marked ready.
 	async function advance(order: Order, to: string) {
 		const body = new FormData();
 		body.set('orderId', order.id);
@@ -72,6 +83,16 @@
 	}
 
 	let newOpen = $state(false);
+	// "New order" on a Floor table lands here with ?newOrder=1&table=…: open the sheet on that table, then tidy the URL.
+	let newTable = $state<string | null>(null);
+	let handledDeepLink = false;
+	$effect(() => {
+		if (handledDeepLink || page.url.searchParams.get('newOrder') !== '1') return;
+		handledDeepLink = true;
+		newTable = page.url.searchParams.get('table');
+		newOpen = true;
+		untrack(() => goto(page.url.pathname, { replaceState: true, keepFocus: true, noScroll: true }));
+	});
 	let payOpen = $state(false);
 	let payOrderId = $state<string | null>(null);
 	let pendingPayId = $state<string | null>(null);
@@ -105,6 +126,9 @@
 
 	let undoRoomFor = $state<Order | null>(null);
 	let cancelFor = $state<Order | null>(null);
+	let declineFor = $state<Order | null>(null);
+	let settleOpen = $state(false);
+	let settleFor = $state<(typeof data.openChecks)[number] | null>(null);
 	let voidFor = $state<Order | null>(null);
 	let invoiceFor = $state<Order | null>(null);
 
@@ -123,6 +147,7 @@
 		if (form?.ok && !form.placed) toast.success(form.ok);
 		if (form?.ok) {
 			cancelFor = null;
+			declineFor = null;
 			voidFor = null;
 			respondFor = null;
 			refundOpen = false;
@@ -139,7 +164,7 @@
 	});
 </script>
 
-<div class="mx-auto w-full max-w-[96rem] px-4 py-6 sm:px-6">
+<div class="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
 	<div class="mb-4 flex flex-wrap items-center gap-3">
 		<p class="text-sm text-ink-muted" aria-live="polite">
 			{data.orders.length === 0 ? 'No open orders.' : `${data.orders.length} on the board`}{toPay > 0 ? ` · ${toPay} to pay` : ''}
@@ -148,7 +173,7 @@
 					· {data.awaitingPayment} awaiting online payment
 				</span>
 			{/if}
-			<span class="ml-1 text-xs">Updates every 20 seconds.</span>
+			<span class="ml-1 text-xs">Updates every 20 seconds. The kitchen starts and finishes dishes on the Kitchen tab.</span>
 		</p>
 		<div class="ml-auto flex flex-wrap items-center gap-2">
 			{#if data.venues.length > 1}
@@ -167,6 +192,81 @@
 			{/if}
 		</div>
 	</div>
+
+	{#if awaitingQr.length > 0}
+		<section class="mb-5 rounded-xl border-2 border-brand/60 bg-brand/5" aria-label="Table orders waiting for you">
+			<h2 class="flex items-center gap-2 border-b border-brand/30 px-4 py-2.5 text-sm font-semibold text-ink">
+				<QrCodeIcon class="size-4 text-brand" aria-hidden="true" />
+				Table orders waiting for you <span class="font-normal tabular-nums text-ink-muted">· {awaitingQr.length}</span>
+			</h2>
+			<ul class="divide-y divide-brand/20">
+				{#each awaitingQr as o (o.id)}
+					<li class="flex flex-wrap items-start gap-x-4 gap-y-2 px-4 py-3">
+						<div class="min-w-0 flex-1">
+							<p class="flex flex-wrap items-baseline gap-x-2 text-sm">
+								<span class="font-semibold text-ink">Table {o.tableLabel ?? '?'}</span>
+								<span class="font-mono text-xs text-ink-muted">{o.code}</span>
+								<span class="text-xs tabular-nums text-ink-muted">{formatWait(waitedMin(o))} ago</span>
+							</p>
+							<ul class="mt-1 text-sm text-ink">
+								{#each o.items as i (i.id)}
+									<li>
+										<span class="tabular-nums text-ink-muted">{i.quantity}×</span> {i.name}{#if i.addons.length > 0}<span class="text-ink-muted"> ({i.addons.join(', ')})</span>{/if}{#if i.remarks}<span class="italic"> “{i.remarks}”</span>{/if}
+									</li>
+								{/each}
+							</ul>
+							{#if o.remarks}<p class="mt-1 text-xs italic text-ink">Note: {o.remarks}</p>{/if}
+						</div>
+						<span class="font-medium tabular-nums text-ink">{peso(o.totalCentavos)}</span>
+						{#if data.canWrite}
+							<div class="flex items-center gap-2">
+								<form method="POST" action="?/accept" use:enhance={() => async ({ update }) => { await update({ reset: false }); await invalidateAll(); }}>
+									<input type="hidden" name="orderId" value={o.id} />
+									<Button type="submit" size="sm">Accept</Button>
+								</form>
+								<Button size="sm" variant="outline" onclick={() => (declineFor = o)}>Decline</Button>
+							</div>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
+
+	{#if data.openChecks.length > 0}
+		<section class="mb-5" aria-label="Tables with open checks">
+			<h2 class="mb-2 flex items-center gap-2 px-1 text-sm font-semibold text-ink">
+				<ArmchairIcon class="size-4 text-ink-muted" aria-hidden="true" />
+				Tables <span class="font-normal tabular-nums text-ink-muted">· {data.openChecks.length} open</span>
+			</h2>
+			<div class="flex gap-3 overflow-x-auto pb-1">
+				{#each data.openChecks as c (c.id)}
+					<div class="w-64 shrink-0 rounded-xl border-2 bg-surface p-3 {c.stage === 'needs_payment' ? 'border-warning/70' : c.stage === 'ready_to_clear' ? 'border-brand/60' : 'border-border'}">
+						<div class="flex items-center justify-between gap-2">
+							<p class="font-semibold text-ink">Table {c.tableName}</p>
+							<Badge variant={c.stage === 'needs_payment' ? 'destructive' : c.stage === 'ready_to_clear' ? 'default' : 'outline'}>{CHECK_STAGE_LABEL[c.stage]}</Badge>
+						</div>
+						<p class="mt-1 text-xs text-ink-muted">
+							{c.liveCount} {c.liveCount === 1 ? 'order' : 'orders'} · {peso(c.totalCentavos)}{c.unpaidCentavos > 0 ? ` · ${peso(c.unpaidCentavos)} to pay` : ''}
+						</p>
+						{#if c.billRequestedAt}<p class="mt-1 text-xs font-medium text-warning">Asked for the bill</p>{/if}
+						{#if data.canWrite}
+							<div class="mt-2 flex gap-2">
+								{#if c.unpaidCount > 0 && c.awaitingAcceptance === 0}
+									<Button size="sm" onclick={() => { settleFor = c; settleOpen = true; }}>Settle &amp; close</Button>
+								{:else if c.stage === 'ready_to_clear'}
+									<form method="POST" action="?/closeTable" use:enhance={() => async ({ update }) => { await update({ reset: false }); await invalidateAll(); }}>
+										<input type="hidden" name="checkId" value={c.id} />
+										<Button type="submit" size="sm">Close table</Button>
+									</form>
+								{/if}
+							</div>
+						{/if}
+					</div>
+				{/each}
+			</div>
+		</section>
+	{/if}
 
 	{#if data.refundDue.length > 0}
 		<section class="mb-5 rounded-xl border border-border bg-surface" aria-label="Refunds due">
@@ -221,7 +321,8 @@
 						<span class="text-sm font-semibold text-ink">{c.label}</span>
 						<span class="text-xs tabular-nums text-ink-muted">{byColumn[c.key]?.length ?? 0}</span>
 					</h2>
-					<div class="space-y-3 lg:min-h-48 lg:rounded-xl lg:bg-surface-2/50 lg:p-2">
+					<!-- Each column scrolls on its own, so a long "Served today" never pushes the others off screen. -->
+						<div class="space-y-3 lg:max-h-[calc(100dvh-13rem)] lg:min-h-48 lg:overflow-y-auto lg:overscroll-contain lg:rounded-xl lg:bg-surface-2/50 lg:p-2" tabindex="0" role="region" aria-label="{c.label} orders">
 						{#each byColumn[c.key] ?? [] as order (order.id)}
 							<OrderCard
 								{order}
@@ -250,10 +351,34 @@
 	{/if}
 </div>
 
-<NewOrderSheet bind:open={newOpen} {data} defaultVenueId={data.venueId} onplaced={placed} />
+<NewOrderSheet bind:open={newOpen} {data} defaultVenueId={data.venueId} defaultTableId={newTable} onplaced={placed} />
 <PayDialog bind:open={payOpen} order={payOrder} shiftOpen={data.shiftOpen} {slug} inHouse={data.inHouse} />
 <ThreadSheet bind:open={threadOpen} order={threadOrder ?? data.refundDue.find((o) => o.id === threadOrderId) ?? null} canWrite={data.canWrite} timezone={data.timezone} />
 <RefundDialog bind:open={refundOpen} order={refundOrder} />
+<SettleDialog bind:open={settleOpen} check={settleFor} shiftOpen={data.shiftOpen} {slug} inHouse={data.inHouse} />
+
+<!-- Decline a table-QR order -->
+<Dialog.Root open={declineFor !== null} onOpenChange={(o) => { if (!o) declineFor = null; }}>
+	<Dialog.Content class="sm:max-w-sm">
+		{#if declineFor}
+			<Dialog.Header>
+				<Dialog.Title>Decline {declineFor.code}?</Dialog.Title>
+				<Dialog.Description>The guest at table {declineFor.tableLabel ?? '?'} sees your reason on their phone.</Dialog.Description>
+			</Dialog.Header>
+			<form method="POST" action="?/cancel" use:enhance class="space-y-3">
+				<input type="hidden" name="orderId" value={declineFor.id} />
+				<div>
+					<Label for="declineReason">Reason</Label>
+					<Input id="declineReason" name="reason" required maxlength={300} placeholder="Sold out, kitchen closed…" class="mt-1" />
+				</div>
+				<Dialog.Footer>
+					<Button type="button" variant="outline" onclick={() => (declineFor = null)}>Keep waiting</Button>
+					<Button type="submit" variant="destructive">Decline order</Button>
+				</Dialog.Footer>
+			</form>
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>
 
 <!-- Answer a guest's request to cancel a paid order -->
 <Dialog.Root open={respondFor !== null} onOpenChange={(o) => { if (!o) respondFor = null; }}>

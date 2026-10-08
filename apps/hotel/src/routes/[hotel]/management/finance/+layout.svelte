@@ -19,6 +19,7 @@
 			{ seg: '/security-deposits', label: 'Security deposits' },
 			{ seg: '/shifts', label: 'Shifts' },
 			{ seg: '/reports', label: 'Reports' },
+			{ seg: '/accounts', label: 'Accounts' },
 			{ seg: '/bir', label: 'BIR' },
 			{ seg: '/paymongo', label: 'PayMongo' },
 			{ seg: '/settings', label: 'Settings', show: data.finance.canAdmin }

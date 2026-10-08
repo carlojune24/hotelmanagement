@@ -31,6 +31,7 @@ describe.skipIf(!hasDb)('dining orders page: load and actions (live DB)', async 
 	const s = await import('$lib/server/db/schema/index');
 	const { mintRef } = await import('$lib/server/ids');
 	const page = await import('./+page.server');
+	const dining = await import('$lib/server/dining-orders');
 	const { seedFinanceDefaults } = await import('$lib/server/finance/seed-defaults');
 	const { openShift } = await import('$lib/server/finance/shifts');
 	const { createDocumentSeries } = await import('$lib/server/finance/documents');
@@ -148,17 +149,33 @@ describe.skipIf(!hasDb)('dining orders page: load and actions (live DB)', async 
 	it("keeps another hotel's orders out of reach", async () => {
 		const placed = await place(asUser(hotelA, CASHIER), { venueId: venueA, orderType: 'takeaway', lines: [{ menuItemId: soda, quantity: 1 }] });
 		const intruder = asUser(hotelB, CASHIER);
-		expect((await act('advance', intruder, { orderId: placed.placed.id, to: 'preparing' })).data.error).toMatch(/could not be found/);
+		expect((await act('advance', intruder, { orderId: placed.placed.id, to: 'served' })).data.error).toMatch(/could not be found/);
 		expect((await act('cancel', intruder, { orderId: placed.placed.id, reason: 'x' })).data.error).toMatch(/could not be found/);
 		expect((await act('pay', intruder, { orderId: placed.placed.id, method: 'card' })).data.error).toMatch(/could not be found/);
 	});
 
-	it('moves an order through the kitchen and enforces the cancel rules', async () => {
+	it('leaves Start and Ready to the kitchen: the Orders board can only serve a ready order', async () => {
 		const cashier = asUser(hotelA, CASHIER);
 		const { placed } = await place(cashier, { venueId: venueA, orderType: 'dine_in', lines: [{ menuItemId: soda, quantity: 1 }] });
+		// dining staff cannot start or finish dishes from here, whatever the form says
+		for (const to of ['accepted', 'preparing', 'ready']) {
+			const r = await act('advance', cashier, { orderId: placed.id, to });
+			expect(r.status).toBe(400);
+			expect(r.data.error).toMatch(/Kitchen tab/);
+		}
+		// and nothing moved
+		expect((await dining.getDiningOrder(hotelA.id, placed.id))!.status).toBe('new');
+		// serving needs the kitchen to have finished first
 		expect((await act('advance', cashier, { orderId: placed.id, to: 'served' })).data.error).toMatch(/can't be marked/);
-		expect((await act('advance', cashier, { orderId: placed.id, to: 'preparing' })).moved).toBe(true);
-		expect((await act('advance', asUser(hotelA, VIEWER), { orderId: placed.id, to: 'ready' }).catch((e) => e)).status).toBe(403);
+		await dining.setStationStatus({ hotelId: hotelA.id, orderId: placed.id, to: 'preparing' });
+		await dining.setStationStatus({ hotelId: hotelA.id, orderId: placed.id, to: 'ready' });
+		expect((await act('advance', cashier, { orderId: placed.id, to: 'served' })).moved).toBe(true);
+	});
+
+	it('enforces the cancel rules', async () => {
+		const cashier = asUser(hotelA, CASHIER);
+		const { placed } = await place(cashier, { venueId: venueA, orderType: 'dine_in', lines: [{ menuItemId: soda, quantity: 1 }] });
+		expect((await act('advance', asUser(hotelA, VIEWER), { orderId: placed.id, to: 'served' }).catch((e) => e)).status).toBe(403);
 		expect((await act('cancel', cashier, { orderId: placed.id, reason: '  ' })).status).toBe(400);
 		expect((await act('cancel', cashier, { orderId: placed.id, reason: 'Guest left' })).ok).toBe('Order cancelled.');
 	});

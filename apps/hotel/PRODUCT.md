@@ -29,6 +29,9 @@ Not a marketplace/OTA (no cross-hotel search or commission model) and not a bare
 - Currency is always PHP, prices are computed and stored in centavos; VAT is a per-hotel configurable rate (default 12%) plus optional additional taxes/fees (reservation fee, resort fee) — the price breakdown the guest sees must reconcile with what `pricing.ts` actually computes.
 - A hotel's amenities (schema already exists: `amenities`/`hotel_amenities`/`room_type_amenities`, with `is_highlighted` flags) are informational only at this stage — not separately sellable/bookable (that's Phase 2's `amenity_items`).
 
+- Dining at the table: each restaurant table has a printed QR code (`/{slug}/dining/t/{token}`) that opens that venue's menu for that table, phone first. A guest sends a round, a waiter accepts it, the kitchen cooks it per station, and the table is settled and freed from one check. No payment happens on the guest's phone; it is a deliberate choice that dining is paid at the table (or charged to the room), unlike pickup orders which can be paid online. Menu photos and descriptions matter here more than anywhere else on the site, but a menu with none must still read cleanly.
+- Dining roles: **floor staff** (Dining → Floor, Orders) take orders, accept QR orders, serve ready food and settle tables; **the kitchen** (Dining → Kitchen) is the only place a dish is started or marked ready, one lane per station. Floor staff cannot mark food ready.
+
 ## Capabilities and Constraints
 
 - **Per-hotel branding is a confirmed requirement, not yet implemented.** `hotels.config` (jsonb, free-form) exists but currently carries no branding fields, and there is no hotel-admin UI to set them. This booking-surface work is expected to define what "branding" means concretely (logo, brand/accent color, hero image, short tagline are the likely candidates) and add the schema + settings UI alongside the guest-facing page — not just the guest page in isolation.
