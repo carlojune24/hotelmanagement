@@ -6,9 +6,10 @@
 
 	const base = $derived(`/${page.params.hotel}/management/dining`);
 
-	// Orders and Reservations join this strip as each one ships.
+	// Orders joins this strip when it ships.
 	const tabs = $derived(
 		[
+			{ seg: 'reservations', label: 'Reservations', show: true },
 			{ seg: 'floor-plan', label: 'Floor plan', show: true },
 			{ seg: 'menu', label: 'Menu', show: true },
 			{ seg: 'addons', label: 'Add-ons', show: true },
