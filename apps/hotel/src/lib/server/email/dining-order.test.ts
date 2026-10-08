@@ -70,6 +70,15 @@ describe('renderDiningOrder', () => {
 		expect(renderDiningOrder(base({ remarks: 'Extra napkins' })).text).toContain('Note: Extra napkins');
 	});
 
+	it('adds the venue pickup note for takeaway only, and escapes it', () => {
+		const note = 'Collect at the <b>Café</b> counter, ground floor';
+		const takeaway = renderDiningOrder(base({ pickupNote: note }));
+		expect(takeaway.text).toContain(note);
+		expect(takeaway.html).toContain('Collect at the &lt;b&gt;Café&lt;/b&gt; counter');
+		expect(renderDiningOrder(base({ pickupNote: note, orderType: 'pre_order' })).text).not.toContain('Collect at');
+		expect(renderDiningOrder(base()).text).not.toContain('Collect at');
+	});
+
 	it('escapes HTML in guest-supplied text', () => {
 		const m = renderDiningOrder(
 			base({

@@ -20,7 +20,7 @@ export async function sendDiningOrderEmail(
 		if (!order) return { ok: false, error: `order ${orderId} not found` };
 		if (!order.guestEmail) return { ok: true, skipped: 'no-email' };
 
-		const [venue] = await db.select({ title: diningItems.title }).from(diningItems).where(eq(diningItems.id, order.diningItemId));
+		const [venue] = await db.select({ title: diningItems.title, pickupNote: diningItems.pickupNote }).from(diningItems).where(eq(diningItems.id, order.diningItemId));
 		const [hotel] = await db.select().from(hotels).where(eq(hotels.id, order.hotelId));
 		if (!hotel) return { ok: false, error: 'hotel not found' };
 		const branding = parseBranding(hotel.config);
@@ -63,6 +63,7 @@ export async function sendDiningOrderEmail(
 			totalCentavos: order.totalCentavos,
 			payment: order.paymentStatus === 'paid' ? 'paid' : 'pay_at_venue',
 			remarks: order.remarks,
+			pickupNote: venue?.pickupNote ?? null,
 			trackUrl: `${origin}/${hotel.slug}/dining/order/${order.code}?t=${order.accessToken}`
 		});
 

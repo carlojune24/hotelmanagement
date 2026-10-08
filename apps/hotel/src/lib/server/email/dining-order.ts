@@ -28,6 +28,8 @@ export interface DiningOrderEmailData {
 	/** 'paid' (online or at the cashier), or 'pay_at_venue'. */
 	payment: 'paid' | 'pay_at_venue';
 	remarks: string | null;
+	/** Where and how to collect, set by the hotel per venue. Shown for takeaway only. */
+	pickupNote?: string | null;
 	/** Absolute link to the guest's tracking page. */
 	trackUrl: string;
 }
@@ -61,6 +63,7 @@ export function renderDiningOrder(data: DiningOrderEmailData): RenderedEmail {
 		: data.payment === 'paid'
 			? 'Your payment is confirmed and the kitchen has your order.'
 			: 'The kitchen has your order. Please pay when you collect it.';
+	const pickupNote = !dineIn && data.pickupNote ? data.pickupNote : null;
 	const when = data.pickupTimeLabel ? `${data.pickupDateLabel ? `${data.pickupDateLabel}, ` : ''}${data.pickupTimeLabel}` : null;
 
 	const itemRows = data.items
@@ -116,6 +119,7 @@ export function renderDiningOrder(data: DiningOrderEmailData): RenderedEmail {
 							<tr><td colspan="2" style="padding:4px 0 0;font-family:${FONT_BODY};font-size:12px;color:${INK_MUTED};">${data.payment === 'paid' ? 'Paid' : 'To pay at the restaurant'}</td></tr>
 						</table>
 						${data.remarks ? `<div style="margin-top:12px;font-family:${FONT_BODY};font-size:12px;color:${INK_MUTED};">Note: ${esc(data.remarks)}</div>` : ''}
+						${pickupNote ? `<div style="margin-top:12px;font-family:${FONT_BODY};font-size:13px;color:${INK};">${esc(pickupNote)}</div>` : ''}
 					</td></tr>
 				</table>
 			</td></tr>
@@ -149,6 +153,7 @@ export function renderDiningOrder(data: DiningOrderEmailData): RenderedEmail {
 		`Total (VAT included): ${peso(data.totalCentavos)}`,
 		data.payment === 'paid' ? 'Paid' : 'To pay at the restaurant',
 		...(data.remarks ? ['', `Note: ${data.remarks}`] : []),
+		...(pickupNote ? ['', pickupNote] : []),
 		'',
 		`Track your order: ${data.trackUrl}`,
 		'',
