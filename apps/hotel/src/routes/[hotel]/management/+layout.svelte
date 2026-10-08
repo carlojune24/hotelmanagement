@@ -92,6 +92,7 @@
 				icon: SparklesIcon,
 				show: can('housekeeping:read')
 			},
+			{ seg: 'dining', label: 'Dining', icon: UtensilsIcon, show: can('dining:read') },
 			{ seg: 'reviews', label: 'Reviews', icon: StarIcon, show: can('review:read') },
 			{ seg: 'finance', label: 'Finance', icon: WalletIcon, show: can('finance:read') },
 			{ seg: 'hr', label: 'HR', icon: UsersIcon, show: can('hr:read') },
