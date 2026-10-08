@@ -184,6 +184,14 @@
 					</div>
 				{/if}
 
+				{#if item.reservationsEnabled}
+					<div class="mt-8">
+						<a href="/{data.hotel.slug}/dining/reserve?venue={item.id}" class="ledger-btn-primary inline-flex min-h-12 items-center px-6">
+							Reserve a table
+						</a>
+					</div>
+				{/if}
+
 				{#if menuSections(item.id).length > 0}
 					<div class="storefront-menu" aria-label="{item.title} menu">
 						<h3 class="storefront-menu-title ledger-display">Menu</h3>
