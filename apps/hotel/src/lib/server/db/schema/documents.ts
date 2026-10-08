@@ -157,6 +157,9 @@ export const documents = pgTable(
 		orderId: uuid('order_id').references(() => orders.id, { onDelete: 'set null' }),
 		bookingId: uuid('booking_id'),
 		hallBookingId: uuid('hall_booking_id'),
+		/** Set for a restaurant sale: the `dining_orders` row this document is for. Plain uuid,
+		 *  same posture as `folio_id` (no hard dependency on the dining schema). */
+		diningOrderId: uuid('dining_order_id'),
 		/** Set for `official_receipt` — the payment this OR acknowledges. Plain uuid. */
 		paymentId: uuid('payment_id'),
 		/** An OR points at the Invoice it was applied to. */
@@ -187,6 +190,14 @@ export const documents = pgTable(
 		uniqueIndex('documents_series_serial_idx').on(t.seriesId, t.serialNo),
 		index('documents_folio_idx').on(t.folioId),
 		index('documents_payment_idx').on(t.paymentId),
+		index('documents_dining_order_idx').on(t.diningOrderId),
+		// One live document of each type per dining order — idempotency backstop.
+		uniqueIndex('documents_one_invoice_per_dining_order_idx')
+			.on(t.diningOrderId)
+			.where(sql`type = 'invoice' and status = 'issued' and dining_order_id is not null`),
+		uniqueIndex('documents_one_or_per_dining_order_idx')
+			.on(t.diningOrderId)
+			.where(sql`type = 'official_receipt' and status = 'issued' and dining_order_id is not null`),
 		// One live Invoice per folio, one live OR per payment — idempotency backstop.
 		uniqueIndex('documents_one_invoice_per_folio_idx')
 			.on(t.folioId)

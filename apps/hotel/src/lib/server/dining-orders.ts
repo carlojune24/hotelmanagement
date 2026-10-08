@@ -25,6 +25,12 @@ import { FinanceError, businessDateFor } from './finance/shared';
 import { changeFor } from './finance/calc';
 import { recordCashMovement, voidCashMovement } from './finance/cash';
 import { resolvePaymentAccount, type PaymentMethod } from './finance/payments';
+import {
+	cancelDiningReceipt,
+	getBirSettings,
+	issueDiningDocument,
+	listDiningOrderDocuments
+} from './finance/documents';
 import { venueBelongsToHotel } from './dining-menu';
 import { canMoveOrder, checkAddonSelection, priceLine, sumLines, type AddonGroupRule } from '../dining-orders';
 
@@ -241,6 +247,7 @@ export async function createDiningOrder(
 					name: r.item.name,
 					stationId: r.item.stationId,
 					stationName: r.item.stationName,
+					taxable: r.item.taxable,
 					quantity: r.line.quantity,
 					unitPriceCentavos: r.item.priceCentavos,
 					addonsCentavos: r.priced.addonsCentavos,
@@ -368,7 +375,7 @@ export async function payDiningOrder(args: {
 	method: PaymentMethod;
 	tenderedCentavos?: number | null;
 	actor?: Actor;
-}): Promise<{ totalCentavos: number; changeCentavos: number }> {
+}): Promise<{ totalCentavos: number; changeCentavos: number; receiptId: string | null }> {
 	const [order] = await db
 		.select()
 		.from(diningOrders)
@@ -445,7 +452,19 @@ export async function payDiningOrder(args: {
 		});
 	});
 
-	return { totalCentavos: order.totalCentavos, changeCentavos: change };
+	// The payment stands even if the receipt can't be issued (no active OR series, say): the
+	// cashier sees a null receipt and can issue it later from the order once the series is fixed.
+	let receiptId: string | null = null;
+	const bir = await getBirSettings(args.hotelId).catch(() => null);
+	if (bir?.autoIssueReceiptOnPayment) {
+		try {
+			receiptId = (await issueDiningDocument(args.hotelId, args.orderId, 'official_receipt', args.actor ?? null)).id;
+		} catch (e) {
+			console.warn('payDiningOrder: could not issue official receipt', args.orderId, e);
+		}
+	}
+
+	return { totalCentavos: order.totalCentavos, changeCentavos: change, receiptId };
 }
 
 /** Voids a paid order's payment (a manager action): reverses the ledger entry and puts the
@@ -475,6 +494,11 @@ export async function voidDiningOrderPayment(args: {
 	if (!movement?.voidedAt) {
 		await voidCashMovement(args.hotelId, order.cashMovementId, `Dining ${order.code}: ${reason}`, args.actor ?? null);
 	}
+
+	// No receipt may stay in force for money that was reversed (the serial is kept, per BIR).
+	await cancelDiningReceipt(args.hotelId, order.id, `Payment voided: ${reason}`, args.actor ?? null).catch((e) => {
+		console.warn('voidDiningOrderPayment: could not cancel receipt', order.id, e);
+	});
 
 	await db
 		.update(diningOrders)
@@ -747,3 +771,6 @@ export async function diningSalesReport(
 		byMethod: byMethod.map((m) => ({ method: m.method ?? 'unknown', orders: n(m.orders), grossCentavos: n(m.gross) }))
 	};
 }
+
+/** Documents currently in force for an order (receipt / invoice numbers for the card). */
+export const getOrderDocuments = listDiningOrderDocuments;

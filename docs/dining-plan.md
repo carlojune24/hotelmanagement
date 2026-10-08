@@ -87,3 +87,10 @@ Run `impeccable` for: (a) staff Dining module (operate mode, shadcn), (b) guest 
 - **Guest alerts:** email + live tracking page only. No SMS/push in this release.
 
 - **Stations (changed after Phase 1):** `station` is now a managed hotel-wide list (`dining_stations`, set up in Dining -> Stations tab) and menu items point to it via `station_id`, so reports can group by station without spelling drift. Still one kitchen board for now.
+
+### Phase 3 decisions (confirmed)
+- Menu prices are **VAT-inclusive** (the guest pays the menu price; VAT is extracted for receipts and reports). No service charge yet. SC/PWD discount on dining is a later step.
+- The Orders board **auto-refreshes (polling every ~20s)**; no SSE/push. Real-time can come with the kitchen board.
+- GCash/Maya/card are **recorded manually at the cashier** for now; PayMongo online payment is Phase 4.
+- **BIR documents reuse the existing system**: `documents.dining_order_id`; an Official Receipt is issued automatically on payment (if `autoIssueReceiptOnPayment`), an Invoice can be issued on request (with optional bill-to name/TIN/address); voiding a payment cancels its receipt and the serial is never reused. Printing reuses `/print/receipt/[documentId]` and `/print/invoice/[documentId]`. Dining content: dishes as lines, VATable vs VAT-exempt split, tender and change.
+- Chart-of-accounts subtype for 4040 reuses `other_operating_revenue` (a dining subtype would change the shared `@mm/finance-core` standard; decide separately).

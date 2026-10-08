@@ -422,6 +422,9 @@ export const diningOrderItems = pgTable(
 		/** Snapshotted so sales can be reported by station even if a dish is later re-tagged. */
 		stationId: uuid('station_id').references(() => diningStations.id, { onDelete: 'set null' }),
 		stationName: text('station_name'),
+		/** Snapshotted VAT status, so a receipt can split VATable from VAT-exempt sales
+		 *  correctly even when a taxable line's VAT rounds to zero centavos. */
+		taxable: boolean('taxable').notNull().default(true),
 		quantity: integer('quantity').notNull(),
 		unitPriceCentavos: bigint('unit_price_centavos', { mode: 'number' }).notNull(),
 		/** Sum of this line's add-on prices, per unit. */

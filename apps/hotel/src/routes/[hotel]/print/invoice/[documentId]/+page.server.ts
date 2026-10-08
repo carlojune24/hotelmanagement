@@ -18,7 +18,12 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 	const isStaff =
 		(locals.user?.isPlatformAdmin ?? false) ||
 		(locals.role ? roleCan(locals.role.capabilities, 'folio:read') : false);
-	if (!isStaff) {
+	// Dining staff may open the receipts and invoices of restaurant sales without folio access.
+	const isDiningStaff =
+		Boolean(rendered.document.diningOrderId) &&
+		(locals.role ? roleCan(locals.role.capabilities, 'dining:read') : false);
+
+	if (!isStaff && !isDiningStaff) {
 		const token = url.searchParams.get('t');
 		const orderId = rendered.document.orderId;
 		const stored = orderId

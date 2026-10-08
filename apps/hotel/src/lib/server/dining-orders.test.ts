@@ -27,6 +27,7 @@ describe.skipIf(!hasDb)('dining orders and finance (live DB)', async () => {
 	const { daySnapshot } = await import('./finance/dayclose');
 	const { revenueBySourceReport } = await import('./finance/reports');
 	const { businessDateFor, FinanceError } = await import('./finance/shared');
+	const bir = await import('./finance/documents');
 
 	const tag = `ordertest-${Math.random().toString(36).slice(2, 10)}`;
 	const hotelIds: string[] = [];
@@ -212,7 +213,8 @@ describe.skipIf(!hasDb)('dining orders and finance (live DB)', async () => {
 
 		const [before] = await db.select().from(s.cashAccounts).where(eq(s.cashAccounts.id, drawerId));
 		const paid = await o.payDiningOrder({ hotelId: hotelA, orderId: c.id, method: 'cash', tenderedCentavos: 30_000 });
-		expect(paid).toEqual({ totalCentavos: 25_000, changeCentavos: 5_000 });
+		// No BIR series is registered yet, so no receipt is issued, but the payment stands.
+		expect(paid).toEqual({ totalCentavos: 25_000, changeCentavos: 5_000, receiptId: null });
 
 		const v = (await o.getDiningOrder(hotelA, c.id))!;
 		expect(v.paymentStatus).toBe('paid');
@@ -294,6 +296,102 @@ describe.skipIf(!hasDb)('dining orders and finance (live DB)', async () => {
 		expect((await o.getDiningOrder(hotelA, c.id))!.paymentStatus).toBe('paid');
 	});
 
+
+	// ---- BIR receipts and invoices --------------------------------------------------
+
+	it('issues a receipt on payment with the dishes, the VAT split, and the tender', async () => {
+		const mk = async (type: 'official_receipt' | 'invoice') =>
+			bir.createDocumentSeries(
+				hotelA,
+				{ type, prefix: type === 'invoice' ? 'INV' : 'OR', serialFrom: 1, serialTo: 99, atpOrPermitNo: 'ATP-1', dateRegistered: null, accreditedPrinter: null, accreditationNo: null, notes: null },
+				null
+			);
+		await mk('official_receipt');
+		await mk('invoice');
+
+		const c = await order([
+			{ menuItemId: adobo, quantity: 2, addonIds: [garlicRice] }, // 2 × 265.00 = 530.00, taxable
+			{ menuItemId: soda, quantity: 1 } // 80.00, VAT-exempt
+		]);
+		const paid = await o.payDiningOrder({ hotelId: hotelA, orderId: c.id, method: 'cash', tenderedCentavos: 70_000 });
+		expect(paid.receiptId).toBeTruthy();
+
+		const docs = await o.getOrderDocuments(hotelA, c.id);
+		expect(docs).toHaveLength(1);
+		expect(docs[0]).toMatchObject({ type: 'official_receipt', formattedNo: 'OR-000001' });
+
+		const rendered = (await bir.getDocumentForRender(hotelA, docs[0]!.id))!;
+		const snap = rendered.snapshot;
+		expect(snap.document.typeLabel).toBe('Official Receipt');
+		expect(snap.reference.orderRef).toBe(c.code);
+		expect(snap.lines).toEqual([
+			{ description: 'Adobo (Garlic rice)', quantity: 2, unitPriceCentavos: 26_500, amountCentavos: 53_000, vatable: true },
+			{ description: 'Soda', quantity: 1, unitPriceCentavos: 8_000, amountCentavos: 8_000, vatable: false }
+		]);
+		const vat = Math.round((53_000 * 1200) / 11_200);
+		expect(snap.totals).toMatchObject({
+			grossCentavos: 61_000,
+			vatCentavos: vat,
+			vatableSalesCentavos: 53_000 - vat,
+			vatExemptSalesCentavos: 8_000,
+			amountPaidCentavos: 61_000,
+			paymentMethod: 'Cash',
+			tenderedCentavos: 70_000,
+			changeCentavos: 9_000
+		});
+		// the document's own figures add up
+		expect(snap.totals.vatableSalesCentavos + snap.totals.vatCentavos + snap.totals.vatExemptSalesCentavos).toBe(snap.totals.grossCentavos);
+		expect(snap.bir.serialRange).toMatchObject({ prefix: 'OR', from: 1, to: 99 });
+	});
+
+	it('issues each document once per order, and only a paid order gets a receipt', async () => {
+		const c = await order([{ menuItemId: soda, quantity: 1 }]);
+		await expect(bir.issueDiningDocument(hotelA, c.id, 'official_receipt', null)).rejects.toThrow(/Take payment/);
+
+		const inv1 = await bir.issueDiningDocument(hotelA, c.id, 'invoice', null, { billTo: { name: 'Acme Corp', tin: '123-456-789', address: '1 Main St' } });
+		const inv2 = await bir.issueDiningDocument(hotelA, c.id, 'invoice', null);
+		expect(inv2.id).toBe(inv1.id); // idempotent: same serial, no second number burned
+		const invSnap = (await bir.getDocumentForRender(hotelA, inv1.id))!.snapshot;
+		expect(invSnap.billTo).toEqual({ name: 'Acme Corp', address: '1 Main St', tin: '123-456-789' });
+		expect(invSnap.totals).toMatchObject({ grossCentavos: 8_000, lessPaymentsCentavos: 0, balanceDueCentavos: 8_000 });
+
+		// paying afterwards: the receipt points back at the invoice
+		await o.payDiningOrder({ hotelId: hotelA, orderId: c.id, method: 'card' });
+		const docs = await o.getOrderDocuments(hotelA, c.id);
+		expect(docs.map((d) => d.type).sort()).toEqual(['invoice', 'official_receipt']);
+		const or = docs.find((d) => d.type === 'official_receipt')!;
+		const orSnap = (await bir.getDocumentForRender(hotelA, or.id))!.snapshot;
+		expect(orSnap.reference.appliedToInvoiceNo).toBe(inv1.formattedNo);
+		expect(orSnap.totals.paymentMethod).toBe('Card');
+	});
+
+	it("refuses to document a cancelled order or another hotel's order", async () => {
+		const c = await order([{ menuItemId: soda, quantity: 1 }]);
+		await o.cancelDiningOrder({ hotelId: hotelA, orderId: c.id, reason: 'no show' });
+		await expect(bir.issueDiningDocument(hotelA, c.id, 'invoice', null)).rejects.toThrow(/cancelled/);
+		const live = await order([{ menuItemId: soda, quantity: 1 }]);
+		await expect(bir.issueDiningDocument(hotelB, live.id, 'invoice', null)).rejects.toThrow(/Order not found/);
+	});
+
+	it('cancels the receipt when its payment is voided, keeps the serial, and never reuses it', async () => {
+		const c = await order([{ menuItemId: soda, quantity: 1 }]);
+		await o.payDiningOrder({ hotelId: hotelA, orderId: c.id, method: 'card' });
+		const [first] = await o.getOrderDocuments(hotelA, c.id);
+
+		await o.voidDiningOrderPayment({ hotelId: hotelA, orderId: c.id, reason: 'Charged twice' });
+		expect(await o.getOrderDocuments(hotelA, c.id)).toEqual([]); // no receipt in force
+		const [row] = await db.select().from(s.documents).where(eq(s.documents.id, first!.id));
+		expect(row).toMatchObject({ status: 'cancelled', formattedNo: first!.formattedNo });
+		expect(row!.cancelReason).toMatch(/Charged twice/);
+
+		await o.payDiningOrder({ hotelId: hotelA, orderId: c.id, method: 'card' }); // paid again
+		const [second] = await o.getOrderDocuments(hotelA, c.id);
+		expect(second!.formattedNo).not.toBe(first!.formattedNo);
+		expect(second!.id).not.toBe(first!.id);
+		const n = (x: string) => Number(x.split('-')[1]);
+		expect(n(second!.formattedNo)).toBeGreaterThan(n(first!.formattedNo)); // the next serial, not a reused one
+	});
+
 	// ---- finance reporting ----------------------------------------------------------
 
 	it('counts dining in the day-close revenue and the revenue-by-source report', async () => {
@@ -314,19 +412,22 @@ describe.skipIf(!hasDb)('dining orders and finance (live DB)', async () => {
 		expect(report.byVenue).toHaveLength(1);
 		expect(report.byVenue[0]!.venue).toBe('Cafe');
 		expect(report.byMethod.map((m) => m.method).sort()).toEqual(['card', 'cash']);
+		// Adobo was paid for in two orders earlier in this file: one plain (1 × 250.00) and one 2 × 265.00
 		const adoboRow = report.byItem.find((i) => i.name === 'Adobo');
-		expect(adoboRow?.quantity).toBe(1);
-		expect(report.byStation.find((st) => st.station === 'Kitchen')?.grossCentavos).toBe(25_000);
+		expect(adoboRow).toMatchObject({ quantity: 3, grossCentavos: 25_000 + 53_000 });
+		expect(report.byStation.find((st) => st.station === 'Kitchen')?.grossCentavos).toBe(78_000);
 		expect(report.byStation.find((st) => st.station === 'No station')).toBeTruthy(); // sodas have no station
 		// station totals add up to the sales total
 		expect(report.byStation.reduce((sum, st) => sum + st.grossCentavos, 0)).toBe(report.grossCentavos);
 
 		// A voided payment is not a sale: voiding Adobo's payment drops it from the report
-		const adoboOrder = (await o.listRecentOrders(hotelA, { limit: 50 })).find((x) => x.items.some((i) => i.name === 'Adobo') && x.paymentStatus === 'paid')!;
+		const adoboOrder = (await o.listRecentOrders(hotelA, { limit: 50 })).find(
+			(x) => x.paymentStatus === 'paid' && x.items.length === 1 && x.items[0]!.name === 'Adobo' && x.items[0]!.quantity === 1
+		)!;
 		await o.voidDiningOrderPayment({ hotelId: hotelA, orderId: adoboOrder.id, reason: 'test' });
 		const after = await o.diningSalesReport(hotelA, today, today);
 		expect(after.grossCentavos).toBe(report.grossCentavos - 25_000);
-		expect(after.byItem.find((i) => i.name === 'Adobo')).toBeUndefined();
+		expect(after.byItem.find((i) => i.name === 'Adobo')).toMatchObject({ quantity: 2, grossCentavos: 53_000 });
 	});
 
 	it("keeps another hotel's sales out of the report", async () => {
