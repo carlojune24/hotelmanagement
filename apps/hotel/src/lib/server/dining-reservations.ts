@@ -399,6 +399,7 @@ export interface GuestReservationView {
 	id: string;
 	code: string;
 	status: DiningReservationStatus;
+	venueId: string;
 	venueTitle: string;
 	guestName: string;
 	partySize: number;
@@ -439,6 +440,7 @@ export async function getReservationForGuest(
 		id: row.r.id,
 		code: row.r.code,
 		status: row.r.status,
+		venueId: row.r.diningItemId,
 		venueTitle: row.venueTitle,
 		guestName: row.r.guestName,
 		partySize: row.r.partySize,

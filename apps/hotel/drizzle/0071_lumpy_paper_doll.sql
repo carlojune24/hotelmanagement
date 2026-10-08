@@ -1,0 +1,1 @@
+ALTER TABLE "dining_items" ADD COLUMN "pickup_note" text;

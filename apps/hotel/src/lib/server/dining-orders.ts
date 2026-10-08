@@ -10,7 +10,9 @@ import {
 	diningMenuItems,
 	diningOrderItemAddons,
 	diningOrderItems,
+	diningOrderMessages,
 	diningOrders,
+	diningPayments,
 	diningReservations,
 	diningStations,
 	diningTables,
@@ -560,6 +562,15 @@ export interface OrderView {
 	totalCentavos: number;
 	vatCentavos: number;
 	paymentMethod: string | null;
+	/** Takeaway collection time, or a pre-order's table time. */
+	pickupAt: Date | null;
+	payMode: string | null;
+	cancelRequestedAt: Date | null;
+	cancelRequestNote: string | null;
+	/** Guest messages staff have not opened yet. */
+	unreadMessages: number;
+	/** Money already returned to the guest. */
+	refundedCentavos: number;
 	createdAt: Date;
 	acceptedAt: Date | null;
 	readyAt: Date | null;
@@ -589,6 +600,18 @@ async function hydrate(rows: { o: DiningOrder; venueTitle: string; bookingOrderI
 				.from(diningOrderItemAddons)
 				.where(inArray(diningOrderItemAddons.orderItemId, items.map((i) => i.id)))
 		: [];
+	const unread = await db
+		.select({ orderId: diningOrderMessages.orderId, n: sql<number>`count(*)` })
+		.from(diningOrderMessages)
+		.where(and(inArray(diningOrderMessages.orderId, orderIds), eq(diningOrderMessages.direction, 'guest'), isNull(diningOrderMessages.readAt)))
+		.groupBy(diningOrderMessages.orderId);
+	const refunds = await db
+		.select({ orderId: diningPayments.orderId, sum: sql<number>`coalesce(sum(${diningPayments.amountCentavos}), 0)` })
+		.from(diningPayments)
+		.where(and(inArray(diningPayments.orderId, orderIds), eq(diningPayments.kind, 'refund'), eq(diningPayments.status, 'paid')))
+		.groupBy(diningPayments.orderId);
+	const unreadBy = new Map(unread.map((u) => [u.orderId, Number(u.n)]));
+	const refundedBy = new Map(refunds.map((r) => [r.orderId, Number(r.sum)]));
 	return rows.map(({ o, venueTitle, bookingOrderId }) => ({
 		id: o.id,
 		code: o.code,
@@ -606,6 +629,12 @@ async function hydrate(rows: { o: DiningOrder; venueTitle: string; bookingOrderI
 		totalCentavos: o.totalCentavos,
 		vatCentavos: o.vatCentavos,
 		paymentMethod: o.paymentMethod,
+		pickupAt: o.pickupAt,
+		payMode: o.payMode,
+		cancelRequestedAt: o.cancelRequestedAt,
+		cancelRequestNote: o.cancelRequestNote,
+		unreadMessages: unreadBy.get(o.id) ?? 0,
+		refundedCentavos: refundedBy.get(o.id) ?? 0,
 		createdAt: o.createdAt,
 		acceptedAt: o.acceptedAt,
 		readyAt: o.readyAt,
@@ -646,6 +675,31 @@ export async function listBoardOrders(hotelId: string, opts: { venueId?: string 
 		)
 		.orderBy(asc(diningOrders.createdAt));
 	return hydrate(rows);
+}
+
+/** Orders that are cancelled but were paid and not yet fully refunded: money the restaurant still owes back. */
+export async function listRefundDueOrders(hotelId: string, venueId?: string | null): Promise<OrderView[]> {
+	const rows = await orderSelect()
+		.where(
+			and(
+				eq(diningOrders.hotelId, hotelId),
+				eq(diningOrders.status, 'cancelled'),
+				eq(diningOrders.paymentStatus, 'paid'),
+				venueId ? eq(diningOrders.diningItemId, venueId) : undefined
+			)
+		)
+		.orderBy(desc(diningOrders.updatedAt))
+		.limit(50);
+	return hydrate(rows);
+}
+
+/** Online orders still waiting for PayMongo, which the kitchen must not act on yet. */
+export async function countAwaitingPayment(hotelId: string, venueId?: string | null): Promise<number> {
+	const [row] = await db
+		.select({ n: sql<number>`count(*)` })
+		.from(diningOrders)
+		.where(and(eq(diningOrders.hotelId, hotelId), eq(diningOrders.status, 'pending_payment'), venueId ? eq(diningOrders.diningItemId, venueId) : undefined));
+	return Number(row?.n ?? 0);
 }
 
 export async function getDiningOrder(hotelId: string, orderId: string): Promise<OrderView | null> {

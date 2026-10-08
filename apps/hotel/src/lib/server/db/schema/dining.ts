@@ -85,6 +85,8 @@ export const diningItems = pgTable(
 		orderClose: text('order_close'),
 		/** Minimum minutes between ordering and pickup. */
 		prepMinutes: integer('prep_minutes').notNull().default(20),
+		/** Where and how to collect, shown on the guest's tracking page and email. */
+		pickupNote: text('pickup_note'),
 		createdAt: createdAt(),
 		updatedAt: updatedAt(),
 		deletedAt: deletedAt()

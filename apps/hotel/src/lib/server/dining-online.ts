@@ -54,6 +54,7 @@ export interface OnlineOrderingConfig {
 	orderOpen: string | null;
 	orderClose: string | null;
 	prepMinutes: number;
+	pickupNote: string | null;
 	canPayOnline: boolean;
 	canPayAtVenue: boolean;
 }
@@ -74,6 +75,7 @@ export async function loadOnlineOrderingConfig(hotelId: string, venueId: string)
 		orderOpen: v.orderOpen,
 		orderClose: v.orderClose,
 		prepMinutes: v.prepMinutes,
+		pickupNote: v.pickupNote,
 		canPayOnline,
 		canPayAtVenue
 	};
@@ -514,6 +516,7 @@ export interface GuestOrderView {
 	canCancel: boolean;
 	canRequestCancel: boolean;
 	needsPayment: boolean;
+	pickupNote: string | null;
 	items: { id: string; name: string; quantity: number; remarks: string | null; addons: string[]; lineTotalCentavos: number }[];
 	messages: { id: string; direction: string; body: string; createdAt: string }[];
 	refund: { amountCentavos: number; method: string | null; referenceNo: string | null; at: string } | null;
@@ -524,7 +527,7 @@ export interface GuestOrderView {
 export async function getOrderForGuest(hotelId: string, timezone: string, code: string, token: string): Promise<GuestOrderView | null> {
 	const order = await loadGuestOrder(hotelId, code, token);
 	if (!order) return null;
-	const [venue] = await db.select({ title: diningItems.title }).from(diningItems).where(eq(diningItems.id, order.diningItemId)).limit(1);
+	const [venue] = await db.select({ title: diningItems.title, pickupNote: diningItems.pickupNote }).from(diningItems).where(eq(diningItems.id, order.diningItemId)).limit(1);
 	const items = await db.select().from(diningOrderItems).where(eq(diningOrderItems.orderId, order.id)).orderBy(asc(diningOrderItems.sortOrder));
 	const addons = items.length ? await db.select().from(diningOrderItemAddons).where(inArray(diningOrderItemAddons.orderItemId, items.map((i) => i.id))) : [];
 	const messages = await db.select().from(diningOrderMessages).where(eq(diningOrderMessages.orderId, order.id)).orderBy(asc(diningOrderMessages.createdAt));
@@ -565,6 +568,7 @@ export async function getOrderForGuest(hotelId: string, timezone: string, code: 
 		// Paid: ask the restaurant, until the food is ready.
 		canRequestCancel: paid && ['new', 'accepted', 'preparing'].includes(order.status) && !order.cancelRequestedAt,
 		needsPayment: order.status === 'pending_payment' && order.payMode === 'online',
+		pickupNote: venue?.pickupNote ?? null,
 		items: items.map((i) => ({
 			id: i.id,
 			name: i.name,

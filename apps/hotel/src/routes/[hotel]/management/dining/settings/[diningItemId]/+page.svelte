@@ -10,6 +10,8 @@
 	import * as Select from '$lib/components/ui/select/index.js';
 	import ImageIcon from '@lucide/svelte/icons/image';
 	import CalendarClockIcon from '@lucide/svelte/icons/calendar-clock';
+	import ShoppingBagIcon from '@lucide/svelte/icons/shopping-bag';
+	import * as ToggleGroup from '$lib/components/ui/toggle-group/index.js';
 	import { Switch } from '$lib/components/ui/switch/index.js';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import type { DiningPhoto } from '$lib/server/db/schema/dining';
@@ -20,6 +22,19 @@
 	const base = $derived(`/${page.params.hotel}/management`);
 	const item = data.item;
 	const photos = $derived((item.photos as DiningPhoto[]) ?? []);
+
+	// Online ordering settings.
+	let ooEnabled = $state(item.onlineOrdersEnabled);
+	let orderOpen = $state(item.orderOpen ?? '');
+	let orderClose = $state(item.orderClose ?? '');
+	let prepMinutes = $state(item.prepMinutes);
+	let onlinePayment = $state<string>(item.onlinePayment);
+	let pickupNote = $state(item.pickupNote ?? '');
+	const ooPreview = $derived(
+		orderOpen && orderClose
+			? `Guests can choose a pickup time from ${orderOpen} to ${orderClose}, at least ${prepMinutes} minutes ahead and up to 7 days out. ${onlinePayment === 'online_only' ? 'They pay online.' : 'They can pay online or at the restaurant.'}`
+			: 'Set the first and last pickup times to see what guests will be offered.'
+	);
 
 	// Reservation settings (controlled so the preview line updates as you type).
 	let resEnabled = $state(item.reservationsEnabled);
@@ -117,6 +132,72 @@
 
 		<Button type="submit">Save dining item</Button>
 	</form>
+
+	<div class="mt-8 border-t border-border pt-6">
+		<h3 class="flex items-center gap-2 text-sm font-semibold text-ink">
+			<ShoppingBagIcon class="size-4 text-brand" /> Online ordering (takeaway)
+		</h3>
+		<p class="mt-1 text-xs text-ink-muted">
+			Let guests order from this menu on your Dining page and collect it, or pre-order for their table booking. Orders paid online reach
+			the kitchen once the payment is confirmed.
+		</p>
+
+		<form method="POST" action="?/updateOnlineOrdering" use:enhance class="mt-4 space-y-4">
+			<div class="flex items-center justify-between rounded-lg border border-border px-3 py-2.5">
+				<div>
+					<Label for="ooEnabled" class="text-sm font-medium text-ink">Take online orders</Label>
+					<p class="text-xs text-ink-muted">Needs pickup hours and at least one dish on the menu.</p>
+				</div>
+				<Switch id="ooEnabled" name="onlineOrdersEnabled" bind:checked={ooEnabled} />
+			</div>
+
+			<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+				<div>
+					<Label for="orderOpen">First pickup</Label>
+					<Input id="orderOpen" name="orderOpen" type="time" bind:value={orderOpen} class="mt-1" />
+				</div>
+				<div>
+					<Label for="orderClose">Last pickup</Label>
+					<Input id="orderClose" name="orderClose" type="time" bind:value={orderClose} class="mt-1" />
+				</div>
+				<div>
+					<Label for="prepMinutes">Prep time (min)</Label>
+					<Input id="prepMinutes" name="prepMinutes" type="number" min="10" max="240" step="5" bind:value={prepMinutes} class="mt-1" />
+				</div>
+			</div>
+
+			<div>
+				<Label class="text-sm">How guests pay</Label>
+				<ToggleGroup.Root type="single" bind:value={onlinePayment} variant="outline" class="mt-1 w-full justify-start sm:w-auto">
+					<ToggleGroup.Item value="online_only">Online only</ToggleGroup.Item>
+					<ToggleGroup.Item value="online_or_venue">Online or at the restaurant</ToggleGroup.Item>
+				</ToggleGroup.Root>
+				<input type="hidden" name="onlinePayment" value={onlinePayment} />
+				<p class="mt-1.5 text-xs text-ink-muted">
+					{#if onlinePayment === 'online_only'}
+						The order reaches the kitchen only after PayMongo confirms payment, so there are no unpaid orders to chase.
+					{:else}
+						A guest who pays at the restaurant sends the order straight to the kitchen and pays on collection.
+					{/if}
+				</p>
+				{#if !data.payMongoConnected}
+					<p class="mt-1.5 text-xs text-danger" role="note">
+						PayMongo is not connected for this hotel, so online payment is unavailable.
+						<a class="underline" href="{base}/settings/payments-email">Connect it in Settings</a>.
+					</p>
+				{/if}
+			</div>
+
+			<div>
+				<Label for="pickupNote">Pickup note (optional)</Label>
+				<Input id="pickupNote" name="pickupNote" maxlength={200} bind:value={pickupNote} placeholder="Collect at the Café counter, ground floor" class="mt-1" />
+				<p class="mt-1 text-xs text-ink-muted">Shown to the guest on their order page and in their email.</p>
+			</div>
+
+			<p class="text-sm text-ink-muted" aria-live="polite">{ooPreview}</p>
+			<Button type="submit" size="sm">Save online ordering</Button>
+		</form>
+	</div>
 
 	<div class="mt-8 border-t border-border pt-6">
 		<h3 class="flex items-center gap-2 text-sm font-semibold text-ink">
