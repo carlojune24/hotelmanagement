@@ -199,6 +199,7 @@ export const cashCategory = pgEnum('cash_category', [
 	'room_revenue',
 	'hall_revenue',
 	'incidental_sale',
+	'dining_revenue',
 	'deposit',
 	'deposit_refund',
 	'refund',

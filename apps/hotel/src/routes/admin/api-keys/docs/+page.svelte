@@ -66,7 +66,7 @@
   "hotel_id": "uuid",
   "business_date": "2026-09-14",
   "direction": "in | out",
-  "category": "room_revenue | hall_revenue | ... (16 values)",
+  "category": "room_revenue | hall_revenue | ... (19 values)",
   "cash_account_id": "uuid",
   "amount_minor": 10000,
   "journal_entry_id": "uuid | null",
