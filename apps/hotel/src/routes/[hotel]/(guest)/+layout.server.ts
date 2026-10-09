@@ -1,6 +1,5 @@
 import { error } from '@sveltejs/kit';
-import { DEFAULT_ACCENT_COLOR, DEFAULT_PAPER_COLOR, parseBranding } from '$lib/server/branding';
-import { darken, lighten, wovenPatternDataUri } from '$lib/woven-pattern';
+import { guestTheme } from '$lib/server/guest-theme';
 import { listFunctionHalls } from '$lib/server/hall-availability';
 import { listApprovedReviews } from '$lib/server/reviews';
 import { listDiningItems, parseDiningConfig } from '$lib/server/dining';
@@ -17,9 +16,7 @@ import type { LayoutServerLoad } from './$types';
 export const load: LayoutServerLoad = async ({ locals }) => {
 	if (!locals.hotel) error(404, 'Hotel not found');
 
-	const branding = parseBranding(locals.hotel.config);
-	const accent = branding.accentColor ?? DEFAULT_ACCENT_COLOR;
-	const paper = branding.paperColor ?? DEFAULT_PAPER_COLOR;
+	const { branding, theme } = guestTheme(locals.hotel.config);
 	const hotelId = locals.hotel.id;
 
 	// Opportunistic release of expired unpaid holds so availability shown below is
@@ -57,17 +54,7 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 			vatRateBps: locals.hotel.vatRateBps
 		},
 		branding,
-		theme: {
-			accent,
-			accentLight: lighten(accent, 0.55),
-			accentDeep: darken(accent, 0.3),
-			patternUri: wovenPatternDataUri(accent),
-			paper,
-			/** Section bands/zebra rows — a shade deeper than `paper`, same relationship the
-			    fixed default tokens had (`--ledger-paper-2` ~3% darker than `--ledger-paper`),
-			    just computed from whatever paper tone the hotel actually picked. */
-			paperDeep: darken(paper, 0.03)
-		},
+		theme,
 		functionHalls,
 		reviews,
 		diningItems,

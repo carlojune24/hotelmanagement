@@ -31,13 +31,12 @@
 		<div class="max-w-md">
 			<h2 class="text-base font-semibold text-ink">Stations</h2>
 			<p class="mt-1 text-sm text-ink-muted">
-				Where dishes are prepared. Tag menu items with a station to report sales by station.
-				Shared by every venue. The minutes box is when a ticket at that station counts as late on the
-				kitchen board (blank = 20; it shows "slow" at half).
+				Where dishes are prepared. Each station gets its own lane on the board; tag a dish with its
+				station on the Dining menu. Shared by every venue.
 			</p>
 		</div>
 
-		{#if data.canManageMenu}
+		{#if data.canManage}
 			<form method="POST" action="?/createStation" use:enhance class="flex shrink-0 items-center gap-2">
 				<Input
 					name="name"
@@ -59,7 +58,7 @@
 		<div class="mt-6 flex flex-col items-center gap-2 rounded-xl border border-dashed border-border p-10 text-center">
 			<ChefHatIcon class="size-6 text-ink-muted" />
 			<p class="text-sm text-ink-muted">
-				No stations yet.{data.canManageMenu ? ' Add your first one above.' : ''}
+				No stations yet.{data.canManage ? ' Add your first one above.' : ''}
 			</p>
 		</div>
 	{:else}
@@ -67,7 +66,7 @@
 			{#each data.stations as st (st.id)}
 				{@const dishes = data.counts[st.id] ?? 0}
 				<li class="flex items-center gap-3 py-1.5 pr-2 pl-2">
-					{#if data.canManageMenu}
+					{#if data.canManage}
 						<!-- Edit in place: Enter or leaving the field saves a changed name. -->
 						<form method="POST" action="?/renameStation" use:enhance class="min-w-0 flex-1">
 							<input type="hidden" name="stationId" value={st.id} />
@@ -89,32 +88,7 @@
 
 					<span class="shrink-0 text-xs tabular-nums text-ink-muted">{dishLabel(dishes)}</span>
 
-					{#if data.canManageMenu}
-						<!-- Late-after target: saved when the field loses focus. -->
-						<form method="POST" action="?/setTarget" use:enhance class="flex shrink-0 items-center gap-1.5">
-							<input type="hidden" name="stationId" value={st.id} />
-							<label class="sr-only" for="target-{st.id}">Late after (minutes)</label>
-							<Input
-								id="target-{st.id}"
-								name="targetMinutes"
-								type="number"
-								min="2"
-								max="240"
-								value={st.targetMinutes ?? ''}
-								placeholder="20"
-								class="h-9 w-16 text-right tabular-nums"
-								onblur={(e) => {
-									const el = e.currentTarget;
-									if (el.value !== String(st.targetMinutes ?? '')) el.form?.requestSubmit();
-								}}
-							/>
-							<span class="text-xs text-ink-muted">min</span>
-						</form>
-					{:else if st.targetMinutes}
-						<span class="shrink-0 text-xs tabular-nums text-ink-muted">late after {st.targetMinutes} min</span>
-					{/if}
-
-					{#if data.canManageMenu}
+					{#if data.canManage}
 						<Button
 							variant="ghost"
 							size="icon"

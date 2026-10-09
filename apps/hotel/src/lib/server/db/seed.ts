@@ -6,7 +6,7 @@ import postgres from 'postgres';
 import { ulid } from 'ulid';
 import { seedHotelAmenities } from '../amenities/catalog';
 import { seedFinanceDefaults } from '../finance/seed-defaults';
-import { seedDefaultRoles } from '../auth/roles';
+import { seedDefaultRoles } from '../auth/seed-roles';
 import * as schema from './schema/index';
 
 const url = process.env.DATABASE_URL;
@@ -23,6 +23,10 @@ const ADMIN_EMAIL = (process.env.SEED_ADMIN_EMAIL ?? 'admin@example.com').toLowe
 const ADMIN_PW = process.env.SEED_ADMIN_PASSWORD ?? 'admin12345';
 const MANAGER_EMAIL = (process.env.SEED_MANAGER_EMAIL ?? 'manager@example.com').toLowerCase();
 const MANAGER_PW = process.env.SEED_MANAGER_PASSWORD ?? 'manager12345';
+const KITCHEN_EMAIL = (process.env.SEED_KITCHEN_EMAIL ?? 'kitchen@example.com').toLowerCase();
+const KITCHEN_PW = process.env.SEED_KITCHEN_PASSWORD ?? 'kitchen12345';
+const DINING_EMAIL = (process.env.SEED_DINING_EMAIL ?? 'dining@example.com').toLowerCase();
+const DINING_PW = process.env.SEED_DINING_PASSWORD ?? 'dining12345';
 const HOTEL_SLUG = process.env.SEED_HOTEL_SLUG ?? 'hotel1';
 
 async function upsertUser(input: {
@@ -343,6 +347,38 @@ async function main() {
 			set: { roleId: hotelAdminRole.id }
 		});
 
+	// A cook's account: it sees only the Kitchen section (the Kitchen role is seeded by seedDefaultRoles above).
+	const kitchenRole = await db
+		.select({ id: schema.roles.id })
+		.from(schema.roles)
+		.where(and(eq(schema.roles.hotelId, hotel.id), eq(schema.roles.slug, 'kitchen')))
+		.then((r) => r.at(0));
+	if (!kitchenRole) throw new Error('kitchen role was not seeded for the demo hotel');
+	const kitchenId = await upsertUser({ email: KITCHEN_EMAIL, name: 'Kitchen', password: KITCHEN_PW, isPlatformAdmin: false });
+	await db
+		.insert(schema.memberships)
+		.values({ userId: kitchenId, hotelId: hotel.id, roleId: kitchenRole.id })
+		.onConflictDoUpdate({
+			target: [schema.memberships.userId, schema.memberships.hotelId],
+			set: { roleId: kitchenRole.id }
+		});
+
+	// A waiter's account: it sees only the Dining section.
+	const diningRole = await db
+		.select({ id: schema.roles.id })
+		.from(schema.roles)
+		.where(and(eq(schema.roles.hotelId, hotel.id), eq(schema.roles.slug, 'dining')))
+		.then((r) => r.at(0));
+	if (!diningRole) throw new Error('dining role was not seeded for the demo hotel');
+	const diningId = await upsertUser({ email: DINING_EMAIL, name: 'Dining', password: DINING_PW, isPlatformAdmin: false });
+	await db
+		.insert(schema.memberships)
+		.values({ userId: diningId, hotelId: hotel.id, roleId: diningRole.id })
+		.onConflictDoUpdate({
+			target: [schema.memberships.userId, schema.memberships.hotelId],
+			set: { roleId: diningRole.id }
+		});
+
 	await seedHotelAmenities(db, hotel.id);
 	await seedHotelAmenityLinks(hotel.id);
 	await seedInventory(hotel.id);
@@ -351,6 +387,8 @@ async function main() {
 	console.log('Seed complete:');
 	console.log(`  Platform admin : ${ADMIN_EMAIL} / ${ADMIN_PW}  -> /admin`);
 	console.log(`  Hotel manager  : ${MANAGER_EMAIL} / ${MANAGER_PW}  -> /${HOTEL_SLUG}/dashboard`);
+	console.log(`  Kitchen cook   : ${KITCHEN_EMAIL} / ${KITCHEN_PW}  -> /${HOTEL_SLUG}/management/kitchen`);
+	console.log(`  Dining staff   : ${DINING_EMAIL} / ${DINING_PW}  -> /${HOTEL_SLUG}/management/dining`);
 	console.log(`  Demo hotel     : /${HOTEL_SLUG}  (${hotel.orgRef})`);
 	void adminId;
 }

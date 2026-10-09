@@ -2,30 +2,21 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { loadVenueMenu } from '$lib/server/dining-menu';
 import { OrderError } from '$lib/server/dining-orders';
-import {
-	QR_COOKIE,
-	cancelMyQrOrder,
-	listMyQrOrders,
-	parseRemembered,
-	placeQrOrder,
-	requestMyBill,
-	resolveQrTable,
-	serializeRemembered
-} from '$lib/server/dining-qr';
+import { QR_COOKIE, parseRemembered, placeQrOrder, resolveQrTable, serializeRemembered } from '$lib/server/dining-qr';
 import { qrOrderByIp, qrOrderByTable } from '$lib/server/auth/rate-limit';
 import type { Actions, PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ locals, params, cookies, depends }) => {
-	depends('app:dining-qr');
+/**
+ * The menu. It reads the table itself (one cheap lookup) rather than from the layout, so the layout's
+ * 10-second order poll never re-fetches the whole menu.
+ */
+export const load: PageServerLoad = async ({ locals, params }) => {
 	const hotelId = locals.hotel!.id;
 	const table = await resolveQrTable(hotelId, params.token);
 	if (!table) error(404, 'This table code is not valid any more. Please ask your waiter for help.');
 
 	const menu = await loadVenueMenu(hotelId, table.venueId);
-	const mine = await listMyQrOrders(hotelId, table.id, parseRemembered(cookies.get(QR_COOKIE)));
-
 	return {
-		table: { name: table.name, areaName: table.areaName, venueTitle: table.venueTitle },
 		menu: {
 			categories: menu.categories.map((c) => ({ id: c.id, name: c.name })),
 			items: menu.items
@@ -47,9 +38,7 @@ export const load: PageServerLoad = async ({ locals, params, cookies, depends })
 				maxChoices: g.maxChoices,
 				addons: g.addons.map((a) => ({ id: a.id, name: a.name, priceCentavos: a.priceCentavos, isAvailable: a.isAvailable }))
 			}))
-		},
-		...mine,
-		nowIso: new Date().toISOString()
+		}
 	};
 };
 
@@ -61,7 +50,7 @@ const lineSchema = z.object({
 });
 
 const placeSchema = z.object({
-	guestName: z.string().trim().max(60).optional(),
+	guestName: z.string().trim().min(1, 'Please enter your name.').max(60),
 	remarks: z.string().trim().max(500).optional(),
 	lines: z.array(lineSchema).min(1, 'Add at least one item to your order.').max(40),
 	website: z.string().max(200).optional()
@@ -96,7 +85,7 @@ export const actions: Actions = {
 		qrOrderByIp.consume(ip);
 		let placed;
 		try {
-			placed = await placeQrOrder({ hotelId, table, lines: d.lines, guestName: d.guestName || null, remarks: d.remarks || null });
+			placed = await placeQrOrder({ hotelId, table, lines: d.lines, guestName: d.guestName, remarks: d.remarks || null });
 		} catch (e) {
 			if (e instanceof OrderError) return fail(409, { error: e.message });
 			throw e;
@@ -104,33 +93,8 @@ export const actions: Actions = {
 		const remembered = parseRemembered(cookies.get(QR_COOKIE));
 		remembered.push({ code: placed.code, token: placed.accessToken });
 		cookies.set(QR_COOKIE, serializeRemembered(remembered), cookieOpts);
-		redirect(303, `${event.url.pathname}?sent=${placed.code}`);
-	},
-
-	cancel: async ({ locals, params, cookies, request }) => {
-		const hotelId = locals.hotel!.id;
-		const table = await resolveQrTable(hotelId, params.token);
-		if (!table) return fail(404, { error: 'This table code is not valid any more.' });
-		const code = String((await request.formData()).get('code') ?? '');
-		try {
-			await cancelMyQrOrder({ hotelId, tableId: table.id, remembered: parseRemembered(cookies.get(QR_COOKIE)), code });
-			return { ok: 'Your order was cancelled.' };
-		} catch (e) {
-			if (e instanceof OrderError) return fail(400, { error: e.message });
-			throw e;
-		}
-	},
-
-	bill: async ({ locals, params, cookies }) => {
-		const hotelId = locals.hotel!.id;
-		const table = await resolveQrTable(hotelId, params.token);
-		if (!table) return fail(404, { error: 'This table code is not valid any more.' });
-		try {
-			await requestMyBill({ hotelId, tableId: table.id, remembered: parseRemembered(cookies.get(QR_COOKIE)) });
-			return { ok: 'We have let your waiter know. They will bring the bill to your table.' };
-		} catch (e) {
-			if (e instanceof OrderError) return fail(400, { error: e.message });
-			throw e;
-		}
+		// Straight to My orders, where the guest watches it move. The path is taken from this request so it
+		// holds on a hotel's own domain as well as under /{slug}.
+		redirect(303, `${event.url.pathname.replace(/\/$/, '')}/orders?sent=${placed.code}`);
 	}
 };

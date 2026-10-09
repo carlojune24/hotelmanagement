@@ -16,6 +16,7 @@
     "test:e2e": "pnpm --filter @mm/hotel test:e2e",
     "db:generate": "pnpm --filter @mm/hotel db:generate",
     "db:migrate": "pnpm --filter @mm/hotel db:migrate",
+    "db:setup": "pnpm --filter @mm/hotel db:setup",
     "db:push": "pnpm --filter @mm/hotel db:push",
     "db:seed": "pnpm --filter @mm/hotel db:seed",
     "db:studio": "pnpm --filter @mm/hotel db:studio"

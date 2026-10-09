@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
-	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
-	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
+	import PrinterIcon from '@lucide/svelte/icons/printer';
+	import { batchPrintHref } from '$lib/print-batch';
+	import PlusIcon from '@lucide/svelte/icons/plus';
 	import ReceiptTextIcon from '@lucide/svelte/icons/receipt-text';
 	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
 	import GlobeIcon from '@lucide/svelte/icons/globe';
@@ -154,9 +155,9 @@
 		</div>
 	{/if}
 
-	<footer class="mt-3 space-y-2.5 border-t border-border pt-2.5">
+	<footer class="mt-3 space-y-4 border-t border-border pt-3">
 		<div class="flex items-center justify-between gap-2">
-			<span class="font-medium tabular-nums text-ink">{peso(order.totalCentavos)}</span>
+			<span class="text-lg font-semibold tabular-nums text-ink">{peso(order.totalCentavos)}</span>
 			{#if unpaid}
 				<Badge variant="outline">Unpaid</Badge>
 			{:else if roomCharged}
@@ -166,60 +167,70 @@
 			{/if}
 		</div>
 
-		{#if receipt || invoice}
-			<p class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
-				<ReceiptTextIcon class="size-3.5" aria-hidden="true" />
-				{#if receipt}<a class="underline" href="/{slug}/print/receipt/{receipt.id}" target="_blank" rel="noopener">Receipt {receipt.formattedNo}</a>{/if}
-				{#if invoice}<a class="underline" href="/{slug}/print/invoice/{invoice.id}" target="_blank" rel="noopener">Invoice {invoice.formattedNo}</a>{/if}
-			</p>
-		{/if}
+		<!-- What was printed or can be: every document is one button, no menu to open. -->
+		<section aria-label="Documents">
+			<h3 class="mb-1.5 text-xs font-medium text-ink-muted">Documents</h3>
+			<div class="grid grid-cols-2 gap-2">
+				<Button variant="outline" class="h-11 justify-start gap-2" onclick={() => window.open(`/${slug}/print/bill/order/${order.id}?auto=1`, '_blank')}>
+					<PrinterIcon class="size-4 shrink-0" aria-hidden="true" /> Print bill
+				</Button>
+				{#if receipt}
+					<Button href={batchPrintHref(slug, [receipt.id])} target="_blank" rel="noopener" variant="outline" class="h-11 justify-start gap-2">
+						<ReceiptTextIcon class="size-4 shrink-0" aria-hidden="true" />
+						<span class="min-w-0 truncate">Receipt <span class="font-mono text-xs">{receipt.formattedNo}</span></span>
+					</Button>
+				{:else if paid && canWrite}
+					<Button variant="outline" class="h-11 justify-start gap-2 border-dashed" onclick={() => onissuereceipt(order)}>
+						<PlusIcon class="size-4 shrink-0" aria-hidden="true" /> Issue receipt
+					</Button>
+				{/if}
+				{#if invoice}
+					<Button href={batchPrintHref(slug, [invoice.id])} target="_blank" rel="noopener" variant="outline" class="h-11 justify-start gap-2">
+						<ReceiptTextIcon class="size-4 shrink-0" aria-hidden="true" />
+						<span class="min-w-0 truncate">Invoice <span class="font-mono text-xs">{invoice.formattedNo}</span></span>
+					</Button>
+				{:else if !roomCharged && canWrite}
+					<Button variant="outline" class="h-11 justify-start gap-2 border-dashed" onclick={() => oninvoice(order)}>
+						<PlusIcon class="size-4 shrink-0" aria-hidden="true" /> Issue invoice…
+					</Button>
+				{/if}
+			</div>
+		</section>
 
-		{#if canWrite}
-			<div class="flex items-center gap-2">
+		{#if canWrite && (next || unpaid || hasThread)}
+			<section class="flex flex-wrap gap-2" aria-label="Order actions">
 				{#if next}
-					<Button size="sm" class="h-10 flex-1" variant={unpaid && order.status === 'served' ? 'outline' : 'default'} onclick={() => onadvance(order, next)}>
+					<Button class="h-11 flex-1" variant={unpaid && order.status === 'served' ? 'outline' : 'default'} onclick={() => onadvance(order, next)}>
 						{NEXT_LABEL[next]}
 					</Button>
 				{/if}
 				{#if unpaid}
-					<Button size="sm" variant={next ? 'outline' : 'default'} class={next ? 'h-10' : 'h-10 flex-1'} onclick={() => onpay(order)}>Take payment</Button>
+					<Button class="h-11 flex-1" variant={next ? 'outline' : 'default'} onclick={() => onpay(order)}>Take payment</Button>
 				{/if}
 				{#if hasThread}
-					<Button variant="ghost" size="icon" class="relative size-10 shrink-0" aria-label={order.unreadMessages > 0 ? `${order.unreadMessages} unread messages for ${order.code}` : `Messages for ${order.code}`} onclick={() => ontalk(order)}>
-						<MessageSquareIcon class="size-4" />
+					<Button variant="outline" class="relative h-11 flex-1 gap-2" onclick={() => ontalk(order)}>
+						<MessageSquareIcon class="size-4" aria-hidden="true" />
+						Messages
 						{#if order.unreadMessages > 0}
-							<span class="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-brand text-[10px] font-semibold text-brand-ink">{order.unreadMessages}</span>
+							<span class="rounded-full bg-brand px-1.5 text-[11px] font-semibold text-brand-ink" aria-label="{order.unreadMessages} unread">{order.unreadMessages}</span>
 						{/if}
 					</Button>
 				{/if}
-				<DropdownMenu.Root>
-					<DropdownMenu.Trigger>
-						{#snippet child({ props })}
-							<Button {...props} variant="ghost" size="icon" class="size-10 shrink-0" aria-label="More actions for {order.code}">
-								<EllipsisIcon class="size-4" />
-							</Button>
-						{/snippet}
-					</DropdownMenu.Trigger>
-					<DropdownMenu.Content align="end">
-						{#if !receipt && paid}
-							<DropdownMenu.Item onSelect={() => onissuereceipt(order)}>Issue official receipt</DropdownMenu.Item>
-						{/if}
-						{#if !invoice && !roomCharged}
-							<DropdownMenu.Item onSelect={() => oninvoice(order)}>Issue invoice…</DropdownMenu.Item>
-						{/if}
-						{#if paid && canVoid}
-							<DropdownMenu.Item variant="destructive" onSelect={() => onvoid(order)}>Void payment…</DropdownMenu.Item>
-						{/if}
-						{#if roomCharged && canVoid}
-							<DropdownMenu.Item variant="destructive" onSelect={() => onundoroom(order)}>Take off room bill…</DropdownMenu.Item>
-						{/if}
-						{#if unpaid && order.status !== 'served'}
-							<DropdownMenu.Separator />
-							<DropdownMenu.Item variant="destructive" onSelect={() => oncancel(order)}>Cancel order…</DropdownMenu.Item>
-						{/if}
-					</DropdownMenu.Content>
-				</DropdownMenu.Root>
-			</div>
+			</section>
+		{/if}
+
+		{#if canWrite && ((paid && canVoid) || (roomCharged && canVoid) || (unpaid && order.status !== 'served'))}
+			<section class="flex flex-wrap gap-2 border-t border-border pt-3" aria-label="Undo or cancel">
+				{#if paid && canVoid}
+					<Button variant="destructive" size="sm" class="h-10" onclick={() => onvoid(order)}>Void payment…</Button>
+				{/if}
+				{#if roomCharged && canVoid}
+					<Button variant="destructive" size="sm" class="h-10" onclick={() => onundoroom(order)}>Take off room bill…</Button>
+				{/if}
+				{#if unpaid && order.status !== 'served'}
+					<Button variant="destructive" size="sm" class="h-10" onclick={() => oncancel(order)}>Cancel order…</Button>
+				{/if}
+			</section>
 		{/if}
 	</footer>
 </article>

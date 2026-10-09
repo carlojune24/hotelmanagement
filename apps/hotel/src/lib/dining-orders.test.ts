@@ -4,6 +4,7 @@ import {
 	canMoveOrder,
 	checkAddonSelection,
 	formatWait,
+	formatWaitShort,
 	groupByStation,
 	orderStateFromStations,
 	waitLevel,
@@ -98,6 +99,17 @@ describe('formatWait', () => {
 		expect(formatWait(65)).toBe('1h 05m');
 		expect(formatWait(125)).toBe('2h 05m');
 		expect(formatWait(-3)).toBe('0 min');
+	});
+});
+
+describe('formatWaitShort', () => {
+	it('uses minutes under an hour, then hours and minutes', () => {
+		expect(formatWaitShort(0)).toBe('0m');
+		expect(formatWaitShort(9)).toBe('9m');
+		expect(formatWaitShort(59.9)).toBe('59m');
+		expect(formatWaitShort(60)).toBe('1h 00m');
+		expect(formatWaitShort(479)).toBe('7h 59m');
+		expect(formatWaitShort(-3)).toBe('0m');
 	});
 });
 

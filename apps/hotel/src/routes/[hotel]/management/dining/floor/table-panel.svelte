@@ -11,6 +11,7 @@
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import ChefHatIcon from '@lucide/svelte/icons/chef-hat';
 	import PlusIcon from '@lucide/svelte/icons/plus';
+	import PrinterIcon from '@lucide/svelte/icons/printer';
 	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
 	import { RESERVATION_TRANSITIONS } from '$lib/dining-slots';
 	import { STAGE_LABEL, type TableView } from '$lib/dining-floor';
@@ -72,6 +73,8 @@
 
 	const res = $derived(view?.reservation ?? null);
 	const seatedFor = $derived(view?.seatedSince ? formatWait(Math.max(0, Math.floor((nowMs - view.seatedSince.getTime()) / 60_000))) : '');
+	// The printed bill lives in the shared print shell, outside /management.
+	const billHref = $derived(check ? `${base.split('/management')[0]}/print/bill/check/${check.id}?auto=1` : '#');
 	const newOrderHref = $derived(table ? `${base}/orders?newOrder=1&venue=${venueId}&table=${table.id}` : '#');
 	let moveTo = $state('');
 	// A choice made on one table must not carry over to the next one opened.
@@ -243,6 +246,12 @@
 						</form>
 					{:else if check && check.unpaidCount > 0 && check.awaitingAcceptance === 0}
 						<Button class="h-12 w-full text-base" variant="outline" onclick={() => onsettle(check)}>Settle early · {peso(check.unpaidCentavos)}</Button>
+					{/if}
+
+					{#if check && check.liveCount > 0}
+						<Button href={billHref} target="_blank" rel="noopener" variant="outline" class="h-11 w-full">
+							<PrinterIcon class="size-4" aria-hidden="true" /> Print bill
+						</Button>
 					{/if}
 
 					<div class="flex w-full gap-2">

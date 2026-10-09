@@ -12,7 +12,7 @@ import type { RequestEvent } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
-	requireCap(locals.user, locals.role, 'dining:read');
+	requireCap(locals.user, locals.role, 'kitchen:read');
 	const hotelId = locals.hotel!.id;
 	const stations = await listStations(hotelId);
 	// How many dishes sit on each station, so a delete warns about what it unassigns.
@@ -25,12 +25,12 @@ export const load: PageServerLoad = async ({ locals }) => {
 	return { stations, counts };
 };
 
-/** Station edits need `dining:manage` (hotel admins also qualify through `hotel:admin`). */
+/** Station edits need `kitchen:manage` (hotel admins also qualify through `hotel:admin`). */
 function requireManage(event: RequestEvent) {
 	const { user, role } = event.locals;
 	if (user?.isPlatformAdmin) return;
 	if (role && roleCan(role.capabilities, 'hotel:admin')) return;
-	requireCap(user, role, 'dining:manage');
+	requireCap(user, role, 'kitchen:manage');
 }
 
 const stationName = z.string().trim().min(1, 'Give the station a name.').max(40);
@@ -95,37 +95,6 @@ export const actions: Actions = {
 			after: { name: parsed.data.name }
 		});
 		return { ok: 'Station renamed.' };
-	},
-
-	/** How many minutes a ticket may wait at this station before the kitchen board calls it late. */
-	setTarget: async (event) => {
-		requireManage(event);
-		const hotelId = event.locals.hotel!.id;
-		const parsed = z
-			.object({
-				stationId: recordId(),
-				targetMinutes: z.preprocess(
-					(v) => (v === '' || v == null ? null : Number(v)),
-					z.number().int('Use whole minutes.').min(2, 'Use at least 2 minutes.').max(240, 'Use 240 minutes or fewer.').nullable()
-				)
-			})
-			.safeParse(Object.fromEntries(await event.request.formData()));
-		if (!parsed.success) return fail(400, { error: parsed.error.issues[0]?.message ?? 'Check the minutes.' });
-		const updated = await db
-			.update(diningStations)
-			.set({ targetMinutes: parsed.data.targetMinutes, updatedAt: new Date() })
-			.where(and(eq(diningStations.id, parsed.data.stationId), eq(diningStations.hotelId, hotelId)))
-			.returning({ id: diningStations.id });
-		if (updated.length === 0) return fail(404, { error: 'Station not found.' });
-		await writeAudit({
-			hotelId,
-			actor: event.locals.user,
-			action: 'dining_station.update',
-			entityType: 'dining_station',
-			entityId: parsed.data.stationId,
-			after: { targetMinutes: parsed.data.targetMinutes }
-		});
-		return { ok: parsed.data.targetMinutes ? `Late after ${parsed.data.targetMinutes} min.` : 'Using the default (20 min).' };
 	},
 
 	deleteStation: async (event) => {

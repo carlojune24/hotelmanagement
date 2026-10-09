@@ -543,7 +543,10 @@ export const diningOrderItems = pgTable(
 		sortOrder: integer('sort_order').notNull().default(0),
 		/** Per-station cooking: when this line's station started it and when it was done. */
 		startedAt: timestamp('started_at', { withTimezone: true }),
-		readyAt: timestamp('ready_at', { withTimezone: true })
+		readyAt: timestamp('ready_at', { withTimezone: true }),
+		/** Who pressed Start / Ready, for the kitchen's per-cook history. */
+		startedByUserId: uuid('started_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		readyByUserId: uuid('ready_by_user_id').references(() => users.id, { onDelete: 'set null' })
 	},
 	(t) => [index('dining_order_items_order_idx').on(t.orderId), index('dining_order_items_menu_idx').on(t.menuItemId)]
 );

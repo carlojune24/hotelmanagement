@@ -1,3 +1,5 @@
+import { redirect } from '@sveltejs/kit';
+import { isDiningOnly, isKitchenOnly } from '$lib/authz';
 import { roleCan } from '$lib/server/auth/rbac';
 import { getRoomStatusGrid } from '$lib/server/front-desk';
 import { getCashPosition } from '$lib/server/finance/cash';
@@ -17,6 +19,14 @@ import type { PageServerLoad } from './$types';
  */
 export const load: PageServerLoad = async ({ locals }) => {
 	const hotel = locals.hotel!;
+	// A cook has nothing on the Dashboard; their working screen is the Kitchen.
+	if (!locals.user?.isPlatformAdmin && locals.role && isKitchenOnly(locals.role.capabilities)) {
+		redirect(302, `/${hotel.slug}/management/kitchen`);
+	}
+	// Likewise a dining account: its working screen is the Floor.
+	if (!locals.user?.isPlatformAdmin && locals.role && isDiningOnly(locals.role.capabilities)) {
+		redirect(302, `/${hotel.slug}/management/dining`);
+	}
 	const can = (cap: string) =>
 		(locals.user?.isPlatformAdmin ?? false) ||
 		(locals.role ? roleCan(locals.role.capabilities, cap) : false);

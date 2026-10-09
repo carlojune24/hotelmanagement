@@ -15,8 +15,8 @@ const isBusinessError = (e: unknown) => e instanceof OrderError;
 
 /** The kitchen sees an order only while it can still be cooked, so served orders are left out. */
 export const load: PageServerLoad = async ({ locals, url, depends }) => {
-	depends('app:dining-kitchen');
-	requireCap(locals.user, locals.role, 'dining:read');
+	depends('app:kitchen');
+	requireCap(locals.user, locals.role, 'kitchen:read');
 	const hotelId = locals.hotel!.id;
 
 	const venues = await db
@@ -52,7 +52,7 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 		orders,
 		cancelled: cancelled.map((c) => ({ code: c.code, tableLabel: c.tableLabel })),
 		stations,
-		canMove: !!locals.user?.isPlatformAdmin || (!!locals.role && roleCan(locals.role.capabilities, 'dining:write')),
+		canMove: !!locals.user?.isPlatformAdmin || (!!locals.role && roleCan(locals.role.capabilities, 'kitchen:write')),
 		serverNow: Date.now()
 	};
 };
@@ -64,7 +64,7 @@ export const actions: Actions = {
 	 * ticket does. The order is ready once every station is.
 	 */
 	advance: async (event) => {
-		requireCap(event.locals.user, event.locals.role, 'dining:write');
+		requireCap(event.locals.user, event.locals.role, 'kitchen:write');
 		const parsed = z
 			.object({ orderId: recordId(), to: z.enum(['preparing', 'ready']), station: z.string().max(80).optional() })
 			.safeParse(Object.fromEntries(await event.request.formData()));

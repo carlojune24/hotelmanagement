@@ -17,7 +17,7 @@ async function hasEnvFile(): Promise<boolean> {
 	}
 }
 
-describe.skipIf(!hasDb)('dining kitchen board (live DB)', async () => {
+describe.skipIf(!hasDb)('kitchen board (live DB)', async () => {
 	const { db } = await import('$lib/server/db/index');
 	const s = await import('$lib/server/db/schema/index');
 	const { mintRef } = await import('$lib/server/ids');
@@ -41,8 +41,10 @@ describe.skipIf(!hasDb)('dining kitchen board (live DB)', async () => {
 	const roleOf = (capabilities: string[]) => ({ id: 'r', slug: 'r', name: 'Role', isProtected: false, capabilities });
 	const asUser = (hotel: { id: string; slug: string; timezone: string; vatRateBps: number }, caps: string[]) =>
 		({ hotel, user: { id: userId, email: 'x@x', name: 'Tester', isPlatformAdmin: false }, role: roleOf(caps) }) as never;
-	const COOK = ['dining:read', 'dining:write'];
-	const VIEWER = ['dining:read'];
+	const COOK = ['kitchen:read', 'kitchen:write'];
+	const VIEWER = ['kitchen:read'];
+	// Floor staff run Dining but no longer cook: starting a dish belongs to the Kitchen role.
+	const WAITER = ['dining:read', 'dining:write'];
 
 	const board = (locals: never) => page.load({ locals, url: new URL('http://x/'), depends: () => {} } as never) as Promise<any>;
 	const advance = (locals: never, body: Record<string, string>) => {
@@ -82,7 +84,7 @@ describe.skipIf(!hasDb)('dining kitchen board (live DB)', async () => {
 		if (userId) await db.delete(s.users).where(eq(s.users.id, userId));
 	});
 
-	it('shows live tickets with their stations, only to staff with dining access, and only this hotel\'s', async () => {
+	it('shows live tickets with their stations, only to staff with kitchen access, and only this hotel\'s', async () => {
 		const order = await place([
 			{ menuItemId: steak, quantity: 2 },
 			{ menuItemId: mojito, quantity: 1 }
@@ -94,7 +96,85 @@ describe.skipIf(!hasDb)('dining kitchen board (live DB)', async () => {
 		expect(cook.canMove).toBe(true);
 		expect((await board(asUser(hotelA, VIEWER))).canMove).toBe(false);
 		await expect(board(asUser(hotelA, []))).rejects.toMatchObject({ status: 403 });
+		await expect(board(asUser(hotelA, WAITER))).rejects.toMatchObject({ status: 403 });
 		expect((await board(asUser(hotelB, COOK))).orders).toEqual([]);
+	});
+
+	it('records which cook started and finished each dish', async () => {
+		const order = await place([{ menuItemId: steak, quantity: 1 }]);
+		const cook = asUser(hotelA, COOK);
+		await advance(cook, { orderId: order.id, to: 'preparing' });
+		await advance(cook, { orderId: order.id, to: 'ready' });
+		const [line] = await db.select().from(s.diningOrderItems).where(eq(s.diningOrderItems.orderId, order.id));
+		expect(line!.startedByUserId).toBe(userId);
+		expect(line!.readyByUserId).toBe(userId);
+	});
+
+	it('reports finished tickets in History, per station and per cook, for this hotel only', async () => {
+		const { kitchenHistory } = await import('$lib/server/kitchen');
+		const { businessDateFor } = await import('$lib/server/finance/shared');
+		const cook = asUser(hotelA, COOK);
+		const order = await place([
+			{ menuItemId: steak, quantity: 2 },
+			{ menuItemId: mojito, quantity: 1 }
+		]);
+		await advance(cook, { orderId: order.id, to: 'preparing' });
+		await advance(cook, { orderId: order.id, to: 'ready' });
+
+		const today = businessDateFor(hotelA.timezone);
+		const h = await kitchenHistory(hotelA, today, today);
+		expect(h.tickets).toBeGreaterThanOrEqual(2);
+		expect(h.stations.map((x) => x.key)).toEqual(expect.arrayContaining(['Grill', 'Bar']));
+		expect(h.topDishes.find((d) => d.name === 'Steak')!.quantity).toBeGreaterThanOrEqual(2);
+		expect(h.cooks.find((c) => c.userId === userId)!.tickets).toBeGreaterThanOrEqual(2);
+		expect(h.cookNames[userId]).toBe('Kitchen tester');
+		expect((await kitchenHistory(hotelB, today, today)).tickets).toBe(0);
+		// a period that ended yesterday holds nothing finished today
+		const { addDays } = await import('$lib/finance-range');
+		expect((await kitchenHistory(hotelA, addDays(today, -9), addDays(today, -2))).tickets).toBe(0);
+	});
+
+	it('lets a cook mark a dish sold out and back on, and nobody else', async () => {
+		const sold = await import('./sold-out/+page.server');
+		const toggle = (locals: never, isAvailable: boolean, itemId = mojito) => {
+			const f = new FormData();
+			f.set('itemId', itemId);
+			f.set('isAvailable', String(isAvailable));
+			return sold.actions.setAvailable!({ locals, request: { formData: async () => f } } as never) as Promise<any>;
+		};
+		const list = async (locals: never) =>
+			(await (sold.load as any)({ locals, depends: () => {} })).dishes.find((d: any) => d.id === mojito);
+
+		expect((await toggle(asUser(hotelA, COOK), false)).ok).toMatch(/sold out/);
+		expect((await list(asUser(hotelA, COOK))).isAvailable).toBe(false);
+		await expect(toggle(asUser(hotelA, VIEWER), true)).rejects.toMatchObject({ status: 403 });
+		await expect(toggle(asUser(hotelA, WAITER), true)).rejects.toMatchObject({ status: 403 });
+		expect((await toggle(asUser(hotelB, COOK), true)).status).toBe(404);
+		expect((await toggle(asUser(hotelA, COOK), true)).ok).toMatch(/back on/);
+		expect((await list(asUser(hotelA, COOK))).isAvailable).toBe(true);
+	});
+
+	it('tells the floor which orders are ready to serve and which table orders are waiting', async () => {
+		const cook = asUser(hotelA, COOK);
+		const ready = await place([{ menuItemId: steak, quantity: 1 }]);
+		const cooking = await place([{ menuItemId: steak, quantity: 1 }]);
+		await advance(cook, { orderId: ready.id, to: 'preparing' });
+		await advance(cook, { orderId: ready.id, to: 'ready' });
+		await advance(cook, { orderId: cooking.id, to: 'preparing' });
+
+		const a = await o.listServiceAlerts(hotelA.id);
+		expect(a.ready.map((x) => x.id)).toContain(ready.id);
+		expect(a.ready.map((x) => x.id)).not.toContain(cooking.id);
+		expect(a.ready.find((x) => x.id === ready.id)).toMatchObject({ code: ready.code, orderType: 'dine_in' });
+		// once served it stops asking for attention, and another hotel never sees it
+		await o.setDiningOrderStatus({ hotelId: hotelA.id, orderId: ready.id, to: 'served' });
+		expect((await o.listServiceAlerts(hotelA.id)).ready.map((x) => x.id)).not.toContain(ready.id);
+		expect((await o.listServiceAlerts(hotelB.id)).ready).toEqual([]);
+	});
+
+	it('does not let a waiter start or finish a dish', async () => {
+		const order = await place([{ menuItemId: steak, quantity: 1 }]);
+		await expect(advance(asUser(hotelA, WAITER), { orderId: order.id, to: 'preparing' })).rejects.toMatchObject({ status: 403 });
 	});
 
 	it('lets a cook start and finish a ticket, and drops served tickets from the board', async () => {

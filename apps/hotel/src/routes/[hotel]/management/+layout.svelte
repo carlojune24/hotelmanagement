@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { invalidate } from '$app/navigation';
+	import { MediaQuery } from 'svelte/reactivity';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import SidebarCollapseButton from '$lib/components/sidebar-collapse-button.svelte';
-	import { roleCan } from '$lib/authz';
+	import { isDiningOnly, isKitchenOnly, roleCan } from '$lib/authz';
 	import { mode, toggleMode } from 'mode-watcher';
 	import type { LayoutData } from './$types';
 	import LayoutDashboardIcon from '@lucide/svelte/icons/layout-dashboard';
@@ -30,10 +31,21 @@
 	import MoonIcon from '@lucide/svelte/icons/moon';
 	import StarIcon from '@lucide/svelte/icons/star';
 	import UtensilsIcon from '@lucide/svelte/icons/utensils';
+	import ChefHatIcon from '@lucide/svelte/icons/chef-hat';
 
 	let { data, children }: { data: LayoutData; children: import('svelte').Snippet } = $props();
 
 	let logoutForm: HTMLFormElement = $state()!;
+
+	// Tablets (portrait and landscape) and landscape phones are too narrow to give a 16rem sidebar away, so
+	// the sidebar folds to its icon rail by itself below 1280px and opens again on a wide screen. Staff can
+	// still open or close it by hand in between; the next change of screen size sets it again. A phone
+	// (under 768px) never shows this rail, it gets the slide-out menu instead.
+	const compact = new MediaQuery('max-width: 1279px');
+	let sidebarOpen = $state(true);
+	$effect(() => {
+		sidebarOpen = !compact.current;
+	});
 
 	// The login page renders standalone — no sidebar shell, since the visitor isn't
 	// authenticated yet and `data.user`/`data.role` may be null.
@@ -57,9 +69,12 @@
 		return isAdmin || (role ? roleCan(role.capabilities, cap) : false);
 	}
 
+	const kitchenOnly = $derived(!isAdmin && !!role && isKitchenOnly(role.capabilities));
+	const diningOnly = $derived(!isAdmin && !!role && isDiningOnly(role.capabilities));
+
 	const items = $derived(
 		[
-			{ seg: 'dashboard', label: 'Dashboard', icon: LayoutDashboardIcon, show: true },
+			{ seg: 'dashboard', label: 'Dashboard', icon: LayoutDashboardIcon, show: !kitchenOnly && !diningOnly },
 			{
 				seg: 'front-desk',
 				label: 'Front desk',
@@ -92,7 +107,10 @@
 				icon: SparklesIcon,
 				show: can('housekeeping:read')
 			},
-			{ seg: 'dining', label: 'Dining', icon: UtensilsIcon, show: can('dining:read') },
+			// The manager's sidebar leaves Dining out (front desk and dining accounts keep it).
+			{ seg: 'dining', label: 'Dining', icon: UtensilsIcon, show: can('dining:read') && !can('hotel:admin') },
+			// Only a cook's account lists the Kitchen; the manager's and front desk's sidebars leave it out.
+			{ seg: 'kitchen', label: 'Kitchen', icon: ChefHatIcon, show: kitchenOnly },
 			{ seg: 'reviews', label: 'Reviews', icon: StarIcon, show: can('review:read') },
 			{ seg: 'finance', label: 'Finance', icon: WalletIcon, show: can('finance:read') },
 			{ seg: 'hr', label: 'HR', icon: UsersIcon, show: can('hr:read') },
@@ -139,7 +157,7 @@
 	<input type="hidden" name="redirectTo" value="{base}/login" />
 </form>
 
-<Sidebar.Provider>
+<Sidebar.Provider bind:open={sidebarOpen}>
 	<Sidebar.Root collapsible="icon" class="print:hidden">
 		<Sidebar.Header>
 			<Sidebar.Menu>

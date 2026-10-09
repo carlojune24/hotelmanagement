@@ -35,6 +35,7 @@ import {
 	issueDiningDocument,
 	listDiningOrderDocuments
 } from './finance/documents';
+import type { BillTo, IssuedDocument, PayDocuments } from '../print-batch';
 import { venueBelongsToHotel } from './dining-menu';
 import { sendDiningOrderEmail } from './email/send-dining-order';
 import {
@@ -449,15 +450,22 @@ export async function setStationStatus(args: {
 
 		const now = new Date();
 		const ids = mine.map((i) => i.id);
+		const cookId = args.actor?.id ?? null;
 		if (args.to === 'preparing') {
 			await tx
 				.update(diningOrderItems)
-				.set({ startedAt: now })
+				.set({ startedAt: now, startedByUserId: cookId })
 				.where(and(inArray(diningOrderItems.id, ids), isNull(diningOrderItems.startedAt)));
 		} else {
 			await tx
 				.update(diningOrderItems)
-				.set({ readyAt: now, startedAt: sql`coalesce(${diningOrderItems.startedAt}, ${now.toISOString()}::timestamptz)` })
+				.set({
+					readyAt: now,
+					readyByUserId: cookId,
+					startedAt: sql`coalesce(${diningOrderItems.startedAt}, ${now.toISOString()}::timestamptz)`,
+					// A line finished without a Start press credits the same cook for both.
+					startedByUserId: sql`case when ${diningOrderItems.startedAt} is null then ${cookId} else ${diningOrderItems.startedByUserId} end`
+				})
 				.where(and(inArray(diningOrderItems.id, ids), isNull(diningOrderItems.readyAt)));
 		}
 
@@ -581,8 +589,21 @@ export async function payDiningOrder(args: {
 	orderId: string;
 	method: PaymentMethod;
 	tenderedCentavos?: number | null;
+	/**
+	 * What to issue with the payment. Omitted (`default`) follows the hotel's auto-receipt setting;
+	 * `or` issues the Official Receipt, `invoice` the Invoice instead, `none` nothing.
+	 */
+	documents?: PayDocuments;
+	billTo?: BillTo;
 	actor?: Actor;
-}): Promise<{ totalCentavos: number; changeCentavos: number; receiptId: string | null }> {
+}): Promise<{
+	totalCentavos: number;
+	changeCentavos: number;
+	receiptId: string | null;
+	documents: IssuedDocument[];
+	/** Why a document the cashier asked for could not be issued; the payment itself stands. */
+	documentError: string | null;
+}> {
 	const [order] = await db
 		.select()
 		.from(diningOrders)
@@ -660,19 +681,36 @@ export async function payDiningOrder(args: {
 		});
 	});
 
-	// The payment stands even if the receipt can't be issued (no active OR series, say): the
-	// cashier sees a null receipt and can issue it later from the order once the series is fixed.
-	let receiptId: string | null = null;
-	const bir = await getBirSettings(args.hotelId).catch(() => null);
-	if (bir?.autoIssueReceiptOnPayment) {
+	// The payment stands even if a document can't be issued (no active series, say): the cashier is
+	// told why, and can issue it later from the order once the series is fixed.
+	const choice = args.documents ?? 'default';
+	let want: 'official_receipt' | 'invoice' | null = null;
+	if (choice === 'or') want = 'official_receipt';
+	else if (choice === 'invoice') want = 'invoice';
+	else if (choice === 'default') {
+		const bir = await getBirSettings(args.hotelId).catch(() => null);
+		if (bir?.autoIssueReceiptOnPayment) want = 'official_receipt';
+	}
+
+	const documents: IssuedDocument[] = [];
+	let documentError: string | null = null;
+	if (want) {
 		try {
-			receiptId = (await issueDiningDocument(args.hotelId, args.orderId, 'official_receipt', args.actor ?? null)).id;
+			const doc = await issueDiningDocument(args.hotelId, args.orderId, want, args.actor ?? null, args.billTo ? { billTo: args.billTo } : {});
+			documents.push({ id: doc.id, type: want, formattedNo: doc.formattedNo, orderCode: order.code });
 		} catch (e) {
-			console.warn('payDiningOrder: could not issue official receipt', args.orderId, e);
+			console.warn('payDiningOrder: could not issue', want, args.orderId, e);
+			documentError = e instanceof Error ? e.message : 'The document could not be issued.';
 		}
 	}
 
-	return { totalCentavos: order.totalCentavos, changeCentavos: change, receiptId };
+	return {
+		totalCentavos: order.totalCentavos,
+		changeCentavos: change,
+		receiptId: documents.find((d) => d.type === 'official_receipt')?.id ?? null,
+		documents,
+		documentError
+	};
 }
 
 /** Voids a paid order's payment (a manager action): reverses the ledger entry and puts the
@@ -1055,3 +1093,27 @@ export async function diningSalesReport(
 
 /** Documents currently in force for an order (receipt / invoice numbers for the card). */
 export const getOrderDocuments = listDiningOrderDocuments;
+
+/** What the floor has to act on right now, across every venue: dishes the kitchen finished
+ *  (to carry to the table) and table-QR orders waiting for a waiter. Cheap enough to poll. */
+export async function listServiceAlerts(hotelId: string): Promise<{
+	ready: { id: string; code: string; tableLabel: string | null; orderType: string }[];
+	qrWaiting: { id: string; code: string; tableLabel: string | null; orderType: string }[];
+}> {
+	const rows = await db
+		.select({
+			id: diningOrders.id,
+			code: diningOrders.code,
+			tableLabel: diningOrders.tableLabel,
+			orderType: diningOrders.orderType,
+			status: diningOrders.status
+		})
+		.from(diningOrders)
+		.where(and(eq(diningOrders.hotelId, hotelId), inArray(diningOrders.status, ['ready', 'pending_acceptance'])))
+		.orderBy(asc(diningOrders.createdAt));
+	const pick = ({ status: _s, ...o }: (typeof rows)[number]) => o;
+	return {
+		ready: rows.filter((r) => r.status === 'ready').map(pick),
+		qrWaiting: rows.filter((r) => r.status === 'pending_acceptance').map(pick)
+	};
+}

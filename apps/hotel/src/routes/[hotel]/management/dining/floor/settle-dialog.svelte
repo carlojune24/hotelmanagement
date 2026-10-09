@@ -11,6 +11,9 @@
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import BedDoubleIcon from '@lucide/svelte/icons/bed-double';
+	import DocumentChoice from '../orders/document-choice.svelte';
+	import DoneDocuments from '../orders/done-documents.svelte';
+	import type { DocumentChoice as DocChoice, IssuedDocument } from '$lib/print-batch';
 	import type { PageData } from './$types';
 
 	type Check = PageData['checks'][number];
@@ -37,7 +40,11 @@
 	let submitting = $state(false);
 	let guestSearch = $state('');
 	let bookingId = $state('');
-	let done = $state<{ change: number; closed: boolean } | null>(null);
+	let done = $state<{ change: number; closed: boolean; documents: IssuedDocument[]; documentError: string | null } | null>(null);
+	// Which document to issue for each order (an official receipt unless the cashier says otherwise).
+	let docChoice = $state<DocChoice>('or');
+	let printAfter = $state(true);
+	let printNow = $state(false);
 
 	// Only `open` is tracked: the floor plan refreshes `check` every few seconds, and that must
 	// not wipe the amount the cashier is typing.
@@ -45,6 +52,7 @@
 		if (!open) return;
 		untrack(() => {
 			method = 'cash';
+			docChoice = 'or';
 			tendered = '';
 			guestSearch = '';
 			bookingId = '';
@@ -100,8 +108,14 @@
 							<p class="text-2xl font-semibold tabular-nums text-ink">{peso(done.change)}</p>
 						</div>
 					{/if}
-					<p class="text-xs text-ink-muted">Each order has its own receipt on the Orders board.</p>
-					<Button onclick={() => (open = false)}>Done</Button>
+					<DoneDocuments
+						documents={done.documents}
+						documentError={done.documentError}
+						{slug}
+						billHref="/{slug}/print/bill/check/{check.id}?auto=1"
+						auto={printNow}
+					/>
+					<Button variant={done.documents.length > 0 ? 'outline' : 'default'} class="h-11 w-full" onclick={() => (open = false)}>Done</Button>
 				</div>
 			{:else}
 				<Dialog.Header>
@@ -136,7 +150,8 @@
 						return async ({ result, update }) => {
 							submitting = false;
 							if (result.type === 'success' && result.data?.settled) {
-								done = result.data.settled as { change: number; closed: boolean };
+								printNow = printAfter && method !== 'room';
+								done = result.data.settled as { change: number; closed: boolean; documents: IssuedDocument[]; documentError: string | null };
 								await invalidateAll();
 							} else {
 								await update({ reset: false });
@@ -227,6 +242,10 @@
 						</div>
 					{:else}
 						<p class="text-sm text-ink-muted">Record this after the guest has paid on the terminal or wallet.</p>
+					{/if}
+
+					{#if method !== 'room'}
+						<DocumentChoice bind:value={docChoice} bind:printAfter guestName="" plural={unpaid.length > 1} />
 					{/if}
 
 					<p class="text-xs text-ink-muted">

@@ -30,7 +30,7 @@ Not a marketplace/OTA (no cross-hotel search or commission model) and not a bare
 - A hotel's amenities (schema already exists: `amenities`/`hotel_amenities`/`room_type_amenities`, with `is_highlighted` flags) are informational only at this stage — not separately sellable/bookable (that's Phase 2's `amenity_items`).
 
 - Dining at the table: each restaurant table has a printed QR code (`/{slug}/dining/t/{token}`) that opens that venue's menu for that table, phone first. A guest sends a round, a waiter accepts it, the kitchen cooks it per station, and the table is settled and freed from one check. No payment happens on the guest's phone; it is a deliberate choice that dining is paid at the table (or charged to the room), unlike pickup orders which can be paid online. Menu photos and descriptions matter here more than anywhere else on the site, but a menu with none must still read cleanly.
-- Dining roles: **floor staff** (Dining → Floor, Orders) take orders, accept QR orders, serve ready food and settle tables; **the kitchen** (Dining → Kitchen) is the only place a dish is started or marked ready, one lane per station. Floor staff cannot mark food ready.
+- Dining roles: **floor staff** (Dining → Floor, Orders) take orders, accept QR orders, serve ready food and settle tables; **the kitchen** (its own section, Kitchen, with its own Kitchen role/account) is the only place a dish is started or marked ready, one lane per station. Floor staff cannot mark food ready. The Kitchen also holds the prep list, the sold-out (86) switch, history and station setup; a cook sees nothing of Dining, payments or finance.
 
 ## Capabilities and Constraints
 

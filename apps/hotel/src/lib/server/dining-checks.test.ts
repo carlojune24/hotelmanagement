@@ -147,6 +147,35 @@ describe.skipIf(!hasDb)('dining table checks (live DB)', async () => {
 		expect(await openCheckOf(t.id)).toBeNull();
 	});
 
+	it('settles a table with the document the cashier picked, one per order', async () => {
+		const { createDocumentSeries } = await import('./finance/documents');
+		const mk = (type: 'official_receipt' | 'invoice') =>
+			createDocumentSeries(hotelId, { type, prefix: type === 'invoice' ? 'INV' : 'OR', serialFrom: 1, serialTo: 99, atpOrPermitNo: 'ATP-1', dateRegistered: null, accreditedPrinter: null, accreditationNo: null, notes: null }, null);
+		await mk('official_receipt');
+		await mk('invoice');
+
+		const settleWith = async (name: string, documents: 'or' | 'none' | 'invoice') => {
+			const t = (await db.insert(s.diningTables).values({ hotelId, diningItemId: venueId, name, seats: 2 }).returning())[0]!;
+			await place(t.id);
+			await place(t.id, soda);
+			const check = (await openCheckOf(t.id))!;
+			return c.settleCheck({ hotelId, checkId: check.id, method: 'card', documents });
+		};
+
+		const or = await settleWith('D1', 'or');
+		expect(or.documents.map((d) => d.type)).toEqual(['official_receipt', 'official_receipt']);
+		expect(new Set(or.documents.map((d) => d.formattedNo)).size).toBe(2); // a serial each
+		expect(or.documentError).toBeNull();
+
+		const inv = await settleWith('D2', 'invoice');
+		expect(inv.documents.map((d) => d.type)).toEqual(['invoice', 'invoice']);
+
+		const none = await settleWith('D3', 'none');
+		expect(none.paidCount).toBe(2);
+		expect(none.documents).toEqual([]);
+		expect(none.documentError).toBeNull();
+	});
+
 	it('shows where a table stands, and counts a QR order waiting for staff', async () => {
 		const t = (await db.insert(s.diningTables).values({ hotelId, diningItemId: venueId, name: 'T4', seats: 2 }).returning())[0]!;
 		const qr = await place(t.id, adobo, { source: 'qr', initialStatus: 'pending_acceptance' });

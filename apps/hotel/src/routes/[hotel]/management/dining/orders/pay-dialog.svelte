@@ -7,10 +7,12 @@
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as ToggleGroup from '$lib/components/ui/toggle-group/index.js';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
-	import PrinterIcon from '@lucide/svelte/icons/printer';
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import BedDoubleIcon from '@lucide/svelte/icons/bed-double';
+	import DocumentChoice from './document-choice.svelte';
+	import DoneDocuments from './done-documents.svelte';
+	import type { DocumentChoice as DocChoice, IssuedDocument } from '$lib/print-batch';
 	import type { PageData } from './$types';
 
 	let {
@@ -33,7 +35,11 @@
 	let method = $state('cash');
 	let tendered = $state('');
 	let submitting = $state(false);
-	let paid = $state<{ changeCentavos: number; receiptId: string | null } | null>(null);
+	let paid = $state<{ changeCentavos: number; documents: IssuedDocument[]; documentError: string | null } | null>(null);
+	// Which document to issue with the payment (an official receipt unless the cashier says otherwise).
+	let docChoice = $state<DocChoice>('or');
+	let printAfter = $state(true);
+	let printNow = $state(false);
 	// Charge to room: pick the in-house guest whose room bill takes this order.
 	let guestSearch = $state('');
 	let bookingId = $state('');
@@ -42,6 +48,7 @@
 	$effect(() => {
 		if (open) {
 			method = 'cash';
+			docChoice = 'or';
 			tendered = '';
 			paid = null;
 			charged = null;
@@ -78,7 +85,7 @@
 </script>
 
 <Dialog.Root bind:open>
-	<Dialog.Content class="sm:max-w-md">
+	<Dialog.Content class="max-h-[92dvh] overflow-y-auto sm:max-w-md">
 		{#if order}
 			{#if charged}
 				<div class="space-y-4 py-2 text-center">
@@ -103,18 +110,14 @@
 							<p class="text-2xl font-semibold tabular-nums text-ink">{peso(paid.changeCentavos)}</p>
 						</div>
 					{/if}
-					<div class="flex flex-col gap-2 sm:flex-row sm:justify-center">
-						{#if paid.receiptId}
-							<Button href="/{slug}/print/receipt/{paid.receiptId}" target="_blank" rel="noopener" variant="outline">
-								<PrinterIcon class="size-4" /> Print receipt
-							</Button>
-						{:else}
-							<p class="text-xs text-ink-muted">
-								No official receipt was issued. Check the BIR series in Finance, then issue it from the order.
-							</p>
-						{/if}
-						<Button onclick={() => (open = false)}>Done</Button>
-					</div>
+					<DoneDocuments
+						documents={paid.documents}
+						documentError={paid.documentError}
+						{slug}
+						billHref="/{slug}/print/bill/order/{order.id}?auto=1"
+						auto={printNow}
+					/>
+					<Button variant={paid.documents.length > 0 ? 'outline' : 'default'} class="h-11 w-full" onclick={() => (open = false)}>Done</Button>
 				</div>
 			{:else}
 				<Dialog.Header>
@@ -141,7 +144,8 @@
 								charged = result.data.charged as { roomLabel: string; guestName: string };
 								await invalidateAll();
 							} else if (result.type === 'success' && result.data?.paid) {
-								paid = result.data.paid as { changeCentavos: number; receiptId: string | null };
+								printNow = printAfter;
+							paid = result.data.paid as { changeCentavos: number; documents: IssuedDocument[]; documentError: string | null };
 								await invalidateAll();
 							} else {
 								await update({ reset: false });
@@ -236,6 +240,10 @@
 						<p class="text-sm text-ink-muted">
 							Record this after the guest has paid on the terminal or wallet. The full amount is posted to the bank account.
 						</p>
+					{/if}
+
+					{#if method !== 'room'}
+						<DocumentChoice bind:value={docChoice} bind:printAfter guestName={order.guestName ?? ''} />
 					{/if}
 
 					<Dialog.Footer>

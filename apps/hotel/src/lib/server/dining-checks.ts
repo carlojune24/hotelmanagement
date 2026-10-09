@@ -15,6 +15,7 @@ import { chargeDiningOrderToRoom } from './dining-room-charge';
 import { OrderError, cancelDiningOrder, payDiningOrder } from './dining-orders';
 import { checkStage, summarizeCheck, type CheckOrderLite, type CheckSummary } from '../dining-checks';
 import { groupByStation, type StationState } from '../dining-orders';
+import type { BillTo, IssuedDocument, PayDocuments } from '../print-batch';
 
 type Actor = SessionUser | null;
 
@@ -130,8 +131,19 @@ export async function settleCheck(args: {
 	method: SettleMethod;
 	tenderedCentavos?: number | null;
 	bookingId?: string | null;
+	/** What to issue for each order paid; see `payDiningOrder`. A room charge issues nothing. */
+	documents?: PayDocuments;
+	billTo?: BillTo;
 	actor?: Actor;
-}): Promise<{ paidCount: number; totalCentavos: number; changeCentavos: number; closed: boolean }> {
+}): Promise<{
+	paidCount: number;
+	totalCentavos: number;
+	changeCentavos: number;
+	closed: boolean;
+	/** One per order paid, in order, ready to print together. */
+	documents: IssuedDocument[];
+	documentError: string | null;
+}> {
 	const check = await loadCheck(args.hotelId, args.checkId);
 	const orders = await ordersOf(check.id);
 	if (orders.some((o) => o.status === 'pending_acceptance')) {
@@ -148,25 +160,32 @@ export async function settleCheck(args: {
 	}
 
 	let paidCount = 0;
+	const documents: IssuedDocument[] = [];
+	const documentErrors: string[] = [];
 	for (const o of unpaid) {
 		if (args.method === 'room') {
 			await chargeDiningOrderToRoom({ hotelId: args.hotelId, orderId: o.id, bookingId: args.bookingId!, actor: args.actor ?? null });
 		} else {
-			await payDiningOrder({
+			const paid = await payDiningOrder({
 				hotelId: args.hotelId,
 				orderId: o.id,
 				method: args.method,
 				// The change is worked out for the table as a whole; each order is tendered exactly.
 				tenderedCentavos: args.method === 'cash' ? o.totalCentavos : null,
+				documents: args.documents,
+				billTo: args.billTo,
 				actor: args.actor ?? null
 			});
+			documents.push(...paid.documents);
+			if (paid.documentError) documentErrors.push(paid.documentError);
 		}
 		paidCount++;
 	}
 
 	const changeCentavos = args.method === 'cash' ? Math.max(0, (args.tenderedCentavos ?? 0) - owed) : 0;
 	const closed = await closeIfDone(args.hotelId, check.id, args.actor ?? null);
-	return { paidCount, totalCentavos: owed, changeCentavos, closed };
+	// The same reason usually repeats for every order (no series), so say it once.
+	return { paidCount, totalCentavos: owed, changeCentavos, closed, documents, documentError: documentErrors[0] ?? null };
 }
 
 /** Closes the check when nothing is left to serve or pay. Returns whether it closed. */

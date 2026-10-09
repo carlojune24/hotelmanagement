@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { thermalPadding } from '$lib/print-batch';
+
 	interface SaleReceiptLine {
 		description: string;
 		quantity: number;
@@ -82,7 +84,7 @@
 	<style>{`@page { size: ${widthMm}mm ${pageHeightMm}mm; margin: 0; }`}</style>
 </svelte:head>
 
-<div class="tr-page" style="--tr-width: {widthMm}mm" bind:this={pageEl}>
+<div class="tr-page" style="--tr-width: {widthMm}mm; --tr-pad: {thermalPadding(widthMm)}" bind:this={pageEl}>
 	<div class="tr-hotel-name">{hotel.legalName || hotel.name}</div>
 	{#if hotel.legalName && hotel.legalName !== hotel.name}
 		<div class="tr-center tr-muted">operating as {hotel.name}</div>
@@ -140,12 +142,12 @@
 		box-sizing: border-box;
 		width: var(--tr-width);
 		margin: 0 auto;
-		padding: 3mm 2.5mm;
+		padding: var(--tr-pad);
 		background: #fff;
 		color: var(--tr-ink);
 		font-family: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
-		font-weight: 500;
-		font-size: 8pt;
+		font-weight: 700;
+		font-size: 9pt;
 		line-height: 1.35;
 		-webkit-print-color-adjust: exact;
 		print-color-adjust: exact;
@@ -161,8 +163,8 @@
 	}
 	.tr-hotel-name {
 		text-align: center;
-		font-size: 11pt;
-		font-weight: 700;
+		font-size: 12.5pt;
+		font-weight: 800;
 		letter-spacing: 0.02em;
 		text-transform: uppercase;
 	}
@@ -182,14 +184,14 @@
 		margin: 1.5mm 0;
 	}
 	.tr-doctype {
-		font-size: 11pt;
-		font-weight: 700;
+		font-size: 12pt;
+		font-weight: 800;
 		letter-spacing: 0.1em;
 		text-transform: uppercase;
 	}
 	.tr-serial-no {
-		font-size: 11pt;
-		font-weight: 700;
+		font-size: 12pt;
+		font-weight: 800;
 		margin-top: 0.5mm;
 	}
 	.tr-row {
@@ -204,7 +206,7 @@
 	}
 	.tr-row span:last-child {
 		text-align: right;
-		font-weight: 600;
+		font-weight: 800;
 		min-width: 0;
 		overflow-wrap: break-word;
 	}
@@ -218,12 +220,13 @@
 		border-top: 1px solid var(--tr-ink);
 		margin-top: 0.6mm;
 		padding-top: 0.8mm;
-		font-weight: 700;
-		font-size: 9pt;
+		font-weight: 800;
+		font-size: 10.5pt;
 	}
 	.tr-legal {
-		font-size: 6.5pt;
-		line-height: 1.5;
+		font-size: 7.5pt;
+		line-height: 1.45;
+		font-weight: 700;
 		color: var(--tr-muted);
 	}
 	.tr-legal p {
@@ -236,8 +239,8 @@
 	.tr-close {
 		text-align: center;
 		margin-top: 2mm;
-		font-weight: 600;
-		font-size: 8pt;
+		font-weight: 800;
+		font-size: 9pt;
 	}
 	@media screen {
 		.tr-page {

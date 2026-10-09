@@ -377,7 +377,7 @@
 						</Select.Root>
 						{#if data.stations.length === 0}
 							<p class="mt-1 text-xs text-ink-muted">
-								<a class="underline" href="{base}/stations">Set up stations</a> (Kitchen, Bar…) to track sales by them.
+								Ask a manager to set up stations (Grill, Bar…) in the Kitchen section, so each dish lands on the right lane.
 							</p>
 						{/if}
 					</div>

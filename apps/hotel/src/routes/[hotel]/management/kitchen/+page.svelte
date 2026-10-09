@@ -15,7 +15,6 @@
 	import FlameIcon from '@lucide/svelte/icons/flame';
 	import BedDoubleIcon from '@lucide/svelte/icons/bed-double';
 	import {
-		DEFAULT_TARGET_MINUTES,
 		formatWait,
 		groupByStation,
 		waitLevel,
@@ -23,6 +22,7 @@
 		type WaitLevel
 	} from '$lib/dining-orders';
 	import { buildLanes, passList } from '$lib/dining-lanes';
+	import { playTone, readSoundPref, stopSound, unlockOnFirstTouch, writeSoundPref } from '$lib/staff-sound';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -43,25 +43,29 @@
 	// Server time minus this device's clock at the last load, so waits stay right on a wall
 	// screen whose clock has drifted.
 	let skewMs = $state(0);
-	let sound = $state(false);
+	// On unless this device turned it off; a browser keeps it silent until the first tap, hence `blocked`.
+	let sound = $state(true);
+	let blocked = $state(false);
 	let busy = $state<string | null>(null);
 	let error = $state('');
 
 	$effect(() => {
-		try {
-			sound = localStorage.getItem('kitchen-sound') === '1';
-		} catch {
-			/* storage blocked: sound stays off */
-		}
+		sound = readSoundPref('kitchen-sound');
+		return unlockOnFirstTouch(() => (blocked = false));
 	});
 	$effect(() => {
 		const clock = setInterval(() => (nowMs = Date.now()), 1000);
-		const refresh = setInterval(() => {
-			if (!document.hidden) invalidate('app:dining-kitchen');
-		}, 10_000);
+		// Keep polling in a background tab too (browsers slow it down but don't stop it) so the
+		// chime still reaches a cook who has another window in front; catch up when shown again.
+		const refresh = setInterval(() => invalidate('app:kitchen'), 10_000);
+		const onShow = () => {
+			if (!document.hidden) invalidate('app:kitchen');
+		};
+		document.addEventListener('visibilitychange', onShow);
 		return () => {
 			clearInterval(clock);
 			clearInterval(refresh);
+			document.removeEventListener('visibilitychange', onShow);
 		};
 	});
 	$effect(() => {
@@ -72,36 +76,27 @@
 	const clockText = $derived(new Date(nowMs + skewMs).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' }));
 	const nowServer = $derived(nowMs + skewMs);
 
-	// ---- a soft chime when a new ticket arrives (browsers need one tap first, hence the toggle) --
+	// ---- sounds: a chime for each new ticket, a different one when a ticket is cancelled ------
 	let seen: Set<string> | null = null;
-	function chime() {
-		try {
-			const ctx = new AudioContext();
-			const osc = ctx.createOscillator();
-			const gain = ctx.createGain();
-			osc.frequency.value = 880;
-			gain.gain.setValueAtTime(0.15, ctx.currentTime);
-			gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
-			osc.connect(gain).connect(ctx.destination);
-			osc.start();
-			osc.stop(ctx.currentTime + 0.5);
-		} catch {
-			/* no audio available */
-		}
-	}
+	let seenCancelled: Set<string> | null = null;
 	$effect(() => {
-		const ids = new Set(data.orders.filter((o) => o.status === 'new' || o.status === 'accepted').map((o) => o.id));
-		if (seen && sound && [...ids].some((id) => !seen!.has(id))) chime();
+		// Only tickets this screen is responsible for: a Bar screen ignores a steak-only ticket.
+		const mine = (o: Order) => !station || o.items.some((i) => (i.stationName ?? '') === laneKey);
+		const ids = new Set(data.orders.filter((o) => (o.status === 'new' || o.status === 'accepted') && mine(o)).map((o) => o.id));
+		const stopped = new Set(data.cancelled.map((c) => c.code));
+		const newTicket = seen !== null && [...ids].some((id) => !seen!.has(id));
+		const newStop = seenCancelled !== null && [...stopped].some((c) => !seenCancelled!.has(c));
 		seen = ids;
+		seenCancelled = stopped;
+		if (!sound || (!newTicket && !newStop)) return;
+		// Stopping a dish matters more than a new one, so it wins when both arrive together.
+		blocked = !playTone(newStop ? 'stop' : 'ticket');
 	});
 	function toggleSound() {
 		sound = !sound;
-		try {
-			localStorage.setItem('kitchen-sound', sound ? '1' : '0');
-		} catch {
-			/* ignore */
-		}
-		if (sound) chime();
+		writeSoundPref('kitchen-sound', sound);
+		if (sound) blocked = !playTone('ticket', 1.2);
+		else stopSound();
 	}
 
 	// ---- filters ----------------------------------------------------------------------
@@ -111,8 +106,6 @@
 		else q.delete(key);
 		goto(`?${q}`, { keepFocus: true, noScroll: true, replaceState: true });
 	}
-	const targetFor = (key: string) => data.stations.find((s) => s.name === key)?.targetMinutes ?? null;
-	const targetOf = (key: string) => targetFor(key) ?? DEFAULT_TARGET_MINUTES;
 
 	// ---- lanes: each station sees only the dishes it has to make ------------------------
 	const allLanes = $derived(buildLanes(data.orders, data.stations));
@@ -146,17 +139,20 @@
 		{ key: 'prep', title: 'Preparing', list: live.filter((t) => colOf(t) === 'prep') }
 	]);
 
+	const between = (a: Date | string | null | undefined, b: Date | string | null | undefined) =>
+		a && b ? Math.max(0, Math.floor((new Date(b).getTime() - new Date(a).getTime()) / 60_000)) : 0;
+	const clock12 = (d: Date | string) => new Date(d).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' });
 	const minutesSince = (d: Date | string | null) => (d ? Math.max(0, Math.floor((nowServer - new Date(d).getTime()) / 60_000)) : 0);
 	const waited = (o: Order) => minutesSince(o.createdAt);
 	const where = (o: Order) => (o.orderType === 'takeaway' ? 'Takeaway' : o.tableLabel ? `Table ${o.tableLabel}` : 'Dine-in');
 
-	/** The worst a ticket is doing: each station still working is judged against its own target. */
+	/** The worst a ticket is doing: how long it has waited, against the one late rule. */
 	function ticketLevel(t: Ticket): WaitLevel {
 		const m = waited(t.order);
 		let worst: WaitLevel = 'ok';
 		for (const g of t.shown) {
 			if (g.state === 'ready') continue;
-			const lvl = waitLevel(m, targetFor(g.key));
+			const lvl = waitLevel(m);
 			if (lvl === 'late') return 'late';
 			if (lvl === 'slow') worst = 'slow';
 		}
@@ -183,7 +179,7 @@
 			error = 'No connection. Try again.';
 		} finally {
 			busy = null;
-			await invalidate('app:dining-kitchen');
+			await invalidate('app:kitchen');
 		}
 	}
 
@@ -198,65 +194,46 @@
 	}
 </script>
 
-<svelte:head><title>Kitchen · Dining</title></svelte:head>
+<svelte:head><title>Kitchen board</title></svelte:head>
 
-<!-- Dark, high-contrast board. In full-screen mode it covers the staff shell. -->
-<div class="dark bg-background text-ink {full ? 'fixed inset-0 z-50 overflow-y-auto' : 'min-h-[calc(100vh-9rem)]'}">
-	<div class="mx-auto flex min-h-full w-full max-w-[1800px] flex-col gap-4 px-4 py-4 sm:px-6">
-		<header class="flex flex-wrap items-center gap-x-4 gap-y-3">
-			<h2 class="text-lg font-semibold tracking-tight">Kitchen</h2>
+<!-- The time record on a ticket: when the order was taken, how long it waited before the station started it,
+     and how long it has been (or was) in the kitchen. Plain rows on a narrow lane, three across on a wide one. -->
+{#snippet record(orderedAt: Date | string, startedAt: Date | string | null | undefined, readyAt?: Date | string | null)}
+	{@const queue = startedAt ? between(orderedAt, startedAt) : minutesSince(orderedAt)}
+	{@const inKitchen = startedAt ? (readyAt ? between(startedAt, readyAt) : minutesSince(startedAt)) : null}
+	<dl class="mt-2 grid grid-cols-1 gap-y-0.5 rounded-lg border border-border bg-surface-2/40 px-2 py-1.5 @[19rem]:grid-cols-3 @[19rem]:gap-x-2">
+		<div class="flex items-baseline justify-between gap-2 @[19rem]:block">
+			<dt class="text-[11px] uppercase tracking-wide text-ink-muted">Ordered</dt>
+			<dd class="font-mono text-sm font-bold tabular-nums">{clock12(orderedAt)}</dd>
+		</div>
+		<div class="flex items-baseline justify-between gap-2 @[19rem]:block">
+			<dt class="text-[11px] uppercase tracking-wide text-ink-muted">{startedAt ? 'Waited to start' : 'Waiting'}</dt>
+			<dd class="font-mono text-sm font-bold tabular-nums">{formatWait(queue)}</dd>
+		</div>
+		<div class="flex items-baseline justify-between gap-2 @[19rem]:block">
+			<dt class="text-[11px] uppercase tracking-wide text-ink-muted">{'In kitchen'}</dt>
+			<dd class="font-mono text-sm font-bold tabular-nums">{inKitchen === null ? '—' : formatWait(inKitchen)}</dd>
+		</div>
+	</dl>
+{/snippet}
 
-			{#if data.venues.length > 1}
-				<ToggleGroup.Root
-					type="single"
-					variant="outline"
-					value={data.venueId ?? 'all'}
-					onValueChange={(v) => v && setParam('venue', v === 'all' ? '' : v)}
-					aria-label="Venue"
-				>
-					<ToggleGroup.Item value="all" class="h-11 px-4">All venues</ToggleGroup.Item>
-					{#each data.venues as v (v.id)}
-						<ToggleGroup.Item value={v.id} class="h-11 px-4">{v.title}</ToggleGroup.Item>
-					{/each}
-				</ToggleGroup.Root>
-			{/if}
-
-			{#if chips.length > 1}
-				<ToggleGroup.Root
-					type="single"
-					variant="outline"
-					value={station || 'all'}
-					onValueChange={(v) => v && setParam('station', v === 'all' ? '' : v)}
-					aria-label="Station"
-				>
-					<ToggleGroup.Item value="all" class="h-11 px-4">All stations</ToggleGroup.Item>
-					{#each chips as c (c.value)}
-						<ToggleGroup.Item value={c.value} class="h-11 gap-2 px-4">
-							{c.label}
-							<span class="text-xs tabular-nums text-ink-muted">{c.count}</span>
-						</ToggleGroup.Item>
-					{/each}
-				</ToggleGroup.Root>
-			{/if}
-
-			<ToggleGroup.Root
-				type="single"
-				variant="outline"
-				value={view}
-				onValueChange={(v) => v && setParam('view', v === 'lanes' ? '' : v)}
-				aria-label="Board layout"
-			>
-				<ToggleGroup.Item value="lanes" class="h-11 px-4">By station</ToggleGroup.Item>
-				<ToggleGroup.Item value="tickets" class="h-11 px-4">Whole tickets</ToggleGroup.Item>
-			</ToggleGroup.Root>
-
-			<div class="ml-auto flex items-center gap-3">
-				<span class="text-xs tabular-nums text-ink-muted">Updated {ago < 3 ? 'just now' : `${ago}s ago`}</span>
-				<span class="text-2xl font-semibold tabular-nums">{clockText}</span>
+<!-- Dark, high-contrast board. In full-screen mode it covers the staff shell.
+     Phones stack everything in one column; the filter rows scroll sideways instead of wrapping into
+     a pile; the station lanes flow into as many columns as the screen can hold (see `lane-grid`). -->
+<div class="dark bg-background text-ink {full ? 'fixed inset-0 z-50 overflow-y-auto' : 'min-h-[calc(100dvh-9rem)]'}">
+	<div class="mx-auto flex min-h-full w-full max-w-[1800px] flex-col gap-3 px-3 py-3 sm:gap-4 sm:px-6 sm:py-4">
+		<header class="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center md:gap-x-4">
+			<!-- Status: the clock leads, with the freshness note under it; the two buttons sit at the end. -->
+			<div class="flex items-center gap-3 md:order-last md:ml-auto">
+				{#if full}<h2 class="mr-auto text-lg font-semibold tracking-tight md:mr-2">Kitchen</h2>{/if}
+				<div class="flex min-w-0 flex-1 flex-col md:flex-none md:items-end">
+					<span class="text-2xl leading-none font-semibold tabular-nums sm:text-3xl">{clockText}</span>
+					<span class="mt-1 text-xs tabular-nums text-ink-muted">Updated {ago < 3 ? 'just now' : `${ago}s ago`}</span>
+				</div>
 				<Button
 					variant="outline"
 					size="icon"
-					class="size-11"
+					class="size-11 shrink-0"
 					onclick={toggleSound}
 					aria-pressed={sound}
 					aria-label={sound ? 'Turn sound off' : 'Turn sound on'}
@@ -267,7 +244,7 @@
 				<Button
 					variant="outline"
 					size="icon"
-					class="size-11"
+					class="size-11 shrink-0"
 					onclick={toggleFull}
 					aria-label={full ? 'Leave full screen' : 'Open full screen'}
 					title={full ? 'Leave full screen' : 'Open full screen'}
@@ -275,6 +252,62 @@
 					{#if full}<MinimizeIcon class="size-5" />{:else}<MaximizeIcon class="size-5" />{/if}
 				</Button>
 			</div>
+
+			<!-- Filters: each group is one swipeable strip on a phone, and sits in a row from a tablet up. -->
+			<div class="flex min-w-0 flex-col gap-2 md:flex-row md:flex-wrap md:items-center md:gap-3">
+				{#if data.venues.length > 1}
+					<div class="-mx-3 overflow-x-auto px-3 sm:-mx-6 sm:px-6 md:mx-0 md:overflow-visible md:px-0">
+						<ToggleGroup.Root
+							type="single"
+							variant="outline"
+							value={data.venueId ?? 'all'}
+							onValueChange={(v) => v && setParam('venue', v === 'all' ? '' : v)}
+							aria-label="Venue"
+						>
+							<ToggleGroup.Item value="all" class="h-11 px-4">All venues</ToggleGroup.Item>
+							{#each data.venues as v (v.id)}
+								<ToggleGroup.Item value={v.id} class="h-11 px-4">{v.title}</ToggleGroup.Item>
+							{/each}
+						</ToggleGroup.Root>
+					</div>
+				{/if}
+
+				{#if chips.length > 1}
+					<div class="-mx-3 overflow-x-auto px-3 sm:-mx-6 sm:px-6 md:mx-0 md:overflow-visible md:px-0">
+						<ToggleGroup.Root
+							type="single"
+							variant="outline"
+							value={station || 'all'}
+							onValueChange={(v) => v && setParam('station', v === 'all' ? '' : v)}
+							aria-label="Station"
+						>
+							<ToggleGroup.Item value="all" class="h-11 px-4">All stations</ToggleGroup.Item>
+							{#each chips as c (c.value)}
+								<ToggleGroup.Item value={c.value} class="h-11 gap-2 px-4">
+									{c.label}
+									<span class="text-xs tabular-nums text-ink-muted">{c.count}</span>
+								</ToggleGroup.Item>
+							{/each}
+						</ToggleGroup.Root>
+					</div>
+				{/if}
+
+				<ToggleGroup.Root
+					type="single"
+					variant="outline"
+					value={view}
+					onValueChange={(v) => v && setParam('view', v === 'lanes' ? '' : v)}
+					aria-label="Board layout"
+					class="w-full md:w-fit"
+				>
+					<ToggleGroup.Item value="lanes" class="h-11 flex-1 px-4 md:flex-none">By station</ToggleGroup.Item>
+					<ToggleGroup.Item value="tickets" class="h-11 flex-1 px-4 md:flex-none">Whole tickets</ToggleGroup.Item>
+				</ToggleGroup.Root>
+			</div>
+
+			{#if sound && blocked}
+				<p class="text-xs text-warning md:basis-full" role="status">Tap the screen once to turn the sound on</p>
+			{/if}
 		</header>
 
 		{#if data.cancelled.length > 0}
@@ -292,44 +325,45 @@
 		{/if}
 
 		{#if view === 'lanes'}
-			<!-- One lane per station: a cook watches their own lane and nobody else's dishes. -->
-			<div class="grid flex-1 auto-cols-[minmax(19rem,1fr)] grid-flow-col gap-4 overflow-x-auto pb-1">
+			<!-- One lane per station: a cook watches their own lane and nobody else's dishes. Up to five lanes
+			     sit side by side on anything from a small tablet up (a sixth wraps onto a second row); a phone
+			     stacks them. Each lane sizes its own text to the width it gets (container queries). -->
+			<div
+				class="grid flex-1 grid-cols-1 content-start items-start gap-3 sm:grid-cols-[repeat(var(--lane-cols),minmax(0,1fr))] {lanes.length === 1 ? 'max-w-3xl' : ''}"
+				style="--lane-cols: {Math.min(5, lanes.length)}"
+			>
 				{#each lanes as lane (lane.key)}
-					<section aria-labelledby="lane-{lane.key || 'none'}" class="flex min-w-0 flex-col gap-3">
-						<div class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-b-2 border-border pb-2">
-							<h3 id="lane-{lane.key || 'none'}" class="text-xl font-semibold tracking-tight">{lane.label}</h3>
-							<p class="text-sm tabular-nums text-ink-muted">
-								{lane.waiting} to start · {lane.cooking} cooking
-							</p>
-							<p class="ml-auto text-xs text-ink-muted">late after {targetOf(lane.key)} min</p>
+					<section aria-labelledby="lane-{lane.key || 'none'}" class="@container flex min-w-0 flex-col gap-3">
+						<div class="border-b-2 border-border pb-2">
+							<h3 id="lane-{lane.key || 'none'}" class="truncate text-lg font-semibold tracking-tight @[14rem]:text-xl">{lane.label}</h3>
+							<p class="mt-0.5 text-xs tabular-nums text-ink-muted @[14rem]:text-sm">{lane.waiting} to start · {lane.cooking} cooking</p>
 						</div>
 
 						{#each lane.cards as card (card.order.id)}
 							{@const m = waited(card.order)}
-							{@const level = waitLevel(m, lane.targetMinutes)}
-							<article class="rounded-xl border-2 bg-surface p-4 {LEVEL_BORDER[level]}">
-								<div class="flex items-start justify-between gap-3">
+							{@const level = waitLevel(m)}
+							<article class="rounded-xl border-2 bg-surface p-2 @[14rem]:p-3 {LEVEL_BORDER[level]}">
+								<div class="flex flex-col gap-1 @[14rem]:flex-row @[14rem]:items-start @[14rem]:justify-between @[14rem]:gap-3">
 									<div class="min-w-0">
-										<p class="font-mono text-2xl font-bold">{card.order.code}</p>
-										<p class="mt-0.5 truncate text-base text-ink-muted">
+										<p class="font-mono text-base font-bold @[14rem]:text-xl @[19rem]:text-2xl">{card.order.code}</p>
+										<p class="mt-0.5 line-clamp-2 break-words text-sm text-ink-muted @[19rem]:text-base">
 											{where(card.order)}{card.order.guestName ? ` · ${card.order.guestName}` : ''}
 										</p>
 										{#if card.order.bookingCode}
-											<p class="mt-0.5 flex items-center gap-1 text-sm text-ink-muted">
-												<BedDoubleIcon class="size-3.5" aria-hidden="true" />
+											<p class="mt-0.5 flex items-center gap-1 text-xs text-ink-muted @[19rem]:text-sm">
+												<BedDoubleIcon class="size-3.5 shrink-0" aria-hidden="true" />
 												{#if card.order.roomLabel}Room {card.order.roomLabel}{:else}In-house{/if}
 											</p>
 										{/if}
 									</div>
-									<div class="shrink-0 text-right">
-										<p class="text-xs uppercase tracking-wide text-ink-muted">Waiting</p>
-										<p class="font-mono text-3xl leading-none font-bold tabular-nums {LEVEL_TEXT[level]}">{formatWait(m)}</p>
+									<div class="shrink-0 @[14rem]:text-right">
+										<p class="font-mono text-xl leading-none font-bold tabular-nums @[19rem]:text-3xl {LEVEL_TEXT[level]}">{formatWait(m)}</p>
 										{#if level === 'late'}
-											<p class="mt-1 flex items-center justify-end gap-1 text-sm font-semibold text-danger">
+											<p class="mt-1 flex items-center gap-1 text-sm font-semibold text-danger @[14rem]:justify-end">
 												<TriangleAlertIcon class="size-3.5" aria-hidden="true" />Late
 											</p>
 										{:else if level === 'slow'}
-											<p class="mt-1 flex items-center justify-end gap-1 text-sm font-semibold text-warning">
+											<p class="mt-1 flex items-center gap-1 text-sm font-semibold text-warning @[14rem]:justify-end">
 												<ClockIcon class="size-3.5" aria-hidden="true" />Slow
 											</p>
 										{/if}
@@ -338,36 +372,28 @@
 									</div>
 								</div>
 
-								<p class="mt-3 flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide {card.state === 'cooking' ? LEVEL_TEXT[level] || 'text-ink' : 'text-ink-muted'}">
+								{@render record(card.order.createdAt, card.group.startedAt)}
+
+								<p class="mt-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide @[14rem]:text-sm {card.state === 'cooking' ? LEVEL_TEXT[level] || 'text-ink' : 'text-ink-muted'}">
 									{#if card.state === 'cooking'}
 										<FlameIcon class="size-4" aria-hidden="true" />
-										Cooking {card.group.startedAt ? formatWait(minutesSince(card.group.startedAt)) : ''}
+										Cooking
 									{:else}
 										Not started
 									{/if}
 								</p>
 								<ul class="mt-1 divide-y divide-border border-y border-border">
 									{#each card.group.items as it (it.id)}
-										<li class="py-2">
-											<p class="text-[22px] leading-snug"><span class="mr-2 font-bold tabular-nums">{it.quantity}×</span>{it.name}</p>
-											{#each it.addons as a (a)}<p class="pl-9 text-lg text-ink-muted">+ {a}</p>{/each}
-											{#if it.remarks}<p class="pl-9 text-lg font-semibold">“{it.remarks}”</p>{/if}
+										<li class="py-1.5 @[14rem]:py-2">
+											<p class="break-words text-sm leading-snug @[14rem]:text-lg @[19rem]:text-[22px]"><span class="mr-1.5 font-bold tabular-nums">{it.quantity}×</span>{it.name}</p>
+											{#each it.addons as a (a)}<p class="break-words pl-5 text-xs text-ink-muted @[14rem]:pl-8 @[14rem]:text-base @[19rem]:text-lg">+ {a}</p>{/each}
+											{#if it.remarks}<p class="break-words pl-5 text-xs font-semibold @[14rem]:pl-8 @[14rem]:text-base @[19rem]:text-lg">“{it.remarks}”</p>{/if}
 										</li>
 									{/each}
 								</ul>
 
-								<div class="mt-2 flex items-center gap-2">
-									<div class="h-1.5 flex-1 overflow-hidden rounded-full bg-border" role="presentation">
-										<div
-											class="h-full rounded-full {level === 'late' ? 'bg-danger' : level === 'slow' ? 'bg-warning' : 'bg-brand'}"
-											style="width: {Math.min(100, Math.round((m / targetOf(lane.key)) * 100))}%"
-										></div>
-									</div>
-									<span class="text-xs tabular-nums text-ink-muted">of {targetOf(lane.key)} min</span>
-								</div>
-
 								{#if card.elsewhere.length > 0}
-									<p class="mt-2 text-sm text-ink-muted">
+									<p class="mt-2 text-xs text-ink-muted @[19rem]:text-sm">
 										Also on this order:
 										{#each card.elsewhere as g, i (g.key)}
 											{i > 0 ? ' · ' : ' '}{g.label}
@@ -375,11 +401,11 @@
 										{/each}
 									</p>
 								{/if}
-								{#if card.order.remarks}<p class="mt-2 text-lg font-semibold">Note: “{card.order.remarks}”</p>{/if}
+								{#if card.order.remarks}<p class="mt-2 break-words text-sm font-semibold @[14rem]:text-lg">Note: “{card.order.remarks}”</p>{/if}
 
 								{#if data.canMove}
 									<Button
-										class="mt-3 h-14 w-full text-lg"
+										class="mt-3 h-12 w-full text-base @[14rem]:h-14 @[14rem]:text-lg"
 										onclick={() => move(card.order, card.state === 'waiting' ? 'preparing' : 'ready', lane.key)}
 										disabled={busy !== null}
 									>
@@ -394,7 +420,7 @@
 								{/if}
 							</article>
 						{:else}
-							<p class="rounded-xl border border-dashed border-border px-4 py-10 text-center text-base text-ink-muted">
+							<p class="rounded-xl border border-dashed border-border px-2 py-4 text-center text-xs text-ink-muted @[14rem]:text-sm sm:py-8">
 								Nothing to make at {lane.label}.
 							</p>
 						{/each}
@@ -403,7 +429,7 @@
 			</div>
 		{:else}
 			<!-- Whole tickets: one card per order, split by station inside. -->
-			<div class="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-2">
+			<div class="grid flex-1 grid-cols-1 content-start gap-4 md:grid-cols-2">
 				{#each columns as col (col.key)}
 					<section aria-labelledby="col-{col.key}" class="flex min-w-0 flex-col gap-3">
 						<div class="flex items-baseline gap-2 border-b border-border pb-2">
@@ -415,11 +441,11 @@
 							{@const m = waited(t.order)}
 							{@const level = ticketLevel(t)}
 							{@const multi = t.shown.length > 1}
-							<article class="rounded-xl border-2 bg-surface p-4 {LEVEL_BORDER[level]}">
+							<article class="rounded-xl border-2 bg-surface p-3 sm:p-4 {LEVEL_BORDER[level]}">
 								<div class="flex items-start justify-between gap-3">
 									<div class="min-w-0">
 										<p class="font-mono text-2xl font-bold">{t.order.code}</p>
-										<p class="mt-0.5 truncate text-base text-ink-muted">
+										<p class="mt-0.5 line-clamp-2 break-words text-base text-ink-muted">
 											{where(t.order)}{t.order.guestName ? ` · ${t.order.guestName}` : ''}
 										</p>
 										{#if t.order.bookingCode}
@@ -447,7 +473,7 @@
 								</div>
 
 								{#each t.shown as g (g.key)}
-									{@const gLevel = g.state === 'ready' ? 'ok' : waitLevel(m, targetFor(g.key))}
+									{@const gLevel = g.state === 'ready' ? 'ok' : waitLevel(m)}
 									<div class="mt-3 {multi ? 'rounded-lg border border-border bg-surface-2/40 p-3' : ''}">
 										{#if multi}
 											<div class="mb-1 flex items-center justify-between gap-2">
@@ -473,7 +499,7 @@
 										<ul class="divide-y divide-border {multi ? '' : 'border-y border-border'}">
 											{#each g.items as it (it.id)}
 												<li class="py-2">
-													<p class="text-[22px] leading-snug {it.readyAt && multi ? 'text-ink-muted line-through decoration-1' : ''}">
+													<p class="text-xl leading-snug sm:text-[22px] {it.readyAt && multi ? 'text-ink-muted line-through decoration-1' : ''}">
 														<span class="mr-2 font-bold tabular-nums">{it.quantity}×</span>{it.name}
 													</p>
 													{#each it.addons as a (a)}<p class="pl-9 text-lg text-ink-muted">+ {a}</p>{/each}
@@ -481,17 +507,7 @@
 												</li>
 											{/each}
 										</ul>
-										{#if g.state !== 'ready'}
-											<div class="mt-2 flex items-center gap-2">
-												<div class="h-1.5 flex-1 overflow-hidden rounded-full bg-border" role="presentation">
-													<div
-														class="h-full rounded-full {gLevel === 'late' ? 'bg-danger' : gLevel === 'slow' ? 'bg-warning' : 'bg-brand'}"
-														style="width: {Math.min(100, Math.round((m / targetOf(g.key)) * 100))}%"
-													></div>
-												</div>
-												<span class="text-xs tabular-nums text-ink-muted">of {targetOf(g.key)} min</span>
-											</div>
-										{/if}
+										{@render record(t.order.createdAt, g.startedAt, g.readyAt)}
 										{#if data.canMove && g.state !== 'ready'}
 											<Button
 												class="mt-3 h-14 w-full text-lg"
@@ -522,7 +538,7 @@
 								{#if t.order.remarks}<p class="mt-2 text-lg font-semibold">Note: “{t.order.remarks}”</p>{/if}
 							</article>
 						{:else}
-							<p class="rounded-xl border border-dashed border-border px-4 py-10 text-center text-base text-ink-muted">
+							<p class="rounded-xl border border-dashed border-border px-4 py-4 text-center text-sm text-ink-muted sm:py-8 sm:text-base">
 								{col.key === 'new' ? 'No new tickets.' : 'Nothing on the stove.'}
 							</p>
 						{/each}
@@ -532,10 +548,10 @@
 		{/if}
 
 		<section aria-labelledby="col-ready" class="border-t border-border pt-3">
-			<div class="flex items-baseline gap-2">
+			<div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
 				<h3 id="col-ready" class="text-base font-semibold uppercase tracking-wide">Ready for the table</h3>
 				<span class="text-base tabular-nums text-ink-muted">{pass.length}</span>
-				<span class="ml-auto text-xs text-ink-muted">Every station is done. The floor serves it.</span>
+				<span class="basis-full text-xs text-ink-muted sm:ml-auto sm:basis-auto">Every station is done. The floor serves it.</span>
 			</div>
 			<div class="mt-2 flex flex-wrap gap-2">
 				{#each pass as o (o.id)}
@@ -546,7 +562,7 @@
 						<span class="text-ink-muted"> · {where(o)}</span>
 						<span class="ml-1 inline-flex items-center gap-1 text-sm tabular-nums {cold ? 'font-semibold text-warning' : 'text-ink-muted'}">
 							{#if cold}<ClockIcon class="size-3.5" aria-hidden="true" />{/if}
-							ready {formatWait(waitingMin)} ago{cold ? ' · getting cold' : ''}
+							ready {formatWait(waitingMin)} ago{cold ? ' · getting cold' : ''} · took {formatWait(between(o.createdAt, o.readyAt))}
 						</span>
 					</span>
 				{:else}

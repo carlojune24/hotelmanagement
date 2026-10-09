@@ -1,16 +1,20 @@
 <script lang="ts">
 	import type { DocumentSnapshot } from '$lib/server/finance/documents';
+	import { thermalPadding } from '$lib/print-batch';
 
 	let {
 		snapshot,
 		logoUrl = null,
 		cancelled = false,
-		widthMm = 80
+		widthMm = 80,
+		managePage = true
 	}: {
 		snapshot: DocumentSnapshot;
 		logoUrl?: string | null;
 		cancelled?: boolean;
 		widthMm?: 58 | 80;
+		/** False when a parent prints several receipts on one strip and owns the `@page` size itself. */
+		managePage?: boolean;
 	} = $props();
 
 	const peso = (c: number) =>
@@ -85,10 +89,10 @@
 </script>
 
 <svelte:head>
-	<style>{`@page { size: ${widthMm}mm ${pageHeightMm}mm; margin: 0; }`}</style>
+	{#if managePage}<style>{`@page { size: ${widthMm}mm ${pageHeightMm}mm; margin: 0; }`}</style>{/if}
 </svelte:head>
 
-<div class="tr-page" style="--tr-width: {widthMm}mm" bind:this={pageEl}>
+<div class="tr-page" style="--tr-width: {widthMm}mm; --tr-pad: {thermalPadding(widthMm)}" bind:this={pageEl}>
 	<!-- Skipped on 80mm paper only — a logo image costs real time/ink on a thermal
 	     head (per a real print test) and 80mm is this hotel's actual roll width;
 	     a 58mm hotel still gets it. -->
@@ -246,12 +250,12 @@
 		box-sizing: border-box;
 		width: var(--tr-width);
 		margin: 0 auto;
-		padding: 3mm 2.5mm;
+		padding: var(--tr-pad);
 		background: #fff;
 		color: var(--tr-ink);
 		font-family: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
-		font-weight: 500;
-		font-size: 8pt;
+		font-weight: 700;
+		font-size: 9pt;
 		line-height: 1.35;
 		-webkit-print-color-adjust: exact;
 		print-color-adjust: exact;
@@ -269,14 +273,14 @@
 	.tr-logo {
 		display: block;
 		max-height: 9mm;
-		max-width: calc(var(--tr-width) - 10mm);
+		max-width: 100%;
 		margin: 0 auto 1.5mm;
 		object-fit: contain;
 	}
 	.tr-hotel-name {
 		text-align: center;
-		font-size: 11pt;
-		font-weight: 700;
+		font-size: 12.5pt;
+		font-weight: 800;
 		letter-spacing: 0.02em;
 		text-transform: uppercase;
 	}
@@ -303,28 +307,28 @@
 		margin: 1.5mm 0;
 	}
 	.tr-doctype {
-		font-size: 11pt;
-		font-weight: 700;
+		font-size: 12pt;
+		font-weight: 800;
 		letter-spacing: 0.1em;
 		text-transform: uppercase;
 	}
 	.tr-serial-no {
-		font-size: 11pt;
-		font-weight: 700;
+		font-size: 12pt;
+		font-weight: 800;
 		margin-top: 0.5mm;
 	}
 	.tr-copy-tag {
 		display: inline-block;
 		margin-top: 1mm;
 		padding: 0.3mm 1.5mm;
-		font-size: 6.5pt;
-		font-weight: 600;
+		font-size: 7.5pt;
+		font-weight: 800;
 		letter-spacing: 0.12em;
 		border: 1px solid #000;
 	}
 	.tr-copy-tag.is-cancelled {
 		font-weight: 700;
-		font-size: 7.5pt;
+		font-size: 8.5pt;
 		border-width: 1.5px;
 		letter-spacing: 0.18em;
 	}
@@ -341,7 +345,7 @@
 	}
 	.tr-row span:last-child {
 		text-align: right;
-		font-weight: 600;
+		font-weight: 800;
 		/* Most values (dates, money) are short and stay on one line; a long one (a
 		   multi-day stay-date range at 58mm) wraps instead of overflowing the roll. */
 		min-width: 0;
@@ -349,16 +353,16 @@
 	}
 
 	.tr-label {
-		font-size: 7pt;
-		font-weight: 700;
+		font-size: 8pt;
+		font-weight: 800;
 		letter-spacing: 0.05em;
 		text-transform: uppercase;
 		color: var(--tr-muted);
 		margin-top: 1mm;
 	}
 	.tr-value {
-		font-size: 9pt;
-		font-weight: 700;
+		font-size: 10.5pt;
+		font-weight: 800;
 	}
 
 	.tr-item-desc {
@@ -372,13 +376,13 @@
 		border-top: 1px solid var(--tr-ink);
 		margin-top: 0.6mm;
 		padding-top: 0.8mm;
-		font-weight: 700;
-		font-size: 9pt;
+		font-weight: 800;
+		font-size: 10.5pt;
 	}
 
 	.tr-words {
-		font-size: 8pt;
-		font-weight: 600;
+		font-size: 9.5pt;
+		font-weight: 800;
 		margin-top: 0.5mm;
 		word-wrap: break-word;
 	}
@@ -393,12 +397,14 @@
 	}
 	.tr-sign .tr-muted {
 		text-align: center;
-		font-size: 7pt;
+		font-size: 8pt;
+		font-weight: 700;
 	}
 
 	.tr-legal {
-		font-size: 6.5pt;
-		line-height: 1.5;
+		font-size: 7.5pt;
+		line-height: 1.45;
+		font-weight: 700;
 		color: var(--tr-muted);
 	}
 	.tr-legal p {
@@ -412,8 +418,8 @@
 	.tr-close {
 		text-align: center;
 		margin-top: 2mm;
-		font-weight: 600;
-		font-size: 8pt;
+		font-weight: 800;
+		font-size: 9pt;
 	}
 
 	@media screen {

@@ -1,5 +1,7 @@
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from './db/index';
+import { writeAudit } from './audit';
+import type { SessionUser } from './auth/session';
 import {
 	diningAddonGroups,
 	diningAddons,
@@ -171,4 +173,35 @@ export async function listPublicMenus(hotelId: string): Promise<Record<string, P
 			.map((c) => ({ id: c.id, name: c.name }));
 	}
 	return out;
+}
+
+/** Flips a dish between Available and Sold out for today. Returns the dish name, or null when it
+ *  isn't this hotel's. Shared by the Dining menu and the Kitchen's Sold out page. */
+export async function setItemAvailability(args: {
+	hotelId: string;
+	itemId: string;
+	isAvailable: boolean;
+	actor: SessionUser | null;
+}): Promise<string | null> {
+	const updated = await db
+		.update(diningMenuItems)
+		.set({ isAvailable: args.isAvailable, updatedAt: new Date() })
+		.where(
+			and(
+				eq(diningMenuItems.id, args.itemId),
+				eq(diningMenuItems.hotelId, args.hotelId),
+				isNull(diningMenuItems.deletedAt)
+			)
+		)
+		.returning({ name: diningMenuItems.name });
+	if (updated.length === 0) return null;
+	await writeAudit({
+		hotelId: args.hotelId,
+		actor: args.actor,
+		action: 'dining_menu_item.availability',
+		entityType: 'dining_menu_item',
+		entityId: args.itemId,
+		after: { isAvailable: args.isAvailable }
+	});
+	return updated[0]!.name;
 }

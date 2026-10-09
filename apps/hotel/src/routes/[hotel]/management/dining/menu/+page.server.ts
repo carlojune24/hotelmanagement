@@ -14,7 +14,7 @@ import { roleCan } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { deleteUploadIfOwned, saveResizedImage, UploadValidationError } from '$lib/server/uploads';
-import { listStations, loadVenueMenu, venueBelongsToHotel } from '$lib/server/dining-menu';
+import { listStations, loadVenueMenu, setItemAvailability, venueBelongsToHotel } from '$lib/server/dining-menu';
 import { friendlyIssue, moneyPhp, recordId } from '$lib/rate-validation';
 import type { RequestEvent } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -349,31 +349,15 @@ export const actions: Actions = {
 			.safeParse(Object.fromEntries(await event.request.formData()));
 		if (!parsed.success) return fail(400, { error: 'That item could not be found.' });
 
-		const updated = await db
-			.update(diningMenuItems)
-			.set({ isAvailable: parsed.data.isAvailable === 'true', updatedAt: new Date() })
-			.where(
-				and(
-					eq(diningMenuItems.id, parsed.data.itemId),
-					eq(diningMenuItems.hotelId, hotelId),
-					isNull(diningMenuItems.deletedAt)
-				)
-			)
-			.returning({ name: diningMenuItems.name });
-		if (updated.length === 0) return fail(404, { error: 'That item could not be found.' });
-		await writeAudit({
+		const name = await setItemAvailability({
 			hotelId,
-			actor: event.locals.user,
-			action: 'dining_menu_item.availability',
-			entityType: 'dining_menu_item',
-			entityId: parsed.data.itemId,
-			after: { isAvailable: parsed.data.isAvailable === 'true' }
+			itemId: parsed.data.itemId,
+			isAvailable: parsed.data.isAvailable === 'true',
+			actor: event.locals.user
 		});
+		if (name === null) return fail(404, { error: 'That item could not be found.' });
 		return {
-			ok:
-				parsed.data.isAvailable === 'true'
-					? `"${updated[0]!.name}" is available again.`
-					: `"${updated[0]!.name}" marked sold out.`
+			ok: parsed.data.isAvailable === 'true' ? `"${name}" is available again.` : `"${name}" marked sold out.`
 		};
 	},
 

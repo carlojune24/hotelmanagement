@@ -8,6 +8,7 @@ import {
 	tooManyMessage
 } from '$lib/server/auth/rate-limit';
 import { safeNext } from '$lib/server/auth/redirect';
+import { homePathFor } from '$lib/authz';
 import { createSession, generateSessionToken, setSessionCookie } from '$lib/server/auth/session';
 import { getMembershipRole } from '$lib/server/tenant';
 import type { Actions, PageServerLoad } from './$types';
@@ -23,7 +24,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	if (!hotel) error(404, 'Hotel not found');
 	const base = `${locals.isCustomDomain ? '' : `/${hotel.slug}`}/management`;
 
-	if (locals.user) redirect(302, safeNext(url.searchParams.get('next'), `${base}/dashboard`));
+	if (locals.user) {
+		redirect(302, safeNext(url.searchParams.get('next'), homePathFor(base, locals.role?.capabilities, locals.user.isPlatformAdmin)));
+	}
 
 	return { next: url.searchParams.get('next') ?? '', hotelName: hotel.name };
 };
@@ -50,14 +53,16 @@ export const actions: Actions = {
 		}
 		loginSucceeded(ip, email);
 
-		const hasAccess =
-			user.isPlatformAdmin || (await getMembershipRole(user.id, hotel.id)) !== null;
-		if (!hasAccess) return fail(403, { error: `You don't have access to ${hotel.name}.` });
+		const role = await getMembershipRole(user.id, hotel.id);
+		if (!user.isPlatformAdmin && role === null) {
+			return fail(403, { error: `You don't have access to ${hotel.name}.` });
+		}
 
 		const token = generateSessionToken();
 		const session = await createSession(token, user.id);
 		setSessionCookie(event, token, session.expiresAt);
 
-		redirect(302, safeNext(next, `${base}/dashboard`));
+		// A cook lands on the Kitchen; everyone else on the Dashboard (unless they were heading somewhere).
+		redirect(302, safeNext(next, homePathFor(base, role?.capabilities, user.isPlatformAdmin)));
 	}
 };

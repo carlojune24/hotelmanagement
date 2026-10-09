@@ -6,6 +6,7 @@ import { recordId } from '../rate-validation';
 import { FinanceError } from './finance/shared';
 import { OrderError } from './dining-orders';
 import { closeCheck, settleCheck } from './dining-checks';
+import { toPayDocuments } from '../print-batch';
 
 /**
  * Form actions for settling and closing a table, shared by the Floor and the Orders board
@@ -22,7 +23,12 @@ export async function settleTableAction(event: RequestEvent) {
 			checkId: recordId(),
 			method: z.enum(['cash', 'card', 'gcash', 'maya', 'room']),
 			tendered: z.coerce.number().min(0).max(10_000_000).optional(),
-			bookingId: z.string().uuid().optional().or(z.literal('').transform(() => undefined))
+			bookingId: z.string().uuid().optional().or(z.literal('').transform(() => undefined)),
+			// What to issue for each order: an Official Receipt unless the cashier says otherwise.
+			documents: z.enum(['or', 'invoice', 'bill', 'none']).default('or'),
+			billToName: z.string().trim().max(160).optional(),
+			billToAddress: z.string().trim().max(300).optional(),
+			billToTin: z.string().trim().max(40).optional()
 		})
 		.safeParse(Object.fromEntries(await event.request.formData()));
 	if (!parsed.success) return fail(400, { error: 'Check the payment details.' });
@@ -33,6 +39,8 @@ export async function settleTableAction(event: RequestEvent) {
 			method: parsed.data.method,
 			tenderedCentavos: parsed.data.tendered != null ? toCentavos(parsed.data.tendered) : null,
 			bookingId: parsed.data.bookingId ?? null,
+			documents: toPayDocuments(parsed.data.documents),
+			billTo: { name: parsed.data.billToName, address: parsed.data.billToAddress, tin: parsed.data.billToTin },
 			actor: event.locals.user
 		});
 		return {
@@ -41,7 +49,7 @@ export async function settleTableAction(event: RequestEvent) {
 				: r.paidCount > 0
 					? 'Paid. The table stays open until everything is served.'
 					: 'Nothing was left to pay.',
-			settled: { change: r.changeCentavos, closed: r.closed }
+			settled: { change: r.changeCentavos, closed: r.closed, documents: r.documents, documentError: r.documentError }
 		};
 	} catch (e) {
 		if (businessError(e)) return fail(400, { error: (e as Error).message });

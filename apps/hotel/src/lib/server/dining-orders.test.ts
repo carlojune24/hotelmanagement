@@ -214,7 +214,7 @@ describe.skipIf(!hasDb)('dining orders and finance (live DB)', async () => {
 		const [before] = await db.select().from(s.cashAccounts).where(eq(s.cashAccounts.id, drawerId));
 		const paid = await o.payDiningOrder({ hotelId: hotelA, orderId: c.id, method: 'cash', tenderedCentavos: 30_000 });
 		// No BIR series is registered yet, so no receipt is issued, but the payment stands.
-		expect(paid).toEqual({ totalCentavos: 25_000, changeCentavos: 5_000, receiptId: null });
+		expect(paid).toMatchObject({ totalCentavos: 25_000, changeCentavos: 5_000, receiptId: null, documents: [] });
 
 		const v = (await o.getDiningOrder(hotelA, c.id))!;
 		expect(v.paymentStatus).toBe('paid');
@@ -342,6 +342,46 @@ describe.skipIf(!hasDb)('dining orders and finance (live DB)', async () => {
 		// the document's own figures add up
 		expect(snap.totals.vatableSalesCentavos + snap.totals.vatCentavos + snap.totals.vatExemptSalesCentavos).toBe(snap.totals.grossCentavos);
 		expect(snap.bir.serialRange).toMatchObject({ prefix: 'OR', from: 1, to: 99 });
+	});
+
+	it('lets the cashier choose the document at payment: receipt, none or invoice', async () => {
+		const none = await order([{ menuItemId: soda, quantity: 1 }]);
+		const paidNone = await o.payDiningOrder({ hotelId: hotelA, orderId: none.id, method: 'card', documents: 'none' });
+		expect(paidNone).toMatchObject({ documents: [], receiptId: null, documentError: null });
+		expect(await o.getOrderDocuments(hotelA, none.id)).toHaveLength(0);
+
+		const inv = await order([{ menuItemId: soda, quantity: 1 }]);
+		const paidInv = await o.payDiningOrder({
+			hotelId: hotelA,
+			orderId: inv.id,
+			method: 'card',
+			documents: 'invoice',
+			billTo: { name: 'Acme Corp', tin: '123-456-789' }
+		});
+		expect(paidInv.documents).toHaveLength(1);
+		expect(paidInv.documents[0]).toMatchObject({ type: 'invoice', orderCode: inv.code });
+		expect(paidInv.receiptId).toBeNull();
+		const invDocs = await o.getOrderDocuments(hotelA, inv.id);
+		expect(invDocs.map((d) => d.type)).toEqual(['invoice']); // an invoice instead of a receipt, not both
+		expect((await bir.getDocumentForRender(hotelA, invDocs[0]!.id))!.snapshot.billTo).toMatchObject({ name: 'Acme Corp', tin: '123-456-789' });
+
+		const or = await order([{ menuItemId: soda, quantity: 1 }]);
+		const paidOr = await o.payDiningOrder({ hotelId: hotelA, orderId: or.id, method: 'card', documents: 'or' });
+		expect(paidOr.documents.map((d) => d.type)).toEqual(['official_receipt']);
+		expect(paidOr.receiptId).toBe(paidOr.documents[0]!.id);
+	});
+
+	it('keeps the payment and says why when the document asked for cannot be issued', async () => {
+		// A hotel of its own with no BIR series at all (kept apart so the other hotels' sales stay untouched).
+		const hotelC = await mkHotel('c');
+		await seedFinanceDefaults(db, hotelC);
+		const [vc] = await db.insert(s.diningItems).values({ hotelId: hotelC, title: 'Third cafe' }).returning();
+		const [dish] = await db.insert(s.diningMenuItems).values({ hotelId: hotelC, diningItemId: vc!.id, name: 'Tea', priceCentavos: 5_000 }).returning();
+		const noSeries = await o.createDiningOrder({ hotelId: hotelC, venueId: vc!.id, orderType: 'takeaway', lines: [{ menuItemId: dish!.id, quantity: 1 }] });
+		const r = await o.payDiningOrder({ hotelId: hotelC, orderId: noSeries.id, method: 'card', documents: 'or' });
+		expect(r.documents).toHaveLength(0);
+		expect(r.documentError).toMatch(/series/i);
+		expect((await o.getDiningOrder(hotelC, noSeries.id))!.paymentStatus).toBe('paid');
 	});
 
 	it('issues each document once per order, and only a paid order gets a receipt', async () => {

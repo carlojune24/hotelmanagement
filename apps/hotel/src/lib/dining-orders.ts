@@ -145,6 +145,13 @@ export function formatWait(minutes: number): string {
 	return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
 }
 
+/** Compact form for dense cards: `9m`, then `1h 05m` once it passes the hour. */
+export function formatWaitShort(minutes: number): string {
+	const m = Math.max(0, Math.floor(minutes));
+	if (m < 60) return `${m}m`;
+	return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+}
+
 export type StationState = 'waiting' | 'cooking' | 'ready';
 
 export interface StationLine {

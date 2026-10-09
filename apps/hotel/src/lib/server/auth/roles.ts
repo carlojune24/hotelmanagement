@@ -2,7 +2,6 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db/index';
 import type { db as Db } from '../db/index';
 import { memberships, roles, rolePermissions } from '../db/schema/index';
-import { MEMBERSHIP_ROLES, ROLE_CAPS } from '$lib/authz';
 import { writeAudit } from '../audit';
 import type { SessionUser } from './session';
 
@@ -180,46 +179,5 @@ export async function deleteCustomRole(
 	await writeAudit({ hotelId, actor, action: 'role.delete', entityType: 'role', entityId: roleId });
 }
 
-const ROLE_LABELS: Record<string, string> = {
-	hotel_admin: 'Hotel Admin',
-	front_desk: 'Front Desk',
-	housekeeping: 'Housekeeping',
-	accountant: 'Accountant',
-	hr: 'HR',
-	read_only: 'Read Only',
-	group_owner: 'Group Owner'
-};
-
-/** Copies the legacy `ROLE_CAPS` seed catalog into concrete `roles`/`role_permissions` rows
- *  for one hotel. Idempotent — safe to call again for a hotel that already has roles (e.g.
- *  the one-off backfill script re-run). Used both at hotel-creation time and by that backfill. */
-export async function seedDefaultRoles(db: DbLike, hotelId: string): Promise<void> {
-	const existing = await db
-		.select({ slug: roles.slug })
-		.from(roles)
-		.where(eq(roles.hotelId, hotelId));
-	const existingSlugs = new Set(existing.map((r) => r.slug));
-
-	// group_owner is portfolio-level (Phase 6), not assignable at a single hotel — skip it here.
-	const toSeed = MEMBERSHIP_ROLES.filter((slug) => slug !== 'group_owner' && !existingSlugs.has(slug));
-	if (toSeed.length === 0) return;
-
-	await db.transaction(async (tx) => {
-		for (const slug of toSeed) {
-			const [row] = await tx
-				.insert(roles)
-				.values({
-					hotelId,
-					slug,
-					name: ROLE_LABELS[slug] ?? slug,
-					isProtected: slug === 'hotel_admin'
-				})
-				.returning({ id: roles.id });
-
-			const caps = ROLE_CAPS[slug];
-			if (caps.length > 0) {
-				await tx.insert(rolePermissions).values(caps.map((capability) => ({ roleId: row!.id, capability })));
-			}
-		}
-	});
-}
+// Moved to its own module so seed and setup scripts can use it under plain tsx (this file needs SvelteKit's `$env`).
+export { seedDefaultRoles } from './seed-roles';

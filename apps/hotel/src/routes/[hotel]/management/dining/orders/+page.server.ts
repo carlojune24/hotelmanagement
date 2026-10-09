@@ -36,6 +36,7 @@ import { DocumentError, issueDiningDocument, listDiningDocumentsForOrders } from
 import { FinanceError } from '$lib/server/finance/shared';
 import { getDefaultOpenShift } from '$lib/server/finance/shifts';
 import { zonedToUtc, localParts } from '$lib/dining-slots';
+import { toPayDocuments } from '$lib/print-batch';
 import type { Actions, PageServerLoad } from './$types';
 
 const PAYMENT_METHODS = ['cash', 'card', 'gcash', 'maya'] as const;
@@ -235,7 +236,12 @@ export const actions: Actions = {
 			.object({
 				orderId: recordId(),
 				method: z.enum(PAYMENT_METHODS),
-				tenderedPhp: z.coerce.number().min(0).max(10_000_000).optional()
+				tenderedPhp: z.coerce.number().min(0).max(10_000_000).optional(),
+				// What to issue with the payment: an Official Receipt unless the cashier says otherwise.
+				documents: z.enum(['or', 'invoice', 'bill', 'none']).default('or'),
+				billToName: z.string().trim().max(160).optional(),
+				billToAddress: z.string().trim().max(300).optional(),
+				billToTin: z.string().trim().max(40).optional()
 			})
 			.safeParse({ ...raw, tenderedPhp: raw.tenderedPhp === '' ? undefined : raw.tenderedPhp });
 		if (!parsed.success) return fail(400, { error: 'Choose how the guest is paying.' });
@@ -246,9 +252,19 @@ export const actions: Actions = {
 				orderId: d.orderId,
 				method: d.method,
 				tenderedCentavos: d.tenderedPhp != null ? toCentavos(d.tenderedPhp) : null,
+				documents: toPayDocuments(d.documents),
+				billTo: { name: d.billToName, address: d.billToAddress, tin: d.billToTin },
 				actor: event.locals.user
 			});
-			return { paid: { orderId: d.orderId, changeCentavos: r.changeCentavos, receiptId: r.receiptId } };
+			return {
+				paid: {
+					orderId: d.orderId,
+					changeCentavos: r.changeCentavos,
+					receiptId: r.receiptId,
+					documents: r.documents,
+					documentError: r.documentError
+				}
+			};
 		} catch (e) {
 			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
 			throw e;

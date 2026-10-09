@@ -8,14 +8,17 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
-	import * as Tabs from '$lib/components/ui/tabs/index.js';
 	import * as Select from '$lib/components/ui/select/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import ChefHatIcon from '@lucide/svelte/icons/chef-hat';
 	import NewOrderSheet from './new-order-sheet.svelte';
 	import PayDialog from './pay-dialog.svelte';
-	import OrderCard from './order-card.svelte';
+	import OrderDetailSheet from './order-detail-sheet.svelte';
+	import SummaryTiles from './summary-tiles.svelte';
+	import ReadyCard from './ready-card.svelte';
+	import QueueCard from './queue-card.svelte';
+	import ServedList from './served-list.svelte';
 	import ThreadSheet from './thread-sheet.svelte';
 	import RefundDialog from './refund-dialog.svelte';
 	import SettleDialog from '../floor/settle-dialog.svelte';
@@ -24,6 +27,11 @@
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { CHECK_STAGE_LABEL } from '$lib/dining-checks';
 	import { formatWait } from '$lib/dining-orders';
+	import { boardGroups, boardSummary } from '$lib/orders-board';
+	import { batchPrintHref } from '$lib/print-batch';
+	import SearchIcon from '@lucide/svelte/icons/search';
+	import PrinterIcon from '@lucide/svelte/icons/printer';
+	import XIcon from '@lucide/svelte/icons/x';
 	import BanknoteArrowUpIcon from '@lucide/svelte/icons/banknote-arrow-up';
 	import type { ActionData, PageData } from './$types';
 
@@ -34,25 +42,35 @@
 	const slug = $derived(page.params.hotel!);
 	const base = $derived(`/${slug}/management/dining`);
 
-	const COLUMNS = [
-		{ key: 'new', label: 'New', hint: 'Waiting for the kitchen to start', statuses: ['new', 'accepted'] },
-		{ key: 'preparing', label: 'Preparing', hint: 'With the kitchen', statuses: ['preparing'] },
-		{ key: 'ready', label: 'Ready', hint: 'Ready to take to the table', statuses: ['ready'] },
-		{ key: 'served', label: 'Served today', hint: 'Served; unpaid ones still need payment', statuses: ['served'] }
-	] as const;
+	// Ticks every 30 s (see the polling effect below) so waits stay current between refreshes.
+	let nowMs = $state(Date.now());
 
-	const byColumn = $derived(
-		Object.fromEntries(COLUMNS.map((c) => [c.key, data.orders.filter((o) => (c.statuses as readonly string[]).includes(o.status))])) as Record<string, Order[]>
-	);
-	const toPay = $derived(data.orders.filter((o) => o.paymentStatus === 'unpaid' && o.status !== 'pending_acceptance').length);
+	// The board: search and "to pay" narrow the sections; the tiles always show the whole board.
+	let query = $state('');
+	let unpaidOnly = $state(false);
+	const groups = $derived(boardGroups(data.orders, nowMs, { query, unpaidOnly }));
+	const summary = $derived(boardSummary(data.orders, nowMs));
+	const filtering = $derived(query.trim() !== '' || unpaidOnly);
+	const shownCount = $derived(groups.ready.length + groups.preparing.length + groups.fresh.length + groups.served.length);
 	// Table-QR orders a waiter has to accept before the kitchen sees them.
 	const awaitingQr = $derived(data.orders.filter((o) => o.status === 'pending_acceptance'));
 	const waitedMin = (o: Order) => Math.max(0, Math.floor((nowMs - new Date(o.createdAt).getTime()) / 60_000));
 
-	let mobileCol = $state('new');
+	function jumpTo(section: 'ready' | 'preparing' | 'new') {
+		const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+		document.getElementById(`orders-${section}`)?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+	}
+
+	let detailOpen = $state(false);
+	let detailOrderId = $state<string | null>(null);
+	const detailOrder = $derived(data.orders.find((o) => o.id === detailOrderId) ?? null);
+	function openDetails(o: Order) {
+		detailOrderId = o.id;
+		detailOpen = true;
+	}
+	let servingId = $state<string | null>(null);
 
 	// ---- the board stays current by polling (no push) ---------------------------------
-	let nowMs = $state(Date.now());
 	$effect(() => {
 		const clock = setInterval(() => (nowMs = Date.now()), 30_000);
 		const refresh = setInterval(() => {
@@ -73,13 +91,19 @@
 	// ---- actions ----------------------------------------------------------------------
 	// The only step taken here: serving an order the kitchen has marked ready.
 	async function advance(order: Order, to: string) {
-		const body = new FormData();
-		body.set('orderId', order.id);
-		body.set('to', to);
-		const res = await fetch('?/advance', { method: 'POST', body, headers: { 'x-sveltekit-action': 'true' } });
-		const result = deserialize(await res.text());
-		await applyAction(result);
-		if (result.type === 'success') await invalidateAll();
+		if (servingId) return;
+		servingId = order.id;
+		try {
+			const body = new FormData();
+			body.set('orderId', order.id);
+			body.set('to', to);
+			const res = await fetch('?/advance', { method: 'POST', body, headers: { 'x-sveltekit-action': 'true' } });
+			const result = deserialize(await res.text());
+			await applyAction(result);
+			if (result.type === 'success') await invalidateAll();
+		} finally {
+			servingId = null;
+		}
 	}
 
 	let newOpen = $state(false);
@@ -156,29 +180,34 @@
 		const issued = form?.issued as { id: string; type: string; formattedNo: string } | undefined;
 		if (issued) {
 			invoiceFor = null;
-			const path = issued.type === 'invoice' ? 'invoice' : 'receipt';
 			toast.success(`${issued.type === 'invoice' ? 'Invoice' : 'Official receipt'} ${issued.formattedNo} issued.`, {
-				action: { label: 'Print', onClick: () => window.open(`/${slug}/print/${path}/${issued.id}`, '_blank', 'noopener') }
+				action: { label: 'Print', onClick: () => window.open(batchPrintHref(slug, [issued.id], { auto: true }), '_blank') }
 			});
 		}
 	});
 </script>
 
 <div class="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
-	<div class="mb-4 flex flex-wrap items-center gap-3">
-		<p class="text-sm text-ink-muted" aria-live="polite">
-			{data.orders.length === 0 ? 'No open orders.' : `${data.orders.length} on the board`}{toPay > 0 ? ` · ${toPay} to pay` : ''}
+	<div class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-3">
+		<p class="mr-auto text-sm text-ink-muted" aria-live="polite">
+			<span class="text-base font-semibold text-ink">
+				{data.orders.length === 0 ? 'No open orders' : `${data.orders.length} on the board`}{summary.unpaid > 0 ? ` · ${summary.unpaid} to pay` : ''}
+			</span>
+			<span class="ml-2 text-xs">Updates every 20 seconds</span>
 			{#if data.awaitingPayment > 0}
-				<span class="ml-1" title="Online orders the guest has not paid for yet. They reach the kitchen once payment is confirmed.">
+				<span class="ml-2 text-xs" title="Online orders the guest has not paid for yet. They reach the kitchen once payment is confirmed.">
 					· {data.awaitingPayment} awaiting online payment
 				</span>
 			{/if}
-			<span class="ml-1 text-xs">Updates every 20 seconds. The kitchen starts and finishes dishes on the Kitchen tab.</span>
 		</p>
-		<div class="ml-auto flex flex-wrap items-center gap-2">
+		<div class="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+			<div class="relative min-w-0 flex-1 sm:w-72 sm:flex-none">
+				<SearchIcon class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-muted" aria-hidden="true" />
+				<Input type="search" bind:value={query} placeholder="Search table, order ID or dish" aria-label="Search orders" class="h-10 pl-9" />
+			</div>
 			{#if data.venues.length > 1}
 				<Select.Root type="single" value={data.venueId ?? 'all'} onValueChange={setVenue}>
-					<Select.Trigger class="w-44" aria-label="Venue">{filterLabel}</Select.Trigger>
+					<Select.Trigger class="h-10 w-44" aria-label="Venue">{filterLabel}</Select.Trigger>
 					<Select.Content>
 						<Select.Item value="all" label="All venues" />
 						{#each data.venues as v (v.id)}<Select.Item value={v.id} label={v.title} />{/each}
@@ -186,7 +215,7 @@
 				</Select.Root>
 			{/if}
 			{#if data.canWrite}
-				<Button onclick={() => (newOpen = true)} disabled={Object.keys(data.menus).length === 0}>
+				<Button class="h-10" onclick={() => (newOpen = true)} disabled={Object.keys(data.menus).length === 0}>
 					<PlusIcon class="size-4" /> New order
 				</Button>
 			{/if}
@@ -233,69 +262,6 @@
 		</section>
 	{/if}
 
-	{#if data.openChecks.length > 0}
-		<section class="mb-5" aria-label="Tables with open checks">
-			<h2 class="mb-2 flex items-center gap-2 px-1 text-sm font-semibold text-ink">
-				<ArmchairIcon class="size-4 text-ink-muted" aria-hidden="true" />
-				Tables <span class="font-normal tabular-nums text-ink-muted">· {data.openChecks.length} open</span>
-			</h2>
-			<div class="flex gap-3 overflow-x-auto pb-1">
-				{#each data.openChecks as c (c.id)}
-					<div class="w-64 shrink-0 rounded-xl border-2 bg-surface p-3 {c.stage === 'needs_payment' ? 'border-warning/70' : c.stage === 'ready_to_clear' ? 'border-brand/60' : 'border-border'}">
-						<div class="flex items-center justify-between gap-2">
-							<p class="font-semibold text-ink">Table {c.tableName}</p>
-							<Badge variant={c.stage === 'needs_payment' ? 'destructive' : c.stage === 'ready_to_clear' ? 'default' : 'outline'}>{CHECK_STAGE_LABEL[c.stage]}</Badge>
-						</div>
-						<p class="mt-1 text-xs text-ink-muted">
-							{c.liveCount} {c.liveCount === 1 ? 'order' : 'orders'} · {peso(c.totalCentavos)}{c.unpaidCentavos > 0 ? ` · ${peso(c.unpaidCentavos)} to pay` : ''}
-						</p>
-						{#if c.billRequestedAt}<p class="mt-1 text-xs font-medium text-warning">Asked for the bill</p>{/if}
-						{#if data.canWrite}
-							<div class="mt-2 flex gap-2">
-								{#if c.unpaidCount > 0 && c.awaitingAcceptance === 0}
-									<Button size="sm" onclick={() => { settleFor = c; settleOpen = true; }}>Settle &amp; close</Button>
-								{:else if c.stage === 'ready_to_clear'}
-									<form method="POST" action="?/closeTable" use:enhance={() => async ({ update }) => { await update({ reset: false }); await invalidateAll(); }}>
-										<input type="hidden" name="checkId" value={c.id} />
-										<Button type="submit" size="sm">Close table</Button>
-									</form>
-								{/if}
-							</div>
-						{/if}
-					</div>
-				{/each}
-			</div>
-		</section>
-	{/if}
-
-	{#if data.refundDue.length > 0}
-		<section class="mb-5 rounded-xl border border-border bg-surface" aria-label="Refunds due">
-			<h2 class="flex items-center gap-2 border-b border-border px-4 py-2.5 text-sm font-semibold text-ink">
-				<BanknoteArrowUpIcon class="size-4 text-brand" aria-hidden="true" />
-				Refunds due <span class="font-normal tabular-nums text-ink-muted">· {data.refundDue.length}</span>
-			</h2>
-			<ul class="divide-y divide-border">
-				{#each data.refundDue as o (o.id)}
-					<li class="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-sm">
-						<span class="font-mono font-semibold text-ink">{o.code}</span>
-						<span class="min-w-0 flex-1 truncate text-ink-muted">
-							{o.guestName ?? 'Guest'}{o.guestPhone ? ` · ${o.guestPhone}` : ''} · cancelled{o.refundedCentavos > 0 ? ' · part refunded' : ''}
-						</span>
-						<span class="font-medium tabular-nums text-ink">{peso(refundOwed(o))}</span>
-						{#if o.unreadMessages > 0 || o.source === 'online'}
-							<Button variant="ghost" size="sm" onclick={() => { threadOrderId = o.id; threadOpen = true; }}>Messages{o.unreadMessages > 0 ? ` (${o.unreadMessages})` : ''}</Button>
-						{/if}
-						{#if data.canVoid}
-							<Button size="sm" onclick={() => { refundOrderId = o.id; refundOpen = true; }}>Record refund</Button>
-						{:else}
-							<span class="text-xs text-ink-muted">A manager records the refund</span>
-						{/if}
-					</li>
-				{/each}
-			</ul>
-		</section>
-	{/if}
-
 	{#if data.venues.length === 0 || Object.keys(data.menus).length === 0}
 		<div class="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border p-12 text-center">
 			<ChefHatIcon class="size-6 text-ink-muted" />
@@ -303,53 +269,183 @@
 			<Button href="{base}/menu" variant="outline">Go to the menu</Button>
 		</div>
 	{:else}
-		<!-- On a phone the four columns become tabs -->
-		<Tabs.Root bind:value={mobileCol} class="mb-3 lg:hidden">
-			<Tabs.List class="w-full">
-				{#each COLUMNS as c (c.key)}
-					<Tabs.Trigger value={c.key} class="flex-1">
-						{c.label} <span class="ml-1 text-xs tabular-nums text-ink-muted">{byColumn[c.key]?.length ?? 0}</span>
-					</Tabs.Trigger>
-				{/each}
-			</Tabs.List>
-		</Tabs.Root>
+		<SummaryTiles {summary} bind:unpaidOnly onjump={jumpTo} />
 
-		<div class="grid gap-4 lg:grid-cols-4">
-			{#each COLUMNS as c (c.key)}
-				<section class="min-w-0 {mobileCol === c.key ? 'block' : 'hidden'} lg:block" aria-label={c.label}>
-					<h2 class="mb-2 hidden items-baseline justify-between px-1 lg:flex">
-						<span class="text-sm font-semibold text-ink">{c.label}</span>
-						<span class="text-xs tabular-nums text-ink-muted">{byColumn[c.key]?.length ?? 0}</span>
+		{#if filtering}
+			<p class="mt-3 flex flex-wrap items-center gap-2 text-sm text-ink-muted" role="status">
+				{shownCount === 0 ? 'No orders match.' : `Showing ${shownCount} ${shownCount === 1 ? 'order' : 'orders'}`}
+				{#if unpaidOnly}<span class="rounded-md bg-danger/10 px-2 py-0.5 text-xs font-medium text-danger">Unpaid only</span>{/if}
+				{#if query.trim()}<span class="rounded-md bg-surface-2 px-2 py-0.5 text-xs font-medium text-ink">“{query.trim()}”</span>{/if}
+				<Button variant="ghost" size="sm" class="h-8 gap-1" onclick={() => { query = ''; unpaidOnly = false; }}>
+					<XIcon class="size-3.5" aria-hidden="true" /> Clear
+				</Button>
+			</p>
+		{/if}
+
+		<div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+			<div class="min-w-0 space-y-8">
+				<section id="orders-ready" class="scroll-mt-4" aria-labelledby="ready-heading">
+					<h2 id="ready-heading" class="mb-3 flex items-center gap-2">
+						<span class="size-2.5 rounded-full bg-ok" aria-hidden="true"></span>
+						<span class="text-lg font-semibold text-ink">Ready to serve</span>
+						<span class="rounded-full bg-ok/15 px-2 py-0.5 text-xs font-semibold tabular-nums text-ink">{groups.ready.length}</span>
+						<span class="ml-auto text-xs text-ink-muted">Longest waiting first</span>
 					</h2>
-					<!-- Each column scrolls on its own, so a long "Served today" never pushes the others off screen. -->
-						<div class="space-y-3 lg:max-h-[calc(100dvh-13rem)] lg:min-h-48 lg:overflow-y-auto lg:overscroll-contain lg:rounded-xl lg:bg-surface-2/50 lg:p-2" tabindex="0" role="region" aria-label="{c.label} orders">
-						{#each byColumn[c.key] ?? [] as order (order.id)}
-							<OrderCard
-								{order}
-								{nowMs}
-								{slug}
-								timezone={data.timezone}
-								canWrite={data.canWrite}
-								canVoid={data.canVoid}
-								onadvance={advance}
-								onpay={openPay}
-								oncancel={(o) => (cancelFor = o)}
-								onvoid={(o) => (voidFor = o)}
-								oninvoice={(o) => (invoiceFor = o)}
-								onissuereceipt={issueReceipt}
-								ontalk={(o) => { threadOrderId = o.id; threadOpen = true; }}
-								onrespond={(o) => (respondFor = o)}
-								onundoroom={(o) => (undoRoomFor = o)}
-							/>
-						{:else}
-							<p class="px-2 py-6 text-center text-sm text-ink-muted">{c.hint}</p>
-						{/each}
-					</div>
+					{#if groups.ready.length > 0}
+						<div class="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-4">
+							{#each groups.ready as order (order.id)}
+								<ReadyCard
+									{order}
+									{nowMs}
+									canWrite={data.canWrite}
+									busy={servingId === order.id}
+									onserve={(o) => advance(o, 'served')}
+									onpay={openPay}
+									ondetails={openDetails}
+								/>
+							{/each}
+						</div>
+					{:else}
+						<p class="rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-ink-muted">
+							{filtering ? 'No ready orders match.' : 'Nothing waiting at the pass. The kitchen will tell you when a dish is ready.'}
+						</p>
+					{/if}
 				</section>
-			{/each}
+
+				<section id="orders-preparing" class="scroll-mt-4" aria-labelledby="preparing-heading">
+					<h2 id="preparing-heading" class="mb-3 flex items-center gap-2">
+						<span class="size-2.5 rounded-full bg-warning" aria-hidden="true"></span>
+						<span class="text-lg font-semibold text-ink">Preparing</span>
+						<span class="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-semibold tabular-nums text-ink">{groups.preparing.length}</span>
+						<span class="ml-auto text-xs text-ink-muted">Late orders first</span>
+					</h2>
+					{#if groups.preparing.length > 0}
+						<div class="grid grid-cols-[repeat(auto-fill,minmax(11.5rem,1fr))] gap-3">
+							{#each groups.preparing as order (order.id)}
+								<QueueCard {order} {nowMs} ondetails={openDetails} />
+							{/each}
+						</div>
+					{:else}
+						<p class="rounded-xl border border-dashed border-border px-4 py-5 text-center text-sm text-ink-muted">
+							{filtering ? 'No preparing orders match.' : 'Nothing cooking right now.'}
+						</p>
+					{/if}
+				</section>
+
+				<section id="orders-new" class="scroll-mt-4" aria-labelledby="new-heading">
+					<h2 id="new-heading" class="mb-3 flex items-center gap-2">
+						<span class="size-2.5 rounded-full bg-brand" aria-hidden="true"></span>
+						<span class="text-lg font-semibold text-ink">New</span>
+						<span class="rounded-full bg-brand/15 px-2 py-0.5 text-xs font-semibold tabular-nums text-ink">{groups.fresh.length}</span>
+						<span class="ml-auto text-xs text-ink-muted">Waiting for the kitchen to start</span>
+					</h2>
+					{#if groups.fresh.length > 0}
+						<div class="grid grid-cols-[repeat(auto-fill,minmax(11.5rem,1fr))] gap-3">
+							{#each groups.fresh as order (order.id)}
+								<QueueCard {order} {nowMs} ondetails={openDetails} />
+							{/each}
+						</div>
+					{:else}
+						<p class="rounded-xl border border-dashed border-border px-4 py-5 text-center text-sm text-ink-muted">
+							{filtering ? 'No new orders match.' : 'No new orders.'}
+						</p>
+					{/if}
+				</section>
+
+				{#if data.openChecks.length > 0}
+					<section aria-label="Tables with open checks">
+						<h2 class="mb-3 flex items-center gap-2 text-lg font-semibold text-ink">
+							<ArmchairIcon class="size-4 text-ink-muted" aria-hidden="true" />
+							Tables <span class="text-sm font-normal tabular-nums text-ink-muted">· {data.openChecks.length} open</span>
+						</h2>
+						<div class="flex gap-3 overflow-x-auto pb-1">
+							{#each data.openChecks as c (c.id)}
+								<div class="w-64 shrink-0 rounded-xl border-2 bg-surface p-3 {c.stage === 'needs_payment' ? 'border-warning/70' : c.stage === 'ready_to_clear' ? 'border-brand/60' : 'border-border'}">
+									<div class="flex items-center justify-between gap-2">
+										<p class="font-semibold text-ink">Table {c.tableName}</p>
+										<Badge variant={c.stage === 'needs_payment' ? 'destructive' : c.stage === 'ready_to_clear' ? 'default' : 'outline'}>{CHECK_STAGE_LABEL[c.stage]}</Badge>
+									</div>
+									<p class="mt-1 text-xs text-ink-muted">
+										{c.liveCount} {c.liveCount === 1 ? 'order' : 'orders'} · {peso(c.totalCentavos)}{c.unpaidCentavos > 0 ? ` · ${peso(c.unpaidCentavos)} to pay` : ''}
+									</p>
+									{#if c.billRequestedAt}<p class="mt-1 text-xs font-medium text-warning">Asked for the bill</p>{/if}
+									{#if c.liveCount > 0}
+										<a class="mt-1 inline-flex items-center gap-1 text-xs font-medium text-brand underline-offset-2 hover:underline" href="/{slug}/print/bill/check/{c.id}?auto=1" target="_blank" rel="noopener">
+											<PrinterIcon class="size-3" aria-hidden="true" /> Print bill
+										</a>
+									{/if}
+									{#if data.canWrite}
+										<div class="mt-2 flex gap-2">
+											{#if c.unpaidCount > 0 && c.awaitingAcceptance === 0}
+												<Button size="sm" onclick={() => { settleFor = c; settleOpen = true; }}>Settle &amp; close</Button>
+											{:else if c.stage === 'ready_to_clear'}
+												<form method="POST" action="?/closeTable" use:enhance={() => async ({ update }) => { await update({ reset: false }); await invalidateAll(); }}>
+													<input type="hidden" name="checkId" value={c.id} />
+													<Button type="submit" size="sm">Close table</Button>
+												</form>
+											{/if}
+										</div>
+									{/if}
+								</div>
+							{/each}
+						</div>
+					</section>
+				{/if}
+
+				{#if data.refundDue.length > 0}
+					<section class="rounded-xl border border-border bg-surface" aria-label="Refunds due">
+						<h2 class="flex items-center gap-2 border-b border-border px-4 py-2.5 text-sm font-semibold text-ink">
+							<BanknoteArrowUpIcon class="size-4 text-brand" aria-hidden="true" />
+							Refunds due <span class="font-normal tabular-nums text-ink-muted">· {data.refundDue.length}</span>
+						</h2>
+						<ul class="divide-y divide-border">
+							{#each data.refundDue as o (o.id)}
+								<li class="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-sm">
+									<span class="font-mono font-semibold text-ink">{o.code}</span>
+									<span class="min-w-0 flex-1 truncate text-ink-muted">
+										{o.guestName ?? 'Guest'}{o.guestPhone ? ` · ${o.guestPhone}` : ''} · cancelled{o.refundedCentavos > 0 ? ' · part refunded' : ''}
+									</span>
+									<span class="font-medium tabular-nums text-ink">{peso(refundOwed(o))}</span>
+									{#if o.unreadMessages > 0 || o.source === 'online'}
+										<Button variant="ghost" size="sm" onclick={() => { threadOrderId = o.id; threadOpen = true; }}>Messages{o.unreadMessages > 0 ? ` (${o.unreadMessages})` : ''}</Button>
+									{/if}
+									{#if data.canVoid}
+										<Button size="sm" onclick={() => { refundOrderId = o.id; refundOpen = true; }}>Record refund</Button>
+									{:else}
+										<span class="text-xs text-ink-muted">A manager records the refund</span>
+									{/if}
+								</li>
+							{/each}
+						</ul>
+					</section>
+				{/if}
+			</div>
+
+			<aside class="min-w-0 lg:sticky lg:top-4 lg:self-start" aria-label="Served orders">
+				<ServedList orders={groups.served} {nowMs} ondetails={openDetails} />
+			</aside>
 		</div>
 	{/if}
 </div>
+
+<OrderDetailSheet
+	bind:open={detailOpen}
+	order={detailOrder}
+	{nowMs}
+	{slug}
+	timezone={data.timezone}
+	canWrite={data.canWrite}
+	canVoid={data.canVoid}
+	onadvance={advance}
+	onpay={openPay}
+	oncancel={(o) => (cancelFor = o)}
+	onvoid={(o) => (voidFor = o)}
+	oninvoice={(o) => (invoiceFor = o)}
+	onissuereceipt={issueReceipt}
+	ontalk={(o) => { threadOrderId = o.id; threadOpen = true; }}
+	onrespond={(o) => (respondFor = o)}
+	onundoroom={(o) => (undoRoomFor = o)}
+/>
 
 <NewOrderSheet bind:open={newOpen} {data} defaultVenueId={data.venueId} defaultTableId={newTable} onplaced={placed} />
 <PayDialog bind:open={payOpen} order={payOrder} shiftOpen={data.shiftOpen} {slug} inHouse={data.inHouse} />

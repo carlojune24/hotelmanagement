@@ -1,12 +1,22 @@
 /** Pure authorization helpers — safe to import on client and server. */
 
 export type MembershipRole =
-	'hotel_admin' | 'front_desk' | 'housekeeping' | 'accountant' | 'hr' | 'read_only' | 'group_owner';
+	| 'hotel_admin'
+	| 'front_desk'
+	| 'housekeeping'
+	| 'dining'
+	| 'kitchen'
+	| 'accountant'
+	| 'hr'
+	| 'read_only'
+	| 'group_owner';
 
 export const MEMBERSHIP_ROLES: MembershipRole[] = [
 	'hotel_admin',
 	'front_desk',
 	'housekeeping',
+	'dining',
+	'kitchen',
 	'accountant',
 	'hr',
 	'read_only',
@@ -18,6 +28,8 @@ export const ASSIGNABLE_HOTEL_ROLES: MembershipRole[] = [
 	'hotel_admin',
 	'front_desk',
 	'housekeeping',
+	'dining',
+	'kitchen',
 	'accountant',
 	'hr',
 	'read_only'
@@ -60,11 +72,20 @@ export const ROLE_CAPS: Record<MembershipRole, string[]> = {
 		'shift:*',
 		'finance:read',
 		// Front desk sees the Dining section and runs orders/reservations; editing the menu
-		// itself (`dining:manage`) stays with hotel_admin.
+		// itself (`dining:manage`) stays with hotel_admin. Starting/finishing dishes belongs to
+		// the Kitchen module, so front desk only gets a read-only view of it.
 		'dining:read',
-		'dining:write'
+		'dining:write',
+		'kitchen:read'
 	],
 	housekeeping: ['housekeeping:*', 'room:read'],
+	// A dining account runs the Dining section end to end: Floor, Orders, Reservations and the guest bill,
+	// plus setting the floor up (areas, tables, QR codes), the menu and add-ons (`dining:manage`).
+	// No payments module, finance, bookings, Kitchen or hotel admin.
+	dining: ['dining:read', 'dining:write', 'dining:manage'],
+	// A cook sees only the Kitchen module: live board, prep list, sold-out list and history.
+	// No Dining, payments or finance. Station setup (`kitchen:manage`) stays with hotel_admin.
+	kitchen: ['kitchen:read', 'kitchen:write'],
 	accountant: [
 		'finance:*',
 		'ledger:*',
@@ -88,6 +109,42 @@ export function roleCan(capabilities: string[], cap: string): boolean {
 	if (capabilities.includes('*') || capabilities.includes(cap)) return true;
 	const [domain, action] = cap.split(':');
 	return capabilities.includes(`${domain}:*`) || capabilities.includes(`*:${action}`);
+}
+
+/** A cook's account: it can see the Kitchen and nothing else of the working hotel, so the
+ *  Dashboard has nothing to show it and login should land on the Kitchen instead. */
+export function isKitchenOnly(capabilities: string[]): boolean {
+	return (
+		roleCan(capabilities, 'kitchen:read') &&
+		!['booking:read', 'room:read', 'dining:read', 'finance:read', 'hr:read', 'reports:read', 'hotel:admin'].some(
+			(cap) => roleCan(capabilities, cap)
+		)
+	);
+}
+
+/** A dining account: it can see Dining and nothing else of the working hotel, so the Dashboard
+ *  has nothing for it and login should land on Dining. Front desk also has Dining, but with bookings
+ *  and rooms too, so it is not "dining only". */
+export function isDiningOnly(capabilities: string[]): boolean {
+	return (
+		roleCan(capabilities, 'dining:read') &&
+		!['booking:read', 'room:read', 'finance:read', 'hr:read', 'reports:read', 'hotel:admin'].some((cap) =>
+			roleCan(capabilities, cap)
+		)
+	);
+}
+
+/**
+ * Where a signed-in staff member lands when nothing else was asked for: a cook goes straight to the
+ * Kitchen, a dining account to Dining, everyone else (and a platform admin looking in) to the
+ * Dashboard. `base` is the management root, e.g. `/hotel1/management`.
+ */
+export function homePathFor(base: string, capabilities: string[] | null | undefined, isPlatformAdmin = false): string {
+	if (!isPlatformAdmin && capabilities) {
+		if (isKitchenOnly(capabilities)) return `${base}/kitchen`;
+		if (isDiningOnly(capabilities)) return `${base}/dining`;
+	}
+	return `${base}/dashboard`;
 }
 
 /** A membership's role, resolved for the current request/session — the live authorization
@@ -118,6 +175,7 @@ export const PERMISSION_SECTIONS = [
 	'HR & Employees',
 	'Payroll',
 	'Dining',
+	'Kitchen',
 	'Settings'
 ] as const;
 
@@ -181,6 +239,10 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 	{ cap: 'dining:read', label: 'See the Dining section (menu, orders, reservations)', section: 'Dining' },
 	{ cap: 'dining:write', label: 'Take and update dining orders and reservations', section: 'Dining' },
 	{ cap: 'dining:manage', label: 'Edit the dining menu, add-ons, and the floor', section: 'Dining' },
+
+	{ cap: 'kitchen:read', label: 'See the Kitchen section (board, prep, sold-out, history)', section: 'Kitchen' },
+	{ cap: 'kitchen:write', label: 'Start and finish dishes, mark dishes sold out', section: 'Kitchen' },
+	{ cap: 'kitchen:manage', label: 'Set up kitchen stations and their timing targets', section: 'Kitchen' },
 
 	{
 		cap: 'hotel:admin',
