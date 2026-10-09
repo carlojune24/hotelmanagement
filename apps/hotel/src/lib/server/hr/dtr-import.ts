@@ -742,6 +742,54 @@ export async function computeMonthDtr(
 			});
 		}
 	}
+	// Leave on a date with no schedule row at all (calendar-day leaves like maternity/paternity,
+	// or a roster not set yet): still show it as leave rather than a blank day. Paid leave is
+	// credited the employee's usual shift length (their most common rostered day this month),
+	// or 8 hours when they have no roster at all.
+	const usualMinutes = (empId: string) => {
+		const counts = new Map<number, number>();
+		for (const sc of schedRows) {
+			if (sc.employeeId !== empId || sc.isRestDay || !sc.startTime) continue;
+			const m = scheduledMinutes(sc);
+			if (m > 0) counts.set(m, (counts.get(m) ?? 0) + 1);
+		}
+		let best = 8 * 60;
+		let bestN = 0;
+		for (const [m, n] of counts) if (n > bestN) [best, bestN] = [m, n];
+		return best;
+	};
+	const empById = new Map(inScope.map((e) => [e.id, e]));
+	for (const [key, lv] of leaveMap) {
+		const [empId = '', date = ''] = key.split('|');
+		const emp = empById.get(empId);
+		if (!emp || schedByKey.has(key) || punchedDays.has(key)) continue;
+		const action = actionFor(key);
+		if (action === 'keep_manual') continue;
+		const covered = lv.paid ? Math.round(usualMinutes(emp.id) / (lv.halfDay ? 2 : 1)) : 0;
+		records.push({
+			employeeId: emp.id,
+			employeeName: `${emp.firstName} ${emp.lastName}`,
+			enrollId: emp.enroll!,
+			date,
+			timeIn: null,
+			timeOut: null,
+			breakOut: null,
+			breakIn: null,
+			scheduleId: null,
+			isAbsent: false,
+			flags: [],
+			manualPunch: false,
+			leave: lv,
+			calendar: null,
+			leaveMinutes: covered,
+			action,
+			workedMinutes: covered,
+			otMinutes: 0,
+			nightDiffMinutes: 0,
+			tardinessMinutes: 0,
+			undertimeMinutes: 0
+		});
+	}
 	records.sort(
 		(a, b) => a.employeeName.localeCompare(b.employeeName) || a.date.localeCompare(b.date)
 	);

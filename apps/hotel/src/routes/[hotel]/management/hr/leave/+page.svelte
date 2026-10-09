@@ -42,9 +42,28 @@
 	const selectedType = $derived(data.types.find((t) => t.id === leaveTypeId));
 	const employeeLabel = $derived(data.employees.find((e) => e.id === employeeId)?.name ?? 'Choose employee');
 	const typeLabel = $derived(selectedType ? `${selectedType.name} (${selectedType.code})` : 'Choose leave');
-	const rows = $derived(
-		statusFilter === 'all' ? data.requests : data.requests.filter((r) => r.status === statusFilter)
+	let search = $state('');
+	let monthFilter = $state('all');
+	let typeFilter = $state('all');
+	const MONTHS = Array.from({ length: 12 }, (_, i) =>
+		new Date(Date.UTC(2000, i, 1)).toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' })
 	);
+	const monthFilterLabel = $derived(monthFilter === 'all' ? 'All months' : MONTHS[Number(monthFilter) - 1]);
+	const typeFilterLabel = $derived(
+		typeFilter === 'all' ? 'All leave types' : (data.types.find((t) => t.id === typeFilter)?.name ?? 'All leave types')
+	);
+	const rows = $derived.by(() => {
+		const q = search.trim().toLowerCase();
+		const mm = monthFilter === 'all' ? null : monthFilter.padStart(2, '0');
+		return data.requests.filter((r) => {
+			if (statusFilter !== 'all' && r.status !== statusFilter) return false;
+			if (q && !r.employeeName.toLowerCase().includes(q)) return false;
+			if (typeFilter !== 'all' && r.leaveTypeId !== typeFilter) return false;
+			// A leave belongs to every month it touches.
+			if (mm && !(r.startDate.slice(0, 7) <= `${data.year}-${mm}` && r.endDate.slice(0, 7) >= `${data.year}-${mm}`)) return false;
+			return true;
+		});
+	});
 
 	$effect(() => {
 		if (form?.error) toast.error(form.error);
@@ -135,15 +154,36 @@
 		</div>
 	</div>
 
-	<div class="mt-4 flex gap-1.5" role="group" aria-label="Status">
-		{#each [['approved', 'Active'], ['cancelled', 'Cancelled'], ['all', 'All']] as const as [v, label] (v)}
-			<Button
-				variant={statusFilter === v ? 'default' : 'outline'}
-				size="sm"
-				onclick={() => (statusFilter = v)}
-				aria-pressed={statusFilter === v}>{label}</Button
-			>
-		{/each}
+	<div class="mt-4 flex flex-wrap items-center gap-2">
+		<div class="flex gap-1.5" role="group" aria-label="Status">
+			{#each [['approved', 'Active'], ['cancelled', 'Cancelled'], ['all', 'All']] as const as [v, label] (v)}
+				<Button
+					variant={statusFilter === v ? 'default' : 'outline'}
+					size="sm"
+					onclick={() => (statusFilter = v)}
+					aria-pressed={statusFilter === v}>{label}</Button
+				>
+			{/each}
+		</div>
+		<Input bind:value={search} placeholder="Search employee" aria-label="Search employee" class="h-8 w-48" />
+		<Select.Root type="single" bind:value={monthFilter}>
+			<Select.Trigger class="h-8 w-36" aria-label="Month">{monthFilterLabel}</Select.Trigger>
+			<Select.Content>
+				<Select.Item value="all" label="All months" />
+				{#each MONTHS as m, i (m)}
+					<Select.Item value={String(i + 1)} label={m} />
+				{/each}
+			</Select.Content>
+		</Select.Root>
+		<Select.Root type="single" bind:value={typeFilter}>
+			<Select.Trigger class="h-8 w-48" aria-label="Leave type">{typeFilterLabel}</Select.Trigger>
+			<Select.Content>
+				<Select.Item value="all" label="All leave types" />
+				{#each data.types as t (t.id)}
+					<Select.Item value={t.id} label={t.name} />
+				{/each}
+			</Select.Content>
+		</Select.Root>
 	</div>
 
 	<div class="mt-3 overflow-x-auto rounded-lg border border-border bg-surface">
@@ -191,7 +231,7 @@
 				{:else}
 					<Table.Row>
 						<Table.Cell colspan={7} class="py-10 text-center text-sm text-ink-muted">
-							No leave on file for {data.year}.
+							{data.requests.length ? 'No leave matches those filters.' : `No leave on file for ${data.year}.`}
 						</Table.Cell>
 					</Table.Row>
 				{/each}
