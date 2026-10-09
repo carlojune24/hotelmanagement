@@ -203,7 +203,9 @@ export const actions: Actions = {
 			...raw,
 			isRestDay: raw.isRestDay === 'on' || raw.isRestDay === '1',
 			startTime: raw.startTime || undefined,
-			endTime: raw.endTime || undefined
+			endTime: raw.endTime || undefined,
+			breakStart: raw.breakStart || undefined,
+			breakEnd: raw.breakEnd || undefined
 		});
 		if (!parsed.success) {
 			return fail(400, { error: parsed.error.issues[0]?.message ?? 'Check the shift details.' });

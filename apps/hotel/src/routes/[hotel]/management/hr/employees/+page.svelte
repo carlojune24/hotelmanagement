@@ -24,6 +24,7 @@
 	import IdCardIcon from '@lucide/svelte/icons/id-card';
 	import LandmarkIcon from '@lucide/svelte/icons/landmark';
 	import MailIcon from '@lucide/svelte/icons/mail';
+	import FingerprintIcon from '@lucide/svelte/icons/fingerprint';
 	import type { ActionData, PageData } from './$types';
 	import type { Employee } from '$lib/server/db/schema/hr';
 
@@ -265,6 +266,20 @@
 						class="pl-8"
 					/>
 				</div>
+			</div>
+			<div>
+				<Label for="{idPrefix}biometricEnrollId">Biometric ID</Label>
+				<div class="relative mt-1">
+					{@render fieldIcon(FingerprintIcon)}
+					<Input
+						id="{idPrefix}biometricEnrollId"
+						name="biometricEnrollId"
+						placeholder="The ID this person has on the time clock"
+						value={emp?.biometricEnrollId ?? ''}
+						class="pl-8"
+					/>
+				</div>
+				<p class="mt-1 text-xs text-ink-muted">Used to match punches when importing DTR.</p>
 			</div>
 			<div class="grid grid-cols-3 gap-3">
 				<div>

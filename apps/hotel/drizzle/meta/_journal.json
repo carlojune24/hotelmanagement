@@ -526,6 +526,41 @@
       "when": 1791464410964,
       "tag": "0074_bouncy_masked_marvel",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1791545043231,
+      "tag": "0075_square_wrecking_crew",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1791548227123,
+      "tag": "0076_outstanding_dragon_lord",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1791549563466,
+      "tag": "0077_dizzy_silverclaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1791549954853,
+      "tag": "0078_sleepy_lightspeed",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1791555478701,
+      "tag": "0079_strong_hellfire_club",
+      "breakpoints": true
     }
   ]
 }

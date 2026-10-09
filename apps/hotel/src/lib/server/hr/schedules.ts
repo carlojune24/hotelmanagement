@@ -2,7 +2,14 @@ import { and, asc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import { employees, schedules } from '$lib/server/db/schema/index';
-import { addDays, isDateString, shiftSpanMinutes, toHHMM } from '$lib/roster';
+import {
+	addDays,
+	breakWindowError,
+	breakWindowMinutes,
+	isDateString,
+	shiftSpanMinutes,
+	toHHMM
+} from '$lib/roster';
 
 export class ScheduleError extends Error {}
 
@@ -21,7 +28,10 @@ export const cellShiftSchema = z
 		isRestDay: z.boolean(),
 		startTime: hhmm.nullable().optional(),
 		endTime: hhmm.nullable().optional(),
-		breakMinutes: z.coerce.number().int().min(0).max(600).default(0)
+		breakMinutes: z.coerce.number().int().min(0).max(600).default(0),
+		/** Split shift: both or neither. `breakMinutes` is then derived from them. */
+		breakStart: hhmm.nullable().optional(),
+		breakEnd: hhmm.nullable().optional()
 	})
 	.superRefine((v, ctx) => {
 		if (v.isRestDay) return;
@@ -31,6 +41,11 @@ export const cellShiftSchema = z
 				path: ['startTime'],
 				message: 'Enter a start and end time that differ.'
 			});
+			return;
+		}
+		if (v.breakStart || v.breakEnd) {
+			const msg = breakWindowError(v.startTime, v.endTime, v.breakStart, v.breakEnd);
+			if (msg) ctx.addIssue({ code: 'custom', path: ['breakStart'], message: msg });
 		}
 	});
 export type CellShift = {
@@ -38,6 +53,8 @@ export type CellShift = {
 	startTime: string | null;
 	endTime: string | null;
 	breakMinutes: number;
+	breakStart: string | null;
+	breakEnd: string | null;
 };
 
 /** A cell and what it held (`null` = empty) — the payload Undo sends back to `restoreCells`. */
@@ -48,14 +65,26 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 const key = (c: CellRef) => `${c.employeeId}|${c.date}`;
 
 function normalizeShift(s: z.infer<typeof cellShiftSchema>): CellShift {
-	return s.isRestDay
-		? { isRestDay: true, startTime: null, endTime: null, breakMinutes: 0 }
-		: {
-				isRestDay: false,
-				startTime: s.startTime ?? null,
-				endTime: s.endTime ?? null,
-				breakMinutes: s.breakMinutes
-			};
+	if (s.isRestDay) {
+		return {
+			isRestDay: true,
+			startTime: null,
+			endTime: null,
+			breakMinutes: 0,
+			breakStart: null,
+			breakEnd: null
+		};
+	}
+	const split = Boolean(s.breakStart && s.breakEnd);
+	return {
+		isRestDay: false,
+		startTime: s.startTime ?? null,
+		endTime: s.endTime ?? null,
+		// A split shift's unpaid break is exactly the gap between its two parts.
+		breakMinutes: split ? breakWindowMinutes(s.breakStart, s.breakEnd) : s.breakMinutes,
+		breakStart: split ? s.breakStart! : null,
+		breakEnd: split ? s.breakEnd! : null
+	};
 }
 
 function dedupe(cells: CellRef[]): CellRef[] {
@@ -102,7 +131,9 @@ async function readCells(tx: Tx, hotelId: string, cells: CellRef[]) {
 			isRestDay: r.isRestDay,
 			startTime: toHHMM(r.startTime),
 			endTime: toHHMM(r.endTime),
-			breakMinutes: r.breakMinutes
+			breakMinutes: r.breakMinutes,
+			breakStart: toHHMM(r.breakStart),
+			breakEnd: toHHMM(r.breakEnd)
 		});
 	}
 	return out;
@@ -120,7 +151,9 @@ async function upsertRows(tx: Tx, hotelId: string, rows: Array<CellRef & { shift
 				isRestDay: r.shift.isRestDay,
 				startTime: r.shift.startTime,
 				endTime: r.shift.endTime,
-				breakMinutes: r.shift.breakMinutes
+				breakMinutes: r.shift.breakMinutes,
+				breakStart: r.shift.breakStart,
+				breakEnd: r.shift.breakEnd
 			}))
 		)
 		.onConflictDoUpdate({
@@ -130,6 +163,8 @@ async function upsertRows(tx: Tx, hotelId: string, rows: Array<CellRef & { shift
 				startTime: sql`excluded.start_time`,
 				endTime: sql`excluded.end_time`,
 				breakMinutes: sql`excluded.break_minutes`,
+				breakStart: sql`excluded.break_start`,
+				breakEnd: sql`excluded.break_end`,
 				deletedAt: null,
 				updatedAt: new Date()
 			}
@@ -145,7 +180,9 @@ function toState(cell: CellRef, prev: CellShift | undefined): CellState {
 					isRestDay: prev.isRestDay,
 					startTime: prev.startTime,
 					endTime: prev.endTime,
-					breakMinutes: prev.breakMinutes
+					breakMinutes: prev.breakMinutes,
+					breakStart: prev.breakStart,
+					breakEnd: prev.breakEnd
 				}
 			: null
 	};
@@ -165,7 +202,9 @@ export async function listSchedules(hotelId: string, from: string, to: string) {
 			isRestDay: schedules.isRestDay,
 			startTime: schedules.startTime,
 			endTime: schedules.endTime,
-			breakMinutes: schedules.breakMinutes
+			breakMinutes: schedules.breakMinutes,
+			breakStart: schedules.breakStart,
+			breakEnd: schedules.breakEnd
 		})
 		.from(schedules)
 		.where(
@@ -180,7 +219,9 @@ export async function listSchedules(hotelId: string, from: string, to: string) {
 	return rows.map((r) => ({
 		...r,
 		startTime: toHHMM(r.startTime),
-		endTime: toHHMM(r.endTime)
+		endTime: toHHMM(r.endTime),
+		breakStart: toHHMM(r.breakStart),
+		breakEnd: toHHMM(r.breakEnd)
 	}));
 }
 
@@ -268,7 +309,9 @@ export async function copyWeek(
 				isRestDay: schedules.isRestDay,
 				startTime: schedules.startTime,
 				endTime: schedules.endTime,
-				breakMinutes: schedules.breakMinutes
+				breakMinutes: schedules.breakMinutes,
+				breakStart: schedules.breakStart,
+				breakEnd: schedules.breakEnd
 			})
 			.from(schedules)
 			.innerJoin(
@@ -296,7 +339,9 @@ export async function copyWeek(
 				isRestDay: s.isRestDay,
 				startTime: toHHMM(s.startTime),
 				endTime: toHHMM(s.endTime),
-				breakMinutes: s.breakMinutes
+				breakMinutes: s.breakMinutes,
+				breakStart: toHHMM(s.breakStart),
+				breakEnd: toHHMM(s.breakEnd)
 			} satisfies CellShift
 		}));
 

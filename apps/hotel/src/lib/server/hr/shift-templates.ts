@@ -2,7 +2,13 @@ import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import { shiftTemplates } from '$lib/server/db/schema/index';
-import { TEMPLATE_TAGS, shiftSpanMinutes, toHHMM } from '$lib/roster';
+import {
+	TEMPLATE_TAGS,
+	breakWindowError,
+	breakWindowMinutes,
+	shiftSpanMinutes,
+	toHHMM
+} from '$lib/roster';
 
 export class ShiftTemplateError extends Error {}
 
@@ -15,6 +21,9 @@ export const shiftTemplateFormSchema = z
 		startTime: hhmm.optional(),
 		endTime: hhmm.optional(),
 		breakMinutes: z.coerce.number().int().min(0).max(600).default(0),
+		/** Split shift: both or neither. `breakMinutes` is then derived from them. */
+		breakStart: hhmm.optional(),
+		breakEnd: hhmm.optional(),
 		tag: z.enum(TEMPLATE_TAGS).default('neutral')
 	})
 	.superRefine((v, ctx) => {
@@ -25,6 +34,11 @@ export const shiftTemplateFormSchema = z
 				path: ['startTime'],
 				message: 'Enter a start and end time that differ.'
 			});
+			return;
+		}
+		if (v.breakStart || v.breakEnd) {
+			const msg = breakWindowError(v.startTime, v.endTime, v.breakStart, v.breakEnd);
+			if (msg) ctx.addIssue({ code: 'custom', path: ['breakStart'], message: msg });
 		}
 	});
 export type ShiftTemplateFormInput = z.infer<typeof shiftTemplateFormSchema>;
@@ -71,17 +85,26 @@ export async function listShiftTemplates(hotelId: string) {
 		startTime: toHHMM(r.startTime),
 		endTime: toHHMM(r.endTime),
 		breakMinutes: r.breakMinutes,
+		breakStart: toHHMM(r.breakStart),
+		breakEnd: toHHMM(r.breakEnd),
 		tag: r.tag
 	}));
 }
 
 function toValues(input: ShiftTemplateFormInput) {
+	const split = !input.isRestDay && Boolean(input.breakStart && input.breakEnd);
 	return {
 		name: input.name,
 		isRestDay: input.isRestDay,
 		startTime: input.isRestDay ? null : (input.startTime ?? null),
 		endTime: input.isRestDay ? null : (input.endTime ?? null),
-		breakMinutes: input.isRestDay ? 0 : input.breakMinutes,
+		breakMinutes: input.isRestDay
+			? 0
+			: split
+				? breakWindowMinutes(input.breakStart, input.breakEnd)
+				: input.breakMinutes,
+		breakStart: split ? input.breakStart! : null,
+		breakEnd: split ? input.breakEnd! : null,
 		tag: input.tag
 	};
 }

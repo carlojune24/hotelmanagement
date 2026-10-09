@@ -28,12 +28,15 @@ export async function listDtrEntries(hotelId: string, from: string, to: string) 
 			date: dtrEntries.date,
 			timeIn: dtrEntries.timeIn,
 			timeOut: dtrEntries.timeOut,
+			breakOut: dtrEntries.breakOut,
+			breakIn: dtrEntries.breakIn,
 			workedMinutes: dtrEntries.workedMinutes,
 			otMinutes: dtrEntries.otMinutes,
 			nightDiffMinutes: dtrEntries.nightDiffMinutes,
 			tardinessMinutes: dtrEntries.tardinessMinutes,
 			undertimeMinutes: dtrEntries.undertimeMinutes,
 			isAbsent: dtrEntries.isAbsent,
+			remarks: dtrEntries.remarks,
 			source: dtrEntries.source
 		})
 		.from(dtrEntries)
@@ -63,6 +66,8 @@ export async function upsertManualDtrEntry(
 		date: input.date,
 		timeIn: input.timeIn ? new Date(`${input.date}T${input.timeIn}:00`) : null,
 		timeOut: input.timeOut ? new Date(`${input.date}T${input.timeOut}:00`) : null,
+		breakOut: null,
+		breakIn: null,
 		workedMinutes: input.workedMinutes,
 		otMinutes: input.otMinutes,
 		nightDiffMinutes: input.nightDiffMinutes,
