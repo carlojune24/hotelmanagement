@@ -11,7 +11,7 @@
 		lateMinutes: number;
 		undertimeMinutes: number;
 		remarks: string;
-		kind: 'work' | 'absent' | 'rest' | 'empty';
+		kind: 'work' | 'absent' | 'rest' | 'empty' | 'leave' | 'holiday';
 	};
 	type Sheet = {
 		employee: { name: string; position: string };
@@ -39,6 +39,7 @@
 	const dayNum = (d: string) => d.slice(8, 10);
 	const hours = (minutes: number) => (minutes / 60).toFixed(3);
 	const notes = (s: Sheet) => s.days.filter((d) => d.kind === 'work' && d.remarks);
+	const hasHours = (k: Day['kind']) => k !== 'rest' && k !== 'empty';
 </script>
 
 {#each sheets as sheet (sheet.employee.name)}
@@ -70,7 +71,7 @@
 					</thead>
 					<tbody>
 						{#each sheet.days as d (d.date)}
-							<tr class:dp-off={d.kind === 'rest' || d.kind === 'absent'}>
+							<tr class:dp-off={d.kind === 'rest' || d.kind === 'absent'} class:dp-credit={d.kind === 'leave' || d.kind === 'holiday'}>
 								<td class="dp-day">{dayNum(d.date)} {d.weekday.toUpperCase()}</td>
 								{#if d.kind === 'work'}
 									<td>{d.timeIn?.t24 ?? ''}</td>
@@ -79,12 +80,18 @@
 									<td>{d.timeOut?.t24 ?? ''}</td>
 								{:else}
 									<td colspan="4" class="dp-span">
-										{d.kind === 'rest' ? 'DAY OFF' : d.kind === 'absent' ? 'ABSENT' : ''}
+										{d.kind === 'rest'
+											? 'DAY OFF'
+											: d.kind === 'absent'
+												? 'ABSENT'
+												: d.kind === 'leave' || d.kind === 'holiday'
+													? d.remarks.toUpperCase()
+													: ''}
 									</td>
 								{/if}
-								<td>{d.kind === 'rest' || d.kind === 'empty' ? '' : hours(d.lateMinutes)}</td>
-								<td>{d.kind === 'rest' || d.kind === 'empty' ? '' : hours(d.undertimeMinutes)}</td>
-								<td>{d.kind === 'rest' || d.kind === 'empty' ? '' : hours(d.workedMinutes)}</td>
+								<td>{hasHours(d.kind) ? hours(d.lateMinutes) : ''}</td>
+								<td>{hasHours(d.kind) ? hours(d.undertimeMinutes) : ''}</td>
+								<td>{hasHours(d.kind) ? hours(d.workedMinutes) : ''}</td>
 							</tr>
 						{/each}
 					</tbody>
@@ -204,6 +211,11 @@
 	.dp-span {
 		font-weight: 700;
 		letter-spacing: 0.05em;
+	}
+	.dp-credit .dp-span {
+		white-space: normal;
+		font-size: 5.5pt;
+		line-height: 1.1;
 	}
 	.dp-off td:not(.dp-day) {
 		background: #f4f4f2;

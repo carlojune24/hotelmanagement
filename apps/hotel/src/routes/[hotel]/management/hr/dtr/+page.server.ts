@@ -56,7 +56,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const selected = people.find((p) => p.id === requested) ?? people[0] ?? null;
 
 	if (!selected) {
-		return { month, range, people, selected: null, preview: null, saved: null, savedState: 'none' as const };
+		return { month, range, people, unsavedCount: people.length, selected: null, preview: null, saved: null, savedState: 'none' as const };
 	}
 
 	const [generated, entries, roster] = await Promise.all([
@@ -83,7 +83,10 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const savedState =
 		ofMonth.length === 0 ? ('none' as const) : sameDays(preview.days, saved.days) ? ('same' as const) : ('differs' as const);
 
-	return { month, range, people, selected, preview, saved, savedState };
+	const savedIds = new Set(entries.map((e) => e.employeeId));
+	const unsavedCount = people.filter((p) => !savedIds.has(p.id)).length;
+
+	return { month, range, people, unsavedCount, selected, preview, saved, savedState };
 };
 
 const addTimeSchema = z.object({

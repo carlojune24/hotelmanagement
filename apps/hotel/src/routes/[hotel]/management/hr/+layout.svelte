@@ -10,7 +10,8 @@
 		[
 			{ seg: '/employees', label: 'Employees', show: data.hr.canEmployee },
 			{ seg: '/schedule', label: 'Schedule', show: data.hr.canSchedule },
-			{ seg: '/dtr', label: 'DTR', show: data.hr.canDtr }
+			{ seg: '/dtr', label: 'DTR', show: data.hr.canDtr },
+			{ seg: '/leave', label: 'Leave', show: data.hr.canLeave }
 		].filter((t) => t.show === undefined || t.show)
 	);
 

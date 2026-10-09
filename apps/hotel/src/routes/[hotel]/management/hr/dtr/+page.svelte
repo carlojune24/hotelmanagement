@@ -93,11 +93,13 @@
 		addOpen = true;
 	}
 
-	const run: SubmitFunction = () => {
+	const run: SubmitFunction = ({ action }) => {
 		busy = true;
-		return async ({ update }) => {
+		const isSave = action.search === '?/save';
+		return async ({ result, update }) => {
 			busy = false;
 			await update({ reset: false });
+			if (isSave && result.type === 'success') mode = 'saved';
 		};
 	};
 </script>
@@ -180,7 +182,7 @@
 					<form method="POST" action="?/save" use:enhance={run} class="contents">
 						<input type="hidden" name="month" value={data.month} />
 						<Button type="submit" variant="outline" disabled={busy}>
-							Save all ({data.people.length})
+							Save all ({data.unsavedCount} unsaved)
 						</Button>
 					</form>
 				</div>
@@ -240,6 +242,8 @@
 								{/if}
 								{#if d.kind === 'rest'}<Badge variant="secondary">Day off</Badge>{/if}
 								{#if d.kind === 'absent'}<Badge variant="destructive">Absent</Badge>{/if}
+								{#if d.kind === 'leave'}<Badge>Leave</Badge>{/if}
+								{#if d.kind === 'holiday'}<Badge>Holiday / memo</Badge>{/if}
 								{#if d.manual}<Badge variant="outline">Staff-added</Badge>{/if}
 							</div>
 							{#if mode === 'preview'}
@@ -274,6 +278,13 @@
 							{/if}
 						{:else if d.kind === 'rest'}
 							<p class="px-3 py-3 text-sm font-medium text-ink-muted">Day off</p>
+						{:else if d.kind === 'leave' || d.kind === 'holiday'}
+							<p class="px-3 py-3 text-sm text-ink">
+								{d.remarks}
+								<span class="text-ink-muted">
+									· {d.workedMinutes ? `${hm(d.workedMinutes)} credited` : 'unpaid'}
+								</span>
+							</p>
 						{:else if d.kind === 'absent'}
 							<p class="px-3 py-3 text-sm text-ink-muted">No punches on a scheduled day.</p>
 						{:else}

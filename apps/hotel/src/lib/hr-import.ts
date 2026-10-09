@@ -420,3 +420,26 @@ export function dayRemarks(flags: DtrFlag[], manualPunch: boolean): string {
 	if (manualPunch) parts.push('Time added by staff');
 	return parts.join(', ');
 }
+
+/** The remarks line for one generated day: absent, leave, holiday/memo, or what looks off. */
+export function recordRemarks(r: {
+	isAbsent: boolean;
+	flags: DtrFlag[];
+	manualPunch: boolean;
+	timeIn: number | null;
+	leave: { code: string; name: string; halfDay: 'am' | 'pm' | null } | null;
+	calendar: { name: string } | null;
+}): string {
+	if (r.leave) {
+		const half = r.leave.halfDay ? ` (half day ${r.leave.halfDay.toUpperCase()})` : '';
+		const base = `${r.leave.code} – ${r.leave.name}${half}`;
+		if (r.timeIn === null && r.leave.halfDay) return `${base}; other half has no punches`;
+		const extra = dayRemarks(r.flags, r.manualPunch);
+		return extra ? `${base}; ${extra}` : base;
+	}
+	if (r.calendar) {
+		const extra = dayRemarks(r.flags, r.manualPunch);
+		return extra ? `${r.calendar.name}; ${extra}` : r.calendar.name;
+	}
+	return r.isAbsent ? 'Absent' : dayRemarks(r.flags, r.manualPunch);
+}

@@ -6,6 +6,7 @@ import {
 	index,
 	integer,
 	jsonb,
+	doublePrecision,
 	pgTable,
 	text,
 	time,
@@ -221,6 +222,15 @@ export const dtrEntries = pgTable(
 		correctionNote: text('correction_note'),
 		/** What to flag on the printed DTR (missing punch, added by hand…). */
 		remarks: text('remarks'),
+		/** The approved leave / calendar day this row stands for, when it came from one. */
+		leaveRequestId: uuid('leave_request_id').references(() => leaveRequests.id, {
+			onDelete: 'set null'
+		}),
+		calendarDayId: uuid('calendar_day_id').references(() => calendarDays.id, {
+			onDelete: 'set null'
+		}),
+		/** Minutes credited as paid leave (counted inside `workedMinutes`). */
+		leaveMinutes: integer('leave_minutes').notNull().default(0),
 		createdAt: createdAt(),
 		updatedAt: updatedAt(),
 		deletedAt: deletedAt()
@@ -317,6 +327,134 @@ export const biometricPunches = pgTable(
 		uniqueIndex('biometric_punches_unique_idx').on(t.hotelId, t.enrollKey, t.punchedAt),
 		index('biometric_punches_hotel_time_idx').on(t.hotelId, t.punchedAt)
 	]
+);
+
+// ---------------------------------------------------------------------------
+// Leave, holidays and memorandums
+// ---------------------------------------------------------------------------
+
+/** A kind of leave and its policy. Edited in Settings; amending one never rewrites past approvals. */
+export const leaveTypes = pgTable(
+	'leave_types',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		/** Short label printed on the DTR (`SIL`, `SL`). */
+		code: text('code').notNull(),
+		name: text('name').notNull(),
+		/** What this leave is for, shown in settings (the legal basis for statutory ones). */
+		description: text('description'),
+		statutory: boolean('statutory').notNull().default(false),
+		paid: boolean('paid').notNull().default(true),
+		daysPerYear: doublePrecision('days_per_year')
+			.notNull()
+			.default(0),
+		/** 'working' counts only rostered work days; 'calendar' counts every day in the range. */
+		dayCount: text('day_count').notNull().default('working'),
+		minServiceMonths: integer('min_service_months').notNull().default(0),
+		/** Employment types that may take it; empty = everyone. */
+		employmentTypes: text('employment_types').array().notNull().default([]),
+		/** 'male' | 'female' | null */
+		sexRestriction: text('sex_restriction'),
+		halfDayAllowed: boolean('half_day_allowed').notNull().default(false),
+		carryOverDays: doublePrecision('carry_over_days')
+			.notNull()
+			.default(0),
+		cashConvertible: boolean('cash_convertible').notNull().default(false),
+		requiresDocument: boolean('requires_document').notNull().default(false),
+		active: boolean('active').notNull().default(true),
+		sortOrder: integer('sort_order').notNull().default(0),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [uniqueIndex('leave_types_hotel_code_idx').on(t.hotelId, t.code)]
+);
+
+export const leaveRequests = pgTable(
+	'leave_requests',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		employeeId: uuid('employee_id')
+			.notNull()
+			.references(() => employees.id, { onDelete: 'cascade' }),
+		leaveTypeId: uuid('leave_type_id')
+			.notNull()
+			.references(() => leaveTypes.id, { onDelete: 'restrict' }),
+		startDate: date('start_date', { mode: 'string' }).notNull(),
+		endDate: date('end_date', { mode: 'string' }).notNull(),
+		/** 'am' | 'pm' | null — single-day requests only. */
+		halfDay: text('half_day'),
+		/** Counted when filed (working days or calendar days per the type). */
+		days: doublePrecision('days').notNull(),
+		/** Copied from the type at filing so a later policy change never rewrites it. */
+		paid: boolean('paid').notNull(),
+		reason: text('reason'),
+		documentNote: text('document_note'),
+		/** 'approved' | 'cancelled' (HR files and approves in one step). */
+		status: text('status').notNull().default('approved'),
+		filedByUserId: uuid('filed_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		cancelledByUserId: uuid('cancelled_by_user_id').references(() => users.id, {
+			onDelete: 'set null'
+		}),
+		cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+		cancelNote: text('cancel_note'),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [
+		index('leave_requests_hotel_dates_idx').on(t.hotelId, t.startDate, t.endDate),
+		index('leave_requests_employee_idx').on(t.employeeId)
+	]
+);
+
+/** Opening balances, carry-over fixes and cash conversions: days added to (+) or taken from (−) a year's balance. */
+export const leaveAdjustments = pgTable(
+	'leave_adjustments',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		employeeId: uuid('employee_id')
+			.notNull()
+			.references(() => employees.id, { onDelete: 'cascade' }),
+		leaveTypeId: uuid('leave_type_id')
+			.notNull()
+			.references(() => leaveTypes.id, { onDelete: 'cascade' }),
+		year: integer('year').notNull(),
+		days: doublePrecision('days').notNull(),
+		reason: text('reason').notNull(),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt()
+	},
+	(t) => [index('leave_adjustments_employee_year_idx').on(t.employeeId, t.year)]
+);
+
+/** A holiday or memorandum that applies to everyone on that date. */
+export const calendarDays = pgTable(
+	'calendar_days',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		date: date('date', { mode: 'string' }).notNull(),
+		name: text('name').notNull(),
+		/** 'regular_holiday' | 'special_holiday' | 'local_holiday' | 'memo' */
+		kind: text('kind').notNull(),
+		/** Minutes credited as paid for the day; null = the full scheduled day. */
+		creditMinutes: integer('credit_minutes'),
+		/** Late/undertime are not counted that day (a memo letting staff go early, for instance). */
+		waiveLateness: boolean('waive_lateness').notNull().default(false),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [uniqueIndex('calendar_days_hotel_date_idx').on(t.hotelId, t.date)]
 );
 
 // ---------------------------------------------------------------------------

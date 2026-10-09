@@ -16,15 +16,17 @@ import {
 	DATE_FORMATS,
 	clusterPunches,
 	computeMetrics,
-	dayRemarks,
 	nightWindowParts,
 	normalizeEnrollId,
 	parseWallDateTime,
+	recordRemarks,
 	type DtrFlag,
 	type DtrMetrics,
 	type ScheduleInput
 } from '$lib/hr-import';
-import { addDays, monthBounds, timeToMinutes } from '$lib/roster';
+import { addDays, monthBounds, netShiftMinutes, timeToMinutes } from '$lib/roster';
+import { listCalendar } from '$lib/server/hr/calendar';
+import { listLeaveDays, type LeaveDay } from '$lib/server/hr/leave';
 
 export class DtrImportError extends Error {}
 
@@ -418,6 +420,12 @@ export type GeneratedRecord = DtrMetrics & {
 	flags: DtrFlag[];
 	/** At least one punch that day was added by hand. */
 	manualPunch: boolean;
+	/** Approved leave covering the day. */
+	leave: LeaveDay | null;
+	/** Holiday or memorandum on the day. */
+	calendar: { id: string; name: string; kind: string; waiveLateness: boolean } | null;
+	/** Paid-leave minutes counted inside `workedMinutes`. */
+	leaveMinutes: number;
 	action: DtrAction;
 };
 
@@ -611,22 +619,104 @@ export async function computeMonthDtr(
 			isAbsent: false,
 			flags,
 			manualPunch: cluster.punches.some((ms) => manualMs.has(`${normalizeEnrollId(enrollId)}|${ms}`)),
+			leave: null,
+			calendar: null,
+			leaveMinutes: 0,
 			action: actionFor(key),
 			...metrics
 		};
 	});
 
-	// Absences: a working day on the roster, already past, with no punches at all.
+	// Leave, holidays and memos: they cover the schedule, so they win over "absent" and, for a
+	// whole-day leave, over any punches that day. A staff-entered DTR row still wins over all.
+	const [leaveMap, calendarRows] = await Promise.all([
+		scopeIds.length > 0
+			? listLeaveDays(hotelId, range.start, range.end, scopeIds)
+			: Promise.resolve(new Map<string, LeaveDay>()),
+		listCalendar(hotelId, range.start, range.end)
+	]);
+	const calByDate = new Map(calendarRows.map((c) => [c.date, c]));
+	const calInfo = (date: string): GeneratedRecord['calendar'] => {
+		const c = calByDate.get(date);
+		return c ? { id: c.id, name: c.name, kind: c.kind, waiveLateness: c.waiveLateness } : null;
+	};
+	const scheduledMinutes = (sched: (typeof schedRows)[number] | undefined) =>
+		sched
+			? netShiftMinutes({
+					isRestDay: sched.isRestDay,
+					startTime: sched.startTime?.slice(0, 5),
+					endTime: sched.endTime?.slice(0, 5),
+					breakMinutes: sched.breakMinutes
+				})
+			: 0;
+
+	for (let i = 0; i < records.length; i++) {
+		const r = records[i]!;
+		const key = `${r.employeeId}|${r.date}`;
+		const sm = scheduledMinutes(schedByKey.get(key));
+		const lv = leaveMap.get(key) ?? null;
+		const cal = calByDate.get(r.date) ?? null;
+		if (lv && !lv.halfDay) {
+			records[i] = {
+				...r,
+				timeIn: null,
+				timeOut: null,
+				breakOut: null,
+				breakIn: null,
+				flags: [],
+				manualPunch: false,
+				leave: lv,
+				calendar: null,
+				workedMinutes: lv.paid ? sm : 0,
+				leaveMinutes: lv.paid ? sm : 0,
+				otMinutes: 0,
+				nightDiffMinutes: 0,
+				tardinessMinutes: 0,
+				undertimeMinutes: 0
+			};
+		} else if (lv) {
+			const half = Math.round(sm / 2);
+			r.leave = lv;
+			r.undertimeMinutes = Math.max(0, r.undertimeMinutes - half);
+			if (lv.paid) {
+				r.workedMinutes = Math.min(sm, r.workedMinutes + half);
+				r.leaveMinutes = half;
+			}
+		} else if (cal) {
+			const credit = cal.creditMinutes ?? sm;
+			r.workedMinutes = Math.max(r.workedMinutes, credit);
+			if (cal.waiveLateness) {
+				r.tardinessMinutes = 0;
+				r.undertimeMinutes = 0;
+			}
+			r.calendar = calInfo(r.date);
+		}
+	}
+
+	// Days with no punches: leave or a holiday/memo credits the day; otherwise a past working
+	// day is an absence.
 	const punchedDays = new Set(clustered.map((c) => `${c.emp.id}|${c.date}`));
 	for (const emp of inScope) {
 		for (const sched of schedRows) {
 			if (sched.employeeId !== emp.id || sched.isRestDay || !sched.startTime) continue;
-			if (sched.date >= today) continue;
 			const key = `${emp.id}|${sched.date}`;
 			if (punchedDays.has(key)) continue;
+			const lv = leaveMap.get(key) ?? null;
+			const cal = calByDate.get(sched.date) ?? null;
+			if (!lv && !cal && sched.date >= today) continue;
 			const action = actionFor(key);
 			// A manual entry for the day already speaks for it; nothing to add or show.
 			if (action === 'keep_manual') continue;
+			const sm = scheduledMinutes(sched);
+			let credit = 0;
+			let leaveMinutes = 0;
+			if (lv) {
+				const covered = lv.halfDay ? Math.round(sm / 2) : sm;
+				credit = lv.paid ? covered : 0;
+				leaveMinutes = credit;
+			} else if (cal) {
+				credit = cal.creditMinutes ?? sm;
+			}
 			records.push({
 				employeeId: emp.id,
 				employeeName: `${emp.firstName} ${emp.lastName}`,
@@ -637,11 +727,14 @@ export async function computeMonthDtr(
 				breakOut: null,
 				breakIn: null,
 				scheduleId: sched.id,
-				isAbsent: true,
+				isAbsent: !lv && !cal,
 				flags: [],
 				manualPunch: false,
+				leave: lv,
+				calendar: lv ? null : calInfo(sched.date),
+				leaveMinutes,
 				action,
-				workedMinutes: 0,
+				workedMinutes: credit,
 				otMinutes: 0,
 				nightDiffMinutes: 0,
 				tardinessMinutes: 0,
@@ -685,7 +778,7 @@ export async function saveMonthDtr(
 				.where(
 					and(
 						eq(dtrEntries.hotelId, hotelId),
-						eq(dtrEntries.source, 'biometric'),
+						inArray(dtrEntries.source, ['biometric', 'leave', 'calendar']),
 						inArray(dtrEntries.employeeId, scopeIds),
 						gte(dtrEntries.date, result.range.start),
 						lte(dtrEntries.date, result.range.end)
@@ -709,8 +802,11 @@ export async function saveMonthDtr(
 					tardinessMinutes: r.tardinessMinutes,
 					undertimeMinutes: r.undertimeMinutes,
 					isAbsent: r.isAbsent,
-					remarks: r.isAbsent ? 'Absent' : dayRemarks(r.flags, r.manualPunch) || null,
-					source: 'biometric',
+					remarks: recordRemarks(r) || null,
+					leaveRequestId: r.leave?.requestId ?? null,
+					calendarDayId: r.calendar?.id ?? null,
+					leaveMinutes: r.leaveMinutes,
+					source: r.leave && !r.timeIn ? 'leave' : r.calendar && !r.timeIn ? 'calendar' : 'biometric',
 					biometricEnrollId: r.enrollId
 				}))
 			);

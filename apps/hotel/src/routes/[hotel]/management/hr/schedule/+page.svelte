@@ -933,6 +933,8 @@
 										{@const tpl = s ? matchTemplate(s) : undefined}
 										{@const cellWarnings = warningsByCell.get(key) ?? []}
 										{@const isSel = selected.has(key) || dragKeys.has(key)}
+										{@const lv = data.leave[key]}
+										{@const cal = data.calendar[d]}
 										<td
 											class="border-b border-r border-border p-1 {d === data.today
 												? 'bg-brand/5'
@@ -979,6 +981,13 @@
 														<PlusIcon
 															class="size-3.5 text-ink-muted opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
 														/>
+													{/if}
+													{#if lv || cal}
+														<span
+															class="absolute right-1 bottom-0.5 rounded bg-brand/15 px-1 text-[10px] font-semibold text-ink"
+															title={lv ? `${lv.name}${lv.half ? ' (half day)' : ''}` : cal?.name}
+															>{lv ? lv.code + (lv.half ? '½' : '') : cal?.kind === 'memo' ? 'Memo' : 'Hol'}</span
+														>
 													{/if}
 													{#if cellWarnings.length > 0}
 														<span

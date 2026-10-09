@@ -80,7 +80,7 @@ export const ROLE_CAPS: Record<MembershipRole, string[]> = {
 	// is a coarse section-visibility grant only (gates the "HR" nav entry, same role
 	// `finance:read` plays for the Finance section) — the actual per-feature gates within
 	// HR pages are `employee:*`/`schedule:*`/`dtr:*` below.
-	hr: ['hr:read', 'employee:*', 'schedule:*', 'dtr:*', 'payroll:*', 'reports:read'],
+	hr: ['hr:read', 'employee:*', 'schedule:*', 'dtr:*', 'leave:*', 'payroll:*', 'reports:read'],
 	read_only: ['*:read']
 };
 
@@ -175,6 +175,7 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 	{ cap: 'employee:*', label: 'Register and manage employee records', section: 'HR & Employees' },
 	{ cap: 'schedule:*', label: 'Create and manage employee work schedules', section: 'HR & Employees' },
 	{ cap: 'dtr:*', label: 'Manage time records / biometric import', section: 'HR & Employees' },
+	{ cap: 'leave:*', label: 'File and cancel leave, set leave policy and the holiday calendar', section: 'HR & Employees' },
 
 	{ cap: 'payroll:*', label: 'Run payroll, manage payslips and cash advances', section: 'Payroll' },
 

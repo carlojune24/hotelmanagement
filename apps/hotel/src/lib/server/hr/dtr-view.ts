@@ -1,4 +1,4 @@
-import { dayRemarks } from '$lib/hr-import';
+import { recordRemarks } from '$lib/hr-import';
 import { datesBetween, toHHMM } from '$lib/roster';
 import type { GeneratedRecord } from '$lib/server/hr/dtr-import';
 import type { listDtrEntries } from '$lib/server/hr/dtr';
@@ -20,8 +20,8 @@ export type DtrDay = {
 	lateMinutes: number;
 	undertimeMinutes: number;
 	remarks: string;
-	/** work = has times; absent / rest = that state; empty = nothing rostered or not yet happened. */
-	kind: 'work' | 'absent' | 'rest' | 'empty';
+	/** work = has times; leave / holiday = covered without punches; absent / rest = that state; empty = nothing rostered or not yet happened. */
+	kind: 'work' | 'absent' | 'rest' | 'empty' | 'leave' | 'holiday';
 	/** The row came from a staff-entered record rather than the biometric. */
 	manual: boolean;
 };
@@ -46,6 +46,8 @@ export type DayRecord = {
 	isAbsent: boolean;
 	remarks: string;
 	manual: boolean;
+	/** Set when the day is credited rather than punched (leave / holiday / memo). */
+	credit: 'leave' | 'holiday' | null;
 };
 
 type RosterShift = Awaited<ReturnType<typeof listSchedules>>[number];
@@ -61,8 +63,9 @@ export function recordFromGenerated(r: GeneratedRecord): DayRecord {
 		tardinessMinutes: r.tardinessMinutes,
 		undertimeMinutes: r.undertimeMinutes,
 		isAbsent: r.isAbsent,
-		remarks: r.isAbsent ? 'Absent' : dayRemarks(r.flags, r.manualPunch),
-		manual: r.manualPunch
+		remarks: recordRemarks(r),
+		manual: r.manualPunch,
+		credit: r.timeIn !== null ? null : r.leave ? 'leave' : r.calendar ? 'holiday' : null
 	};
 }
 
@@ -77,7 +80,8 @@ export function recordFromSaved(e: SavedEntry): DayRecord {
 		undertimeMinutes: e.undertimeMinutes,
 		isAbsent: e.isAbsent,
 		remarks: e.isAbsent ? 'Absent' : (e.remarks ?? (e.source === 'manual' ? 'Entered by staff' : '')),
-		manual: e.source === 'manual'
+		manual: e.source === 'manual',
+		credit: e.source === 'leave' ? 'leave' : e.source === 'calendar' ? 'holiday' : null
 	};
 }
 
@@ -137,6 +141,21 @@ export function buildDtrDays(opts: {
 				remarks: rec.remarks || 'Absent',
 				kind: 'absent' as const,
 				manual: rec.manual
+			};
+		}
+		if (rec?.credit) {
+			return {
+				...base,
+				timeIn: null,
+				breakOut: null,
+				breakIn: null,
+				timeOut: null,
+				workedMinutes: rec.workedMinutes,
+				lateMinutes: 0,
+				undertimeMinutes: 0,
+				remarks: rec.remarks,
+				kind: rec.credit,
+				manual: false
 			};
 		}
 		if (rec) {
