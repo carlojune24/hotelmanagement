@@ -56,7 +56,8 @@ describe('normalizeEnrollId', () => {
 describe('clusterPunches', () => {
 	it('pairs first/last of a day and drops double taps', () => {
 		const [c] = clusterPunches([at(7, 58), at(7, 59), at(12), at(16, 3)]);
-		expect(c).toMatchObject(cl(at(7, 58), at(16, 3), 3));
+		expect(c).toMatchObject({ inMs: at(7, 58), outMs: at(16, 3), punchCount: 3 });
+		expect(c?.punches).toEqual([at(7, 58), at(12), at(16, 3)]);
 	});
 	it('splits shifts on a long silence and keeps an overnight shift together', () => {
 		const clusters = clusterPunches([at(22), at(30), at(46), at(54)]); // 22:00→06:00 next day, then 22:00→06:00
