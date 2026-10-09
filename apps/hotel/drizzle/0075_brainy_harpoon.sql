@@ -1,4 +1,0 @@
-ALTER TABLE "dining_order_items" ADD COLUMN "started_by_user_id" uuid;--> statement-breakpoint
-ALTER TABLE "dining_order_items" ADD COLUMN "ready_by_user_id" uuid;--> statement-breakpoint
-ALTER TABLE "dining_order_items" ADD CONSTRAINT "dining_order_items_started_by_user_id_users_id_fk" FOREIGN KEY ("started_by_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "dining_order_items" ADD CONSTRAINT "dining_order_items_ready_by_user_id_users_id_fk" FOREIGN KEY ("ready_by_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;

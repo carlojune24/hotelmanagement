@@ -10,6 +10,9 @@ import {
 import { db } from '$lib/server/db/index';
 import { employees, memberships, roles } from '$lib/server/db/schema/index';
 import { mintRef } from '$lib/server/ids';
+import { normalizeEnrollId } from '$lib/hr-import';
+
+export class EmployeeError extends Error {}
 
 export const employeeFormSchema = z.object({
 	employeeNo: z.string().trim().min(1).max(40),
@@ -24,6 +27,7 @@ export const employeeFormSchema = z.object({
 	status: employeeStatus.default('active'),
 	position: z.string().trim().min(1).max(120),
 	email: z.string().trim().email('Not a valid email address').max(200).optional().or(z.literal('')),
+	biometricEnrollId: z.string().trim().max(40).optional(),
 	department: z.string().trim().max(120).optional(),
 	costCenter: z.string().trim().max(80).optional(),
 	payBasis,
@@ -54,6 +58,7 @@ function toInsertValues(hotelId: string, input: EmployeeFormInput) {
 		status: input.status,
 		position: input.position,
 		email: input.email || null,
+		biometricEnrollId: input.biometricEnrollId || null,
 		department: input.department || null,
 		costCenter: input.costCenter || null,
 		payBasis: input.payBasis,
@@ -154,7 +159,28 @@ export async function getEmployee(hotelId: string, id: string) {
 		.then((r) => r.at(0) ?? null);
 }
 
+/** Biometric import matches punches by this id, so two employees must never share one
+ *  (compared the way the import does: `0042`, `42` and `42.0` are the same id). */
+async function assertEnrollIdFree(hotelId: string, enrollId: string | undefined, exceptId?: string) {
+	if (!enrollId) return;
+	const wanted = normalizeEnrollId(enrollId);
+	const rows = await db
+		.select({
+			id: employees.id,
+			firstName: employees.firstName,
+			lastName: employees.lastName,
+			enroll: employees.biometricEnrollId
+		})
+		.from(employees)
+		.where(and(eq(employees.hotelId, hotelId), isNull(employees.deletedAt)));
+	const clash = rows.find((r) => r.id !== exceptId && r.enroll && normalizeEnrollId(r.enroll) === wanted);
+	if (clash) {
+		throw new EmployeeError(`Biometric ID ${enrollId} is already used by ${clash.firstName} ${clash.lastName}.`);
+	}
+}
+
 export async function createEmployee(hotelId: string, input: EmployeeFormInput, photoUrl: string | null) {
+	await assertEnrollIdFree(hotelId, input.biometricEnrollId);
 	const [row] = await db
 		.insert(employees)
 		.values({ ...toInsertValues(hotelId, input), photoUrl, personRef: mintRef('person') })
@@ -168,6 +194,7 @@ export async function updateEmployee(
 	input: EmployeeFormInput,
 	photoUrl: string | null
 ) {
+	await assertEnrollIdFree(hotelId, input.biometricEnrollId, id);
 	const [row] = await db
 		.update(employees)
 		.set({ ...toInsertValues(hotelId, input), photoUrl, updatedAt: new Date() })

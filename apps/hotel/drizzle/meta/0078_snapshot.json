@@ -1,6 +1,6 @@
 {
-  "id": "d53388eb-76ee-45ad-8a6c-757121c4744c",
-  "prevId": "0b201d51-91d1-4374-b7ce-997af6d5d605",
+  "id": "bca1d390-4b4e-4079-a399-d6c959837b76",
+  "prevId": "70ee18da-66fd-4c0b-b82a-c80bcee5cbeb",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -14214,6 +14214,145 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.biometric_punches": {
+      "name": "biometric_punches",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "hotel_id": {
+          "name": "hotel_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enroll_id": {
+          "name": "enroll_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enroll_key": {
+          "name": "enroll_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "punched_at": {
+          "name": "punched_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_file": {
+          "name": "source_file",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "imported_by_user_id": {
+          "name": "imported_by_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "biometric_punches_unique_idx": {
+          "name": "biometric_punches_unique_idx",
+          "columns": [
+            {
+              "expression": "hotel_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "enroll_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "punched_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "biometric_punches_hotel_time_idx": {
+          "name": "biometric_punches_hotel_time_idx",
+          "columns": [
+            {
+              "expression": "hotel_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "punched_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "biometric_punches_hotel_id_hotels_id_fk": {
+          "name": "biometric_punches_hotel_id_hotels_id_fk",
+          "tableFrom": "biometric_punches",
+          "tableTo": "hotels",
+          "columnsFrom": [
+            "hotel_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "biometric_punches_imported_by_user_id_users_id_fk": {
+          "name": "biometric_punches_imported_by_user_id_users_id_fk",
+          "tableFrom": "biometric_punches",
+          "tableTo": "users",
+          "columnsFrom": [
+            "imported_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.cash_advances": {
       "name": "cash_advances",
       "schema": "",
@@ -14421,6 +14560,18 @@
         },
         "time_out": {
           "name": "time_out",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "break_out": {
+          "name": "break_out",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "break_in": {
+          "name": "break_in",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -15349,6 +15500,18 @@
           "notNull": true,
           "default": 0
         },
+        "break_start": {
+          "name": "break_start",
+          "type": "time",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "break_end": {
+          "name": "break_end",
+          "type": "time",
+          "primaryKey": false,
+          "notNull": false
+        },
         "night_diff_window": {
           "name": "night_diff_window",
           "type": "jsonb",
@@ -15496,6 +15659,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "break_start": {
+          "name": "break_start",
+          "type": "time",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "break_end": {
+          "name": "break_end",
+          "type": "time",
+          "primaryKey": false,
+          "notNull": false
         },
         "tag": {
           "name": "tag",

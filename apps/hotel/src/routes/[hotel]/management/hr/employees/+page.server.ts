@@ -7,7 +7,8 @@ import {
 	employeeFormSchema,
 	getEmployee,
 	listEmployeesWithTeamRole,
-	updateEmployee
+	updateEmployee,
+	EmployeeError
 } from '$lib/server/hr/employees';
 import { deleteUploadIfOwned, saveUpload, UploadValidationError } from '$lib/server/uploads';
 import type { Actions, PageServerLoad } from './$types';
@@ -45,7 +46,13 @@ export const actions: Actions = {
 			throw e;
 		}
 
-		const employee = await createEmployee(hotelId, parsed.data, photoUrl);
+		let employee;
+		try {
+			employee = await createEmployee(hotelId, parsed.data, photoUrl);
+		} catch (e) {
+			if (e instanceof EmployeeError) return fail(400, { error: e.message });
+			throw e;
+		}
 		await writeAudit({
 			hotelId,
 			actor: event.locals.user,
@@ -90,7 +97,13 @@ export const actions: Actions = {
 			throw e;
 		}
 
-		const employee = await updateEmployee(hotelId, employeeId, parsed.data, photoUrl);
+		let employee;
+		try {
+			employee = await updateEmployee(hotelId, employeeId, parsed.data, photoUrl);
+		} catch (e) {
+			if (e instanceof EmployeeError) return fail(400, { error: e.message });
+			throw e;
+		}
 		if (!employee) return fail(400, { error: 'Employee not found.' });
 
 		await writeAudit({

@@ -28,6 +28,8 @@
 		addDays,
 		computeRosterWarnings,
 		crossesMidnight,
+		breakWindowError,
+		breakWindowMinutes,
 		formatHours,
 		netShiftMinutes,
 		sameShift,
@@ -45,6 +47,9 @@
 		startTime: string | null;
 		endTime: string | null;
 		breakMinutes: number;
+		/** Split shift: the unpaid gap between the two parts. */
+		breakStart?: string | null;
+		breakEnd?: string | null;
 	};
 	type Cell = { employeeId: string; date: string };
 	type CellState = Cell & { shift: Shift | null };
@@ -70,7 +75,9 @@
 				isRestDay: e.isRestDay,
 				startTime: e.startTime,
 				endTime: e.endTime,
-				breakMinutes: e.breakMinutes
+				breakMinutes: e.breakMinutes,
+				breakStart: e.breakStart,
+				breakEnd: e.breakEnd
 			});
 		}
 		for (const [key, shift] of overlay) {
@@ -144,7 +151,11 @@
 		return `${h}${m ? `:${String(m).padStart(2, '0')}` : ''}${h24 < 12 ? 'a' : 'p'}`;
 	}
 	const range = (s: Shift) =>
-		s.startTime && s.endTime ? `${shortTime(s.startTime)}–${shortTime(s.endTime)}` : '—';
+		s.startTime && s.endTime
+			? s.breakStart && s.breakEnd
+				? `${shortTime(s.startTime)}–${shortTime(s.breakStart)} · ${shortTime(s.breakEnd)}–${shortTime(s.endTime)}`
+				: `${shortTime(s.startTime)}–${shortTime(s.endTime)}`
+			: '—';
 	const dayName = (d: string) =>
 		new Date(`${d}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
 	const dayNum = (d: string) =>
@@ -164,7 +175,9 @@
 		isRestDay: t.isRestDay,
 		startTime: t.startTime,
 		endTime: t.endTime,
-		breakMinutes: t.breakMinutes
+		breakMinutes: t.breakMinutes,
+		breakStart: t.breakStart,
+		breakEnd: t.breakEnd
 	});
 	const matchTemplate = (s: Shift) => data.templates.find((t) => sameShift(templateShift(t), s));
 
@@ -451,6 +464,9 @@
 	let customStart = $state('09:00');
 	let customEnd = $state('17:00');
 	let customBreak = $state(60);
+	let customSplit = $state(false);
+	let customBreakStart = $state('12:00');
+	let customBreakEnd = $state('13:00');
 	$effect(() => {
 		if (!editing) return;
 		const s = shifts.get(editing);
@@ -458,8 +474,33 @@
 			customStart = s.startTime;
 			customEnd = s.endTime;
 			customBreak = s.breakMinutes;
+			customSplit = Boolean(s.breakStart && s.breakEnd);
+			if (s.breakStart && s.breakEnd) {
+				customBreakStart = s.breakStart;
+				customBreakEnd = s.breakEnd;
+			}
+		} else {
+			customSplit = false;
 		}
 	});
+	/** Seeds the break window with the usual noon hour, or the middle of the shift if that falls outside it. */
+	function suggestBreak(start: string, end: string): [string, string] {
+		const noonFits = breakWindowError(start, end, '12:00', '13:00') === null;
+		if (noonFits) return ['12:00', '13:00'];
+		const s = timeToMinutes(start) ?? 0;
+		const e = timeToMinutes(end) ?? 0;
+		const mid = Math.floor((s + e) / 2 / 5) * 5;
+		const hhmm = (m: number) =>
+			`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+		return [hhmm(mid - 30), hhmm(mid + 30)];
+	}
+	function startCustomSplit() {
+		[customBreakStart, customBreakEnd] = suggestBreak(customStart, customEnd);
+		customSplit = true;
+	}
+	const customSplitError = $derived(
+		customSplit ? breakWindowError(customStart, customEnd, customBreakStart, customBreakEnd) : null
+	);
 
 	function applyFromPopover(cell: Cell, shift: Shift | null) {
 		editing = null;
@@ -469,6 +510,21 @@
 	function applyCustom(cell: Cell) {
 		if (!customStart || !customEnd || customStart === customEnd) {
 			toast.error('Enter a start and end time that differ.');
+			return;
+		}
+		if (customSplit) {
+			if (customSplitError) {
+				toast.error(customSplitError);
+				return;
+			}
+			applyFromPopover(cell, {
+				isRestDay: false,
+				startTime: customStart,
+				endTime: customEnd,
+				breakMinutes: breakWindowMinutes(customBreakStart, customBreakEnd),
+				breakStart: customBreakStart,
+				breakEnd: customBreakEnd
+			});
 			return;
 		}
 		applyFromPopover(cell, {
@@ -517,6 +573,9 @@
 		startTime: string;
 		endTime: string;
 		breakMinutes: number;
+		split: boolean;
+		breakStart: string;
+		breakEnd: string;
 		tag: string;
 	};
 	const blankDraft = (): TplDraft => ({
@@ -526,6 +585,9 @@
 		startTime: '09:00',
 		endTime: '17:00',
 		breakMinutes: 60,
+		split: false,
+		breakStart: '12:00',
+		breakEnd: '13:00',
 		tag: 'neutral'
 	});
 	let draft = $state<TplDraft>(blankDraft());
@@ -537,8 +599,20 @@
 			startTime: t.startTime ?? '09:00',
 			endTime: t.endTime ?? '17:00',
 			breakMinutes: t.breakMinutes,
+			split: Boolean(t.breakStart && t.breakEnd),
+			breakStart: t.breakStart ?? '12:00',
+			breakEnd: t.breakEnd ?? '13:00',
 			tag: t.tag
 		});
+	function startDraftSplit() {
+		[draft.breakStart, draft.breakEnd] = suggestBreak(draft.startTime, draft.endTime);
+		draft.split = true;
+	}
+	const draftSplitError = $derived(
+		draft.split && !draft.isRestDay
+			? breakWindowError(draft.startTime, draft.endTime, draft.breakStart, draft.breakEnd)
+			: null
+	);
 
 	$effect(() => {
 		if (form?.error) toast.error(form.error);
@@ -859,6 +933,8 @@
 										{@const tpl = s ? matchTemplate(s) : undefined}
 										{@const cellWarnings = warningsByCell.get(key) ?? []}
 										{@const isSel = selected.has(key) || dragKeys.has(key)}
+										{@const lv = data.leave[key]}
+										{@const cal = data.calendar[d]}
 										<td
 											class="border-b border-r border-border p-1 {d === data.today
 												? 'bg-brand/5'
@@ -905,6 +981,13 @@
 														<PlusIcon
 															class="size-3.5 text-ink-muted opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
 														/>
+													{/if}
+													{#if lv || cal}
+														<span
+															class="absolute right-1 bottom-0.5 rounded bg-brand/15 px-1 text-[10px] font-semibold text-ink"
+															title={lv ? `${lv.name}${lv.half ? ' (half day)' : ''}` : cal?.name}
+															>{lv ? lv.code + (lv.half ? '½' : '') : cal?.kind === 'memo' ? 'Memo' : 'Hol'}</span
+														>
 													{/if}
 													{#if cellWarnings.length > 0}
 														<span
@@ -966,39 +1049,65 @@
 															>
 																Custom hours
 															</p>
-															<div class="grid grid-cols-3 gap-2">
-																<div>
-																	<Label for="cs" class="text-xs">Start</Label>
-																	<Input
-																		id="cs"
-																		type="time"
-																		bind:value={customStart}
-																		class="mt-1 h-8 px-2 text-sm"
-																	/>
+															{#if customSplit}
+																<div class="space-y-2">
+																	<div>
+																		<p class="text-xs font-medium text-ink">First part</p>
+																		<div class="mt-1 grid grid-cols-2 gap-2">
+																			<div>
+																				<Label for="cs" class="text-xs text-ink-muted">Start</Label>
+																				<Input id="cs" type="time" bind:value={customStart} class="mt-1 h-8 px-2 text-sm" />
+																			</div>
+																			<div>
+																				<Label for="cbs" class="text-xs text-ink-muted">End</Label>
+																				<Input id="cbs" type="time" bind:value={customBreakStart} class="mt-1 h-8 px-2 text-sm" />
+																			</div>
+																		</div>
+																	</div>
+																	<div>
+																		<p class="text-xs font-medium text-ink">Second part</p>
+																		<div class="mt-1 grid grid-cols-2 gap-2">
+																			<div>
+																				<Label for="cbe" class="text-xs text-ink-muted">Start</Label>
+																				<Input id="cbe" type="time" bind:value={customBreakEnd} class="mt-1 h-8 px-2 text-sm" />
+																			</div>
+																			<div>
+																				<Label for="ce" class="text-xs text-ink-muted">End</Label>
+																				<Input id="ce" type="time" bind:value={customEnd} class="mt-1 h-8 px-2 text-sm" />
+																			</div>
+																		</div>
+																	</div>
+																	<div class="flex items-center justify-between gap-2">
+																		<p class="text-xs tabular-nums {customSplitError ? 'text-danger' : 'text-ink-muted'}" aria-live="polite">
+																			{customSplitError ?? `Break ${formatHours(breakWindowMinutes(customBreakStart, customBreakEnd))}, unpaid`}
+																		</p>
+																		<Button type="button" variant="ghost" size="sm" class="h-7 px-2" onclick={() => (customSplit = false)}>
+																			<XIcon class="size-3.5" /> Single
+																		</Button>
+																	</div>
 																</div>
-																<div>
-																	<Label for="ce" class="text-xs">End</Label>
-																	<Input
-																		id="ce"
-																		type="time"
-																		bind:value={customEnd}
-																		class="mt-1 h-8 px-2 text-sm"
-																	/>
+															{:else}
+																<div class="grid grid-cols-3 gap-2">
+																	<div>
+																		<Label for="cs" class="text-xs">Start</Label>
+																		<Input id="cs" type="time" bind:value={customStart} class="mt-1 h-8 px-2 text-sm" />
+																	</div>
+																	<div>
+																		<Label for="ce" class="text-xs">End</Label>
+																		<Input id="ce" type="time" bind:value={customEnd} class="mt-1 h-8 px-2 text-sm" />
+																	</div>
+																	<div>
+																		<Label for="cb" class="text-xs">Break (m)</Label>
+																		<Input id="cb" type="number" min="0" max="600" bind:value={customBreak} class="mt-1 h-8 px-2 text-sm" />
+																	</div>
 																</div>
-																<div>
-																	<Label for="cb" class="text-xs">Break (m)</Label>
-																	<Input
-																		id="cb"
-																		type="number"
-																		min="0"
-																		max="600"
-																		bind:value={customBreak}
-																		class="mt-1 h-8 px-2 text-sm"
-																	/>
-																</div>
-															</div>
-															{#if crossesMidnight(customStart, customEnd)}
-																<p class="text-xs text-ink-muted">Ends the next day.</p>
+																{#if crossesMidnight(customStart, customEnd)}
+																	<p class="text-xs text-ink-muted">Ends the next day.</p>
+																{:else}
+																	<Button type="button" variant="ghost" size="sm" class="h-7 px-2" onclick={() => startCustomSplit()}>
+																		<PlusIcon class="size-3.5" /> Add second part
+																	</Button>
+																{/if}
 															{/if}
 														</div>
 														<div class="flex items-center justify-between gap-2">
@@ -1168,44 +1277,65 @@
 						Rest day
 					</label>
 					{#if !draft.isRestDay}
-						<div class="grid grid-cols-3 gap-2">
-							<div>
-								<Label for="tplStart">Start</Label>
-								<Input
-									id="tplStart"
-									name="startTime"
-									type="time"
-									required
-									bind:value={draft.startTime}
-									class="mt-1"
-								/>
+						{#if draft.split}
+							<div class="space-y-3">
+								<div>
+									<p class="text-sm font-medium text-ink">First part</p>
+									<div class="mt-1 grid grid-cols-2 gap-2">
+										<div>
+											<Label for="tplStart" class="text-xs text-ink-muted">Start</Label>
+											<Input id="tplStart" name="startTime" type="time" required bind:value={draft.startTime} class="mt-1" />
+										</div>
+										<div>
+											<Label for="tplBreakStart" class="text-xs text-ink-muted">End</Label>
+											<Input id="tplBreakStart" name="breakStart" type="time" required bind:value={draft.breakStart} class="mt-1" />
+										</div>
+									</div>
+								</div>
+								<div>
+									<p class="text-sm font-medium text-ink">Second part</p>
+									<div class="mt-1 grid grid-cols-2 gap-2">
+										<div>
+											<Label for="tplBreakEnd" class="text-xs text-ink-muted">Start</Label>
+											<Input id="tplBreakEnd" name="breakEnd" type="time" required bind:value={draft.breakEnd} class="mt-1" />
+										</div>
+										<div>
+											<Label for="tplEnd" class="text-xs text-ink-muted">End</Label>
+											<Input id="tplEnd" name="endTime" type="time" required bind:value={draft.endTime} class="mt-1" />
+										</div>
+									</div>
+								</div>
+								<div class="flex items-center justify-between gap-2">
+									<p class="text-xs tabular-nums {draftSplitError ? 'text-danger' : 'text-ink-muted'}" aria-live="polite">
+										{draftSplitError ?? `Break ${formatHours(breakWindowMinutes(draft.breakStart, draft.breakEnd))} (${draft.breakStart}\u2013${draft.breakEnd}), unpaid`}
+									</p>
+									<Button type="button" variant="ghost" size="sm" onclick={() => (draft.split = false)}>
+										<XIcon class="size-3.5" /> Single shift
+									</Button>
+								</div>
 							</div>
-							<div>
-								<Label for="tplEnd">End</Label>
-								<Input
-									id="tplEnd"
-									name="endTime"
-									type="time"
-									required
-									bind:value={draft.endTime}
-									class="mt-1"
-								/>
+						{:else}
+							<div class="grid grid-cols-3 gap-2">
+								<div>
+									<Label for="tplStart">Start</Label>
+									<Input id="tplStart" name="startTime" type="time" required bind:value={draft.startTime} class="mt-1" />
+								</div>
+								<div>
+									<Label for="tplEnd">End</Label>
+									<Input id="tplEnd" name="endTime" type="time" required bind:value={draft.endTime} class="mt-1" />
+								</div>
+								<div>
+									<Label for="tplBreak">Break (m)</Label>
+									<Input id="tplBreak" name="breakMinutes" type="number" min="0" max="600" bind:value={draft.breakMinutes} class="mt-1" />
+								</div>
 							</div>
-							<div>
-								<Label for="tplBreak">Break (m)</Label>
-								<Input
-									id="tplBreak"
-									name="breakMinutes"
-									type="number"
-									min="0"
-									max="600"
-									bind:value={draft.breakMinutes}
-									class="mt-1"
-								/>
-							</div>
-						</div>
-						{#if crossesMidnight(draft.startTime, draft.endTime)}
-							<p class="text-xs text-ink-muted">Ends the next day.</p>
+							{#if crossesMidnight(draft.startTime, draft.endTime)}
+								<p class="text-xs text-ink-muted">Ends the next day.</p>
+							{:else}
+								<Button type="button" variant="ghost" size="sm" onclick={() => startDraftSplit()}>
+									<PlusIcon class="size-3.5" /> Add second part
+								</Button>
+							{/if}
 						{/if}
 					{/if}
 					<fieldset>

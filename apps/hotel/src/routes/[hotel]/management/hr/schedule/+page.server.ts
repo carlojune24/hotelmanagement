@@ -25,6 +25,8 @@ import {
 	updateShiftTemplate
 } from '$lib/server/hr/shift-templates';
 import { listEmployees } from '$lib/server/hr/employees';
+import { listCalendar } from '$lib/server/hr/calendar';
+import { listLeaveDays } from '$lib/server/hr/leave';
 import { addDays, isDateString, mondayOf, weekDates } from '$lib/roster';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -38,11 +40,13 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const weekStart = mondayOf(anchor && isDateString(anchor) ? anchor : today);
 	const weekEnd = addDays(weekStart, 6);
 
-	const [entries, allEmployees, templates, previousWeek] = await Promise.all([
+	const [entries, allEmployees, templates, previousWeek, leaveDays, calendar] = await Promise.all([
 		listSchedules(hotel.id, weekStart, weekEnd),
 		listEmployees(hotel.id),
 		listShiftTemplates(hotel.id),
-		listSchedules(hotel.id, addDays(weekStart, -7), addDays(weekStart, -1))
+		listSchedules(hotel.id, addDays(weekStart, -7), addDays(weekStart, -1)),
+		listLeaveDays(hotel.id, weekStart, weekEnd),
+		listCalendar(hotel.id, weekStart, weekEnd)
 	]);
 
 	// A separated employee drops off the roster, unless they still hold shifts this week.
@@ -66,7 +70,13 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		entries,
 		employees: rosterEmployees,
 		templates,
-		previousWeekShiftCount: previousWeek.length
+		previousWeekShiftCount: previousWeek.length,
+		/** `employeeId|date` → leave covering that day (an overlay: the shift itself is untouched). */
+		leave: Object.fromEntries(
+			[...leaveDays].map(([key, l]) => [key, { code: l.code, name: l.name, half: l.halfDay }])
+		),
+		/** date → holiday / memo name. */
+		calendar: Object.fromEntries(calendar.map((c) => [c.date, { name: c.name, kind: c.kind }]))
 	};
 };
 
@@ -203,7 +213,9 @@ export const actions: Actions = {
 			...raw,
 			isRestDay: raw.isRestDay === 'on' || raw.isRestDay === '1',
 			startTime: raw.startTime || undefined,
-			endTime: raw.endTime || undefined
+			endTime: raw.endTime || undefined,
+			breakStart: raw.breakStart || undefined,
+			breakEnd: raw.breakEnd || undefined
 		});
 		if (!parsed.success) {
 			return fail(400, { error: parsed.error.issues[0]?.message ?? 'Check the shift details.' });

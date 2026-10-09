@@ -1,6 +1,6 @@
 {
-  "id": "d53388eb-76ee-45ad-8a6c-757121c4744c",
-  "prevId": "0b201d51-91d1-4374-b7ce-997af6d5d605",
+  "id": "70ee18da-66fd-4c0b-b82a-c80bcee5cbeb",
+  "prevId": "aad7be02-b8ca-4689-a2d9-09e395824406",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -14425,6 +14425,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "break_out": {
+          "name": "break_out",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "break_in": {
+          "name": "break_in",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "worked_minutes": {
           "name": "worked_minutes",
           "type": "integer",
@@ -15349,6 +15361,18 @@
           "notNull": true,
           "default": 0
         },
+        "break_start": {
+          "name": "break_start",
+          "type": "time",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "break_end": {
+          "name": "break_end",
+          "type": "time",
+          "primaryKey": false,
+          "notNull": false
+        },
         "night_diff_window": {
           "name": "night_diff_window",
           "type": "jsonb",
@@ -15496,6 +15520,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "break_start": {
+          "name": "break_start",
+          "type": "time",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "break_end": {
+          "name": "break_end",
+          "type": "time",
+          "primaryKey": false,
+          "notNull": false
         },
         "tag": {
           "name": "tag",

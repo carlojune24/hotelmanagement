@@ -6,6 +6,7 @@ import {
 	index,
 	integer,
 	jsonb,
+	doublePrecision,
 	pgTable,
 	text,
 	time,
@@ -122,6 +123,10 @@ export const schedules = pgTable(
 		startTime: time('start_time'),
 		endTime: time('end_time'),
 		breakMinutes: integer('break_minutes').notNull().default(0),
+		/** Split shift: the unpaid break window (e.g. 12:00–13:00). Both null for a straight
+		 *  shift; when set, `breakMinutes` is always the gap between them. */
+		breakStart: time('break_start'),
+		breakEnd: time('break_end'),
 		/** `{ start, end }`, both `HH:MM` — unset falls back to the hotel's default window. */
 		nightDiffWindow: jsonb('night_diff_window'),
 		createdAt: createdAt(),
@@ -158,6 +163,8 @@ export const shiftTemplates = pgTable(
 		startTime: time('start_time'),
 		endTime: time('end_time'),
 		breakMinutes: integer('break_minutes').notNull().default(0),
+		breakStart: time('break_start'),
+		breakEnd: time('break_end'),
 		/** `neutral` | `brand` | `ok` | `warning` — a fixed set of staff-theme tokens, never a free colour. */
 		tag: text('tag').notNull().default('neutral'),
 		sortOrder: integer('sort_order').notNull().default(0),
@@ -195,6 +202,9 @@ export const dtrEntries = pgTable(
 		date: date('date', { mode: 'string' }).notNull(),
 		timeIn: timestamp('time_in', { withTimezone: true }),
 		timeOut: timestamp('time_out', { withTimezone: true }),
+		/** Split shifts only: the lunch punches between `timeIn` and `timeOut`. */
+		breakOut: timestamp('break_out', { withTimezone: true }),
+		breakIn: timestamp('break_in', { withTimezone: true }),
 		workedMinutes: integer('worked_minutes').notNull().default(0),
 		otMinutes: integer('ot_minutes').notNull().default(0),
 		nightDiffMinutes: integer('night_diff_minutes').notNull().default(0),
@@ -210,6 +220,17 @@ export const dtrEntries = pgTable(
 			onDelete: 'set null'
 		}),
 		correctionNote: text('correction_note'),
+		/** What to flag on the printed DTR (missing punch, added by hand…). */
+		remarks: text('remarks'),
+		/** The approved leave / calendar day this row stands for, when it came from one. */
+		leaveRequestId: uuid('leave_request_id').references(() => leaveRequests.id, {
+			onDelete: 'set null'
+		}),
+		calendarDayId: uuid('calendar_day_id').references(() => calendarDays.id, {
+			onDelete: 'set null'
+		}),
+		/** Minutes credited as paid leave (counted inside `workedMinutes`). */
+		leaveMinutes: integer('leave_minutes').notNull().default(0),
 		createdAt: createdAt(),
 		updatedAt: updatedAt(),
 		deletedAt: deletedAt()
@@ -218,6 +239,222 @@ export const dtrEntries = pgTable(
 		index('dtr_entries_hotel_idx').on(t.hotelId),
 		index('dtr_entries_employee_date_idx').on(t.employeeId, t.date)
 	]
+);
+
+/**
+ * A saved column mapping for a biometric export: which column holds the biometric id and
+ * which the date/time. App-level (not part of the portable `@mm/hr-core` standard) — one
+ * per device brand/export format a hotel uses.
+ */
+export const biometricImportTemplates = pgTable(
+	'biometric_import_templates',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		/** Zero-based column positions. */
+		idColumn: integer('id_column').notNull(),
+		datetimeColumn: integer('datetime_column').notNull(),
+		hasHeader: boolean('has_header').notNull().default(true),
+		/** `auto` | `ymd` | `mdy` | `dmy` — see `lib/hr-import.ts`. */
+		dateFormat: text('date_format').notNull().default('auto'),
+		createdAt: createdAt(),
+		updatedAt: updatedAt(),
+		deletedAt: deletedAt()
+	},
+	(t) => [
+		index('biometric_import_templates_hotel_idx').on(t.hotelId),
+		uniqueIndex('biometric_import_templates_hotel_name_idx')
+			.on(t.hotelId, t.name)
+			.where(sql`deleted_at is null`)
+	]
+);
+
+/** One uploaded biometric file. `period` is the year-month it was filed under (`YYYY-MM`). */
+export const biometricUploads = pgTable(
+	'biometric_uploads',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		fileName: text('file_name').notNull(),
+		period: text('period').notNull(),
+		punchCount: integer('punch_count').notNull().default(0),
+		newCount: integer('new_count').notNull().default(0),
+		uploadedByUserId: uuid('uploaded_by_user_id').references(() => users.id, {
+			onDelete: 'set null'
+		}),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [index('biometric_uploads_hotel_period_idx').on(t.hotelId, t.period)]
+);
+
+/**
+ * Every punch ever imported from a biometric device, exactly as it was read: append-only,
+ * never edited. DTR is generated from these (plus schedules), so a punch whose ID matched
+ * nobody at import time isn't lost; set the employee's Biometric ID and generate again.
+ */
+export const biometricPunches = pgTable(
+	'biometric_punches',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		/** The uploaded file this punch came from; null for punches added by hand. */
+		uploadId: uuid('upload_id').references(() => biometricUploads.id, { onDelete: 'cascade' }),
+		/** 'file' | 'manual' (added by staff because the employee forgot to punch). */
+		source: text('source').notNull().default('file'),
+		/** Why a manual punch was added. */
+		note: text('note'),
+		addedByUserId: uuid('added_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		/** The ID as it appeared in the file (`0042`). */
+		enrollId: text('enroll_id').notNull(),
+		/** Normalised ID (`42`) — what matching and de-duplication use. */
+		enrollKey: text('enroll_key').notNull(),
+		punchedAt: timestamp('punched_at', { withTimezone: true }).notNull(),
+		sourceFile: text('source_file'),
+		importedByUserId: uuid('imported_by_user_id').references(() => users.id, {
+			onDelete: 'set null'
+		}),
+		createdAt: createdAt()
+	},
+	(t) => [
+		uniqueIndex('biometric_punches_unique_idx').on(t.hotelId, t.enrollKey, t.punchedAt),
+		index('biometric_punches_hotel_time_idx').on(t.hotelId, t.punchedAt)
+	]
+);
+
+// ---------------------------------------------------------------------------
+// Leave, holidays and memorandums
+// ---------------------------------------------------------------------------
+
+/** A kind of leave and its policy. Edited in Settings; amending one never rewrites past approvals. */
+export const leaveTypes = pgTable(
+	'leave_types',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		/** Short label printed on the DTR (`SIL`, `SL`). */
+		code: text('code').notNull(),
+		name: text('name').notNull(),
+		/** What this leave is for, shown in settings (the legal basis for statutory ones). */
+		description: text('description'),
+		statutory: boolean('statutory').notNull().default(false),
+		paid: boolean('paid').notNull().default(true),
+		daysPerYear: doublePrecision('days_per_year')
+			.notNull()
+			.default(0),
+		/** 'working' counts only rostered work days; 'calendar' counts every day in the range. */
+		dayCount: text('day_count').notNull().default('working'),
+		minServiceMonths: integer('min_service_months').notNull().default(0),
+		/** Employment types that may take it; empty = everyone. */
+		employmentTypes: text('employment_types').array().notNull().default([]),
+		/** 'male' | 'female' | null */
+		sexRestriction: text('sex_restriction'),
+		halfDayAllowed: boolean('half_day_allowed').notNull().default(false),
+		carryOverDays: doublePrecision('carry_over_days')
+			.notNull()
+			.default(0),
+		cashConvertible: boolean('cash_convertible').notNull().default(false),
+		requiresDocument: boolean('requires_document').notNull().default(false),
+		active: boolean('active').notNull().default(true),
+		sortOrder: integer('sort_order').notNull().default(0),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [uniqueIndex('leave_types_hotel_code_idx').on(t.hotelId, t.code)]
+);
+
+export const leaveRequests = pgTable(
+	'leave_requests',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		employeeId: uuid('employee_id')
+			.notNull()
+			.references(() => employees.id, { onDelete: 'cascade' }),
+		leaveTypeId: uuid('leave_type_id')
+			.notNull()
+			.references(() => leaveTypes.id, { onDelete: 'restrict' }),
+		startDate: date('start_date', { mode: 'string' }).notNull(),
+		endDate: date('end_date', { mode: 'string' }).notNull(),
+		/** 'am' | 'pm' | null — single-day requests only. */
+		halfDay: text('half_day'),
+		/** Counted when filed (working days or calendar days per the type). */
+		days: doublePrecision('days').notNull(),
+		/** Copied from the type at filing so a later policy change never rewrites it. */
+		paid: boolean('paid').notNull(),
+		reason: text('reason'),
+		documentNote: text('document_note'),
+		/** 'approved' | 'cancelled' (HR files and approves in one step). */
+		status: text('status').notNull().default('approved'),
+		filedByUserId: uuid('filed_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		cancelledByUserId: uuid('cancelled_by_user_id').references(() => users.id, {
+			onDelete: 'set null'
+		}),
+		cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+		cancelNote: text('cancel_note'),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [
+		index('leave_requests_hotel_dates_idx').on(t.hotelId, t.startDate, t.endDate),
+		index('leave_requests_employee_idx').on(t.employeeId)
+	]
+);
+
+/** Opening balances, carry-over fixes and cash conversions: days added to (+) or taken from (−) a year's balance. */
+export const leaveAdjustments = pgTable(
+	'leave_adjustments',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		employeeId: uuid('employee_id')
+			.notNull()
+			.references(() => employees.id, { onDelete: 'cascade' }),
+		leaveTypeId: uuid('leave_type_id')
+			.notNull()
+			.references(() => leaveTypes.id, { onDelete: 'cascade' }),
+		year: integer('year').notNull(),
+		days: doublePrecision('days').notNull(),
+		reason: text('reason').notNull(),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt()
+	},
+	(t) => [index('leave_adjustments_employee_year_idx').on(t.employeeId, t.year)]
+);
+
+/** A holiday or memorandum that applies to everyone on that date. */
+export const calendarDays = pgTable(
+	'calendar_days',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		date: date('date', { mode: 'string' }).notNull(),
+		name: text('name').notNull(),
+		/** 'regular_holiday' | 'special_holiday' | 'local_holiday' | 'memo' */
+		kind: text('kind').notNull(),
+		/** Minutes credited as paid for the day; null = the full scheduled day. */
+		creditMinutes: integer('credit_minutes'),
+		/** Late/undertime are not counted that day (a memo letting staff go early, for instance). */
+		waiveLateness: boolean('waive_lateness').notNull().default(false),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [uniqueIndex('calendar_days_hotel_date_idx').on(t.hotelId, t.date)]
 );
 
 // ---------------------------------------------------------------------------

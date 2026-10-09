@@ -10,6 +10,7 @@
 	import GemIcon from '@lucide/svelte/icons/gem';
 	import ZapIcon from '@lucide/svelte/icons/zap';
 	import UsersIcon from '@lucide/svelte/icons/users';
+	import CalendarOffIcon from '@lucide/svelte/icons/calendar-off';
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 
 	const base = $derived(`/${page.params.hotel}/management`);
@@ -68,6 +69,12 @@
 			icon: ZapIcon,
 			label: 'Automation',
 			desc: 'Background jobs that run on a schedule instead of a manual button.'
+		},
+		{
+			href: 'leave',
+			icon: CalendarOffIcon,
+			label: 'Leave & holidays',
+			desc: 'Leave types and their rules, plus the holiday and memorandum calendar that cover employee schedules.'
 		},
 		{
 			href: 'team',

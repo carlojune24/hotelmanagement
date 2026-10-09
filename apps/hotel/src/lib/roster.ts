@@ -62,6 +62,39 @@ export function netShiftMinutes(shift: {
 	return Math.max(0, shiftSpanMinutes(shift.startTime, shift.endTime) - shift.breakMinutes);
 }
 
+/**
+ * A split shift (e.g. 08:00-12:00 + 13:00-17:00) is stored as its overall span plus the
+ * unpaid break window between the parts, so span, paid minutes and overnight rules all
+ * keep working. Returns an error message, or null when the window is valid.
+ */
+export function breakWindowError(
+	start: string | null | undefined,
+	end: string | null | undefined,
+	breakStart: string | null | undefined,
+	breakEnd: string | null | undefined
+): string | null {
+	const s = timeToMinutes(start);
+	const e = timeToMinutes(end);
+	const bs = timeToMinutes(breakStart);
+	const be = timeToMinutes(breakEnd);
+	if (s === null || e === null || bs === null || be === null) return 'Enter both break times.';
+	if (e <= s) return 'A split shift has to end the same day it starts.';
+	if (bs <= s) return 'The first part has to start before the break.';
+	if (be <= bs) return 'The second part has to start after the first one ends.';
+	if (be >= e) return 'The second part has to end after it starts.';
+	return null;
+}
+
+/** The unpaid gap between the two parts, in minutes. */
+export function breakWindowMinutes(
+	breakStart: string | null | undefined,
+	breakEnd: string | null | undefined
+): number {
+	const bs = timeToMinutes(breakStart);
+	const be = timeToMinutes(breakEnd);
+	return bs === null || be === null || be <= bs ? 0 : be - bs;
+}
+
 export function formatHours(minutes: number): string {
 	const h = Math.floor(minutes / 60);
 	const m = minutes % 60;
@@ -120,6 +153,9 @@ export type CodedShift = {
 	startTime: string | null;
 	endTime: string | null;
 	breakMinutes: number;
+	/** Split shift only: the gap between the two parts. */
+	breakStart?: string | null;
+	breakEnd?: string | null;
 };
 export type CodeTemplate = CodedShift & { name: string };
 export type ShiftLegendEntry = {
@@ -132,7 +168,11 @@ export type ShiftLegendEntry = {
 export function sameShift(a: CodedShift, b: CodedShift): boolean {
 	if (a.isRestDay || b.isRestDay) return a.isRestDay === b.isRestDay;
 	return (
-		a.startTime === b.startTime && a.endTime === b.endTime && a.breakMinutes === b.breakMinutes
+		a.startTime === b.startTime &&
+		a.endTime === b.endTime &&
+		a.breakMinutes === b.breakMinutes &&
+		(a.breakStart ?? null) === (b.breakStart ?? null) &&
+		(a.breakEnd ?? null) === (b.breakEnd ?? null)
 	);
 }
 

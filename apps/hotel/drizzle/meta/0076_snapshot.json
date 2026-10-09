@@ -1,6 +1,6 @@
 {
-  "id": "d53388eb-76ee-45ad-8a6c-757121c4744c",
-  "prevId": "0b201d51-91d1-4374-b7ce-997af6d5d605",
+  "id": "aad7be02-b8ca-4689-a2d9-09e395824406",
+  "prevId": "d53388eb-76ee-45ad-8a6c-757121c4744c",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -15349,6 +15349,18 @@
           "notNull": true,
           "default": 0
         },
+        "break_start": {
+          "name": "break_start",
+          "type": "time",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "break_end": {
+          "name": "break_end",
+          "type": "time",
+          "primaryKey": false,
+          "notNull": false
+        },
         "night_diff_window": {
           "name": "night_diff_window",
           "type": "jsonb",
@@ -15496,6 +15508,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "break_start": {
+          "name": "break_start",
+          "type": "time",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "break_end": {
+          "name": "break_end",
+          "type": "time",
+          "primaryKey": false,
+          "notNull": false
         },
         "tag": {
           "name": "tag",

@@ -530,8 +530,50 @@
     {
       "idx": 75,
       "version": "7",
-      "when": 1791515356886,
-      "tag": "0075_brainy_harpoon",
+      "when": 1791545043231,
+      "tag": "0075_square_wrecking_crew",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1791548227123,
+      "tag": "0076_outstanding_dragon_lord",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1791549563466,
+      "tag": "0077_dizzy_silverclaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1791549954853,
+      "tag": "0078_sleepy_lightspeed",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1791555478701,
+      "tag": "0079_strong_hellfire_club",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1791557826087,
+      "tag": "0080_great_chronomancer",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1791560269539,
+      "tag": "0081_dining_item_cook_ids",
       "breakpoints": true
     }
   ]
