@@ -18,6 +18,7 @@
 			{ seg: 'floor', label: 'Floor', show: true, badge: data.badges.floor, hint: 'asking for the bill', ready: 0 },
 			// QR orders waiting for a waiter plus online orders the kitchen has not picked up yet.
 			{ seg: 'orders', label: 'Orders', show: true, badge: data.badges.orders, hint: 'waiting for you', ready: data.alerts.ready.length },
+			{ seg: 'messages', label: 'Messages', show: true, badge: data.unreadMessages, hint: 'unread', ready: 0 },
 			{ seg: 'reservations', label: 'Reservations', show: true, badge: data.badges.reservations, hint: 'pending or arriving soon', ready: 0 },
 			{ seg: 'menu', label: 'Menu', show: true, badge: 0, hint: '', ready: 0 },
 			{ seg: 'addons', label: 'Add-ons', show: true, badge: 0, hint: '', ready: 0 },
