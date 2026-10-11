@@ -43,6 +43,15 @@
 				? { title: 'Confirming your payment', note: 'This can take a moment. This page updates on its own.' }
 				: { title: 'Waiting for your payment', note: 'Your order goes to the kitchen as soon as payment is confirmed.' };
 		}
+		if (o.status === 'pending_acceptance') {
+			return {
+				title: 'Waiting for the restaurant to confirm',
+				note:
+					o.paymentStatus === 'paid'
+						? 'Your order is paid. The kitchen starts it as soon as the restaurant confirms. This page updates on its own.'
+						: `The kitchen starts it as soon as the restaurant confirms. Please pay when you ${o.fulfilment === 'delivery' ? 'receive it' : 'collect it'}.`
+			};
+		}
 		if (o.held && (o.status === 'new' || o.status === 'accepted') && o.releaseLocal) {
 			return {
 				title: 'Your order is scheduled',
@@ -76,7 +85,7 @@
 		{ label: 'Ready' },
 		{ label: isPre ? 'Served' : o.fulfilment === 'delivery' ? 'Delivered' : 'Collected' }
 	]);
-	const reached = $derived(({ pending_payment: -1, new: 0, accepted: 0, preparing: 1, ready: 2, served: 3, cancelled: -1 } as Record<string, number>)[o.status] ?? -1);
+	const reached = $derived(({ pending_payment: -1, pending_acceptance: 0, new: 0, accepted: 0, preparing: 1, ready: 2, served: 3, cancelled: -1 } as Record<string, number>)[o.status] ?? -1);
 
 	// Keep the page current while the order is live.
 	$effect(() => {

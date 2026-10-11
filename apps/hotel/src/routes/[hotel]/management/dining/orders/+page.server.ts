@@ -9,10 +9,11 @@ import { recordId } from '$lib/rate-validation';
 import { loadVenueMenu } from '$lib/server/dining-menu';
 import {
 	OrderError,
-	acceptQrOrder,
+	acceptOrder,
 	cancelDiningOrder,
 	countAwaitingPayment,
 	createDiningOrder,
+	declineOrder,
 	dispatchDeliveryOrder,
 	listBoardOrders,
 	listRefundDueOrders,
@@ -219,14 +220,30 @@ export const actions: Actions = {
 		}
 	},
 
-	/** A waiter accepts a table-QR order: it goes to the kitchen and the table becomes occupied. */
+	/** Staff accept an order waiting for them (table QR, or online pickup/delivery): it goes to the kitchen. */
 	accept: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'dining:write');
 		const parsed = z.object({ orderId: recordId() }).safeParse(Object.fromEntries(await event.request.formData()));
 		if (!parsed.success) return fail(400, { error: 'That order could not be found.' });
 		try {
-			const o = await acceptQrOrder({ hotelId: event.locals.hotel!.id, orderId: parsed.data.orderId, actor: event.locals.user });
+			const o = await acceptOrder({ hotelId: event.locals.hotel!.id, orderId: parsed.data.orderId, actor: event.locals.user });
 			return { ok: `Order ${o.code} accepted. The kitchen has it.` };
+		} catch (e) {
+			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
+			throw e;
+		}
+	},
+
+	/** Staff decline an order waiting for them. A paid online order then shows up under Refunds due. */
+	decline: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'dining:write');
+		const parsed = z
+			.object({ orderId: recordId(), reason: z.string().trim().min(1, 'Give a reason for declining.').max(300) })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: parsed.error.issues[0]?.message ?? 'Give a reason for declining.' });
+		try {
+			await declineOrder({ hotelId: event.locals.hotel!.id, orderId: parsed.data.orderId, reason: parsed.data.reason, actor: event.locals.user });
+			return { ok: 'Order declined. The guest can see your reason.' };
 		} catch (e) {
 			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
 			throw e;

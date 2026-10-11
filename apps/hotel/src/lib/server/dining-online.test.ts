@@ -215,13 +215,15 @@ describe.skipIf(!hasDb)('online dining orders (live DB)', async () => {
 		expect(mocks.emails).toEqual([]); // nothing is confirmed to the guest yet
 	});
 
-	it('sends a pay-at-the-restaurant order straight to the kitchen, only where the venue allows it', async () => {
+	it('holds a pay-at-the-restaurant order for Dining to accept, only where the venue allows it', async () => {
 		await expect(place({ payMode: 'venue' })).rejects.toThrow(/online payment only/);
 		await setVenue({ onlinePayment: 'online_or_venue' });
 		const placed = await place({ payMode: 'venue' });
-		expect(placed.status).toBe('new');
-		expect((await o.listBoardOrders(hotelA.id, { servedSince: new Date(0) })).map((x) => x.id)).toContain(placed.id);
+		expect(placed.status).toBe('pending_acceptance');
+		expect((await o.listBoardOrders(hotelA.id, { servedSince: new Date(0) })).map((x) => x.id)).not.toContain(placed.id);
 		expect(mocks.emails).toEqual([{ orderId: placed.id, kind: 'confirmation' }]);
+		await o.acceptOrder({ hotelId: hotelA.id, orderId: placed.id });
+		expect((await o.listBoardOrders(hotelA.id, { servedSince: new Date(0) })).map((x) => x.id)).toContain(placed.id);
 		mocks.state.payOnline = false;
 		await expect(place({ payMode: 'online' })).rejects.toThrow(/Online payment is not available/);
 		await setVenue({ onlinePayment: 'online_only' });
@@ -297,7 +299,7 @@ describe.skipIf(!hasDb)('online dining orders (live DB)', async () => {
 		await handlePaymongoEvent(paidEvent(placed.id, { eventId: 'evt_1', session: pending!.paymongoCheckoutSessionId!, amount: 25_000 }), { hotelId: hotelA.id });
 
 		const row = await orderRow(placed.id);
-		expect(row).toMatchObject({ status: 'new', paymentStatus: 'paid', paymentMethod: 'paymongo', businessDate: today, cashAccountId: undepositedId });
+		expect(row).toMatchObject({ status: 'pending_acceptance', paymentStatus: 'paid', paymentMethod: 'paymongo', businessDate: today, cashAccountId: undepositedId });
 		const [mv] = await movements(placed.id);
 		expect(mv).toMatchObject({ category: 'dining_revenue', direction: 'in', amountCentavos: 25_000, cashAccountId: undepositedId, sourceId: pending!.id });
 		expect(row.cashMovementId).toBe(mv!.id);
@@ -305,6 +307,8 @@ describe.skipIf(!hasDb)('online dining orders (live DB)', async () => {
 		const [payRow] = await db.select().from(s.diningPayments).where(eq(s.diningPayments.id, pending!.id));
 		expect(payRow).toMatchObject({ status: 'paid', paymongoEventId: 'evt_1', paymongoPaymentId: 'pay_evt_1', cashMovementId: mv!.id });
 		expect((await o.getOrderDocuments(hotelA.id, placed.id))[0]).toMatchObject({ type: 'official_receipt' });
+		expect((await o.listBoardOrders(hotelA.id, { servedSince: new Date(0) })).map((x) => x.id)).not.toContain(placed.id); // waits for Dining to accept
+		await o.acceptOrder({ hotelId: hotelA.id, orderId: placed.id });
 		expect((await o.listBoardOrders(hotelA.id, { servedSince: new Date(0) })).map((x) => x.id)).toContain(placed.id); // now in the kitchen
 		expect(mocks.emails).toContainEqual({ orderId: placed.id, kind: 'confirmation' });
 	});
@@ -379,7 +383,7 @@ describe.skipIf(!hasDb)('online dining orders (live DB)', async () => {
 		expect((await orderRow(stale.id)).cancelReason).toMatch(/not completed/);
 		expect(mocks.client.expireCheckoutSession).toHaveBeenCalled();
 		expect((await orderRow(fresh.id)).status).toBe('pending_payment');
-		expect((await orderRow(paid.id)).status).toBe('new');
+		expect((await orderRow(paid.id)).status).toBe('pending_acceptance');
 		expect(await on.expirePendingDiningOrders({ hotelId: hotelB.id })).toBe(0); // scoped by hotel
 	});
 
@@ -432,7 +436,7 @@ describe.skipIf(!hasDb)('online dining orders (live DB)', async () => {
 		await handlePaymongoEvent(paidEvent(b.id, { eventId: 'evt_cr2', amount: 25_000 }), { hotelId: hotelA.id });
 		await on.requestDiningCancellation(hotelA.id, b.code, b.accessToken, '');
 		await on.respondToDiningCancellation({ hotelId: hotelA.id, orderId: b.id, approve: false, message: 'Sorry, it is already being cooked.', actor: null });
-		expect(await orderRow(b.id)).toMatchObject({ status: 'new', cancelRequestedAt: null });
+		expect(await orderRow(b.id)).toMatchObject({ status: 'pending_acceptance', cancelRequestedAt: null });
 		await expect(on.respondToDiningCancellation({ hotelId: hotelA.id, orderId: b.id, approve: true, actor: null })).rejects.toThrow(/no cancellation request/);
 
 		// not once the food is ready

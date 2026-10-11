@@ -218,6 +218,29 @@
 	</dl>
 {/snippet}
 
+<!-- Where a ticket came from, so a cook can tell an online order from a table or a walk-in at a glance:
+     ONLINE (solid) with Pickup time or Delivery, and whether it is already paid or paid at the counter. -->
+{#snippet sourceChips(o: Order)}
+	{#if o.source === 'online'}
+		<div class="mt-1 flex flex-wrap gap-1 @[14rem]:justify-end">
+			<span class="rounded bg-brand px-1.5 py-0.5 text-[11px] font-bold tracking-wide text-brand-ink uppercase">Online</span>
+			{#if o.orderType === 'pre_order'}
+				<Badge variant="outline">Pre-order{#if o.pickupAt} · {clock12(o.pickupAt)}{/if}</Badge>
+			{:else if o.fulfilment === 'delivery'}
+				<Badge variant="outline">Delivery</Badge>
+			{:else}
+				<Badge variant="outline">Pickup{#if o.pickupAt} {clock12(o.pickupAt)}{/if}</Badge>
+			{/if}
+			<Badge variant="outline" class={o.paymentStatus === 'paid' ? 'border-brand text-brand' : ''}>
+				{o.paymentStatus === 'paid' ? 'Paid' : 'Pay at counter'}
+			</Badge>
+		</div>
+		{#if o.guestName}<p class="mt-1 text-xs text-ink-muted @[14rem]:text-right">{o.guestName.split(' ')[0]}</p>{/if}
+	{:else if o.source === 'qr'}
+		<Badge variant="outline" class="mt-1">QR</Badge>
+	{/if}
+{/snippet}
+
 <!-- Dark, high-contrast board. In full-screen mode it covers the staff shell.
      Phones stack everything in one column; the filter rows scroll sideways instead of wrapping into
      a pile; the station lanes flow into as many columns as the screen can hold (see `lane-grid`). -->
@@ -368,8 +391,7 @@
 												<ClockIcon class="size-3.5" aria-hidden="true" />Slow
 											</p>
 										{/if}
-										{#if card.order.source === 'qr'}<Badge variant="outline" class="mt-1">QR</Badge>{/if}
-										{#if card.order.source === 'online'}<Badge variant="outline" class="mt-1">Online</Badge>{/if}
+										{@render sourceChips(card.order)}
 									</div>
 								</div>
 
@@ -468,8 +490,7 @@
 												<ClockIcon class="size-3.5" aria-hidden="true" />Slow
 											</p>
 										{/if}
-										{#if t.order.source === 'online'}<Badge variant="outline" class="mt-1">Online</Badge>{/if}
-										{#if t.order.source === 'qr'}<Badge variant="outline" class="mt-1">QR</Badge>{/if}
+										{@render sourceChips(t.order)}
 									</div>
 								</div>
 

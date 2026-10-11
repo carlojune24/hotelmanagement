@@ -33,7 +33,7 @@ const base = (over: Partial<DiningOrderEmailData> = {}): DiningOrderEmailData =>
 describe('renderDiningOrder', () => {
 	it('confirms a paid order with the code, pickup time, dishes, total and tracking link', () => {
 		const m = renderDiningOrder(base());
-		expect(m.subject).toBe('Order DN-7K4Q confirmed: Waling Waling Café');
+		expect(m.subject).toBe('Order DN-7K4Q received: Waling Waling Café');
 		for (const body of [m.html, m.text]) {
 			expect(body).toContain('DN-7K4Q');
 			expect(body).toContain('Sat, Oct 10, 7:30 PM');

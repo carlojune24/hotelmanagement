@@ -37,8 +37,12 @@ test('a delivery order is sent out with a rider and the guest sees them', async 
 	const { code } = orderFromUrl(page.url());
 	const trackingUrl = page.url();
 
-	// ---- kitchen: make it ----
+	// ---- dining: accept it (online orders wait for Dining before the kitchen sees them) ----
 	await staffLogin(page);
+	await page.goto(`/${SLUG}/management/dining/orders`);
+	await page.getByLabel('Orders waiting for you').locator('li', { hasText: code }).getByRole('button', { name: 'Accept' }).click();
+
+	// ---- kitchen: make it ----
 	await page.goto(`/${SLUG}/management/kitchen`);
 	const ticket = page.locator('article', { hasText: code }).first();
 	await ticket.getByRole('button', { name: /^Start/ }).click();

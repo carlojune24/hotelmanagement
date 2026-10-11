@@ -143,11 +143,20 @@ export interface PlaceOnlineOrderInput {
  * Places a guest's online order. Takeaway needs a valid pickup time; a pre-order attaches to the
  * guest's own reservation (proved by its ticket token) and is served at their table time. Paying
  * online starts the order as `pending_payment`, invisible to the kitchen until PayMongo confirms;
- * paying at the restaurant is only allowed where the venue permits it and goes straight to the kitchen.
+ * paying at the restaurant is only allowed where the venue permits it. Either way a takeaway or delivery
+ * order then waits as `pending_acceptance` until Dining accepts it (see `acceptOrder`) and only then
+ * reaches the kitchen. A pre-order for a table reservation skips that step: the reservation is what staff
+ * already confirm, and it is held until its prep time.
  */
 export async function placeOnlineOrder(
 	input: PlaceOnlineOrderInput
-): Promise<{ id: string; code: string; accessToken: string; status: 'pending_payment' | 'new'; totalCentavos: number }> {
+): Promise<{
+	id: string;
+	code: string;
+	accessToken: string;
+	status: 'pending_payment' | 'pending_acceptance' | 'new';
+	totalCentavos: number;
+}> {
 	const cfg = await loadOnlineOrderingConfig(input.hotelId, input.venueId);
 	if (!cfg || !cfg.enabled) throw new OrderError('Online ordering is not available for this venue right now.');
 	if (input.payMode === 'online' && !cfg.canPayOnline) throw new OrderError('Online payment is not available. Please choose to pay at the restaurant.');
@@ -208,12 +217,14 @@ export async function placeOnlineOrder(
 				eq(diningOrders.source, 'online'),
 				eq(diningOrders.guestPhone, phone),
 				eq(diningOrders.paymentStatus, 'unpaid'),
-				inArray(diningOrders.status, ['pending_payment', 'new', 'accepted', 'preparing'])
+				inArray(diningOrders.status, ['pending_payment', 'pending_acceptance', 'new', 'accepted', 'preparing'])
 			)
 		);
 	if (Number(n) >= 3) throw new OrderError('You already have several open orders. Please wait for them to be ready or contact us.');
 
-	const status = input.payMode === 'online' ? 'pending_payment' : 'new';
+	// Dining accepts a takeaway/delivery order before the kitchen sees it; a reservation pre-order is automatic.
+	const afterPayment = input.orderType === 'pre_order' ? 'new' : 'pending_acceptance';
+	const status = input.payMode === 'online' ? 'pending_payment' : afterPayment;
 	const created = await createDiningOrder({
 		hotelId: input.hotelId,
 		venueId: input.venueId,
@@ -233,8 +244,8 @@ export async function placeOnlineOrder(
 		initialStatus: status
 	});
 
-	// Paying at the restaurant: the order is already in the kitchen, so confirm it now.
-	if (status === 'new' && input.guestEmail) void sendDiningOrderEmail(created.id, 'confirmation');
+	// Paying at the restaurant: the order is placed, so confirm we have it now.
+	if (status !== 'pending_payment' && input.guestEmail) void sendDiningOrderEmail(created.id, 'confirmation');
 	return { ...created, status };
 }
 
@@ -434,7 +445,8 @@ export async function confirmDiningPayment(args: {
 		await tx
 			.update(diningOrders)
 			.set({
-				status: 'new',
+				// Takeaway/delivery waits for Dining to accept; a reservation pre-order goes on as before.
+				status: order.orderType === 'pre_order' ? 'new' : 'pending_acceptance',
 				paymentStatus: 'paid',
 				paymentMethod: 'paymongo',
 				businessDate,
@@ -618,7 +630,7 @@ export async function getOrderForGuest(hotelId: string, timezone: string, code: 
 		.limit(1);
 
 	const paid = order.paymentStatus === 'paid';
-	const early = order.status === 'pending_payment' || order.status === 'new';
+	const early = order.status === 'pending_payment' || order.status === 'pending_acceptance' || order.status === 'new';
 	return {
 		id: order.id,
 		code: order.code,
@@ -646,7 +658,7 @@ export async function getOrderForGuest(hotelId: string, timezone: string, code: 
 		// Unpaid and not started: the guest may cancel it themselves.
 		canCancel: !paid && early,
 		// Paid: ask the restaurant, until the food is ready.
-		canRequestCancel: paid && ['new', 'accepted', 'preparing'].includes(order.status) && !order.cancelRequestedAt,
+		canRequestCancel: paid && ['pending_acceptance', 'new', 'accepted', 'preparing'].includes(order.status) && !order.cancelRequestedAt,
 		needsPayment: order.status === 'pending_payment' && order.payMode === 'online',
 		pickupNote: venue?.pickupNote ?? null,
 		held: !!heldRow,
@@ -673,7 +685,7 @@ export async function cancelDiningOrderAsGuest(hotelId: string, code: string, to
 		const [order] = await tx.select().from(diningOrders).where(eq(diningOrders.id, found.id)).for('update');
 		if (!order) throw new OrderError('We could not find that order.');
 		if (order.paymentStatus !== 'unpaid') throw new OrderError('This order is paid. Please send a cancellation request instead.');
-		if (order.status !== 'pending_payment' && order.status !== 'new') throw new OrderError('The kitchen has already started this order. Please contact the restaurant.');
+		if (order.status !== 'pending_payment' && order.status !== 'pending_acceptance' && order.status !== 'new') throw new OrderError('The kitchen has already started this order. Please contact the restaurant.');
 		await tx.update(diningOrders).set({ status: 'cancelled', cancelledAt: new Date(), cancelReason: 'Cancelled by the guest.', updatedAt: new Date() }).where(eq(diningOrders.id, order.id));
 		const pending = await tx
 			.select({ id: diningPayments.id, session: diningPayments.paymongoCheckoutSessionId })
@@ -694,7 +706,7 @@ export async function requestDiningCancellation(hotelId: string, code: string, t
 	const found = await loadGuestOrder(hotelId, code, token);
 	if (!found) throw new OrderError('We could not find that order.');
 	if (found.paymentStatus !== 'paid') throw new OrderError('This order has not been paid, so you can cancel it directly.');
-	if (!['new', 'accepted', 'preparing'].includes(found.status)) throw new OrderError('This order is already ready or finished. Please contact the restaurant.');
+	if (!['pending_acceptance', 'new', 'accepted', 'preparing'].includes(found.status)) throw new OrderError('This order is already ready or finished. Please contact the restaurant.');
 	if (found.cancelRequestedAt) throw new OrderError('You have already asked to cancel this order. The restaurant will reply here.');
 	const text = note.trim().slice(0, 500);
 	await db.transaction(async (tx) => {
@@ -712,7 +724,7 @@ export async function respondToDiningCancellation(args: { hotelId: string; order
 		if (!order.cancelRequestedAt) throw new OrderError('There is no cancellation request on this order.');
 		const note = args.message?.trim().slice(0, 500);
 		if (args.approve) {
-			if (!['new', 'accepted', 'preparing'].includes(order.status)) throw new OrderError(`A ${order.status} order can't be cancelled.`);
+			if (!['pending_acceptance', 'new', 'accepted', 'preparing'].includes(order.status)) throw new OrderError(`A ${order.status} order can't be cancelled.`);
 			await tx
 				.update(diningOrders)
 				.set({ status: 'cancelled', cancelledAt: new Date(), cancelReason: 'Cancelled at the guest\'s request.', cancelRequestedAt: null, updatedAt: new Date() })

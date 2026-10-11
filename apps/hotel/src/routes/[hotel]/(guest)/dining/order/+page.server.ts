@@ -153,7 +153,9 @@ export const actions: Actions = {
 		}
 
 		const track = `/${params.hotel}/dining/order/${placed.code}?t=${placed.accessToken}`;
-		if (placed.status === 'new') redirect(303, track); // pay at the restaurant: already in the kitchen
+		// Paying at the restaurant: nothing to pay now. The order waits for Dining to accept it (or, for a
+		// reservation pre-order, is already placed), and the order page shows where it stands.
+		if (placed.status !== 'pending_payment') redirect(303, track);
 
 		try {
 			const { checkoutUrl } = await startDiningCheckout({

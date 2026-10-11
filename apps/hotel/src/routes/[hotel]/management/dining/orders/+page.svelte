@@ -52,8 +52,14 @@
 	const summary = $derived(boardSummary(data.orders, nowMs));
 	const filtering = $derived(query.trim() !== '' || unpaidOnly);
 	const shownCount = $derived(groups.ready.length + groups.preparing.length + groups.fresh.length + groups.served.length);
-	// Table-QR orders a waiter has to accept before the kitchen sees them.
+	// Orders staff have to accept before the kitchen sees them: table-QR and online pickup/delivery.
 	const awaitingQr = $derived(data.orders.filter((o) => o.status === 'pending_acceptance'));
+	const waitingOnline = $derived(awaitingQr.filter((o) => o.source === 'online').length);
+	const slotFmt = $derived(
+		new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: data.timezone })
+	);
+	/** Amber after 2 minutes, red after 5: the same threshold the alert tone escalates at. */
+	const waitClass = (o: Order) => (waitedMin(o) >= 5 ? 'font-semibold text-danger' : waitedMin(o) >= 2 ? 'font-semibold text-warning' : 'text-ink-muted');
 	const waitedMin = (o: Order) => Math.max(0, Math.floor((nowMs - new Date(o.createdAt).getTime()) / 60_000));
 
 	function jumpTo(section: 'ready' | 'preparing' | 'new') {
@@ -225,20 +231,37 @@
 	</div>
 
 	{#if awaitingQr.length > 0}
-		<section class="mb-5 rounded-xl border-2 border-brand/60 bg-brand/5" aria-label="Table orders waiting for you">
+		<section class="mb-5 rounded-xl border-2 border-brand/60 bg-brand/5" aria-label="Orders waiting for you">
 			<h2 class="flex items-center gap-2 border-b border-brand/30 px-4 py-2.5 text-sm font-semibold text-ink">
 				<QrCodeIcon class="size-4 text-brand" aria-hidden="true" />
-				Table orders waiting for you <span class="font-normal tabular-nums text-ink-muted">· {awaitingQr.length}</span>
+				Orders waiting for you <span class="font-normal tabular-nums text-ink-muted">· {awaitingQr.length}{waitingOnline > 0 ? ` (${waitingOnline} online)` : ''}</span>
 			</h2>
 			<ul class="divide-y divide-brand/20">
 				{#each awaitingQr as o (o.id)}
 					<li class="flex flex-wrap items-start gap-x-4 gap-y-2 px-4 py-3">
 						<div class="min-w-0 flex-1">
 							<p class="flex flex-wrap items-baseline gap-x-2 text-sm">
-								<span class="font-semibold text-ink">Table {o.tableLabel ?? '?'}</span>
+								{#if o.source === 'online'}
+									<span class="rounded bg-brand px-1.5 py-0.5 text-[11px] font-semibold tracking-wide text-brand-ink uppercase">Online</span>
+									<span class="font-semibold text-ink">
+										{#if o.orderType === 'pre_order'}Pre-order · Table {o.tableLabel ?? '?'}
+										{:else if o.fulfilment === 'delivery'}Delivery
+										{:else}Pickup{/if}{#if o.pickupAt} · {slotFmt.format(new Date(o.pickupAt))}{/if}
+									</span>
+								{:else}
+									<span class="font-semibold text-ink">Table {o.tableLabel ?? '?'}</span>
+								{/if}
 								<span class="font-mono text-xs text-ink-muted">{o.code}</span>
-								<span class="text-xs tabular-nums text-ink-muted">{formatWait(waitedMin(o))} ago</span>
+								<span class="text-xs tabular-nums {waitClass(o)}">{formatWait(waitedMin(o))} ago</span>
 							</p>
+							{#if o.source === 'online'}
+								<p class="mt-0.5 text-xs text-ink">
+									{o.guestName ?? 'Guest'}{#if o.guestPhone} · {o.guestPhone}{/if}
+									<span class="mx-1 text-ink-muted" aria-hidden="true">·</span>
+									<span class="font-semibold {o.paymentStatus === 'paid' ? 'text-brand' : ''}">{o.paymentStatus === 'paid' ? 'Paid online' : 'Pay at the restaurant'}</span>
+								</p>
+								{#if o.fulfilment === 'delivery' && o.deliveryAddress}<p class="mt-0.5 text-xs text-ink-muted">Deliver to {o.deliveryAddress}</p>{/if}
+							{/if}
 							<ul class="mt-1 text-sm text-ink">
 								{#each o.items as i (i.id)}
 									<li>
@@ -485,15 +508,22 @@
 	</Dialog.Content>
 </Dialog.Root>
 
-<!-- Decline a table-QR order -->
+<!-- Decline an order waiting for you (table QR or online) -->
 <Dialog.Root open={declineFor !== null} onOpenChange={(o) => { if (!o) declineFor = null; }}>
 	<Dialog.Content class="sm:max-w-sm">
 		{#if declineFor}
 			<Dialog.Header>
 				<Dialog.Title>Decline {declineFor.code}?</Dialog.Title>
-				<Dialog.Description>The guest at table {declineFor.tableLabel ?? '?'} sees your reason on their phone.</Dialog.Description>
+				<Dialog.Description>
+					{#if declineFor.source === 'online'}
+						{declineFor.guestName ?? 'The guest'} sees your reason on their order page.
+						{#if declineFor.paymentStatus === 'paid'}This order is already paid, so it will be listed under Refunds due.{/if}
+					{:else}
+						The guest at table {declineFor.tableLabel ?? '?'} sees your reason on their phone.
+					{/if}
+				</Dialog.Description>
 			</Dialog.Header>
-			<form method="POST" action="?/cancel" use:enhance class="space-y-3">
+			<form method="POST" action="?/decline" use:enhance class="space-y-3">
 				<input type="hidden" name="orderId" value={declineFor.id} />
 				<div>
 					<Label for="declineReason">Reason</Label>

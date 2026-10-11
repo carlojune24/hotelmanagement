@@ -224,7 +224,7 @@ describe.skipIf(!hasDb)('guest dining order pages (live DB)', async () => {
 		expect(mocks.client.createCheckoutSession).not.toHaveBeenCalled();
 		const code = res.redirect.match(/DN-[A-Z0-9]{4}/)![0];
 		const [row] = await db.select().from(s.diningOrders).where(eq(s.diningOrders.code, code));
-		expect(row).toMatchObject({ status: 'new', payMode: 'venue', paymentStatus: 'unpaid' });
+		expect(row).toMatchObject({ status: 'pending_acceptance', payMode: 'venue', paymentStatus: 'unpaid' });
 	});
 
 	it('keeps the order and lets the guest retry when PayMongo cannot be reached', async () => {

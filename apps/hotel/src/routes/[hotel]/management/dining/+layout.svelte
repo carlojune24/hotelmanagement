@@ -5,7 +5,7 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import BellIcon from '@lucide/svelte/icons/bell';
 	import BellOffIcon from '@lucide/svelte/icons/bell-off';
-	import { describeAlert, newAlerts, seenFrom, type SeenAlerts } from '$lib/service-alerts';
+	import { describeAlert, newAlerts, overdueAlerts, seenFrom, type SeenAlerts } from '$lib/service-alerts';
 	import { playTone, readSoundPref, soundReady, stopSound, unlockOnFirstTouch, writeSoundPref } from '$lib/staff-sound';
 	import type { LayoutData } from './$types';
 
@@ -76,10 +76,12 @@
 			);
 		}
 		if (fresh.qrWaiting.length > 0) {
+			const online = fresh.qrWaiting.every((o) => o.source === 'online');
+			const noun = online ? 'online orders' : 'orders';
 			toast.info(
 				fresh.qrWaiting.length === 1
-					? `Table order waiting for you: ${describeAlert(fresh.qrWaiting[0]!)}`
-					: `${fresh.qrWaiting.length} table orders waiting for you`,
+					? `${fresh.qrWaiting[0]!.source === 'online' ? 'Online order' : 'Table order'} waiting for you: ${describeAlert(fresh.qrWaiting[0]!)}`
+					: `${fresh.qrWaiting.length} ${noun} waiting for you`,
 				{ duration: 15_000, action: { label: 'Accept', onClick: () => goto(`${base}/orders`) } }
 			);
 		}
@@ -89,6 +91,23 @@
 		// Bring whichever list this tab is showing up to date straight away.
 		invalidate('app:dining-orders');
 		invalidate('app:dining-floor');
+	});
+
+	// Nobody answered: keep ringing once a minute while an order has been waiting over 5 minutes. It is never
+	// accepted or declined on its own; a person has to.
+	$effect(() => {
+		const t = setInterval(() => {
+			const late = overdueAlerts(data.alerts.qrWaiting, Date.now());
+			if (late.length === 0) return;
+			toast.warning(
+				late.length === 1
+					? `Still waiting for you: ${describeAlert(late[0]!)}`
+					: `${late.length} orders have been waiting over 5 minutes`,
+				{ duration: 15_000, action: { label: 'Accept', onClick: () => goto(`${base}/orders`) } }
+			);
+			if (sound) blocked = !playTone('ticket');
+		}, 60_000);
+		return () => clearInterval(t);
 	});
 
 	function toggleSound() {

@@ -595,16 +595,19 @@ export async function cancelDiningOrder(args: {
 }
 
 /**
- * Staff accept a table-QR order: it becomes a normal new ticket for the kitchen and joins the
- * table's check (opening it, which is what makes the table "occupied"). Declining is just
- * `cancelDiningOrder` with a reason the guest sees.
+ * Staff accept an order that is waiting for them: it becomes a normal new ticket for the kitchen.
+ * A table-QR order also joins the table's check (opening it, which is what makes the table
+ * "occupied"); an online takeaway/delivery order has no table, so it just goes to the kitchen.
+ * Declining is `declineOrder`.
  */
-export async function acceptQrOrder(args: { hotelId: string; orderId: string; actor?: Actor }): Promise<DiningOrder> {
+export async function acceptOrder(args: { hotelId: string; orderId: string; actor?: Actor }): Promise<DiningOrder> {
 	return db.transaction(async (tx) => {
 		const order = await loadOrderForUpdate(tx, args.hotelId, args.orderId);
 		if (order.status !== 'pending_acceptance') throw new OrderError('This order is not waiting to be accepted.');
-		if (!order.tableId) throw new OrderError('This order has no table.');
-		const checkId = await ensureOpenCheck(tx, { hotelId: args.hotelId, venueId: order.diningItemId, tableId: order.tableId });
+		if (order.source === 'qr' && !order.tableId) throw new OrderError('This order has no table.');
+		const checkId = order.tableId
+			? await ensureOpenCheck(tx, { hotelId: args.hotelId, venueId: order.diningItemId, tableId: order.tableId })
+			: null;
 		const [updated] = await tx
 			.update(diningOrders)
 			.set({ status: 'new', checkId, updatedAt: new Date() })
@@ -620,6 +623,36 @@ export async function acceptQrOrder(args: { hotelId: string; orderId: string; ac
 			after: { status: 'new', checkId }
 		});
 		return updated!;
+	});
+}
+
+/** Kept under its old name for the table-QR callers. */
+export const acceptQrOrder = acceptOrder;
+
+/**
+ * Staff decline an order that is waiting for them, with a reason the guest sees. Unlike
+ * `cancelDiningOrder` this may be a PAID online order: it stays `paid`, so it shows up under Refunds due
+ * and the guest's page says the restaurant will send the refund.
+ */
+export async function declineOrder(args: { hotelId: string; orderId: string; reason: string; actor?: Actor }): Promise<void> {
+	const reason = args.reason.trim();
+	if (!reason) throw new OrderError('Give a reason for declining the order.');
+	await db.transaction(async (tx) => {
+		const order = await loadOrderForUpdate(tx, args.hotelId, args.orderId);
+		if (order.status !== 'pending_acceptance') throw new OrderError('This order is not waiting to be accepted.');
+		await tx
+			.update(diningOrders)
+			.set({ status: 'cancelled', cancelledAt: new Date(), cancelReason: reason, updatedAt: new Date() })
+			.where(eq(diningOrders.id, order.id));
+		await writeAudit({
+			hotelId: args.hotelId,
+			actor: args.actor ?? null,
+			action: 'dining_order.decline',
+			entityType: 'dining_order',
+			entityId: order.id,
+			before: { status: 'pending_acceptance', paymentStatus: order.paymentStatus },
+			after: { status: 'cancelled', reason }
+		});
 	});
 }
 
@@ -1199,10 +1232,21 @@ export async function diningSalesReport(
 export const getOrderDocuments = listDiningOrderDocuments;
 
 /** What the floor has to act on right now, across every venue: dishes the kitchen finished
- *  (to carry to the table) and table-QR orders waiting for a waiter. Cheap enough to poll. */
+ *  (to carry to the table) and orders waiting for staff to accept them: table-QR orders and online
+ *  takeaway/delivery orders (`qrWaiting` keeps its name; `source` says which). Cheap enough to poll. */
+export interface ServiceAlertOrder {
+	id: string;
+	code: string;
+	tableLabel: string | null;
+	orderType: string;
+	source: string;
+	fulfilment: string | null;
+	pickupAt: Date | null;
+	createdAt: Date;
+}
 export async function listServiceAlerts(hotelId: string): Promise<{
-	ready: { id: string; code: string; tableLabel: string | null; orderType: string }[];
-	qrWaiting: { id: string; code: string; tableLabel: string | null; orderType: string }[];
+	ready: ServiceAlertOrder[];
+	qrWaiting: ServiceAlertOrder[];
 }> {
 	const rows = await db
 		.select({
@@ -1210,6 +1254,10 @@ export async function listServiceAlerts(hotelId: string): Promise<{
 			code: diningOrders.code,
 			tableLabel: diningOrders.tableLabel,
 			orderType: diningOrders.orderType,
+			source: diningOrders.source,
+			fulfilment: diningOrders.fulfilment,
+			pickupAt: diningOrders.pickupAt,
+			createdAt: diningOrders.createdAt,
 			status: diningOrders.status
 		})
 		.from(diningOrders)

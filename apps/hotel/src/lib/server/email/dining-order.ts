@@ -67,21 +67,33 @@ export function renderDiningOrder(data: DiningOrderEmailData): RenderedEmail {
 			: delivery
 				? 'Your order is ready for delivery'
 				: 'Your order is ready for pickup'
-		: 'We have your order';
-	const subject = ready ? `Your order ${data.code} is ready: ${hotel.name}` : `Order ${data.code} confirmed: ${data.venueTitle}`;
+		: dineIn
+			? 'We have your order'
+			: 'We received your order';
+	// A pickup or delivery order is accepted by the restaurant before the kitchen starts it, so this email
+	// says it was received; the order page shows the moment it is confirmed.
+	const subject = ready
+		? `Your order ${data.code} is ready: ${hotel.name}`
+		: dineIn
+			? `Order ${data.code} confirmed: ${data.venueTitle}`
+			: `Order ${data.code} received: ${data.venueTitle}`;
 	const lead = ready
 		? dineIn
 			? 'It will be brought to your table.'
 			: delivery
 				? 'It is ready and a rider will take it to the address below shortly.'
 				: 'Please come to the restaurant to collect it. We kept it warm for you.'
-		: data.payment === 'paid'
-			? delivery
-				? 'Your payment is confirmed and the kitchen has your order. We will deliver it to the address below.'
-				: 'Your payment is confirmed and the kitchen has your order.'
-			: delivery
-				? 'The kitchen has your order. Please pay when it arrives.'
-				: 'The kitchen has your order. Please pay when you collect it.';
+		: dineIn
+			? data.payment === 'paid'
+				? 'Your payment is confirmed and the kitchen has your order.'
+				: 'The kitchen has your order. Please pay when you collect it.'
+			: data.payment === 'paid'
+				? delivery
+					? 'Your payment is confirmed. The restaurant will confirm your order shortly, then we will deliver it to the address below.'
+					: 'Your payment is confirmed. The restaurant will confirm your order shortly and the kitchen starts it then.'
+				: delivery
+					? 'The restaurant will confirm your order shortly. Please pay when it arrives.'
+					: 'The restaurant will confirm your order shortly. Please pay when you collect it.';
 	const pickupNote = !dineIn && !delivery && data.pickupNote ? data.pickupNote : null;
 	const whenWord = dineIn ? 'Table time' : delivery ? 'Delivery' : 'Pickup';
 	const when = data.pickupTimeLabel ? `${data.pickupDateLabel ? `${data.pickupDateLabel}, ` : ''}${data.pickupTimeLabel}` : null;

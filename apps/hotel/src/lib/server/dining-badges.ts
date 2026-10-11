@@ -7,8 +7,8 @@ import { releasedToKitchen } from './dining-hold';
  * Counts for the little number bubbles on the Dining and Kitchen tabs, so staff see work waiting
  * without opening each tab. Counts only: cheap enough to poll, and nothing here changes any state.
  *
- * - `orders`: table-QR orders waiting for a waiter, plus online orders paid/placed and not yet
- *   picked up by the kitchen.
+ * - `orders`: table-QR and online takeaway/delivery orders waiting for staff to accept them, plus
+ *   reservation pre-orders just released to the kitchen.
  * - `reservations`: bookings still `pending`, and confirmed ones arriving within the next two hours
  *   (or already late, but not past their slot) that nobody has seated.
  * - `floor`: open tables whose guests have asked for the bill.
@@ -45,7 +45,14 @@ export async function listDiningBadges(
 							eq(diningOrders.hotelId, hotelId),
 							or(
 								eq(diningOrders.status, 'pending_acceptance'),
-								and(eq(diningOrders.status, 'new'), eq(diningOrders.source, 'online'), releasedToKitchen)
+								// Online takeaway/delivery waits as `pending_acceptance` (counted above). What is left
+								// here is a reservation pre-order that has just been released to the kitchen.
+								and(
+									eq(diningOrders.status, 'new'),
+									eq(diningOrders.source, 'online'),
+									eq(diningOrders.orderType, 'pre_order'),
+									releasedToKitchen
+								)
 							)
 						)
 					)
