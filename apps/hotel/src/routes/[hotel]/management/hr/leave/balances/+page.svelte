@@ -1,5 +1,4 @@
 <script lang="ts">
-	import SetupLink from '$lib/components/staff/setup-link.svelte';
 	import { enhance } from '$app/forms';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -90,8 +89,7 @@
 	</div>
 	{#if data.types.length === 0}
 		<p class="mt-3 text-sm text-ink-muted">
-			No leave types are switched on.
-			<SetupLink to="settings/leave" cap="leave:*" variant="text">Turn them on in Settings → Leave &amp; holidays</SetupLink>
+			No leave types are switched on. Turn them on under Settings → Leave &amp; holidays.
 		</p>
 	{/if}
 </div>

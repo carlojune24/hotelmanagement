@@ -1,5 +1,4 @@
 <script lang="ts">
-	import SetupLink from '$lib/components/staff/setup-link.svelte';
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
@@ -59,7 +58,7 @@
 		<div class="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border p-12 text-center">
 			<LayersIcon class="size-6 text-ink-muted" />
 			<p class="text-sm text-ink-muted">Add a venue first, then set up its add-ons.</p>
-			<SetupLink to="dining/settings">Set up venues</SetupLink>
+			<Button href="{base}/settings" variant="outline">Set up venues</Button>
 		</div>
 	{:else if data.venue}
 		{@const venue = data.venue}

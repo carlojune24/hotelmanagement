@@ -13,8 +13,7 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 			canEmployee: can('employee:*'),
 			canSchedule: can('schedule:*'),
 			canDtr: can('dtr:*'),
-			canLeave: can('leave:*'),
-			canPayroll: can('payroll:*')
+			canLeave: can('leave:*')
 		}
 	};
 };

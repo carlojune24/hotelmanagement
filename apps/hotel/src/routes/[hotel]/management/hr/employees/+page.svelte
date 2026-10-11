@@ -1,5 +1,4 @@
 <script lang="ts">
-	import SetupLink from '$lib/components/staff/setup-link.svelte';
 	import { enhance } from '$app/forms';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -614,7 +613,7 @@
 							{:else}
 								not linked to a team account
 							{/if}
-							<SetupLink to="settings/team" cap="team:*" variant="text">Set from Settings → Team</SetupLink>
+							<span class="text-ink-muted/70">(set from Settings → Team)</span>
 						</p>
 						{#if (editPhotoPreview && !editPhotoRemoved) || emp.photoUrl}
 							<button

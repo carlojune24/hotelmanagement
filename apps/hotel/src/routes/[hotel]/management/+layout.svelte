@@ -8,7 +8,6 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import SidebarCollapseButton from '$lib/components/sidebar-collapse-button.svelte';
 	import { isDiningOnly, isKitchenOnly, roleCan } from '$lib/authz';
-	import { canOpenSettings } from '$lib/settings-nav';
 	import { mode, toggleMode } from 'mode-watcher';
 	import type { LayoutData } from './$types';
 	import LayoutDashboardIcon from '@lucide/svelte/icons/layout-dashboard';
@@ -24,6 +23,7 @@
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	import ShieldIcon from '@lucide/svelte/icons/shield';
+	import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import BuildingIcon from '@lucide/svelte/icons/building-2';
 	import SunIcon from '@lucide/svelte/icons/sun';
@@ -122,13 +122,17 @@
 			{ seg: 'reviews', label: 'Reviews', icon: StarIcon, show: can('review:read') },
 			{ seg: 'finance', label: 'Finance', icon: WalletIcon, show: can('finance:read') },
 			{ seg: 'hr', label: 'HR', icon: UsersIcon, show: can('hr:read') },
-			// Anyone who manages at least one piece of configuration (leave, team, dining menu, kitchen
-			// stations, …), not only a hotel admin. The Audit log now lives inside Settings.
+			{
+				seg: 'settings/audit',
+				label: 'Audit log',
+				icon: ShieldCheckIcon,
+				show: can('hotel:admin') || isAdmin
+			},
 			{
 				seg: 'settings',
 				label: 'Settings',
 				icon: SettingsIcon,
-				show: canOpenSettings(role?.capabilities, isAdmin)
+				show: can('hotel:admin') || isAdmin
 			}
 		].filter((i) => i.show)
 	);
@@ -137,6 +141,9 @@
 		const path = page.url.pathname;
 		const target = `${base}/${seg}`;
 		if (path === target) return true;
+		// "Settings" would otherwise also read active on /settings/audit, since that
+		// route nests under it — it now has its own top-level entry, so exclude it here.
+		if (seg === 'settings') return path.startsWith(`${target}/`) && !path.startsWith(`${base}/settings/audit`);
 		return path.startsWith(`${target}/`);
 	};
 

@@ -11,21 +11,18 @@
 			{ seg: '/employees', label: 'Employees', show: data.hr.canEmployee },
 			{ seg: '/schedule', label: 'Schedule', show: data.hr.canSchedule },
 			{ seg: '/dtr', label: 'DTR', show: data.hr.canDtr },
-			{ seg: '/leave', label: 'Leave', show: data.hr.canLeave },
-			// Payroll lives one level up (`/management/payroll`); it was reachable by URL only.
-			{ seg: '/payroll', label: 'Payroll', show: data.hr.canPayroll, href: `/${page.params.hotel}/management/payroll` }
+			{ seg: '/leave', label: 'Leave', show: data.hr.canLeave }
 		].filter((t) => t.show === undefined || t.show)
 	);
 
-	const active = (seg: string) =>
-		page.url.pathname.startsWith(seg === '/payroll' ? `/${page.params.hotel}/management/payroll` : base + seg);
+	const active = (seg: string) => page.url.pathname.startsWith(base + seg);
 </script>
 
 <div class="flex min-h-full flex-col">
 	<nav class="flex gap-1 overflow-x-auto border-b border-border bg-surface-2 px-4 py-2 sm:px-6">
 		{#each tabs as t (t.seg)}
 			<a
-				href={t.href ?? base + t.seg}
+				href={base + t.seg}
 				class="rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap {active(t.seg)
 					? 'bg-surface text-ink shadow-sm'
 					: 'text-ink-muted hover:text-ink'}"
