@@ -32,6 +32,7 @@ import KeyRoundIcon from '@lucide/svelte/icons/key-round';
 import UploadIcon from '@lucide/svelte/icons/upload';
 import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
 import SearchIcon from '@lucide/svelte/icons/search';
+import SettingsIcon from '@lucide/svelte/icons/settings';
 
 export type SettingsGroupId = 'property' | 'rates' | 'dining' | 'finance' | 'people' | 'system';
 
@@ -68,6 +69,15 @@ const ADMIN = 'hotel:admin';
 
 export const SETTINGS_ENTRIES: SettingsEntry[] = [
 	// ---- Property ----
+	{
+		id: 'general',
+		group: 'property',
+		label: 'General',
+		desc: 'Currency, VAT rate, timezone and the Senior Citizen / PWD discount.',
+		href: 'settings/general',
+		icon: SettingsIcon,
+		anyOf: [ADMIN]
+	},
 	{
 		id: 'branding',
 		group: 'property',
@@ -191,7 +201,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		id: 'finance-settings',
 		group: 'finance',
 		label: 'Finance preferences',
-		desc: 'Hotel details and VAT, cash accounts, expense categories, vendors, API keys.',
+		desc: 'Preferences, cash accounts, expense categories, vendors, API keys.',
 		href: 'finance/settings',
 		icon: SlidersIcon,
 		anyOf: [ADMIN],

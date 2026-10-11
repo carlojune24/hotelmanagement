@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SetupLink from '$lib/components/staff/setup-link.svelte';
 	import { enhance, applyAction, deserialize } from '$app/forms';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
@@ -170,7 +171,7 @@
 		<div class="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border p-12 text-center">
 			<CalendarCheckIcon class="size-6 text-ink-muted" />
 			<p class="text-sm text-ink-muted">Add a venue and its tables to start taking reservations.</p>
-			<Button href="{base}/settings" variant="outline">Set up venues</Button>
+			<SetupLink to="dining/settings">Set up venues</SetupLink>
 		</div>
 	{:else if data.rows.length === 0}
 		<div class="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border p-12 text-center">

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SetupLink from '$lib/components/staff/setup-link.svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { enhance } from '$app/forms';
@@ -186,7 +187,10 @@
 			{/if}
 
 			{#if catalogItems.length === 0}
-				<p class="text-sm text-ink-muted">No sellable items yet — add some under Settings → Sellable items.</p>
+				<p class="text-sm text-ink-muted">
+					No sellable items yet.
+					<SetupLink to="settings/amenity-items" variant="text">Add some in Settings</SetupLink>
+				</p>
 			{:else}
 				<div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
 					{#each visibleItems as item (item.id)}

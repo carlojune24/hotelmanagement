@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SetupLink from '$lib/components/staff/setup-link.svelte';
 	import { tick, untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { enhance } from '$app/forms';
@@ -1194,12 +1195,7 @@
 					</Button>
 				</form>
 			{:else}
-				<a
-					href="{staffBase}/finance/settings"
-					class="text-xs text-ink-muted underline underline-offset-2"
-				>
-					Set up a cash drawer →
-				</a>
+				<SetupLink to="finance/settings" variant="text">Set up a cash drawer</SetupLink>
 			{/if}
 			{#if pickMode}
 				<Button variant="outline" onclick={cancelPickMode}>
@@ -2582,10 +2578,8 @@
 										</form>
 									{:else}
 										<p class="text-xs text-ink-muted">
-											No sellable items set up yet — add some in
-											<a href="{staffBase}/settings/amenity-items" class="underline underline-offset-2">
-												Settings → Sellable items
-											</a>.
+											No sellable items set up yet.
+											<SetupLink to="settings/amenity-items" variant="text">Add some in Settings</SetupLink>
 										</p>
 									{/if}
 
@@ -3402,10 +3396,8 @@
 								</form>
 							{:else}
 								<p class="text-xs text-ink-muted">
-									No sellable items set up yet — add some in
-									<a href="{staffBase}/settings/amenity-items" class="underline underline-offset-2">
-										Settings → Sellable items
-									</a>.
+									No sellable items set up yet.
+									<SetupLink to="settings/amenity-items" variant="text">Add some in Settings</SetupLink>
 								</p>
 							{/if}
 						</div>
