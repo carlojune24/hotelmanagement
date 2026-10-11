@@ -105,7 +105,9 @@
 				seg: 'lookup',
 				label: 'Find by number',
 				icon: SearchIcon,
-				show: can('booking:read') || can('dining:read') || can('finance:read')
+				// Not offered to a dining-only account: it is about bookings and finance numbers, and it
+				// sat right above Dining in their menu as if it belonged there.
+				show: can('booking:read') || can('finance:read')
 			},
 			{ seg: 'emails', label: 'Emails', icon: MailIcon, show: can('booking:read') },
 			{ seg: 'messages', label: 'Messages', icon: MessageSquareIcon, show: can('booking:read') },
