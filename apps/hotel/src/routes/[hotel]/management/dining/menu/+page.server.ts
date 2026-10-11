@@ -14,7 +14,13 @@ import { roleCan } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { deleteUploadIfOwned, saveResizedImage, UploadValidationError } from '$lib/server/uploads';
-import { listStations, loadVenueMenu, setItemAvailability, venueBelongsToHotel } from '$lib/server/dining-menu';
+import {
+	ensureDefaultStation,
+	listStations,
+	loadVenueMenu,
+	setItemAvailability,
+	venueBelongsToHotel
+} from '$lib/server/dining-menu';
 import { friendlyIssue, moneyPhp, recordId } from '$lib/rate-validation';
 import type { RequestEvent } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -34,7 +40,13 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const requested = url.searchParams.get('venue');
 	const venue = venues.find((v) => v.id === requested) ?? venues[0] ?? null;
 	const menu = venue ? await loadVenueMenu(hotelId, venue.id) : null;
-	const stations = await listStations(hotelId);
+	// A dish must belong to a station, so a manager opening the menu of a hotel that has none yet
+	// gets a default one. Read-only roles never write.
+	const { user, role } = locals;
+	const canManage =
+		!!user?.isPlatformAdmin ||
+		(!!role && (roleCan(role.capabilities, 'hotel:admin') || roleCan(role.capabilities, 'dining:manage')));
+	const stations = canManage ? await ensureDefaultStation(hotelId) : await listStations(hotelId);
 
 	return { venues, venue, menu, stations };
 };
@@ -60,7 +72,10 @@ const itemSchema = z.object({
 	description: z.string().trim().max(500).optional(),
 	pricePhp: moneyPhp(),
 	categoryId: z.string().uuid().optional(),
-	stationId: z.string().uuid().optional(),
+	stationId: z
+		.string()
+		.min(1, 'Pick the station that makes this dish.')
+		.uuid('Pick a station from your list.'),
 	sortOrder: z.coerce.number().int().min(0).max(100000)
 });
 
@@ -196,11 +211,14 @@ export const actions: Actions = {
 			...raw,
 			categoryId: raw.categoryId && raw.categoryId !== 'none' ? raw.categoryId : undefined,
 			description: raw.description || undefined,
-			stationId: raw.stationId && raw.stationId !== 'none' ? raw.stationId : undefined,
+			stationId: raw.stationId && raw.stationId !== 'none' ? raw.stationId : '',
 			sortOrder: raw.sortOrder || '0'
 		});
 		if (!parsed.success) {
-			return fail(400, { error: friendlyIssue(parsed.error, 'Check the item details and try again.') });
+			const stationIssue = parsed.error.issues.find((i) => i.path[0] === 'stationId')?.message;
+			return fail(400, {
+				error: friendlyIssue(parsed.error, stationIssue ?? 'Check the item details and try again.')
+			});
 		}
 		const d = parsed.data;
 		const itemId = raw.itemId ? String(raw.itemId) : null;
@@ -226,14 +244,12 @@ export const actions: Actions = {
 			if (!cat) return fail(400, { error: 'Pick a category from this venue.' });
 		}
 
-		if (d.stationId) {
-			const [st] = await db
-				.select({ id: diningStations.id })
-				.from(diningStations)
-				.where(and(eq(diningStations.id, d.stationId), eq(diningStations.hotelId, hotelId)))
-				.limit(1);
-			if (!st) return fail(400, { error: 'Pick a station from your list.' });
-		}
+		const [st] = await db
+			.select({ id: diningStations.id })
+			.from(diningStations)
+			.where(and(eq(diningStations.id, d.stationId), eq(diningStations.hotelId, hotelId)))
+			.limit(1);
+		if (!st) return fail(400, { error: 'Pick a station from your list.' });
 
 		const groupIds = [...new Set(form.getAll('addonGroupIds').map(String))].filter(
 			(g) => z.string().uuid().safeParse(g).success
@@ -283,7 +299,7 @@ export const actions: Actions = {
 			description: d.description ?? null,
 			priceCentavos: toCentavos(d.pricePhp),
 			categoryId: d.categoryId ?? null,
-			stationId: d.stationId ?? null,
+			stationId: d.stationId,
 			taxable: raw.taxable === 'on',
 			isActive: raw.isActive === 'on',
 			sortOrder: d.sortOrder

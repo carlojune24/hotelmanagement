@@ -118,6 +118,13 @@
 		<Button variant="outline" href="{base}/dashboard">← Dashboard</Button>
 	</div>
 
+	<!-- Got a booking code, DN-/TB- code, OR number or payment reference? That has its own search. -->
+	<form method="GET" action="{base}/lookup" class="mb-4 flex flex-wrap items-center gap-2" role="search">
+		<label class="text-sm text-ink-muted" for="auditLookup">Look up a number</label>
+		<Input id="auditLookup" name="q" placeholder="Booking code, DN-…, OR-…" class="h-9 w-64" autocomplete="off" />
+		<Button type="submit" size="sm" variant="outline">Find</Button>
+	</form>
+
 	<div class="mb-4 flex flex-wrap items-center gap-3">
 		<div class="relative min-w-48 flex-1">
 			<SearchIcon class="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-muted" />

@@ -33,7 +33,10 @@ declare global {
 			role: ResolvedRole | null;
 		}
 
-		// interface PageState {}
+		/** The guest ordering page's step (shallow routing, so Back returns to the previous step). */
+		interface PageState {
+			step?: number;
+		}
 		// interface Platform {}
 	}
 }

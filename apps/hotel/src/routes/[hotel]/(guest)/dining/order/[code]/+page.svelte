@@ -43,10 +43,30 @@
 				? { title: 'Confirming your payment', note: 'This can take a moment. This page updates on its own.' }
 				: { title: 'Waiting for your payment', note: 'Your order goes to the kitchen as soon as payment is confirmed.' };
 		}
-		if (o.status === 'ready') return { title: isPre ? 'Ready to serve' : 'Ready for pickup', note: isPre ? 'It will be brought to your table.' : 'Please come to the restaurant to collect it.' };
-		if (o.status === 'served') return { title: isPre ? 'Enjoy your meal' : 'Collected', note: 'Thank you for ordering with us.' };
+		if (o.held && (o.status === 'new' || o.status === 'accepted') && o.releaseLocal) {
+			return {
+				title: 'Your order is scheduled',
+				note: `${o.paymentStatus === 'paid' ? 'It is paid. ' : ''}The kitchen starts it at ${clock(o.releaseLocal.time)} on ${longDay(o.releaseLocal.date)}, or as soon as you are seated, so it is fresh when you sit down.`
+			};
+		}
+		if (o.status === 'ready') {
+			if (isPre) return { title: 'Ready to serve', note: 'It will be brought to your table.' };
+			if (o.fulfilment === 'delivery') {
+				return o.outForDeliveryAt
+					? { title: 'On its way', note: `${o.riderName ?? 'Our rider'} is bringing it to your address.` }
+					: { title: 'Ready for delivery', note: 'A rider will take it to your address shortly.' };
+			}
+			return { title: 'Ready for pickup', note: 'Please come to the restaurant to collect it.' };
+		}
+		if (o.status === 'served') return { title: isPre ? 'Enjoy your meal' : o.fulfilment === 'delivery' ? 'Delivered' : 'Collected', note: 'Thank you for ordering with us.' };
 		if (o.status === 'preparing' || o.status === 'accepted') return { title: 'Being prepared', note: 'The kitchen is working on your order.' };
-		return { title: 'We have your order', note: o.paymentStatus === 'paid' ? 'Your payment is confirmed and the kitchen has your order.' : 'The kitchen has your order. Please pay when you collect it.' };
+		return {
+			title: 'We have your order',
+			note:
+				o.paymentStatus === 'paid'
+					? 'Your payment is confirmed and the kitchen has your order.'
+					: `The kitchen has your order. Please pay when you ${o.fulfilment === 'delivery' ? 'receive it' : 'collect it'}.`
+		};
 	});
 
 	// Progress: how far along the kitchen has got.
@@ -54,7 +74,7 @@
 		{ label: 'Placed' },
 		{ label: 'Preparing' },
 		{ label: 'Ready' },
-		{ label: isPre ? 'Served' : 'Collected' }
+		{ label: isPre ? 'Served' : o.fulfilment === 'delivery' ? 'Delivered' : 'Collected' }
 	]);
 	const reached = $derived(({ pending_payment: -1, new: 0, accepted: 0, preparing: 1, ready: 2, served: 3, cancelled: -1 } as Record<string, number>)[o.status] ?? -1);
 
@@ -175,8 +195,20 @@
 				<dl class="mt-2 divide-y divide-[var(--ledger-rule)]">
 					{#if o.pickupLocal}
 						<div class="flex items-baseline justify-between gap-4 py-3">
-							<dt class="ledger-label">{isPre ? 'At your table' : 'Pickup'}</dt>
+							<dt class="ledger-label">{isPre ? 'At your table' : o.fulfilment === 'delivery' ? 'Delivery' : 'Pickup'}</dt>
 							<dd class="ledger-data text-right">{longDay(o.pickupLocal.date)}, {clock(o.pickupLocal.time)}</dd>
+						</div>
+					{/if}
+					{#if o.fulfilment === 'delivery' && o.deliveryAddress}
+						<div class="flex items-baseline justify-between gap-4 py-3">
+							<dt class="ledger-label">Deliver to</dt>
+							<dd class="text-right text-sm">{o.deliveryAddress}</dd>
+						</div>
+					{/if}
+					{#if o.fulfilment === 'delivery' && o.riderName && o.status !== 'cancelled'}
+						<div class="flex items-baseline justify-between gap-4 py-3">
+							<dt class="ledger-label">Rider</dt>
+							<dd class="text-right text-sm">{o.riderName}{#if o.riderPhone} · <a class="underline" href="tel:{o.riderPhone}">{o.riderPhone}</a>{/if}</dd>
 						</div>
 					{/if}
 					<div class="flex items-baseline justify-between gap-4 py-3">
@@ -200,12 +232,18 @@
 						</li>
 					{/each}
 				</ul>
+				{#if o.deliveryFeeCentavos > 0}
+					<div class="flex gap-3 border-t border-[var(--ledger-rule)] py-3">
+						<span class="min-w-0 flex-1 font-medium">Delivery fee</span>
+						<span class="ledger-data text-sm">{peso(o.deliveryFeeCentavos)}</span>
+					</div>
+				{/if}
 				<div class="order-total">
 					<span>Total <span class="text-xs text-[var(--ledger-ink-muted)]">VAT included</span></span>
 					<span class="ledger-data text-lg">{peso(o.totalCentavos)}</span>
 				</div>
 				{#if o.remarks}<p class="mt-3 text-sm text-[var(--ledger-ink-muted)]">Your note: {o.remarks}</p>{/if}
-				{#if o.pickupNote && !isPre && o.status !== 'cancelled'}<p class="mt-3 text-sm">{o.pickupNote}</p>{/if}
+				{#if o.pickupNote && !isPre && o.fulfilment !== 'delivery' && o.status !== 'cancelled'}<p class="mt-3 text-sm">{o.pickupNote}</p>{/if}
 			</div>
 		</div>
 

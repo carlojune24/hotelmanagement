@@ -197,7 +197,7 @@
 						{/if}
 						{#if data.orderableVenueIds.includes(item.id)}
 							<a href="/{data.hotel.slug}/dining/order?venue={item.id}" class="ledger-btn-primary inline-flex min-h-12 items-center px-6">
-								Order for pickup
+								Order online
 							</a>
 						{/if}
 					</div>

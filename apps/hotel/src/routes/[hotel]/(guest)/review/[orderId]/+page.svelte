@@ -156,6 +156,15 @@
 				</Table.Row>
 			</Table.Body>
 		</Table.Root>
+		{#if data.securityDepositCentavos > 0}
+			<!-- A memo: refundable, collected at check-in, not part of the total or what is charged here. -->
+			<p class="mt-3 rounded-md border border-[var(--ledger-rule)] px-3 py-2 text-sm text-[var(--ledger-ink-muted)]">
+				Refundable security deposit:
+				<span class="ledger-data font-medium text-[var(--ledger-ink)]">{peso(data.securityDepositCentavos)}</span>,
+				collected at check-in and returned when you check out, less any damage. It is not charged online
+				and is not part of the total above.
+			</p>
+		{/if}
 		{#if data.order.discountCentavos}
 			<p class="mt-2 text-sm font-medium" style="color: var(--hotel-accent-deep)">
 				You're saving {peso(data.order.discountCentavos)} with your promo code.

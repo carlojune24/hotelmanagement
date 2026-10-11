@@ -6,7 +6,7 @@ import { diningMenuItems, diningStations } from '$lib/server/db/schema/index';
 import { roleCan } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
-import { listStations } from '$lib/server/dining-menu';
+import { StationError, deleteStationMovingDishes, listStations } from '$lib/server/dining-menu';
 import { recordId } from '$lib/rate-validation';
 import type { RequestEvent } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -15,7 +15,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 	requireCap(locals.user, locals.role, 'kitchen:read');
 	const hotelId = locals.hotel!.id;
 	const stations = await listStations(hotelId);
-	// How many dishes sit on each station, so a delete warns about what it unassigns.
+	// How many dishes sit on each station, so a delete knows what has to move.
 	const items = await db
 		.select({ stationId: diningMenuItems.stationId })
 		.from(diningMenuItems)
@@ -101,22 +101,27 @@ export const actions: Actions = {
 		requireManage(event);
 		const hotelId = event.locals.hotel!.id;
 		const parsed = z
-			.object({ stationId: recordId() })
+			.object({ stationId: recordId(), moveTo: z.string().optional() })
 			.safeParse(Object.fromEntries(await event.request.formData()));
 		if (!parsed.success) return fail(400, { error: 'Station not found.' });
-		// Dishes on this station become unassigned (FK is ON DELETE SET NULL).
-		const deleted = await db
-			.delete(diningStations)
-			.where(and(eq(diningStations.id, parsed.data.stationId), eq(diningStations.hotelId, hotelId)))
-			.returning({ id: diningStations.id });
-		if (deleted.length === 0) return fail(404, { error: 'Station not found.' });
-		await writeAudit({
-			hotelId,
-			actor: event.locals.user,
-			action: 'dining_station.delete',
-			entityType: 'dining_station',
-			entityId: parsed.data.stationId
-		});
-		return { ok: 'Station deleted. Its dishes are now unassigned.' };
+		// Every dish needs a station, so its dishes (and the lines of orders still being made) move
+		// to the station chosen in the dialog before this one goes.
+		try {
+			const r = await deleteStationMovingDishes({
+				hotelId,
+				stationId: parsed.data.stationId,
+				moveToStationId: parsed.data.moveTo || null,
+				actor: event.locals.user
+			});
+			const dishes = `${r.movedDishes} ${r.movedDishes === 1 ? 'dish' : 'dishes'}`;
+			return {
+				ok: r.movedTo
+					? `Deleted "${r.name}". ${dishes} moved to "${r.movedTo}".`
+					: `Deleted "${r.name}".`
+			};
+		} catch (e) {
+			if (e instanceof StationError) return fail(400, { error: e.message });
+			throw e;
+		}
 	},
 };

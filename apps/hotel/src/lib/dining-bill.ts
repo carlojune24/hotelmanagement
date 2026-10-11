@@ -10,6 +10,8 @@ export interface BillOrderInput {
 	paymentStatus: string;
 	totalCentavos: number;
 	vatCentavos: number;
+	/** A delivery fee inside `totalCentavos`; shown as its own line so the bill adds up. */
+	deliveryFeeCentavos?: number;
 	items: {
 		name: string;
 		quantity: number;
@@ -54,15 +56,26 @@ export const describeItem = (name: string, addons: string[]) => (addons.length >
 
 export function buildBill(orders: BillOrderInput[]): BillTotals {
 	const live = orders.filter(isBillable);
-	const lines: BillLine[] = live.flatMap((o) =>
-		o.items.map((i) => ({
+	const lines: BillLine[] = live.flatMap((o) => [
+		...o.items.map((i) => ({
 			orderCode: o.code,
 			description: describeItem(i.name, i.addons),
 			quantity: i.quantity,
 			unitPriceCentavos: i.unitPriceCentavos + i.addonsCentavos,
 			lineTotalCentavos: i.lineTotalCentavos
-		}))
-	);
+		})),
+		...((o.deliveryFeeCentavos ?? 0) > 0
+			? [
+					{
+						orderCode: o.code,
+						description: 'Delivery fee',
+						quantity: 1,
+						unitPriceCentavos: o.deliveryFeeCentavos!,
+						lineTotalCentavos: o.deliveryFeeCentavos!
+					}
+				]
+			: [])
+	]);
 	const total = live.reduce((s, o) => s + o.totalCentavos, 0);
 	const paid = live.filter(isSettled).reduce((s, o) => s + o.totalCentavos, 0);
 	return {

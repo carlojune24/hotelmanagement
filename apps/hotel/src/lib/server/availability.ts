@@ -14,6 +14,7 @@ import {
 	roomTypeAmenities,
 	roomTypes,
 	rooms,
+	securityDepositPolicies,
 	type BedConfigEntry,
 	type RoomPhoto
 } from './db/schema/index';
@@ -62,6 +63,9 @@ export interface AvailableRatePlan {
 	/** Flat charge per extra bed on this plan, if any (`ratePlans.extraBedFeeCentavos`) —
 	 *  for showing "+ ₱X per extra bed" alongside `AvailableRoomType.extraBedsNeeded`. */
 	extraBedFeeCentavos: number | null;
+	/** Refundable security deposit per room, collected at check-in (never charged online and never
+	 *  part of `price`); null when the plan has none. For display only. */
+	securityDepositCentavos: number | null;
 }
 
 export interface AvailableRoomType {
@@ -311,7 +315,7 @@ export async function searchAvailability(params: {
 		.filter((t) => t.availableRooms >= roomCount);
 	if (available.length === 0) return [];
 
-	const [plansByType, cancellationByPlan, highlightsByType, amenitiesByType] = await Promise.all([
+	const [plansByType, cancellationByPlan, highlightsByType, amenitiesByType, depositByPlan] = await Promise.all([
 		db
 			.select()
 			.from(ratePlans)
@@ -328,7 +332,13 @@ export async function searchAvailability(params: {
 			.where(eq(ratePlans.hotelId, hotelId))
 			.then((rows) => new Map(rows.map((r) => [r.ratePlanId, r]))),
 		loadHighlightedAmenitiesByType(hotelId),
-		loadAllAmenitiesByType(hotelId)
+		loadAllAmenitiesByType(hotelId),
+		db
+			.select({ ratePlanId: ratePlans.id, amount: securityDepositPolicies.amountCentavos })
+			.from(ratePlans)
+			.innerJoin(securityDepositPolicies, eq(securityDepositPolicies.id, ratePlans.securityDepositPolicyId))
+			.where(eq(ratePlans.hotelId, hotelId))
+			.then((rows) => new Map(rows.map((r) => [r.ratePlanId, r.amount])))
 	]);
 
 	const results: AvailableRoomType[] = [];
@@ -362,7 +372,8 @@ export async function searchAvailability(params: {
 						}
 					: null,
 				price,
-				extraBedFeeCentavos: plan.extraBedFeeCentavos ?? null
+				extraBedFeeCentavos: plan.extraBedFeeCentavos ?? null,
+				securityDepositCentavos: (depositByPlan.get(plan.id) ?? 0) > 0 ? depositByPlan.get(plan.id)! : null
 			});
 		}
 

@@ -11,6 +11,21 @@
 	const r = $derived(data.result);
 	const qs = $derived(page.url.searchParams.toString());
 	const csvHref = $derived(`${base}/${data.slug}/export${qs ? `?${qs}` : ''}`);
+
+	// Overall / Hotel / Dining: the same report narrowed to one part of the business. Each link keeps
+	// the date choices already on the page and only swaps the scope.
+	const SCOPES = [
+		{ key: 'all', label: 'Overall' },
+		{ key: 'hotel', label: 'Hotel' },
+		{ key: 'dining', label: 'Dining' }
+	] as const;
+	const scopeHref = (key: string) => {
+		const p = new URLSearchParams(page.url.searchParams);
+		if (key === 'all') p.delete('scope');
+		else p.set('scope', key);
+		const s = p.toString();
+		return `${base}/${data.slug}${s ? `?${s}` : ''}`;
+	};
 </script>
 
 <div class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
@@ -24,6 +39,20 @@
 		</div>
 	</div>
 	<h1 class="mb-1 text-xl font-semibold tracking-tight text-ink print:text-black">{r.name}</h1>
+	{#if data.scopable}
+		<nav class="mb-3 flex flex-wrap items-center gap-1.5 print:hidden" aria-label="Report scope">
+			{#each SCOPES as s (s.key)}
+				<Button size="sm" variant={r.scope === s.key ? 'default' : 'outline'} href={scopeHref(s.key)}>{s.label}</Button>
+			{/each}
+			{#if r.scope === 'dining'}
+				<span class="ml-2 text-xs text-ink-muted">
+					Restaurant takings and refunds only. Room-charged dining counts once the room bill is paid.
+				</span>
+			{:else if r.scope === 'hotel'}
+				<span class="ml-2 text-xs text-ink-muted">Rooms, halls, incidentals and room deposits. Restaurant takings are left out.</span>
+			{/if}
+		</nav>
+	{/if}
 	<p class="mb-3 hidden text-sm text-black print:block">{page.data.hotel?.name ?? ''}</p>
 
 	<form method="GET" class="mb-4 flex flex-wrap items-end gap-2 print:hidden">

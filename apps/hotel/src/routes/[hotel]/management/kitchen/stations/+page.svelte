@@ -4,6 +4,8 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
+	import * as Select from '$lib/components/ui/select/index.js';
+	import { Label } from '$lib/components/ui/label/index.js';
 	import ChefHatIcon from '@lucide/svelte/icons/chef-hat';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
@@ -13,6 +15,12 @@
 
 	let newName = $state('');
 	let deleting = $state<{ id: string; name: string; dishes: number } | null>(null);
+	// Where a deleted station's dishes go; cleared each time the dialog opens or closes.
+	let moveTo = $state('');
+	$effect(() => {
+		void deleting?.id;
+		moveTo = '';
+	});
 
 	const dishLabel = (n: number) => `${n} ${n === 1 ? 'dish' : 'dishes'}`;
 
@@ -31,8 +39,8 @@
 		<div class="max-w-md">
 			<h2 class="text-base font-semibold text-ink">Stations</h2>
 			<p class="mt-1 text-sm text-ink-muted">
-				Where dishes are prepared. Each station gets its own lane on the board; tag a dish with its
-				station on the Dining menu. Shared by every venue.
+				Where dishes are made: Hot Section, Grill, Bar… Each station gets its own lane on the board, and
+				every dish belongs to exactly one, set on the Dining menu. Shared by every venue.
 			</p>
 		</div>
 
@@ -43,7 +51,7 @@
 					bind:value={newName}
 					required
 					maxlength={40}
-					placeholder="e.g. Kitchen"
+					placeholder="e.g. Hot Section"
 					aria-label="New station name"
 					class="w-full sm:w-52"
 				/>
@@ -108,21 +116,39 @@
 <Dialog.Root open={deleting !== null} onOpenChange={(open) => { if (!open) deleting = null; }}>
 	<Dialog.Content class="sm:max-w-sm">
 		{#if deleting}
+			{@const others = data.stations.filter((s) => s.id !== deleting!.id)}
 			<Dialog.Header>
 				<Dialog.Title>Delete {deleting.name}?</Dialog.Title>
 				<Dialog.Description>
 					{deleting.dishes > 0
-						? `${dishLabel(deleting.dishes)} will be left without a station. The dishes themselves stay on the menu.`
+						? `${dishLabel(deleting.dishes)} ${deleting.dishes === 1 ? 'is' : 'are'} made here. Every dish needs a station, so choose where ${deleting.dishes === 1 ? 'it' : 'they'} should go. Orders still being made move too.`
 						: 'No dishes use this station.'}
 				</Dialog.Description>
 			</Dialog.Header>
-			<Dialog.Footer>
-				<Button variant="outline" onclick={() => (deleting = null)}>Cancel</Button>
-				<form method="POST" action="?/deleteStation" use:enhance>
-					<input type="hidden" name="stationId" value={deleting.id} />
-					<Button type="submit" variant="destructive">Delete station</Button>
-				</form>
-			</Dialog.Footer>
+			<form method="POST" action="?/deleteStation" use:enhance class="space-y-4">
+				<input type="hidden" name="stationId" value={deleting.id} />
+				{#if deleting.dishes > 0}
+					{#if others.length === 0}
+						<p class="text-sm text-ink-muted">Add another station first, then come back to delete this one.</p>
+					{:else}
+						<div>
+							<Label for="moveTo">Move {dishLabel(deleting.dishes)} to</Label>
+							<Select.Root type="single" name="moveTo" bind:value={moveTo}>
+								<Select.Trigger id="moveTo" class="mt-1 w-full">{others.find((s) => s.id === moveTo)?.name ?? 'Choose a station'}</Select.Trigger>
+								<Select.Content>
+									{#each others as s (s.id)}
+										<Select.Item value={s.id} label={s.name} />
+									{/each}
+								</Select.Content>
+							</Select.Root>
+						</div>
+					{/if}
+				{/if}
+				<Dialog.Footer>
+					<Button type="button" variant="outline" onclick={() => (deleting = null)}>Cancel</Button>
+					<Button type="submit" variant="destructive" disabled={deleting.dishes > 0 && !moveTo}>Delete station</Button>
+				</Dialog.Footer>
+			</form>
 		{/if}
 	</Dialog.Content>
 </Dialog.Root>

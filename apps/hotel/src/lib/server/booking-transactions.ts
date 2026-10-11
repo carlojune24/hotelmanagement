@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, lte, ne, gt, lt, or } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lte, ne } from 'drizzle-orm';
 import { db } from './db/index';
 import {
 	bookingRooms,
@@ -7,9 +7,11 @@ import {
 	guests,
 	hallBookings,
 	orders,
+	payments,
 	roomAssignments,
 	roomTypes,
-	rooms
+	rooms,
+	securityDeposits
 } from './db/schema/index';
 import { loadOrderLedgers } from './folio';
 
@@ -178,4 +180,90 @@ export async function listBookingTransactions(
 	}
 	// Newest booking first.
 	return out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+}
+
+/** A register row with the columns an exported/printed register needs on top of the list's. */
+export interface BookingTransactionExportRow extends BookingTransactionRow {
+	/** `Online` when the guest booked and paid through PayMongo; otherwise made at the desk. */
+	source: 'Online' | 'Walk-in / staff';
+	/** Distinct tenders actually used (cash, gcash, …), voided and refund rows left out. */
+	methods: string[];
+	/** Card approval codes, e-wallet references and cheque numbers recorded on those payments. */
+	references: string[];
+	/** The refundable security deposit held or already settled for the booking's rooms. */
+	depositCentavos: number;
+}
+
+/**
+ * `listBookingTransactions` plus source, tender, references and security deposit, for the printed
+ * and CSV register. Read-only and additive: the list page keeps using the leaner function.
+ */
+export async function listBookingTransactionsForExport(
+	hotelId: string,
+	range: { from: string; to: string },
+	q?: string
+): Promise<BookingTransactionExportRow[]> {
+	const rows = await listBookingTransactions(hotelId, range, q);
+	if (rows.length === 0) return [];
+	const ids = rows.map((r) => r.orderId);
+
+	const [orderRows, paymentRows, depositRows] = await Promise.all([
+		db
+			.select({ id: orders.id, session: orders.paymongoCheckoutSessionId })
+			.from(orders)
+			.where(and(eq(orders.hotelId, hotelId), inArray(orders.id, ids))),
+		db
+			.select({
+				orderId: payments.orderId,
+				method: payments.method,
+				referenceNo: payments.referenceNo,
+				paidAt: payments.paidAt
+			})
+			.from(payments)
+			.innerJoin(orders, eq(orders.id, payments.orderId))
+			.where(
+				and(
+					eq(orders.hotelId, hotelId),
+					inArray(payments.orderId, ids),
+					eq(payments.status, 'paid'),
+					isNull(payments.voidedAt),
+					ne(payments.purpose, 'refund')
+				)
+			)
+			.orderBy(asc(payments.createdAt)),
+		db
+			.select({ orderId: bookings.orderId, amount: securityDeposits.amountCentavos })
+			.from(securityDeposits)
+			.innerJoin(bookings, eq(bookings.id, securityDeposits.bookingId))
+			.where(
+				and(
+					eq(securityDeposits.hotelId, hotelId),
+					inArray(bookings.orderId, ids),
+					ne(securityDeposits.status, 'voided')
+				)
+			)
+	]);
+
+	const online = new Set(orderRows.filter((o) => !!o.session).map((o) => o.id));
+	const methodsBy = new Map<string, Set<string>>();
+	const refsBy = new Map<string, Set<string>>();
+	for (const p of paymentRows) {
+		if (!methodsBy.has(p.orderId)) methodsBy.set(p.orderId, new Set());
+		methodsBy.get(p.orderId)!.add(p.method);
+		const ref = p.referenceNo?.trim();
+		if (ref) {
+			if (!refsBy.has(p.orderId)) refsBy.set(p.orderId, new Set());
+			refsBy.get(p.orderId)!.add(ref);
+		}
+	}
+	const depositBy = new Map<string, number>();
+	for (const d of depositRows) depositBy.set(d.orderId, (depositBy.get(d.orderId) ?? 0) + d.amount);
+
+	return rows.map((r) => ({
+		...r,
+		source: online.has(r.orderId) ? 'Online' : 'Walk-in / staff',
+		methods: [...(methodsBy.get(r.orderId) ?? [])],
+		references: [...(refsBy.get(r.orderId) ?? [])],
+		depositCentavos: depositBy.get(r.orderId) ?? 0
+	}));
 }

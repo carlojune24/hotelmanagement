@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { stationIdFor } from '$lib/server/test-station';
 import { eq, inArray } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 
@@ -62,7 +63,7 @@ describe.skipIf(!hasDb)('table QR ordering (live DB)', async () => {
 		const [t] = await db.insert(s.diningTables).values({ hotelId, diningItemId: venueId, name: 'V1', seats: 6, areaId: area!.id }).returning();
 		tableId = t!.id;
 		token = t!.qrToken;
-		const [item] = await db.insert(s.diningMenuItems).values({ hotelId, diningItemId: venueId, name: 'Adobo', priceCentavos: 25_000 }).returning();
+		const [item] = await db.insert(s.diningMenuItems).values({ hotelId, stationId: await stationIdFor(hotelId), diningItemId: venueId, name: 'Adobo', priceCentavos: 25_000 }).returning();
 		adobo = item!.id;
 	});
 

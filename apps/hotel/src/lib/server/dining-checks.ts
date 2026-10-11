@@ -1,11 +1,14 @@
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { db } from './db/index';
 import {
+	diningItems,
 	diningOrderItems,
 	diningOrders,
 	diningReservations,
+	diningReservationTables,
 	diningTableChecks,
 	diningTables,
+	hotels,
 	type DiningOrder
 } from './db/schema/index';
 import { writeAudit } from './audit';
@@ -13,6 +16,8 @@ import type { SessionUser } from './auth/session';
 import type { PaymentMethod } from './finance/payments';
 import { chargeDiningOrderToRoom } from './dining-room-charge';
 import { OrderError, cancelDiningOrder, payDiningOrder } from './dining-orders';
+import { loadHolds } from './dining-reservations';
+import { HOLDING_STATUSES, localParts, zonedToUtc } from '../dining-slots';
 import { checkStage, summarizeCheck, type CheckOrderLite, type CheckSummary } from '../dining-checks';
 import { groupByStation, type StationState } from '../dining-orders';
 import type { BillTo, IssuedDocument, PayDocuments } from '../print-batch';
@@ -296,4 +301,295 @@ export async function getOpenCheckForTable(hotelId: string, tableId: string) {
 		.orderBy(desc(diningTableChecks.openedAt))
 		.limit(1);
 	return c ?? null;
+}
+
+/**
+ * Guests change tables: the table's whole tab goes with them. The check is repointed at the new
+ * table (so the check id, payments, bill request and messages are untouched) and every order on
+ * it, plus QR orders still waiting for a waiter at the old table, follows: `tableId` and the
+ * `tableLabel` snapshot the Orders board, Kitchen and alerts read. A seated reservation moves
+ * with them so the old table does not keep reading "Seated".
+ *
+ * The destination must be empty: no open check, no QR order waiting on it, no seated guests and
+ * no booking inside the venue's turn time. To fold the tab into one that is already open, use
+ * `mergeCheckIntoCheck`.
+ */
+export async function moveCheckToTable(args: {
+	hotelId: string;
+	checkId: string;
+	toTableId: string;
+	actor?: Actor;
+}): Promise<{ fromName: string; toName: string; orderCount: number }> {
+	const actor = args.actor ?? null;
+	try {
+		return await db.transaction(async (tx) => {
+			const [check] = await tx
+				.select()
+				.from(diningTableChecks)
+				.where(and(eq(diningTableChecks.id, args.checkId), eq(diningTableChecks.hotelId, args.hotelId)))
+				.for('update');
+			if (!check) throw new OrderError('That table check could not be found.');
+			if (check.status !== 'open') throw new OrderError('That table is already closed.');
+			if (check.tableId === args.toTableId) throw new OrderError('The guests are already at that table.');
+
+			const [dest] = await tx
+				.select({ id: diningTables.id, name: diningTables.name })
+				.from(diningTables)
+				.where(
+					and(
+						eq(diningTables.id, args.toTableId),
+						eq(diningTables.hotelId, args.hotelId),
+						eq(diningTables.diningItemId, check.diningItemId),
+						eq(diningTables.isActive, true)
+					)
+				)
+				.limit(1);
+			if (!dest) throw new OrderError('Pick a table from this venue.');
+			const [source] = await tx
+				.select({ name: diningTables.name })
+				.from(diningTables)
+				.where(eq(diningTables.id, check.tableId))
+				.limit(1);
+
+			// Same lock reservations take, so a booking cannot land on the table mid-move.
+			await tx.execute(
+				sql`select pg_advisory_xact_lock(hashtext(${args.hotelId}), hashtext(${'dining:' + check.diningItemId}))`
+			);
+
+			const [occupied] = await tx
+				.select({ id: diningTableChecks.id })
+				.from(diningTableChecks)
+				.where(and(eq(diningTableChecks.tableId, dest.id), eq(diningTableChecks.status, 'open')))
+				.limit(1);
+			if (occupied) throw new OrderError(`Table ${dest.name} already has guests.`);
+
+			const [waiting] = await tx
+				.select({ id: diningOrders.id })
+				.from(diningOrders)
+				.where(
+					and(
+						eq(diningOrders.hotelId, args.hotelId),
+						eq(diningOrders.tableId, dest.id),
+						eq(diningOrders.status, 'pending_acceptance')
+					)
+				)
+				.limit(1);
+			if (waiting) {
+				throw new OrderError(`Table ${dest.name} has an order waiting to be accepted. Accept or decline it first.`);
+			}
+
+			const [own] = check.reservationId
+				? await tx
+						.select({
+							status: diningReservations.status,
+							startsAt: diningReservations.startsAt,
+							endsAt: diningReservations.endsAt
+						})
+						.from(diningReservations)
+						.where(eq(diningReservations.id, check.reservationId))
+						.limit(1)
+				: [];
+			const ownHolds = !!own && (HOLDING_STATUSES as readonly string[]).includes(own.status);
+			const ignore = ownHolds ? check.reservationId : null;
+
+			// Guests seated there count however long they have overstayed, but only today's: the
+			// Floor reads a reservation from an earlier day that was never completed as nothing at all,
+			// so a table that shows Free must not be refused here.
+			const [hotel] = await tx.select({ timezone: hotels.timezone }).from(hotels).where(eq(hotels.id, args.hotelId)).limit(1);
+			const timezone = hotel?.timezone ?? 'Asia/Manila';
+			const todayStart = zonedToUtc(localParts(new Date(), timezone).date, '00:00', timezone);
+			const [seatedThere] = await tx
+				.select({ id: diningReservations.id })
+				.from(diningReservations)
+				.innerJoin(diningReservationTables, eq(diningReservationTables.reservationId, diningReservations.id))
+				.where(
+					and(
+						eq(diningReservationTables.tableId, dest.id),
+						eq(diningReservations.hotelId, args.hotelId),
+						eq(diningReservations.status, 'seated'),
+						gt(diningReservations.endsAt, todayStart),
+						ignore ? ne(diningReservations.id, ignore) : undefined
+					)
+				)
+				.limit(1);
+			if (seatedThere) throw new OrderError(`Table ${dest.name} has seated guests.`);
+
+			const [venue] = await tx
+				.select({ turnMinutes: diningItems.turnMinutes })
+				.from(diningItems)
+				.where(eq(diningItems.id, check.diningItemId))
+				.limit(1);
+			const now = new Date();
+			let from = now;
+			let to = new Date(now.getTime() + (venue?.turnMinutes ?? 90) * 60_000);
+			if (ownHolds && own) {
+				if (own.startsAt < from) from = own.startsAt;
+				if (own.endsAt > to) to = own.endsAt;
+			}
+			const clash = (await loadHolds(args.hotelId, check.diningItemId, from, to, tx))
+				.filter((h) => h.reservationId !== ignore && h.tableIds.includes(dest.id))
+				.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())[0];
+			if (clash) {
+				const at = new Intl.DateTimeFormat('en-PH', { hour: 'numeric', minute: '2-digit', timeZone: timezone }).format(
+					clash.startsAt
+				);
+				throw new OrderError(`Table ${dest.name} is booked at ${at}.`);
+			}
+
+			await tx.update(diningTableChecks).set({ tableId: dest.id, updatedAt: now }).where(eq(diningTableChecks.id, check.id));
+
+			// The check's own orders, plus QR orders still waiting at the old table. Never match on the
+			// old table alone: that would drag in earlier, closed sessions.
+			const moved = await tx
+				.update(diningOrders)
+				.set({ tableId: dest.id, tableLabel: dest.name, updatedAt: now })
+				.where(
+					and(
+						eq(diningOrders.hotelId, args.hotelId),
+						or(
+							eq(diningOrders.checkId, check.id),
+							and(
+								eq(diningOrders.tableId, check.tableId),
+								eq(diningOrders.status, 'pending_acceptance'),
+								isNull(diningOrders.checkId)
+							)
+						)
+					)
+				)
+				.returning({ id: diningOrders.id });
+
+			if (ignore) {
+				await tx
+					.delete(diningReservationTables)
+					.where(and(eq(diningReservationTables.reservationId, ignore), eq(diningReservationTables.tableId, check.tableId)));
+				await tx
+					.insert(diningReservationTables)
+					.values({ reservationId: ignore, tableId: dest.id })
+					.onConflictDoNothing();
+			}
+
+			await writeAudit({
+				hotelId: args.hotelId,
+				actor,
+				action: 'dining_check.move_table',
+				entityType: 'dining_table_check',
+				entityId: check.id,
+				before: { tableId: check.tableId, tableName: source?.name ?? null },
+				after: { tableId: dest.id, tableName: dest.name, orderCount: moved.length, reservationId: ignore }
+			});
+			return { fromName: source?.name ?? '', toName: dest.name, orderCount: moved.length };
+		});
+	} catch (e) {
+		// Someone opened a tab on the destination between our check and the update.
+		const code = (e as { code?: string; cause?: { code?: string } }).code ?? (e as { cause?: { code?: string } }).cause?.code;
+		if (code === '23505') throw new OrderError('That table was just taken. Pick another one.');
+		throw e;
+	}
+}
+
+/**
+ * A guest who has already ordered goes to sit with a friend: their tab is folded into the friend's
+ * open tab. Every order on `fromCheckId` (plus QR orders still waiting at its table) is repointed
+ * at the surviving check and its table, then the emptied check is closed, so the first table
+ * reads Free and the pair settle together. Payments, receipts and kitchen state hang off the
+ * order, so nothing is renumbered or charged twice.
+ *
+ * The surviving check keeps its own reservation and bill request; it is opened at the earlier of
+ * the two. A seated reservation on the folded check is completed, as when a table is cleared.
+ * To move onto an *empty* table use `moveCheckToTable`.
+ */
+export async function mergeCheckIntoCheck(args: {
+	hotelId: string;
+	fromCheckId: string;
+	intoCheckId: string;
+	actor?: Actor;
+}): Promise<{ fromName: string; toName: string; intoTableId: string; orderCount: number }> {
+	const actor = args.actor ?? null;
+	if (args.fromCheckId === args.intoCheckId) throw new OrderError('Pick a different table to join.');
+	return db.transaction(async (tx) => {
+		// Lock in a fixed order so two staff joining the same pair cannot deadlock.
+		const locked = await tx
+			.select()
+			.from(diningTableChecks)
+			.where(
+				and(
+					eq(diningTableChecks.hotelId, args.hotelId),
+					inArray(diningTableChecks.id, [args.fromCheckId, args.intoCheckId])
+				)
+			)
+			.orderBy(asc(diningTableChecks.id))
+			.for('update');
+		const from = locked.find((c) => c.id === args.fromCheckId);
+		const into = locked.find((c) => c.id === args.intoCheckId);
+		if (!from || !into) throw new OrderError('That table check could not be found.');
+		if (from.status !== 'open' || into.status !== 'open') throw new OrderError('That table is already closed.');
+		if (from.diningItemId !== into.diningItemId) throw new OrderError('Pick a table from this venue.');
+
+		// Same lock reservations and moves take.
+		await tx.execute(
+			sql`select pg_advisory_xact_lock(hashtext(${args.hotelId}), hashtext(${'dining:' + from.diningItemId}))`
+		);
+
+		const names = await tx
+			.select({ id: diningTables.id, name: diningTables.name })
+			.from(diningTables)
+			.where(inArray(diningTables.id, [from.tableId, into.tableId]));
+		const fromName = names.find((t) => t.id === from.tableId)?.name ?? '';
+		const toName = names.find((t) => t.id === into.tableId)?.name ?? '';
+
+		const now = new Date();
+		const atNewTable = { tableId: into.tableId, tableLabel: toName, updatedAt: now };
+		const joined = await tx
+			.update(diningOrders)
+			.set({ ...atNewTable, checkId: into.id })
+			.where(and(eq(diningOrders.hotelId, args.hotelId), eq(diningOrders.checkId, from.id)))
+			.returning({ id: diningOrders.id });
+		// QR orders still waiting for a waiter follow too, but stay out of any check until accepted.
+		// Never match on the table alone: that would drag in earlier, closed sessions.
+		const waiting = await tx
+			.update(diningOrders)
+			.set(atNewTable)
+			.where(
+				and(
+					eq(diningOrders.hotelId, args.hotelId),
+					eq(diningOrders.tableId, from.tableId),
+					eq(diningOrders.status, 'pending_acceptance'),
+					isNull(diningOrders.checkId)
+				)
+			)
+			.returning({ id: diningOrders.id });
+		const moved = [...joined, ...waiting];
+
+		await tx
+			.update(diningTableChecks)
+			.set({ openedAt: from.openedAt < into.openedAt ? from.openedAt : into.openedAt, updatedAt: now })
+			.where(eq(diningTableChecks.id, into.id));
+		await tx
+			.update(diningTableChecks)
+			.set({ status: 'closed', closedAt: now, closedByUserId: actor?.id ?? null, updatedAt: now })
+			.where(eq(diningTableChecks.id, from.id));
+		if (from.reservationId && from.reservationId !== into.reservationId) {
+			await tx
+				.update(diningReservations)
+				.set({ status: 'completed', updatedAt: now })
+				.where(and(eq(diningReservations.id, from.reservationId), eq(diningReservations.status, 'seated')));
+		}
+
+		await writeAudit({
+			hotelId: args.hotelId,
+			actor,
+			action: 'dining_check.merge',
+			entityType: 'dining_table_check',
+			entityId: from.id,
+			before: { tableId: from.tableId, tableName: fromName },
+			after: {
+				intoCheckId: into.id,
+				intoTableId: into.tableId,
+				intoTableName: toName,
+				orderCount: moved.length,
+				orderIds: moved.map((o) => o.id)
+			}
+		});
+		return { fromName, toName, intoTableId: into.tableId, orderCount: moved.length };
+	});
 }

@@ -21,6 +21,10 @@ export type CartItem =
 			 *  preview only — absent on carts saved before this existed, which read as pay in
 			 *  full. The server re-derives it from the policy and never trusts this. */
 			downpaymentBps?: number | null;
+			/** Refundable security deposit per room (centavos), collected at check-in. Shown as a
+			 *  memo only — it is never part of `price`, the downpayment or what is charged online.
+			 *  Absent on carts saved before this existed. */
+			securityDepositCentavos?: number | null;
 	  }
 	| {
 			kind: 'hall';
@@ -144,6 +148,14 @@ export class CartStore {
 	}
 	get totalCentavos() {
 		return this.items.reduce((sum, i) => sum + i.price.totalCentavos, 0);
+	}
+	/** Refundable security deposit across every room in the cart, collected at check-in. A memo
+	 *  for the guest only: never added to a total, a downpayment or an online charge. */
+	get securityDepositCentavos() {
+		return this.items.reduce(
+			(sum, i) => sum + (i.kind === 'room' ? (i.securityDepositCentavos ?? 0) * i.roomCount : 0),
+			0
+		);
 	}
 	/** Preview of what is charged online now vs at the hotel (halls always pay in full). */
 	get downpayment() {

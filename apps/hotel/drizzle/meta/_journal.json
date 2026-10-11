@@ -575,6 +575,41 @@
       "when": 1791560269539,
       "tag": "0081_dining_item_cook_ids",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1791686534579,
+      "tag": "0082_colossal_the_hunter",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1791690364508,
+      "tag": "0083_secret_siren",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1791691065428,
+      "tag": "0084_broad_blade",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1791696661621,
+      "tag": "0085_peaceful_boomerang",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1791698097092,
+      "tag": "0086_gifted_cobalt_man",
+      "breakpoints": true
     }
   ]
 }

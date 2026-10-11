@@ -1,6 +1,13 @@
-import { and, eq, gte, lte, sql } from 'drizzle-orm';
+import { and, eq, gte, lte, ne, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/index';
-import { cashMovements, expenseCategories, expenses, payments, orders } from '../db/schema/index';
+import {
+	cashMovements,
+	diningOrders,
+	expenseCategories,
+	expenses,
+	payments,
+	orders
+} from '../db/schema/index';
 import { getCashPosition } from './cash';
 import { arAging } from './receivables';
 import { daySnapshot } from './dayclose';
@@ -15,7 +22,80 @@ const REVENUE_CATEGORIES = [
 	'other_revenue'
 ] as const;
 
+/**
+ * Which part of the business a report speaks for. Purely a read-side filter on what is already
+ * booked: it never changes how a movement is recorded or posted.
+ *  - `all`    everything, exactly as the reports always read (the default)
+ *  - `hotel`  rooms, function halls, incidentals, other revenue and room deposits
+ *  - `dining` restaurant takings (cash movements categorised `dining_revenue`)
+ */
+export type ReportScope = 'all' | 'hotel' | 'dining';
+
+export const REPORT_SCOPES: { key: ReportScope; label: string }[] = [
+	{ key: 'all', label: 'Overall' },
+	{ key: 'hotel', label: 'Hotel' },
+	{ key: 'dining', label: 'Dining' }
+];
+
+export function parseReportScope(v: string | null | undefined): ReportScope {
+	return v === 'hotel' || v === 'dining' ? v : 'all';
+}
+
+const HOTEL_CATEGORIES = ['room_revenue', 'hall_revenue', 'incidental_sale', 'other_revenue', 'deposit'] as const;
+
+/** The categories a scope's revenue lines are drawn from. */
+function scopeRevenueCategories(scope: ReportScope): readonly string[] {
+	if (scope === 'dining') return ['dining_revenue'];
+	if (scope === 'hotel') return HOTEL_CATEGORIES;
+	return REVENUE_CATEGORIES;
+}
+
+/**
+ * The `cash_movements` rows a scope covers: its revenue categories, plus refunds paid out of it
+ * (a dining refund carries `source_type = 'dining_refund'`; any other refund belongs to the hotel).
+ * `undefined` for `all`, so the default query is untouched.
+ */
+function scopeMovementFilter(scope: ReportScope): SQL | undefined {
+	if (scope === 'all') return undefined;
+	const isDiningSource = sql`${cashMovements.sourceType} like 'dining%'`;
+	if (scope === 'dining') {
+		return sql`(${cashMovements.category} = 'dining_revenue' or (${cashMovements.category} = 'refund' and ${isDiningSource}))`;
+	}
+	const cats = sql.join(HOTEL_CATEGORIES.map((c) => sql`${c}`), sql`, `);
+	return sql`(${cashMovements.category} in (${cats}) or (${cashMovements.category} in ('refund', 'deposit_refund') and not ${isDiningSource}))`;
+}
+
 // ---------------------------------------------------------------------------
+
+/**
+ * Restaurant takings by tender over a range of business dates: orders paid at the till or online
+ * (`paid`, not cancelled). A room charge is excluded — it is paid later, through the folio.
+ */
+async function diningTender(
+	hotelId: string,
+	from: string,
+	to: string
+): Promise<{ method: string; count: number; amountCentavos: number }[]> {
+	const methodExpr = sql<string>`coalesce(${diningOrders.paymentMethod}::text, 'unknown')`;
+	const rows = await db
+		.select({
+			method: methodExpr,
+			count: sql<number>`count(*)::int`,
+			amountCentavos: sql<number>`coalesce(sum(${diningOrders.totalCentavos}), 0)::bigint`
+		})
+		.from(diningOrders)
+		.where(
+			and(
+				eq(diningOrders.hotelId, hotelId),
+				eq(diningOrders.paymentStatus, 'paid'),
+				ne(diningOrders.status, 'cancelled'),
+				gte(diningOrders.businessDate, from),
+				lte(diningOrders.businessDate, to)
+			)
+		)
+		.groupBy(methodExpr);
+	return rows.map((r) => ({ method: r.method, count: Number(r.count), amountCentavos: Number(r.amountCentavos) }));
+}
 
 export interface DailySalesReport {
 	date: string;
@@ -27,7 +107,11 @@ export interface DailySalesReport {
 	netCashCentavos: number;
 }
 
-export async function dailySalesReport(hotelId: string, date: string): Promise<DailySalesReport> {
+export async function dailySalesReport(
+	hotelId: string,
+	date: string,
+	scope: ReportScope = 'all'
+): Promise<DailySalesReport> {
 	const snap = await daySnapshot(hotelId, date);
 
 	const movementRows = await db
@@ -41,11 +125,14 @@ export async function dailySalesReport(hotelId: string, date: string): Promise<D
 			and(
 				eq(cashMovements.hotelId, hotelId),
 				eq(cashMovements.businessDate, date),
-				sql`${cashMovements.voidedAt} is null`
+				sql`${cashMovements.voidedAt} is null`,
+				scopeMovementFilter(scope)
 			)
 		);
 
-	const revenueBySource = REVENUE_CATEGORIES.map((source) => ({
+	const revenueBySource = scopeRevenueCategories(scope)
+		.filter((c) => (REVENUE_CATEGORIES as readonly string[]).includes(c))
+		.map((source) => ({
 		source,
 		amountCentavos: movementRows
 			.filter((m) => m.direction === 'in' && m.category === source)
@@ -58,25 +145,38 @@ export async function dailySalesReport(hotelId: string, date: string): Promise<D
 		.filter((m) => m.category === 'refund' || m.category === 'deposit_refund')
 		.reduce((s, m) => s + m.amountCentavos, 0);
 
-	const paymentRows = await db
-		.select({ method: payments.method, amountCentavos: payments.amountCentavos })
-		.from(payments)
-		.innerJoin(orders, eq(orders.id, payments.orderId))
-		.where(
-			and(
-				eq(orders.hotelId, hotelId),
-				eq(payments.status, 'paid'),
-				sql`${payments.voidedAt} is null`,
-				sql`${payments.paidAt} >= ${date}::date and ${payments.paidAt} < (${date}::date + 1)`
-			)
-		);
+	// Tender: room/hall payments live in `payments`; restaurant takings in `dining_orders`.
 	const methodMap = new Map<string, { count: number; amountCentavos: number }>();
-	for (const p of paymentRows) {
-		const cur = methodMap.get(p.method) ?? { count: 0, amountCentavos: 0 };
-		cur.count += 1;
-		cur.amountCentavos += p.amountCentavos;
-		methodMap.set(p.method, cur);
+	if (scope === 'dining') {
+		for (const m of await diningTender(hotelId, date, date)) {
+			methodMap.set(m.method, { count: m.count, amountCentavos: m.amountCentavos });
+		}
+	} else {
+		const paymentRows = await db
+			.select({ method: payments.method, amountCentavos: payments.amountCentavos })
+			.from(payments)
+			.innerJoin(orders, eq(orders.id, payments.orderId))
+			.where(
+				and(
+					eq(orders.hotelId, hotelId),
+					eq(payments.status, 'paid'),
+					sql`${payments.voidedAt} is null`,
+					sql`${payments.paidAt} >= ${date}::date and ${payments.paidAt} < (${date}::date + 1)`
+				)
+			);
+		for (const p of paymentRows) {
+			const cur = methodMap.get(p.method) ?? { count: 0, amountCentavos: 0 };
+			cur.count += 1;
+			cur.amountCentavos += p.amountCentavos;
+			methodMap.set(p.method, cur);
+		}
 	}
+
+	// For a scope the day's totals are rebuilt from that scope's own movements (the day snapshot
+	// is the whole business). Net = what the scope took in minus what it refunded out.
+	const scoped = scope !== 'all';
+	const scopedIn = movementRows.filter((m) => m.direction === 'in').reduce((s, m) => s + m.amountCentavos, 0);
+	const scopedOut = movementRows.filter((m) => m.direction === 'out').reduce((s, m) => s + m.amountCentavos, 0);
 
 	return {
 		date,
@@ -84,8 +184,8 @@ export async function dailySalesReport(hotelId: string, date: string): Promise<D
 		byMethod: [...methodMap.entries()].map(([method, v]) => ({ method, ...v })),
 		depositsCentavos,
 		refundsCentavos,
-		grossRevenueCentavos: snap.grossRevenueCentavos,
-		netCashCentavos: snap.netCentavos
+		grossRevenueCentavos: scoped ? scopedIn : snap.grossRevenueCentavos,
+		netCashCentavos: scoped ? scopedIn - scopedOut : snap.netCentavos
 	};
 }
 
@@ -107,7 +207,8 @@ export interface CashflowRow {
 export async function cashflowReport(
 	hotelId: string,
 	from: string,
-	to: string
+	to: string,
+	scope: ReportScope = 'all'
 ): Promise<{ rows: CashflowRow[]; totalInCentavos: number; totalOutCentavos: number }> {
 	const grouped = await db
 		.select({
@@ -122,7 +223,8 @@ export async function cashflowReport(
 				eq(cashMovements.hotelId, hotelId),
 				gte(cashMovements.businessDate, from),
 				lte(cashMovements.businessDate, to),
-				sql`${cashMovements.voidedAt} is null`
+				sql`${cashMovements.voidedAt} is null`,
+				scopeMovementFilter(scope)
 			)
 		)
 		.groupBy(cashMovements.direction, cashMovements.category);
@@ -190,7 +292,12 @@ export async function dailyCashflowReport(
 		.sort((a, b) => a.date.localeCompare(b.date));
 }
 
-export async function revenueBySourceReport(hotelId: string, from: string, to: string) {
+export async function revenueBySourceReport(
+	hotelId: string,
+	from: string,
+	to: string,
+	scope: ReportScope = 'all'
+) {
 	const grouped = await db
 		.select({
 			category: cashMovements.category,
@@ -204,7 +311,14 @@ export async function revenueBySourceReport(hotelId: string, from: string, to: s
 				gte(cashMovements.businessDate, from),
 				lte(cashMovements.businessDate, to),
 				sql`${cashMovements.voidedAt} is null`,
-				sql`${cashMovements.category} in ('room_revenue','hall_revenue','incidental_sale','dining_revenue','other_revenue','deposit')`
+				sql`${cashMovements.category} in ('room_revenue','hall_revenue','incidental_sale','dining_revenue','other_revenue','deposit')`,
+				// Revenue lines only: a scope's refunds are not a "source".
+				scope === 'all'
+					? undefined
+					: sql`${cashMovements.category} in (${sql.join(
+							scopeRevenueCategories(scope).map((c) => sql`${c}`),
+							sql`, `
+						)})`
 			)
 		)
 		.groupBy(cashMovements.category);
@@ -300,7 +414,16 @@ export async function expenseReport(hotelId: string, from: string, to: string) {
 
 // ---------------------------------------------------------------------------
 
-export async function paymentMethodBreakdown(hotelId: string, from: string, to: string) {
+export async function paymentMethodBreakdown(
+	hotelId: string,
+	from: string,
+	to: string,
+	scope: ReportScope = 'all'
+) {
+	if (scope === 'dining') {
+		const rows = await diningTender(hotelId, from, to);
+		return { rows, totalCentavos: rows.reduce((s, r) => s + r.amountCentavos, 0) };
+	}
 	const rows = await db
 		.select({
 			method: payments.method,

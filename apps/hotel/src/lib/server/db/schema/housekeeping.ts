@@ -127,6 +127,44 @@ export const housekeepingDamageReports = pgTable(
 	]
 );
 
+/**
+ * A housekeeper's sign-off that a room was inspected after a stay and nothing was damaged.
+ * Append-only and read-only to everything else: the deposit and checkout rules do not look at
+ * it (front desk sees it next to the deposit, but settling is not gated on it). `bookingId` is
+ * resolved and frozen at sign-off, like a damage report's, so it still points at the right stay
+ * once the guest has gone. `result` is a plain text column so a later "damage found" outcome
+ * needs no enum migration.
+ */
+export const housekeepingInspections = pgTable(
+	'housekeeping_inspections',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		roomId: uuid('room_id')
+			.notNull()
+			.references(() => rooms.id, { onDelete: 'cascade' }),
+		bookingId: uuid('booking_id').references(() => bookings.id, { onDelete: 'set null' }),
+		result: text('result').notNull().default('no_damage'),
+		note: text('note'),
+		inspectedByUserId: uuid('inspected_by_user_id').references(() => users.id, {
+			onDelete: 'set null'
+		}),
+		inspectedAt: timestamp('inspected_at', { withTimezone: true }).notNull().defaultNow(),
+		createdAt: createdAt()
+	},
+	(t) => [
+		index('housekeeping_inspections_room_idx').on(t.hotelId, t.roomId),
+		index('housekeeping_inspections_booking_idx').on(t.bookingId)
+	]
+);
+
+export const housekeepingInspectionsRelations = relations(housekeepingInspections, ({ one }) => ({
+	hotel: one(hotels, { fields: [housekeepingInspections.hotelId], references: [hotels.id] }),
+	room: one(rooms, { fields: [housekeepingInspections.roomId], references: [rooms.id] })
+}));
+
 export const housekeepingStatusRelations = relations(housekeepingStatus, ({ one }) => ({
 	hotel: one(hotels, { fields: [housekeepingStatus.hotelId], references: [hotels.id] }),
 	room: one(rooms, { fields: [housekeepingStatus.roomId], references: [rooms.id] }),
@@ -150,3 +188,4 @@ export const housekeepingDamageReportsRelations = relations(
 
 export type HousekeepingStatus = typeof housekeepingStatus.$inferSelect;
 export type HousekeepingDamageReport = typeof housekeepingDamageReports.$inferSelect;
+export type HousekeepingInspection = typeof housekeepingInspections.$inferSelect;

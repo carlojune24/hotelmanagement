@@ -67,6 +67,11 @@
 						</div>
 					</div>
 				{/if}
+				{#if cart.securityDepositCentavos > 0}
+					<p class="mt-2 text-xs text-[var(--ledger-ink-muted)]">
+						Refundable security deposit {peso(cart.securityDepositCentavos)}, collected at check-in. Not part of the total above.
+					</p>
+				{/if}
 				<a href="/{hotelSlug}/details" class="ledger-btn-primary storefront-invoice-cta">
 					Proceed to checkout
 				</a>

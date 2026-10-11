@@ -231,6 +231,19 @@
 						</span>
 					</li>
 				{/if}
+				{#if data.securityDepositCentavos > 0}
+					<li class="flex gap-3">
+						<CircleCheckIcon
+							class="mt-0.5 size-5 shrink-0 text-[var(--ledger-ink-muted)]"
+							aria-hidden="true"
+						/>
+						<span>
+							A refundable security deposit of
+							<span class="ledger-data font-medium">{peso(data.securityDepositCentavos)}</span> is collected at
+							check-in and returned when you check out, less any damage. It was not charged online.
+						</span>
+					</li>
+				{/if}
 				{#if contact.contactAddress}
 					<li class="flex gap-3">
 						<MapPinIcon class="mt-0.5 size-5 shrink-0 text-[var(--ledger-ink-muted)]" aria-hidden="true" />

@@ -5,6 +5,7 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
+	import * as Sheet from '$lib/components/ui/sheet/index.js';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
@@ -33,6 +34,17 @@
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
 	const base = $derived(`/${page.params.hotel}/management`);
+
+	// The detail panel is a side column on a wide screen. On a phone there is no room for a column,
+	// so the same panel opens as a bottom sheet — a housekeeper must be able to reach the buttons.
+	let isDesktop = $state(true);
+	$effect(() => {
+		const mq = window.matchMedia('(min-width: 1024px)');
+		const sync = () => (isDesktop = mq.matches);
+		sync();
+		mq.addEventListener('change', sync);
+		return () => mq.removeEventListener('change', sync);
+	});
 
 	type Selected = { kind: 'room'; id: string } | { kind: 'hall'; id: string } | null;
 	let selected = $state<Selected>(null);
@@ -244,7 +256,7 @@
 			{/if}
 		</div>
 
-		<div class="hidden w-96 shrink-0 overflow-y-auto border-l border-border lg:block">
+		{#snippet detailPanel()}
 			{#if !selected}
 				<div class="p-4">
 					<p class="text-sm text-ink-muted">Select a room or function hall to update its status.</p>
@@ -311,6 +323,23 @@
 						{/if}
 					</div>
 
+					<div class="mb-4 border-t border-border pt-3">
+						<h4 class="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">Inspection</h4>
+						{#if detail?.inspection}
+							<p class="mb-2 flex items-center gap-1.5 text-xs text-ok">
+								<CheckIcon class="size-3.5" />
+								No damages — signed off {fmtDateTime(detail.inspection.inspectedAt)}{#if detail.inspection.inspectedByName} by {detail.inspection.inspectedByName}{/if}
+							</p>
+						{/if}
+						<form method="POST" action="?/markNoDamage" use:enhance class="space-y-2">
+							<input type="hidden" name="roomId" value={selectedRoom.roomId} />
+							<Input name="note" placeholder="Note (optional)" maxlength={300} class="text-sm" />
+							<Button type="submit" variant="outline" class="w-full gap-1.5">
+								<CheckIcon class="size-3.5" />
+								No damages
+							</Button>
+						</form>
+					</div>
 					<div class="border-t border-border pt-3">
 						<h4 class="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">
 							Report damage
@@ -494,6 +523,22 @@
 					{/if}
 				</div>
 			{/if}
-		</div>
+		{/snippet}
+
+		{#if isDesktop}
+			<div class="hidden w-96 shrink-0 overflow-y-auto border-l border-border lg:block">
+				{@render detailPanel()}
+			</div>
+		{:else}
+			<Sheet.Root open={!!selected} onOpenChange={(o) => { if (!o) selected = null; }}>
+				<Sheet.Content side="bottom" class="max-h-[85dvh] overflow-y-auto p-0">
+					<Sheet.Header class="sr-only">
+						<Sheet.Title>Room details</Sheet.Title>
+						<Sheet.Description>Update this room's status or report damage.</Sheet.Description>
+					</Sheet.Header>
+					{@render detailPanel()}
+				</Sheet.Content>
+			</Sheet.Root>
+		{/if}
 	</div>
 </div>

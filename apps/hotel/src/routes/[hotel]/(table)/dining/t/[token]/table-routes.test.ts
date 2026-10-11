@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { stationIdFor } from '$lib/server/test-station';
 import { inArray } from 'drizzle-orm';
 
 /**
@@ -75,7 +76,7 @@ describe.skipIf(!hasDb)('table ordering routes (live DB)', async () => {
 		const [area] = await db.insert(s.diningAreas).values({ hotelId: hotelA.id, diningItemId: v!.id, name: 'Indoor' }).returning();
 		const [t] = await db.insert(s.diningTables).values({ hotelId: hotelA.id, diningItemId: v!.id, name: 'T2', seats: 4, areaId: area!.id }).returning();
 		token = t!.qrToken;
-		const [item] = await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, diningItemId: v!.id, name: 'Adobo', priceCentavos: 8_000 }).returning();
+		const [item] = await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, stationId: await stationIdFor(hotelA.id), diningItemId: v!.id, name: 'Adobo', priceCentavos: 8_000 }).returning();
 		adobo = item!.id;
 	});
 

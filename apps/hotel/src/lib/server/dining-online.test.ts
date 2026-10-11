@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { stationIdFor } from '$lib/server/test-station';
 import { and, eq, inArray } from 'drizzle-orm';
 
 /**
@@ -113,8 +114,8 @@ describe.skipIf(!hasDb)('online dining orders (live DB)', async () => {
 		const items = await db
 			.insert(s.diningMenuItems)
 			.values([
-				{ hotelId: hotelA.id, diningItemId: venueA, name: 'Adobo', priceCentavos: 25_000 },
-				{ hotelId: hotelA.id, diningItemId: venueA, name: 'Soda', priceCentavos: 8_000, taxable: false }
+				{ hotelId: hotelA.id, stationId: await stationIdFor(hotelA.id), diningItemId: venueA, name: 'Adobo', priceCentavos: 25_000 },
+				{ hotelId: hotelA.id, stationId: await stationIdFor(hotelA.id), diningItemId: venueA, name: 'Soda', priceCentavos: 8_000, taxable: false }
 			])
 			.returning();
 		[adobo, soda] = items.map((i) => i.id) as [string, string];

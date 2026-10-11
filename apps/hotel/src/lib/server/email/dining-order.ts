@@ -25,6 +25,11 @@ export interface DiningOrderEmailData {
 	pickupTimeLabel: string | null;
 	items: { name: string; quantity: number; addons: string[]; remarks: string | null; lineTotalCentavos: number }[];
 	totalCentavos: number;
+	/** 'delivery' for an online takeaway order sent to the guest; absent or 'pickup' otherwise. */
+	fulfilment?: 'pickup' | 'delivery';
+	deliveryAddress?: string | null;
+	/** A delivery fee already inside `totalCentavos`, listed as its own line. */
+	deliveryFeeCentavos?: number;
 	/** 'paid' (online or at the cashier), or 'pay_at_venue'. */
 	payment: 'paid' | 'pay_at_venue';
 	remarks: string | null;
@@ -53,17 +58,32 @@ export function renderDiningOrder(data: DiningOrderEmailData): RenderedEmail {
 	const band = paper.toLowerCase() === '#ffffff' ? DEFAULT_BAND : darken(paper, 0.03);
 	const ready = data.kind === 'ready';
 	const dineIn = data.orderType === 'pre_order';
+	const delivery = !dineIn && data.fulfilment === 'delivery';
+	const fee = delivery ? (data.deliveryFeeCentavos ?? 0) : 0;
 
-	const headline = ready ? (dineIn ? 'Your order is ready to serve' : 'Your order is ready for pickup') : 'We have your order';
+	const headline = ready
+		? dineIn
+			? 'Your order is ready to serve'
+			: delivery
+				? 'Your order is ready for delivery'
+				: 'Your order is ready for pickup'
+		: 'We have your order';
 	const subject = ready ? `Your order ${data.code} is ready: ${hotel.name}` : `Order ${data.code} confirmed: ${data.venueTitle}`;
 	const lead = ready
 		? dineIn
 			? 'It will be brought to your table.'
-			: 'Please come to the restaurant to collect it. We kept it warm for you.'
+			: delivery
+				? 'It is ready and a rider will take it to the address below shortly.'
+				: 'Please come to the restaurant to collect it. We kept it warm for you.'
 		: data.payment === 'paid'
-			? 'Your payment is confirmed and the kitchen has your order.'
-			: 'The kitchen has your order. Please pay when you collect it.';
-	const pickupNote = !dineIn && data.pickupNote ? data.pickupNote : null;
+			? delivery
+				? 'Your payment is confirmed and the kitchen has your order. We will deliver it to the address below.'
+				: 'Your payment is confirmed and the kitchen has your order.'
+			: delivery
+				? 'The kitchen has your order. Please pay when it arrives.'
+				: 'The kitchen has your order. Please pay when you collect it.';
+	const pickupNote = !dineIn && !delivery && data.pickupNote ? data.pickupNote : null;
+	const whenWord = dineIn ? 'Table time' : delivery ? 'Delivery' : 'Pickup';
 	const when = data.pickupTimeLabel ? `${data.pickupDateLabel ? `${data.pickupDateLabel}, ` : ''}${data.pickupTimeLabel}` : null;
 
 	const itemRows = data.items
@@ -103,7 +123,7 @@ export function renderDiningOrder(data: DiningOrderEmailData): RenderedEmail {
 	<tr><td style="padding:32px 4px 0;">
 		<div style="font-family:${FONT_DISPLAY};font-size:26px;font-weight:500;color:${INK};">${esc(headline)}</div>
 		<div style="margin-top:10px;font-family:${FONT_DATA};font-size:20px;font-weight:700;letter-spacing:2px;color:${accentDeep};">${esc(data.code)}</div>
-		<div style="margin-top:10px;font-family:${FONT_BODY};font-size:14px;line-height:1.55;color:${INK_MUTED};">${esc(data.guestName)}, ${esc(lead)}${when ? ` ${dineIn ? 'Table time' : 'Pickup'}: <strong style="color:${INK};">${esc(when)}</strong>.` : ''}</div>
+		<div style="margin-top:10px;font-family:${FONT_BODY};font-size:14px;line-height:1.55;color:${INK_MUTED};">${esc(data.guestName)}, ${esc(lead)}${when ? ` ${whenWord}: <strong style="color:${INK};">${esc(when)}</strong>.` : ''}</div>
 	</td></tr>
 	<tr><td style="padding:24px 0 0;">
 		<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${accent}" style="background:${accent};border-radius:4px 4px 10px 10px;">
@@ -112,12 +132,14 @@ export function renderDiningOrder(data: DiningOrderEmailData): RenderedEmail {
 					<tr><td style="padding:20px 22px;">
 						<div style="font-family:${FONT_DATA};font-size:10px;letter-spacing:1px;text-transform:uppercase;color:${INK_MUTED};">${esc(data.venueTitle)}</div>
 						<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:8px;">${itemRows}
+							${fee > 0 ? `<tr><td style="padding:8px 0;border-bottom:1px solid ${RULE};font-family:${FONT_BODY};font-size:14px;color:${INK};">Delivery fee</td><td style="padding:8px 0 8px 12px;border-bottom:1px solid ${RULE};text-align:right;font-family:${FONT_DATA};font-size:13px;color:${INK};white-space:nowrap;">${esc(peso(fee))}</td></tr>` : ''}
 							<tr>
 								<td style="padding:12px 0 0;font-family:${FONT_BODY};font-size:15px;font-weight:600;color:${INK};">Total <span style="font-weight:400;font-size:12px;color:${INK_MUTED};">VAT included</span></td>
 								<td style="padding:12px 0 0;text-align:right;font-family:${FONT_DATA};font-size:15px;font-weight:700;color:${INK};white-space:nowrap;">${esc(peso(data.totalCentavos))}</td>
 							</tr>
 							<tr><td colspan="2" style="padding:4px 0 0;font-family:${FONT_BODY};font-size:12px;color:${INK_MUTED};">${data.payment === 'paid' ? 'Paid' : 'To pay at the restaurant'}</td></tr>
 						</table>
+						${delivery && data.deliveryAddress ? `<div style="margin-top:12px;font-family:${FONT_BODY};font-size:13px;color:${INK};">Deliver to: ${esc(data.deliveryAddress)}</div>` : ''}
 						${data.remarks ? `<div style="margin-top:12px;font-family:${FONT_BODY};font-size:12px;color:${INK_MUTED};">Note: ${esc(data.remarks)}</div>` : ''}
 						${pickupNote ? `<div style="margin-top:12px;font-family:${FONT_BODY};font-size:13px;color:${INK};">${esc(pickupNote)}</div>` : ''}
 					</td></tr>
@@ -143,13 +165,15 @@ export function renderDiningOrder(data: DiningOrderEmailData): RenderedEmail {
 		`${data.venueTitle}`,
 		'',
 		lead,
-		...(when ? [`${dineIn ? 'Table time' : 'Pickup'}: ${when}`] : []),
+		...(when ? [`${whenWord}: ${when}`] : []),
+		...(delivery && data.deliveryAddress ? [`Deliver to: ${data.deliveryAddress}`] : []),
 		'',
 		...data.items.flatMap((i) => [
 			`${i.quantity}x ${i.name}  ${peso(i.lineTotalCentavos)}`,
 			...(i.addons.length ? [`   + ${i.addons.join(', ')}`] : []),
 			...(i.remarks ? [`   "${i.remarks}"`] : [])
 		]),
+		...(fee > 0 ? [`Delivery fee  ${peso(fee)}`] : []),
 		`Total (VAT included): ${peso(data.totalCentavos)}`,
 		data.payment === 'paid' ? 'Paid' : 'To pay at the restaurant',
 		...(data.remarks ? ['', `Note: ${data.remarks}`] : []),

@@ -36,17 +36,19 @@
 		name: ''
 	});
 	let newCategory = $state('');
-	// Select values for the item dialog ('none' = unassigned; the server maps it to null).
+	// Select values for the item dialog ('none' = uncategorised). A station is required, so '' means
+	// "not chosen yet" and the item cannot be saved until one is.
 	let itemCategory = $state('none');
-	let itemStation = $state('none');
+	let itemStation = $state('');
 	const categoryLabel = $derived(
 		menu?.categories.find((c) => c.id === itemCategory)?.name ?? 'Uncategorised'
 	);
-	const stationLabel = $derived(data.stations.find((st) => st.id === itemStation)?.name ?? 'None');
+	const stationLabel = $derived(data.stations.find((st) => st.id === itemStation)?.name ?? 'Choose a station');
 
 	function openItem(item: MenuItemWithAddons | null) {
 		itemCategory = item?.categoryId ?? 'none';
-		itemStation = item?.stationId ?? 'none';
+		// A new dish starts on the hotel's only station, when it has just one.
+		itemStation = item?.stationId ?? (data.stations.length === 1 ? data.stations[0]!.id : '');
 		itemDialog = { open: true, item };
 	}
 
@@ -365,19 +367,21 @@
 				</div>
 				<div class="grid grid-cols-2 gap-3">
 					<div>
-						<Label for="itemStation">Station (optional)</Label>
+						<Label for="itemStation">Station</Label>
 						<Select.Root type="single" name="stationId" bind:value={itemStation}>
 							<Select.Trigger id="itemStation" class="mt-1 w-full">{stationLabel}</Select.Trigger>
 							<Select.Content>
-								<Select.Item value="none" label="None" />
 								{#each data.stations as st (st.id)}
 									<Select.Item value={st.id} label={st.name} />
 								{/each}
 							</Select.Content>
 						</Select.Root>
+						{#if data.stations.length > 1 && !itemStation}
+							<p class="mt-1 text-xs text-ink-muted">Pick where this dish is made, so it lands on the right lane.</p>
+						{/if}
 						{#if data.stations.length === 0}
 							<p class="mt-1 text-xs text-ink-muted">
-								Ask a manager to set up stations (Grill, Bar…) in the Kitchen section, so each dish lands on the right lane.
+								Ask a manager to set up stations (Hot Section, Grill, Bar…) in the Kitchen section, so each dish lands on the right lane.
 							</p>
 						{/if}
 					</div>
@@ -428,7 +432,7 @@
 				{/if}
 				<div class="flex gap-2">
 					<Button variant="outline" onclick={() => (itemDialog.open = false)}>Cancel</Button>
-					<Button type="submit" form="itemForm">{item ? 'Save' : 'Add item'}</Button>
+					<Button type="submit" form="itemForm" disabled={!itemStation}>{item ? 'Save' : 'Add item'}</Button>
 				</div>
 			</Dialog.Footer>
 		{/if}

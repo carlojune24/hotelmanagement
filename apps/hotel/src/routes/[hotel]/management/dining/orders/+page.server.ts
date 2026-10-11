@@ -13,6 +13,7 @@ import {
 	cancelDiningOrder,
 	countAwaitingPayment,
 	createDiningOrder,
+	dispatchDeliveryOrder,
 	listBoardOrders,
 	listRefundDueOrders,
 	payDiningOrder,
@@ -190,6 +191,28 @@ export const actions: Actions = {
 		try {
 			await setDiningOrderStatus({ hotelId: event.locals.hotel!.id, orderId: parsed.data.orderId, to: parsed.data.to, actor: event.locals.user });
 			return { moved: true };
+		} catch (e) {
+			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
+			throw e;
+		}
+	},
+
+	/** Staff send a ready delivery order out with a rider; the guest's page then says who is bringing it. */
+	dispatch: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'dining:write');
+		const parsed = z
+			.object({ orderId: recordId(), riderName: z.string().trim().min(1, 'Enter the rider\'s name.').max(80), riderPhone: z.string().trim().max(40).optional() })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: parsed.error.issues[0]?.message ?? 'Enter the rider\'s name.' });
+		try {
+			await dispatchDeliveryOrder({
+				hotelId: event.locals.hotel!.id,
+				orderId: parsed.data.orderId,
+				riderName: parsed.data.riderName,
+				riderPhone: parsed.data.riderPhone || null,
+				actor: event.locals.user
+			});
+			return { ok: `Sent out with ${parsed.data.riderName}.` };
 		} catch (e) {
 			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
 			throw e;

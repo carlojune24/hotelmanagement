@@ -37,6 +37,7 @@ import {
 } from './finance/documents';
 import type { BillTo, IssuedDocument, PayDocuments } from '../print-batch';
 import { venueBelongsToHotel } from './dining-menu';
+import { heldForReservation, releasedToKitchen } from './dining-hold';
 import { sendDiningOrderEmail } from './email/send-dining-order';
 import {
 	canMoveOrder,
@@ -45,6 +46,7 @@ import {
 	orderStateFromStations,
 	priceLine,
 	sumLines,
+	vatPortion,
 	type AddonGroupRule
 } from '../dining-orders';
 
@@ -80,6 +82,12 @@ export interface CreateOrderInput {
 	pickupAt?: Date | null;
 	/** How an online order is being paid: 'online' (PayMongo) or 'venue' (at pickup). */
 	payMode?: 'online' | 'venue' | null;
+	/** An online takeaway order that is delivered rather than collected. Set only by the online
+	 *  ordering flow, which takes the fee from the venue's own setting, never from the guest. */
+	fulfilment?: 'pickup' | 'delivery';
+	deliveryAddress?: string | null;
+	/** VAT-inclusive, added on top of the dishes. Zero or absent for everything but a delivery. */
+	deliveryFeeCentavos?: number;
 	/** `pending_payment` for an online order that must be paid before the kitchen sees it;
 	 *  `pending_acceptance` for a table-QR order that staff must accept first. */
 	initialStatus?: 'new' | 'pending_payment' | 'pending_acceptance';
@@ -193,8 +201,21 @@ export async function createDiningOrder(
 		});
 		return { line, item, chosen, priced, sortOrder };
 	});
-	const totals = sumLines(resolved.map((r) => r.priced));
-	if (totals.totalCentavos <= 0) throw new OrderError('This order has nothing to charge.');
+	const lineTotals = sumLines(resolved.map((r) => r.priced));
+	if (lineTotals.totalCentavos <= 0) throw new OrderError('This order has nothing to charge.');
+
+	// --- delivery: the fee is part of what the guest pays, VAT included, like any menu price ---
+	const fulfilment = input.fulfilment ?? 'pickup';
+	const deliveryFee = fulfilment === 'delivery' ? (input.deliveryFeeCentavos ?? 0) : 0;
+	if (!Number.isInteger(deliveryFee) || deliveryFee < 0) throw new OrderError('The delivery fee is not valid.');
+	if (fulfilment === 'delivery') {
+		if (input.orderType !== 'takeaway') throw new OrderError('Only a takeaway order can be delivered.');
+		if (!input.deliveryAddress?.trim()) throw new OrderError('Enter the address to deliver to.');
+	}
+	const totals = {
+		totalCentavos: lineTotals.totalCentavos + deliveryFee,
+		vatCentavos: lineTotals.vatCentavos + vatPortion(deliveryFee, hotel.vatRateBps)
+	};
 
 	// --- table / reservation links ---
 	let tableLabel: string | null = null;
@@ -250,6 +271,9 @@ export async function createDiningOrder(
 					remarks: input.remarks?.trim() || null,
 					pickupAt: input.pickupAt ?? null,
 					payMode: input.payMode ?? null,
+					fulfilment,
+					deliveryFeeCentavos: deliveryFee,
+					deliveryAddress: fulfilment === 'delivery' ? input.deliveryAddress!.trim().slice(0, 300) : null,
 					status: input.initialStatus ?? 'new',
 					source: input.source ?? 'staff',
 					totalCentavos: totals.totalCentavos,
@@ -496,6 +520,42 @@ export async function setStationStatus(args: {
 	});
 	if (becameReady && updated.source === 'online') void sendDiningOrderEmail(updated.id, 'ready');
 	return updated;
+}
+
+/**
+ * Staff send a ready delivery order out with a rider. Nothing else about the order changes: it stays
+ * `ready` (so the kitchen and the money are untouched) until staff mark it delivered, which is the
+ * ordinary `served` move. Sending it out again only changes the rider.
+ */
+export async function dispatchDeliveryOrder(args: {
+	hotelId: string;
+	orderId: string;
+	riderName: string;
+	riderPhone?: string | null;
+	actor?: Actor;
+}): Promise<void> {
+	const riderName = args.riderName.trim().slice(0, 80);
+	if (!riderName) throw new OrderError('Enter the rider\'s name.');
+	const riderPhone = args.riderPhone?.trim().slice(0, 40) || null;
+	await db.transaction(async (tx) => {
+		const order = await loadOrderForUpdate(tx, args.hotelId, args.orderId);
+		if (order.fulfilment !== 'delivery') throw new OrderError('This order is not a delivery.');
+		if (order.status !== 'ready') throw new OrderError('Send it out once the kitchen has it ready.');
+		const now = new Date();
+		await tx
+			.update(diningOrders)
+			.set({ riderName, riderPhone, outForDeliveryAt: order.outForDeliveryAt ?? now, updatedAt: now })
+			.where(eq(diningOrders.id, order.id));
+		await writeAudit({
+			hotelId: args.hotelId,
+			actor: args.actor ?? null,
+			action: 'dining_order.dispatch',
+			entityType: 'dining_order',
+			entityId: order.id,
+			before: { riderName: order.riderName },
+			after: { riderName, riderPhone }
+		});
+	});
 }
 
 /** Cancels an order that has not been paid (a paid order must have its payment voided first). */
@@ -797,8 +857,18 @@ export interface OrderView {
 	paymentMethod: string | null;
 	/** Room number when the order is charged to an in-house guest's room bill. */
 	roomLabel: string | null;
-	/** Takeaway collection time, or a pre-order's table time. */
+	/** Takeaway collection time (or delivery time), or a pre-order's table time. */
 	pickupAt: Date | null;
+	/** A pre-order for a table that is not due yet: kept off the kitchen board until it is released. */
+	held: boolean;
+	/** An online takeaway order that is sent out rather than collected; the fee is inside the total. */
+	fulfilment: 'pickup' | 'delivery';
+	deliveryAddress: string | null;
+	deliveryFeeCentavos: number;
+	/** Set when staff sent a delivery out; null before that. */
+	riderName: string | null;
+	riderPhone: string | null;
+	outForDeliveryAt: Date | null;
 	payMode: string | null;
 	cancelRequestedAt: Date | null;
 	cancelRequestNote: string | null;
@@ -847,6 +917,11 @@ async function hydrate(rows: { o: DiningOrder; venueTitle: string; bookingOrderI
 		.from(diningPayments)
 		.where(and(inArray(diningPayments.orderId, orderIds), eq(diningPayments.kind, 'refund'), eq(diningPayments.status, 'paid')))
 		.groupBy(diningPayments.orderId);
+	const heldRows = await db
+		.select({ id: diningOrders.id })
+		.from(diningOrders)
+		.where(and(inArray(diningOrders.id, orderIds), heldForReservation));
+	const heldSet = new Set(heldRows.map((h) => h.id));
 	const unreadBy = new Map(unread.map((u) => [u.orderId, Number(u.n)]));
 	const refundedBy = new Map(refunds.map((r) => [r.orderId, Number(r.sum)]));
 	return rows.map(({ o, venueTitle, bookingOrderId }) => ({
@@ -870,6 +945,13 @@ async function hydrate(rows: { o: DiningOrder; venueTitle: string; bookingOrderI
 		paymentMethod: o.paymentMethod,
 		roomLabel: o.roomLabel,
 		pickupAt: o.pickupAt,
+		held: heldSet.has(o.id),
+		fulfilment: o.fulfilment === 'delivery' ? 'delivery' : 'pickup',
+		deliveryAddress: o.deliveryAddress,
+		deliveryFeeCentavos: o.deliveryFeeCentavos,
+		riderName: o.riderName,
+		riderPhone: o.riderPhone,
+		outForDeliveryAt: o.outForDeliveryAt,
 		payMode: o.payMode,
 		cancelRequestedAt: o.cancelRequestedAt,
 		cancelRequestNote: o.cancelRequestNote,
@@ -905,13 +987,21 @@ const orderSelect = () =>
  *  `servedSince` (so a served-but-unpaid table is still visible at the cashier). */
 export async function listBoardOrders(
 	hotelId: string,
-	opts: { venueId?: string | null; servedSince: Date; /** The Orders board also lists table-QR orders awaiting staff; the kitchen must not. */ includeAwaitingAcceptance?: boolean }
+	opts: {
+		venueId?: string | null;
+		servedSince: Date;
+		/** The Orders board also lists table-QR orders awaiting staff; the kitchen must not. */
+		includeAwaitingAcceptance?: boolean;
+		/** The kitchen's own board: leave out a pre-order whose reservation is not due yet (see `dining-hold`). */
+		releasedOnly?: boolean;
+	}
 ): Promise<OrderView[]> {
 	const rows = await orderSelect()
 		.where(
 			and(
 				eq(diningOrders.hotelId, hotelId),
 				opts.venueId ? eq(diningOrders.diningItemId, opts.venueId) : undefined,
+				opts.releasedOnly ? releasedToKitchen : undefined,
 				or(
 					inArray(
 						diningOrders.status,
@@ -1060,6 +1150,20 @@ export async function diningSalesReport(
 
 	const byItem = new Map<string, { quantity: number; grossCentavos: number }>();
 	const byStation = new Map<string, { quantity: number; grossCentavos: number }>();
+
+	// Delivery fees are part of an order's total but not of any dish: they get their own line in the
+	// station and dish breakdowns so those still add up to the day's sales.
+	const [fees] = await db
+		.select({
+			orders: sql<number>`count(*) filter (where ${diningOrders.deliveryFeeCentavos} > 0)`,
+			gross: sql<number>`coalesce(sum(${diningOrders.deliveryFeeCentavos}), 0)`
+		})
+		.from(diningOrders)
+		.where(where);
+	if (n(fees?.gross) > 0) {
+		byItem.set('Delivery fee', { quantity: n(fees?.orders), grossCentavos: n(fees?.gross) });
+		byStation.set('Delivery fee', { quantity: n(fees?.orders), grossCentavos: n(fees?.gross) });
+	}
 	for (const r of itemRows) {
 		const i = byItem.get(r.name) ?? { quantity: 0, grossCentavos: 0 };
 		i.quantity += n(r.quantity);

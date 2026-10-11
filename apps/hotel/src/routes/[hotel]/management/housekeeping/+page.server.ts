@@ -10,6 +10,7 @@ import {
 	getHousekeepingRoomDetail,
 	markHallClean,
 	markRoomClean,
+	markRoomNoDamage,
 	reportHallDamage,
 	reportRoomDamage,
 	startCleaningHall,
@@ -94,6 +95,24 @@ export const actions: Actions = {
 		if (!parsed.success) return fail(400, { error: 'Missing hall.' });
 		await markHallClean(hotelId, parsed.data.functionHallId, event.locals.user);
 		return { hallDetail: await getHousekeepingHallDetail(hotelId, parsed.data.functionHallId) };
+	},
+
+	/** One-tap inspection sign-off: "I checked this room and nothing is damaged". */
+	markNoDamage: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'housekeeping:write');
+		const hotelId = event.locals.hotel!.id;
+		const raw = Object.fromEntries(await event.request.formData());
+		const parsed = z
+			.object({ roomId: z.string().uuid(), note: z.string().max(300).optional() })
+			.safeParse(raw);
+		if (!parsed.success) return fail(400, { error: 'Missing room.' });
+		try {
+			await markRoomNoDamage(hotelId, parsed.data.roomId, { note: parsed.data.note }, event.locals.user);
+		} catch (e) {
+			if (e instanceof HousekeepingError) return fail(400, { error: e.message });
+			throw e;
+		}
+		return { roomDetail: await getHousekeepingRoomDetail(hotelId, parsed.data.roomId) };
 	},
 
 	reportDamage: async (event) => {

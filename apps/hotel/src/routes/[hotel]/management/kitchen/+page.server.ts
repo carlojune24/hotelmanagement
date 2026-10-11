@@ -27,7 +27,12 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 	const venueId = venues.find((v) => v.id === url.searchParams.get('venue'))?.id ?? null;
 
 	await expirePendingDiningOrders({ hotelId }).catch((e) => console.error('kitchen: expirePendingDiningOrders failed', e));
-	const live = await listBoardOrders(hotelId, { venueId, servedSince: new Date(Date.now() + 86_400_000) });
+	// A pre-order for a table that is not due yet stays off the cooks' board until its release time.
+	const live = await listBoardOrders(hotelId, {
+		venueId,
+		servedSince: new Date(Date.now() + 86_400_000),
+		releasedOnly: true
+	});
 	const orders = live.filter((o) => o.status !== 'served');
 
 	// Orders cancelled in the last 15 minutes, so a cook who already started one is told to stop.

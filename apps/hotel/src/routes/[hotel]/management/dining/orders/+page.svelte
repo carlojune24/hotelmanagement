@@ -151,6 +151,7 @@
 	let undoRoomFor = $state<Order | null>(null);
 	let cancelFor = $state<Order | null>(null);
 	let declineFor = $state<Order | null>(null);
+	let dispatchFor = $state<Order | null>(null);
 	let settleOpen = $state(false);
 	let settleFor = $state<(typeof data.openChecks)[number] | null>(null);
 	let voidFor = $state<Order | null>(null);
@@ -172,6 +173,7 @@
 		if (form?.ok) {
 			cancelFor = null;
 			declineFor = null;
+			dispatchFor = null;
 			voidFor = null;
 			respondFor = null;
 			refundOpen = false;
@@ -300,6 +302,7 @@
 									canWrite={data.canWrite}
 									busy={servingId === order.id}
 									onserve={(o) => advance(o, 'served')}
+									ondispatch={(o) => (dispatchFor = o)}
 									onpay={openPay}
 									ondetails={openDetails}
 								/>
@@ -452,6 +455,35 @@
 <ThreadSheet bind:open={threadOpen} order={threadOrder ?? data.refundDue.find((o) => o.id === threadOrderId) ?? null} canWrite={data.canWrite} timezone={data.timezone} />
 <RefundDialog bind:open={refundOpen} order={refundOrder} />
 <SettleDialog bind:open={settleOpen} check={settleFor} shiftOpen={data.shiftOpen} {slug} inHouse={data.inHouse} />
+
+<!-- Send a delivery order out with a rider -->
+<Dialog.Root open={dispatchFor !== null} onOpenChange={(o) => { if (!o) dispatchFor = null; }}>
+	<Dialog.Content class="sm:max-w-sm">
+		{#if dispatchFor}
+			<Dialog.Header>
+				<Dialog.Title>Send out {dispatchFor.code}</Dialog.Title>
+				<Dialog.Description>
+					Deliver to {dispatchFor.deliveryAddress ?? 'the guest'}. The guest's order page will show who is bringing it.
+				</Dialog.Description>
+			</Dialog.Header>
+			<form method="POST" action="?/dispatch" use:enhance class="space-y-3">
+				<input type="hidden" name="orderId" value={dispatchFor.id} />
+				<div>
+					<Label for="riderName">Rider</Label>
+					<Input id="riderName" name="riderName" required maxlength={80} value={dispatchFor.riderName ?? ''} placeholder="Name of the rider" class="mt-1" />
+				</div>
+				<div>
+					<Label for="riderPhone">Rider's mobile (optional)</Label>
+					<Input id="riderPhone" name="riderPhone" type="tel" maxlength={40} value={dispatchFor.riderPhone ?? ''} placeholder="09xx xxx xxxx" class="mt-1" />
+				</div>
+				<Dialog.Footer>
+					<Button type="button" variant="outline" onclick={() => (dispatchFor = null)}>Not yet</Button>
+					<Button type="submit">Send out</Button>
+				</Dialog.Footer>
+			</form>
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>
 
 <!-- Decline a table-QR order -->
 <Dialog.Root open={declineFor !== null} onOpenChange={(o) => { if (!o) declineFor = null; }}>

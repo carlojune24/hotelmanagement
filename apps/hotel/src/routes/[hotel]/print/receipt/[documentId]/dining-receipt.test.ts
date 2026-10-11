@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { stationIdFor } from '$lib/server/test-station';
 import { inArray } from 'drizzle-orm';
 
 /** Who may open a dining order's printed receipt: dining staff, finance staff, and the guest with
@@ -49,7 +50,7 @@ describe.skipIf(!hasDb)('dining receipt print access (live DB)', async () => {
 		await createDocumentSeries(hotelA.id, { type: 'official_receipt', prefix: 'OR', serialFrom: 1, serialTo: 20, atpOrPermitNo: null, dateRegistered: null, accreditedPrinter: null, accreditationNo: null, notes: null }, null);
 		await createDocumentSeries(hotelA.id, { type: 'invoice', prefix: 'INV', serialFrom: 1, serialTo: 20, atpOrPermitNo: null, dateRegistered: null, accreditedPrinter: null, accreditationNo: null, notes: null }, null);
 		const [v] = await db.insert(s.diningItems).values({ hotelId: hotelA.id, title: 'Cafe' }).returning();
-		const [dish] = await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, diningItemId: v!.id, name: 'Soda', priceCentavos: 8_000 }).returning();
+		const [dish] = await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, stationId: await stationIdFor(hotelA.id), diningItemId: v!.id, name: 'Soda', priceCentavos: 8_000 }).returning();
 		const placed = await o.createDiningOrder({ hotelId: hotelA.id, venueId: v!.id, orderType: 'takeaway', source: 'online', guestName: 'Gina', lines: [{ menuItemId: dish!.id, quantity: 1 }] });
 		token = placed.accessToken;
 		await o.payDiningOrder({ hotelId: hotelA.id, orderId: placed.id, method: 'card' });

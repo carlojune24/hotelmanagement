@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { stationIdFor } from '$lib/server/test-station';
 import { eq, inArray } from 'drizzle-orm';
 
 /** Printing several receipts/invoices in one job: only staff may, only their own hotel's, only real
@@ -45,7 +46,7 @@ describe.skipIf(!hasDb)('batch print (live DB)', async () => {
 		await seedFinanceDefaults(db, hotelA.id);
 		await createDocumentSeries(hotelA.id, { type: 'official_receipt', prefix: 'OR', serialFrom: 1, serialTo: 20, atpOrPermitNo: null, dateRegistered: null, accreditedPrinter: null, accreditationNo: null, notes: null }, null);
 		const [v] = await db.insert(s.diningItems).values({ hotelId: hotelA.id, title: 'Cafe' }).returning();
-		const [dish] = await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, diningItemId: v!.id, name: 'Soda', priceCentavos: 8_000 }).returning();
+		const [dish] = await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, stationId: await stationIdFor(hotelA.id), diningItemId: v!.id, name: 'Soda', priceCentavos: 8_000 }).returning();
 		for (let i = 0; i < 2; i++) {
 			const placed = await o.createDiningOrder({ hotelId: hotelA.id, venueId: v!.id, orderType: 'takeaway', source: 'staff', lines: [{ menuItemId: dish!.id, quantity: 1 }] });
 			const paid = await o.payDiningOrder({ hotelId: hotelA.id, orderId: placed.id, method: 'card', documents: 'or' });

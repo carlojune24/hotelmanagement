@@ -5,6 +5,8 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
+	import PrinterIcon from '@lucide/svelte/icons/printer';
+	import DownloadIcon from '@lucide/svelte/icons/download';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -23,6 +25,15 @@
 		if (data.q) p.set('q', data.q);
 		return `?${p.toString()}`;
 	};
+
+	// The register print and CSV take exactly what this page is showing: same range, same search.
+	const exportQuery = $derived.by(() => {
+		const p = new URLSearchParams({ range: data.range.preset, from: data.range.from, to: data.range.to });
+		if (data.q) p.set('q', data.q);
+		return p.toString();
+	});
+	const printHref = $derived(`/${page.params.hotel}/print/transactions?${exportQuery}`);
+	const csvHref = $derived(`${base}/transactions/csv?${exportQuery}`);
 
 	let customFrom = $state(data.range.from);
 	let customTo = $state(data.range.to);
@@ -95,6 +106,15 @@
 			/>
 			<Button type="submit" size="sm" variant="outline">Search</Button>
 		</form>
+
+		<div class="flex items-center gap-1.5">
+			<Button size="sm" variant="outline" href={printHref} target="_blank" rel="noopener">
+				<PrinterIcon class="size-4" aria-hidden="true" /> Print
+			</Button>
+			<Button size="sm" variant="outline" href={csvHref} download>
+				<DownloadIcon class="size-4" aria-hidden="true" /> CSV
+			</Button>
+		</div>
 	</div>
 
 	<div class="grid grid-cols-2 gap-3 rounded-lg border border-border p-3 text-sm sm:grid-cols-4">

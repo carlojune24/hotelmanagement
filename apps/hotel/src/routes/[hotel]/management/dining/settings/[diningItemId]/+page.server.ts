@@ -61,7 +61,15 @@ const onlineOrderingSchema = z.object({
 	orderOpen: timeOfDay().optional(),
 	orderClose: timeOfDay().optional(),
 	prepMinutes: z.coerce.number().int().min(10, 'Allow at least 10 minutes to prepare an order.').max(240, 'Prep time can be at most 4 hours.'),
-	pickupNote: z.string().trim().max(200, 'Keep the pickup note under 200 characters.').optional()
+	pickupNote: z.string().trim().max(200, 'Keep the pickup note under 200 characters.').optional(),
+	deliveryEnabled: z.boolean(),
+	// 0 = today only; a later day is a phone call.
+	orderAheadDays: z.coerce.number().int().min(0).max(6, 'Guests can order up to 6 days ahead.'),
+	// In pesos as typed; stored as centavos. Blank means no fee.
+	deliveryFeePhp: z.coerce
+		.number({ error: 'Enter the delivery fee as an amount, like 60.' })
+		.min(0, 'The delivery fee cannot be negative.')
+		.max(10_000, 'That delivery fee looks too high.')
 });
 
 const reservationsSchema = z.object({
@@ -92,6 +100,8 @@ export const actions: Actions = {
 		const parsed = onlineOrderingSchema.safeParse({
 			...raw,
 			onlineOrdersEnabled: raw.onlineOrdersEnabled === 'on',
+			deliveryEnabled: raw.deliveryEnabled === 'on',
+			deliveryFeePhp: raw.deliveryFeePhp === undefined || raw.deliveryFeePhp === '' ? 0 : raw.deliveryFeePhp,
 			orderOpen: raw.orderOpen || undefined,
 			orderClose: raw.orderClose || undefined,
 			pickupNote: raw.pickupNote || undefined
@@ -128,6 +138,9 @@ export const actions: Actions = {
 				orderClose: d.orderClose ?? null,
 				prepMinutes: d.prepMinutes,
 				pickupNote: d.pickupNote ?? null,
+				orderAheadDays: d.orderAheadDays,
+				deliveryEnabled: d.deliveryEnabled,
+				deliveryFeeCentavos: Math.round(d.deliveryFeePhp * 100),
 				updatedAt: new Date()
 			})
 			.where(and(eq(diningItems.id, diningItemId), eq(diningItems.hotelId, hotelId)))

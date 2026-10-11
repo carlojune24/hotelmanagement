@@ -28,11 +28,14 @@
 	let orderOpen = $state(item.orderOpen ?? '');
 	let orderClose = $state(item.orderClose ?? '');
 	let prepMinutes = $state(item.prepMinutes);
+	let orderAheadDays = $state(String(item.orderAheadDays));
 	let onlinePayment = $state<string>(item.onlinePayment);
 	let pickupNote = $state(item.pickupNote ?? '');
+	let deliveryEnabled = $state(item.deliveryEnabled);
+	let deliveryFee = $state((item.deliveryFeeCentavos / 100).toFixed(2));
 	const ooPreview = $derived(
 		orderOpen && orderClose
-			? `Guests can choose a pickup time from ${orderOpen} to ${orderClose}, at least ${prepMinutes} minutes ahead and up to 7 days out. ${onlinePayment === 'online_only' ? 'They pay online.' : 'They can pay online or at the restaurant.'}`
+			? `Guests can choose a pickup time from ${orderOpen} to ${orderClose}, at least ${prepMinutes} minutes ahead${orderAheadDays === '0' ? ', for today only' : ` and up to ${Number(orderAheadDays) || 6} days out`}. ${onlinePayment === 'online_only' ? 'They pay online.' : 'They can pay online or at the restaurant.'}`
 			: 'Set the first and last pickup times to see what guests will be offered.'
 	);
 
@@ -189,9 +192,45 @@
 			</div>
 
 			<div>
+				<Label for="orderAheadDays">How far ahead can guests order online?</Label>
+				<select
+					id="orderAheadDays"
+					name="orderAheadDays"
+					bind:value={orderAheadDays}
+					class="mt-1 h-9 w-full max-w-xs rounded-md border border-input bg-background px-3 text-sm"
+				>
+					<option value="0">Today only</option>
+					<option value="1">Today and tomorrow</option>
+					<option value="2">Up to 2 days ahead</option>
+					<option value="3">Up to 3 days ahead</option>
+					<option value="6">Up to 6 days ahead</option>
+				</select>
+				<p class="mt-1 text-xs text-ink-muted">
+					With “Today only”, guests who want another day are asked to call the venue's number. Tables can still be reserved with a pre-order.
+				</p>
+			</div>
+
+			<div>
 				<Label for="pickupNote">Pickup note (optional)</Label>
 				<Input id="pickupNote" name="pickupNote" maxlength={200} bind:value={pickupNote} placeholder="Collect at the Café counter, ground floor" class="mt-1" />
 				<p class="mt-1 text-xs text-ink-muted">Shown to the guest on their order page and in their email.</p>
+			</div>
+
+			<div class="rounded-lg border border-border px-3 py-2.5">
+				<div class="flex items-center justify-between">
+					<div>
+						<Label for="deliveryEnabled" class="text-sm font-medium text-ink">Deliver online orders</Label>
+						<p class="text-xs text-ink-muted">Guests choose pickup or delivery when they order. Pickup stays available.</p>
+					</div>
+					<input id="deliveryEnabled" name="deliveryEnabled" type="checkbox" bind:checked={deliveryEnabled} class="size-4" />
+				</div>
+				{#if deliveryEnabled}
+					<div class="mt-3 max-w-xs">
+						<Label for="deliveryFeePhp">Delivery fee (₱)</Label>
+						<Input id="deliveryFeePhp" name="deliveryFeePhp" type="number" min="0" max="10000" step="0.01" bind:value={deliveryFee} class="mt-1 tabular-nums" />
+						<p class="mt-1 text-xs text-ink-muted">Added to the order, VAT included, and shown to the guest before they pay. Leave 0 for free delivery.</p>
+					</div>
+				{/if}
 			</div>
 
 			<p class="text-sm text-ink-muted" aria-live="polite">{ooPreview}</p>

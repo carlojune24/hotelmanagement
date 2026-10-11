@@ -61,6 +61,9 @@ export async function sendDiningOrderEmail(
 				lineTotalCentavos: i.lineTotalCentavos
 			})),
 			totalCentavos: order.totalCentavos,
+			fulfilment: order.fulfilment === 'delivery' ? 'delivery' : 'pickup',
+			deliveryAddress: order.deliveryAddress,
+			deliveryFeeCentavos: order.deliveryFeeCentavos,
 			payment: order.paymentStatus === 'paid' ? 'paid' : 'pay_at_venue',
 			remarks: order.remarks,
 			pickupNote: venue?.pickupNote ?? null,

@@ -144,7 +144,8 @@
 	const clock12 = (d: Date | string) => new Date(d).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' });
 	const minutesSince = (d: Date | string | null) => (d ? Math.max(0, Math.floor((nowServer - new Date(d).getTime()) / 60_000)) : 0);
 	const waited = (o: Order) => minutesSince(o.createdAt);
-	const where = (o: Order) => (o.orderType === 'takeaway' ? 'Takeaway' : o.tableLabel ? `Table ${o.tableLabel}` : 'Dine-in');
+	const where = (o: Order) =>
+		o.orderType === 'takeaway' ? (o.fulfilment === 'delivery' ? 'Delivery' : 'Takeaway') : o.tableLabel ? `Table ${o.tableLabel}` : 'Dine-in';
 
 	/** The worst a ticket is doing: how long it has waited, against the one late rule. */
 	function ticketLevel(t: Ticket): WaitLevel {

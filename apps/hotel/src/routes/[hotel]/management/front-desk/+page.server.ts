@@ -42,6 +42,7 @@ import {
 	dismissDamageReport,
 	flagRoomForHousekeeping,
 	getDamageReportById,
+	getLatestRoomInspections,
 	getRoomHousekeepingOverlay,
 	markDamageReportCharged
 } from '$lib/server/housekeeping';
@@ -148,6 +149,13 @@ export const load: PageServerLoad = async ({ locals }) => {
 		roomId,
 		...o
 	}));
+	// Housekeeping's "no damages" sign-offs, shown beside a deposit. Information only: nothing
+	// about settling or checking out reads them.
+	const inspectionMap = await getLatestRoomInspections(
+		hotel.id,
+		grid.cells.map((c) => c.roomId)
+	);
+	const inspections = [...inspectionMap.values()];
 
 	return {
 		businessDate,
@@ -161,6 +169,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 		hallGrid,
 		roomTypePolicies,
 		housekeeping,
+		inspections,
 		role: locals.role,
 		cashier: {
 			requireOpenShiftForCashPayment: financeSettings.requireOpenShiftForCashPayment,

@@ -7,11 +7,13 @@ import {
 	guests,
 	hallBookings,
 	housekeepingDamageReports,
+	housekeepingInspections,
 	housekeepingStatus,
 	orders,
 	roomAssignments,
 	rooms,
 	roomTypes,
+	users,
 	type HousekeepingDamageReport
 } from './db/schema/index';
 import { writeAudit } from './audit';
@@ -208,6 +210,9 @@ export interface HousekeepingDetail {
 	 *  these collapsed by default so a freshly-cleaned room doesn't look like it still has
 	 *  open issues. */
 	resolvedDamageReports: HousekeepingDamageReportView[];
+	/** The latest "no damages" sign-off for a room that no damage report has superseded; always
+	 *  null for a function hall (inspection sign-off is a room stay thing). */
+	inspection: { inspectedAt: Date; inspectedByName: string | null; note: string | null } | null;
 }
 
 export async function getHousekeepingRoomDetail(
@@ -245,7 +250,11 @@ export async function getHousekeepingRoomDetail(
 			? (refs.get(status.triggeringBookingId) ?? null)
 			: null,
 		openDamageReports: damageReports.filter((r) => r.status === 'pending').map(view),
-		resolvedDamageReports: damageReports.filter((r) => r.status !== 'pending').map(view)
+		resolvedDamageReports: damageReports.filter((r) => r.status !== 'pending').map(view),
+		inspection: await getLatestRoomInspections(hotelId, [roomId]).then((m) => {
+			const i = m.get(roomId);
+			return i ? { inspectedAt: i.inspectedAt, inspectedByName: i.inspectedByName, note: i.note } : null;
+		})
 	};
 }
 
@@ -294,7 +303,8 @@ export async function getHousekeepingHallDetail(
 			? (refs.get(status.triggeringHallBookingId) ?? null)
 			: null,
 		openDamageReports: damageReports.filter((r) => r.status === 'pending').map(view),
-		resolvedDamageReports: damageReports.filter((r) => r.status !== 'pending').map(view)
+		resolvedDamageReports: damageReports.filter((r) => r.status !== 'pending').map(view),
+		inspection: null
 	};
 }
 
@@ -753,3 +763,159 @@ export async function countPendingDamageReports(hotelId: string): Promise<number
 		);
 	return row?.n ?? 0;
 }
+
+// ---------------------------------------------------------------------------
+// "No damages" — a housekeeper's inspection sign-off
+// ---------------------------------------------------------------------------
+
+/** A recorded sign-off that a room was inspected after a stay and nothing was damaged. */
+export interface RoomInspectionView {
+	roomId: string;
+	/** The stay it was signed off for, resolved when the housekeeper tapped the button. */
+	bookingId: string | null;
+	inspectedAt: Date;
+	inspectedByName: string | null;
+	note: string | null;
+}
+
+/**
+ * Housekeeping signs off that a room was inspected and nothing is damaged. This only records the
+ * fact (and audits it): it does not change cleanliness, charge anything or release a deposit. Front
+ * desk sees it beside the deposit; the deposit and checkout rules do not depend on it.
+ *
+ * It is refused while a damage report on the room is still waiting for front desk — "no damages"
+ * and an open report cannot both be true. Tapping it again for the same stay changes nothing.
+ */
+export async function markRoomNoDamage(
+	hotelId: string,
+	roomId: string,
+	input: { note?: string | null },
+	actor: SessionUser | null
+): Promise<{ alreadyRecorded: boolean }> {
+	const [room] = await db
+		.select({ id: rooms.id })
+		.from(rooms)
+		.where(and(eq(rooms.id, roomId), eq(rooms.hotelId, hotelId)))
+		.limit(1);
+	if (!room) throw new HousekeepingError('Room not found.');
+
+	const [pending] = await db
+		.select({ id: housekeepingDamageReports.id })
+		.from(housekeepingDamageReports)
+		.where(
+			and(
+				eq(housekeepingDamageReports.hotelId, hotelId),
+				eq(housekeepingDamageReports.roomId, roomId),
+				eq(housekeepingDamageReports.status, 'pending')
+			)
+		)
+		.limit(1);
+	if (pending) {
+		throw new HousekeepingError(
+			'A damage report on this room is still waiting for front desk. It has to be charged or dismissed first.'
+		);
+	}
+
+	const bookingId = await resolveBookingForRoomDamage(hotelId, roomId);
+	const [existing] = await db
+		.select({ id: housekeepingInspections.id })
+		.from(housekeepingInspections)
+		.where(
+			and(
+				eq(housekeepingInspections.hotelId, hotelId),
+				eq(housekeepingInspections.roomId, roomId),
+				bookingId
+					? eq(housekeepingInspections.bookingId, bookingId)
+					: sql`${housekeepingInspections.bookingId} is null`
+			)
+		)
+		.orderBy(desc(housekeepingInspections.inspectedAt))
+		.limit(1);
+	if (existing) {
+		// A damage report filed since then makes that older sign-off stale; a fresh tap supersedes it.
+		const [laterDamage] = await db
+			.select({ id: housekeepingDamageReports.id })
+			.from(housekeepingDamageReports)
+			.innerJoin(housekeepingInspections, eq(housekeepingInspections.id, existing.id))
+			.where(
+				and(
+					eq(housekeepingDamageReports.hotelId, hotelId),
+					eq(housekeepingDamageReports.roomId, roomId),
+					sql`${housekeepingDamageReports.createdAt} > ${housekeepingInspections.inspectedAt}`
+				)
+			)
+			.limit(1);
+		if (!laterDamage) return { alreadyRecorded: true };
+	}
+
+	const note = input.note?.trim().slice(0, 300) || null;
+	const [row] = await db
+		.insert(housekeepingInspections)
+		.values({
+			hotelId,
+			roomId,
+			bookingId,
+			result: 'no_damage',
+			note,
+			inspectedByUserId: actor?.id ?? null
+		})
+		.returning({ id: housekeepingInspections.id });
+	await writeAudit({
+		hotelId,
+		actor,
+		action: 'housekeeping.no_damage',
+		entityType: 'room',
+		entityId: roomId,
+		after: { inspectionId: row!.id, bookingId, note }
+	});
+	return { alreadyRecorded: false };
+}
+
+/**
+ * The latest "no damages" sign-off per room, for a batch of rooms — what Front Desk shows beside a
+ * deposit. A sign-off that a damage report has since been filed against is left out: it no longer
+ * says the room is undamaged. Rooms never inspected are simply absent.
+ */
+export async function getLatestRoomInspections(
+	hotelId: string,
+	roomIds: string[]
+): Promise<Map<string, RoomInspectionView>> {
+	const out = new Map<string, RoomInspectionView>();
+	if (roomIds.length === 0) return out;
+
+	const rows = await db
+		.select({
+			roomId: housekeepingInspections.roomId,
+			bookingId: housekeepingInspections.bookingId,
+			inspectedAt: housekeepingInspections.inspectedAt,
+			note: housekeepingInspections.note,
+			by: users.name
+		})
+		.from(housekeepingInspections)
+		.leftJoin(users, eq(users.id, housekeepingInspections.inspectedByUserId))
+		.where(and(eq(housekeepingInspections.hotelId, hotelId), inArray(housekeepingInspections.roomId, roomIds)))
+		.orderBy(desc(housekeepingInspections.inspectedAt));
+	for (const r of rows) {
+		if (out.has(r.roomId)) continue;
+		out.set(r.roomId, {
+			roomId: r.roomId,
+			bookingId: r.bookingId,
+			inspectedAt: r.inspectedAt,
+			inspectedByName: r.by ?? null,
+			note: r.note
+		});
+	}
+
+	// A report filed after the sign-off supersedes it.
+	const damaged = await db
+		.select({ roomId: housekeepingDamageReports.roomId, at: sql<Date>`max(${housekeepingDamageReports.createdAt})` })
+		.from(housekeepingDamageReports)
+		.where(and(eq(housekeepingDamageReports.hotelId, hotelId), inArray(housekeepingDamageReports.roomId, roomIds)))
+		.groupBy(housekeepingDamageReports.roomId);
+	for (const d of damaged) {
+		const insp = d.roomId ? out.get(d.roomId) : undefined;
+		if (insp && new Date(d.at) > insp.inspectedAt) out.delete(d.roomId!);
+	}
+	return out;
+}
+

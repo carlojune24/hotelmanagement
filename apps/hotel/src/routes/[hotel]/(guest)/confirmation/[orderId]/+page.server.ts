@@ -13,6 +13,7 @@ import {
 } from '$lib/server/db/schema/index';
 import { getOrderPaymentSummary } from '$lib/server/order-payment';
 import { getOrderPromo } from '$lib/server/promo-codes';
+import { orderSecurityDepositCentavos } from '$lib/server/security-deposit-lookup';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, params, url, depends }) => {
@@ -60,12 +61,15 @@ export const load: PageServerLoad = async ({ locals, params, url, depends }) => 
 
 	const payment = await getOrderPaymentSummary(order);
 	const promo = await getOrderPromo(order.id);
+	// A memo for the guest: refundable, collected at check-in, never part of what was paid.
+	const securityDepositCentavos = await orderSecurityDepositCentavos(hotelId, order.id);
 
 	return {
 		status: order.status,
 		// Null for an ordinary pay-in-full order — the page then keeps saying "Total paid".
 		payment,
 		promo,
+		securityDepositCentavos,
 		order: {
 			id: order.id,
 			accessToken: order.accessToken,

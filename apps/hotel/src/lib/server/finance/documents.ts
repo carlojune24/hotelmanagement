@@ -1016,9 +1016,22 @@ export async function buildDiningSnapshot(
 		};
 	});
 
-	const vatableGross = items.filter((i) => i.taxable).reduce((sum, i) => sum + i.lineTotalCentavos, 0);
+	// A delivery fee is its own VAT-able line. Its VAT is whatever the order carries beyond its
+	// dishes, so the document always adds up to the order's total.
+	const deliveryFee = order.deliveryFeeCentavos;
+	const itemsVat = items.reduce((sum, i) => sum + i.vatCentavos, 0);
+	if (deliveryFee > 0) {
+		lines.push({
+			description: 'Delivery fee',
+			quantity: 1,
+			unitPriceCentavos: deliveryFee,
+			amountCentavos: deliveryFee,
+			vatable: true
+		});
+	}
+	const vatableGross = items.filter((i) => i.taxable).reduce((sum, i) => sum + i.lineTotalCentavos, 0) + deliveryFee;
 	const exemptGross = items.filter((i) => !i.taxable).reduce((sum, i) => sum + i.lineTotalCentavos, 0);
-	const vat = items.reduce((sum, i) => sum + i.vatCentavos, 0);
+	const vat = itemsVat + (deliveryFee > 0 ? Math.max(0, order.vatCentavos - itemsVat) : 0);
 	const gross = order.totalCentavos;
 	const paid = order.paymentStatus === 'paid';
 	const isInvoice = type === 'invoice';
