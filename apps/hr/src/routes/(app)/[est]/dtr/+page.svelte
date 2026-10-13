@@ -268,8 +268,12 @@
 		</aside>
 
 		<!-- Centre: the days -->
-		<section class="min-w-0 space-y-3">
-			<div class="flex flex-wrap items-center justify-between gap-2">
+		<!-- Only the day list scrolls; the month title and totals stay put. Height leaves room for the
+		     page header and the hand-off strip above, with a floor so a short window still has a list. -->
+		<section
+			class="flex min-w-0 flex-col gap-3 max-lg:max-h-[75dvh] lg:h-[max(24rem,calc(100dvh-16rem))]"
+		>
+			<div class="flex shrink-0 flex-wrap items-center justify-between gap-2">
 				<h2 class="text-base font-semibold text-ink">
 					{monthName} {year} · {mode === 'saved' ? 'Saved record' : 'Preview'}
 				</h2>
@@ -290,6 +294,7 @@
 					Nothing is saved for {monthName} {year} yet. Check the Preview, then Save record.
 				</p>
 			{:else if view}
+				<div class="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
 				{#each view.days as d (d.date)}
 					<article class="overflow-hidden rounded-lg border border-border bg-surface">
 						<header class="flex items-center justify-between gap-2 bg-primary/10 px-3 py-2">
@@ -352,6 +357,7 @@
 						{/if}
 					</article>
 				{/each}
+				</div>
 			{/if}
 		</section>
 
@@ -361,7 +367,7 @@
 				<SearchIcon class="absolute top-2.5 left-2.5 size-4 text-ink-muted" />
 				<Input bind:value={search} placeholder="Search name or Biometric ID" class="pl-8" aria-label="Search employees" />
 			</div>
-			<ul class="max-h-[75vh] divide-y divide-border overflow-y-auto rounded-lg border border-border bg-surface">
+			<ul class="max-h-[75vh] lg:max-h-[max(20rem,calc(100dvh-20rem))] divide-y divide-border overflow-y-auto rounded-lg border border-border bg-surface">
 				{#each people as p (p.id)}
 					<li>
 						<a

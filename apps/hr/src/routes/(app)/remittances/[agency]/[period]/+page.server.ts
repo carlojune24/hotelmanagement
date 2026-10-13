@@ -6,6 +6,7 @@ import { db } from '$lib/server/db/index';
 import { establishments } from '$lib/server/db/schema/index';
 import {
 	AGENCY_LABEL,
+	employerNoFor,
 	RemittanceError,
 	agencySchema,
 	getSchedule,
@@ -44,7 +45,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		record: s.record,
 		dueDate: s.dueDate,
 		draftBatches: s.draftBatches,
-		employerNo: agency === 'bir' ? s.settings.employer.tin : s.settings.employerIds[agency]
+		employerNo: employerNoFor(agency, s.settings)
 	};
 };
 

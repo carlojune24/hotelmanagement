@@ -64,6 +64,9 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 					tax: deductions.withholding_tax ?? 0,
 					other: (deductions.cash_advance ?? 0) + (deductions.loans ?? 0) + (deductions.tardiness_undertime ?? 0) + (deductions.other ?? 0),
 					net: l.netPayCentavos,
+					loans: ((l.detail as { loans?: Array<{ label: string; due: number; deducted: number }> } | null)?.loans ?? []).map(
+						(x) => ({ label: x.label, due: x.due, deducted: x.deducted })
+					),
 					sharedWith: Object.keys(l.costByEstablishment as Record<string, number>)
 						.filter((id) => id !== l.establishmentId)
 						.map((id) => estName.get(id) ?? 'another establishment'),
@@ -71,7 +74,6 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 						allowances: (adj.allowancesCentavos ?? 0) / 100,
 						otherEarnings: (adj.otherEarningsCentavos ?? 0) / 100,
 						cashAdvance: (adj.cashAdvanceCentavos ?? 0) / 100,
-						loans: (adj.loansCentavos ?? 0) / 100,
 						otherDeductions: (adj.otherDeductionsCentavos ?? 0) / 100,
 						withholdingOverride: adj.withholdingOverrideCentavos == null ? '' : String((adj.withholdingOverrideCentavos as number) / 100)
 					}

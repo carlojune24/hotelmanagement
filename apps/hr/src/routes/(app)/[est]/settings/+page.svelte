@@ -67,6 +67,24 @@
 			Times after midnight wrap, so 22:00 to 06:00 covers the night. The statutory minimum is 10%.
 			Changing the window affects DTRs generated from now on; saved DTRs are not recomputed.
 		</p>
+		<div class="rounded-2xl bg-ink/5 px-4 py-3 text-sm">
+			<p class="font-medium">Which window does the DTR follow?</p>
+			<ul class="mt-1 list-disc space-y-1 pl-5 text-ink-muted">
+				<li>
+					A shift's own window wins. It is set per shift template or per day in Schedule, and a template's
+					window is copied onto each day it is applied to.
+				</li>
+				<li>
+					A day with no window of its own — and any punch with no schedule — uses the window above.
+				</li>
+				<li>
+					The premium (%) is only set here; a shift can change the hours it covers but not the rate.
+				</li>
+				<li>
+					Changing a template later does not change days it was already applied to — apply it again.
+				</li>
+			</ul>
+		</div>
 		<Button type="submit">Save</Button>
 	</form>
 

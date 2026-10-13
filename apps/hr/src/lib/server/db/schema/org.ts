@@ -1,4 +1,4 @@
-import { index, jsonb, pgTable, primaryKey, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, index, jsonb, pgTable, primaryKey, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, deletedAt, pk, updatedAt } from './_shared';
 import { users } from './auth';
 
@@ -20,6 +20,27 @@ export const organizations = pgTable('organizations', {
 });
 
 /**
+ * The kinds of establishment Main HR runs (Hotel, Restaurant, Retail…). `links_to_hotel_app` is the
+ * behaviour: only a hotel-type establishment carries the hotel app's reference and can be linked to it.
+ * It is fixed when the type is created so an existing establishment's behaviour never changes under it.
+ */
+export const establishmentTypes = pgTable(
+	'establishment_types',
+	{
+		id: pk(),
+		organizationId: uuid('organization_id')
+			.notNull()
+			.references(() => organizations.id, { onDelete: 'restrict' }),
+		name: text('name').notNull(),
+		linksToHotelApp: boolean('links_to_hotel_app').notNull().default(false),
+		active: boolean('active').notNull().default(true),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [uniqueIndex('establishment_types_org_name_idx').on(t.organizationId, t.name)]
+);
+
+/**
  * A business HR is run for: a hotel (identified by that hotel's `hotels.org_ref` in the hotel
  * app) or a non-hotel business that exists only here. Replaces the old `hotel_id` FK.
  */
@@ -39,8 +60,9 @@ export const establishments = pgTable(
 		legalName: text('legal_name'),
 		addressLine: text('address_line'),
 		city: text('city'),
-		/** 'hotel' | 'business' — validated at the app layer. */
+		/** 'hotel' | 'business' — derived from the type's `links_to_hotel_app`; kept for the code that branches on it. */
 		kind: text('kind').notNull(),
+		typeId: uuid('type_id').references(() => establishmentTypes.id, { onDelete: 'restrict' }),
 		/** IANA timezone; DTR business dates and roster weeks resolve from it. */
 		timezone: text('timezone').notNull().default('Asia/Manila'),
 		/** 'active' | 'archived' */

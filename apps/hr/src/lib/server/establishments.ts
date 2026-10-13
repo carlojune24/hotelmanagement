@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from './db/index';
-import { establishments, organizations } from './db/schema/index';
+import { establishmentTypes, establishments, organizations } from './db/schema/index';
 import { mintRef } from './ids';
 import { uniqueSlug } from '$lib/slug';
 import { establishmentSchema, type EstablishmentInput } from '$lib/establishment-schema';
@@ -32,8 +32,21 @@ export async function loadEstablishmentBySlug(slug: string) {
 		.then((r) => r.at(0) ?? null);
 }
 
+/** The type an establishment is being created or moved to — must exist, be in use, and belong to this company. */
+async function activeType(organizationId: string, typeId: string) {
+	const type = await db
+		.select()
+		.from(establishmentTypes)
+		.where(and(eq(establishmentTypes.id, typeId), eq(establishmentTypes.organizationId, organizationId)))
+		.then((r) => r.at(0));
+	if (!type || !type.active) throw new EstablishmentError('Choose an establishment type that is in use.');
+	return type;
+}
+
 export async function createEstablishment(input: EstablishmentInput) {
 	const org = await getOrganization();
+	const type = await activeType(org.id, input.typeId);
+	const kind = type.linksToHotelApp ? 'hotel' : 'business';
 	const slug = await uniqueSlug(input.name, async (candidate) => {
 		const hit = await db
 			.select({ id: establishments.id })
@@ -44,7 +57,7 @@ export async function createEstablishment(input: EstablishmentInput) {
 	});
 	// A given hotel reference is stored exactly as given: it must match the hotel app's value byte
 	// for byte. A hotel not set up in the hotel app yet (or a business) gets a minted one.
-	const orgRef = input.kind === 'hotel' && input.orgRef ? input.orgRef : mintRef('org');
+	const orgRef = kind === 'hotel' && input.orgRef ? input.orgRef : mintRef('org');
 	const dupe = await db
 		.select({ id: establishments.id })
 		.from(establishments)
@@ -58,7 +71,8 @@ export async function createEstablishment(input: EstablishmentInput) {
 			orgRef,
 			slug,
 			name: input.name,
-			kind: input.kind,
+			kind,
+			typeId: type.id,
 			timezone: input.timezone,
 			legalName: input.legalName || null,
 			addressLine: input.addressLine || null,
@@ -68,15 +82,34 @@ export async function createEstablishment(input: EstablishmentInput) {
 	return row!;
 }
 
-/** Kind is identity — set once. A hotel's reference may be (re)linked, nothing else is keyed to it yet. */
+/** A hotel-style type can't become a non-hotel one or back (that changes what the establishment is);
+ *  moving between types of the same behaviour is fine. A hotel's reference may be (re)linked. */
 export async function updateEstablishment(
 	id: string,
 	input: Pick<EstablishmentInput, 'name' | 'timezone' | 'legalName' | 'addressLine' | 'city'> & {
 		status?: 'active' | 'archived';
 		/** Hotels only: link to (or re-point at) the hotel app's record. */
 		orgRef?: string;
+		typeId?: string;
 	}
 ) {
+	let typeId: string | undefined;
+	if (input.typeId) {
+		const org = await getOrganization();
+		const next = await activeType(org.id, input.typeId);
+		const cur = await db
+			.select({ linksToHotelApp: establishmentTypes.linksToHotelApp, kind: establishments.kind })
+			.from(establishments)
+			.leftJoin(establishmentTypes, eq(establishmentTypes.id, establishments.typeId))
+			.where(eq(establishments.id, id))
+			.then((r) => r.at(0));
+		if (!cur) throw new EstablishmentError('Establishment not found.');
+		const wasHotel = cur.linksToHotelApp ?? cur.kind === 'hotel';
+		if (wasHotel !== next.linksToHotelApp) {
+			throw new EstablishmentError('A hotel cannot be changed to another type, or the other way round.');
+		}
+		typeId = next.id;
+	}
 	if (input.orgRef) {
 		const current = await db
 			.select({ kind: establishments.kind, orgRef: establishments.orgRef })
@@ -98,6 +131,7 @@ export async function updateEstablishment(
 		.update(establishments)
 		.set({
 			...(input.orgRef ? { orgRef: input.orgRef } : {}),
+			...(typeId ? { typeId } : {}),
 			name: input.name,
 			timezone: input.timezone,
 			legalName: input.legalName || null,

@@ -66,6 +66,10 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		earnings: l.earnings as Record<string, number>,
 		deductions: l.deductions as Record<string, number>,
 		notCovered: notCoveredLabels(l.detail),
+		/** Each loan on this payslip: what was due and what the pay could cover. No reference numbers. */
+		loans: ((l.detail as { loans?: Array<{ label: string; due: number; deducted: number }> } | null)?.loans ?? []).map(
+			(x) => ({ label: x.label, due: x.due, deducted: x.deducted })
+		),
 		gross: l.grossCentavos,
 		net: l.netPayCentavos
 	};

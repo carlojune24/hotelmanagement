@@ -103,7 +103,15 @@
 				<Label for="duePagibig">Pag-IBIG due day</Label>
 				<Input id="duePagibig" name="duePagibig" type="number" min="1" max="31" value={data.settings.dueDay.pagibig ?? ''} class="mt-1" />
 			</div>
-			<div class="sm:col-start-2">
+			<div>
+				<Label for="dueSssLoan">SSS loans due day</Label>
+				<Input id="dueSssLoan" name="dueSssLoan" type="number" min="1" max="31" value={data.settings.dueDay.sss_loan ?? ''} class="mt-1" />
+			</div>
+			<div>
+				<Label for="duePagibigLoan">Pag-IBIG loans due day</Label>
+				<Input id="duePagibigLoan" name="duePagibigLoan" type="number" min="1" max="31" value={data.settings.dueDay.pagibig_loan ?? ''} class="mt-1" />
+			</div>
+			<div>
 				<Label for="dueBir">BIR due day</Label>
 				<Input id="dueBir" name="dueBir" type="number" min="1" max="31" value={data.settings.dueDay.bir ?? ''} class="mt-1" />
 			</div>

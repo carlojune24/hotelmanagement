@@ -35,13 +35,22 @@ export const actions: Actions = {
 				dueSss: day,
 				duePhilhealth: day,
 				duePagibig: day,
-				dueBir: day
+				dueBir: day,
+				dueSssLoan: day,
+				duePagibigLoan: day
 			})
 			.safeParse(Object.fromEntries(await request.formData()));
 		if (!parsed.success) return fail(400, { error: 'Due days are 1–31 (or leave blank).' });
 		const p = parsed.data;
 		const org = await getOrganization();
-		const dueDay = { sss: p.dueSss, philhealth: p.duePhilhealth, pagibig: p.duePagibig, bir: p.dueBir };
+		const dueDay = {
+			sss: p.dueSss,
+			philhealth: p.duePhilhealth,
+			pagibig: p.duePagibig,
+			bir: p.dueBir,
+			sss_loan: p.dueSssLoan,
+			pagibig_loan: p.duePagibigLoan
+		};
 		await saveRemittanceSettings(org.id, {
 			employerIds: {
 				sss: p.sssNo || undefined,

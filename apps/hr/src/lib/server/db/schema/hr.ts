@@ -776,6 +776,117 @@ export const remittances = pgTable(
 	(t) => [uniqueIndex('remittances_org_agency_period_idx').on(t.organizationId, t.agency, t.period)]
 );
 
+/**
+ * The kinds of loan Main HR deducts from pay. `key` is what a loan stores (immutable, so renaming a type never
+ * breaks history); `remit_to` decides which remittance schedule its deductions land on.
+ */
+export const loanTypes = pgTable(
+	'loan_types',
+	{
+		id: pk(),
+		organizationId: uuid('organization_id')
+			.notNull()
+			.references(() => organizations.id, { onDelete: 'restrict' }),
+		key: text('key').notNull(),
+		name: text('name').notNull(),
+		/** 'sss' | 'pagibig' | 'none' — 'none' is deducted from pay but remitted to no agency here. */
+		remitTo: text('remit_to').notNull().default('none'),
+		active: boolean('active').notNull().default(true),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [uniqueIndex('loan_types_org_key_idx').on(t.organizationId, t.key)]
+);
+
+/**
+ * A loan taken out against an employee's pay: SSS / Pag-IBIG government loans (collected and remitted
+ * separately from contributions) or a company loan. The balance is never stored — it is the principal less
+ * what was deducted on locked/released payslips (`payroll_loan_deductions`), so it cannot go stale.
+ */
+export const employeeLoans = pgTable(
+	'employee_loans',
+	{
+		id: pk(),
+		organizationId: uuid('organization_id')
+			.notNull()
+			.references(() => organizations.id, { onDelete: 'restrict' }),
+		employeeId: uuid('employee_id')
+			.notNull()
+			.references(() => employees.id, { onDelete: 'restrict' }),
+		/** 'sss_salary' | 'sss_calamity' | 'pagibig_mpl' | 'pagibig_calamity' | 'pagibig_housing' | 'company' */
+		kind: text('kind').notNull(),
+		referenceNo: text('reference_no'),
+		principalCentavos: bigint('principal_centavos', { mode: 'number' }).notNull(),
+		/** The monthly amount; a semi-monthly run takes half in each cutoff. */
+		amortizationCentavos: bigint('amortization_centavos', { mode: 'number' }).notNull(),
+		/** `YYYY-MM` — the first pay month it is deducted in. */
+		startPeriod: text('start_period').notNull(),
+		/** 'active' | 'paused' | 'paid_off' | 'cancelled' */
+		status: text('status').notNull().default('active'),
+		/** Why it was cancelled, paused or closed early. */
+		statusNote: text('status_note'),
+		note: text('note'),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [index('employee_loans_employee_idx').on(t.employeeId), index('employee_loans_org_status_idx').on(t.organizationId, t.status)]
+);
+
+/**
+ * What one payslip line took (or failed to take) for one loan. Written when a batch is generated and
+ * replaced with the line on a regenerate; it only counts once its batch is locked. `reference_no` and
+ * `kind` are snapshots so a filed schedule never changes if the loan is edited.
+ */
+export const payrollLoanDeductions = pgTable(
+	'payroll_loan_deductions',
+	{
+		id: pk(),
+		loanId: uuid('loan_id')
+			.notNull()
+			.references(() => employeeLoans.id, { onDelete: 'restrict' }),
+		lineId: uuid('line_id')
+			.notNull()
+			.references(() => payrollRunLines.id, { onDelete: 'cascade' }),
+		kind: text('kind').notNull(),
+		/** The remittance schedule at the time ('sss_loan' | 'pagibig_loan'), null if not remitted. */
+		agency: text('agency'),
+		referenceNo: text('reference_no'),
+		/** The scheduled share plus anything carried over from earlier shortfalls, capped at the balance. */
+		dueCentavos: bigint('due_centavos', { mode: 'number' }).notNull(),
+		/** What the pay could cover; `due - deducted` is carried to the next cutoff. */
+		deductedCentavos: bigint('deducted_centavos', { mode: 'number' }).notNull(),
+		createdAt: createdAt()
+	},
+	(t) => [uniqueIndex('payroll_loan_deductions_loan_line_idx').on(t.loanId, t.lineId)]
+);
+
+/**
+ * A notice from Main HR shown on the dashboard of the establishments it is addressed to. `audience` is
+ * a list of establishment ids, or null for every establishment. It stops showing after `expires_on`
+ * (inclusive) or once archived; nothing is ever deleted.
+ */
+export const announcements = pgTable(
+	'announcements',
+	{
+		id: pk(),
+		organizationId: uuid('organization_id')
+			.notNull()
+			.references(() => organizations.id, { onDelete: 'restrict' }),
+		title: text('title').notNull(),
+		body: text('body').notNull(),
+		audience: jsonb('audience'),
+		pinned: boolean('pinned').notNull().default(false),
+		expiresOn: date('expires_on', { mode: 'string' }),
+		/** 'active' | 'archived' */
+		status: text('status').notNull().default('active'),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [index('announcements_org_status_idx').on(t.organizationId, t.status)]
+);
+
 // ---------------------------------------------------------------------------
 // Relations
 // ---------------------------------------------------------------------------
@@ -818,6 +929,9 @@ export type NewDtrEntry = typeof dtrEntries.$inferInsert;
 export type EmployeeAssignment = typeof employeeAssignments.$inferSelect;
 export type SchedulePeriod = typeof schedulePeriods.$inferSelect;
 export type DtrSubmission = typeof dtrSubmissions.$inferSelect;
+export type EmployeeLoan = typeof employeeLoans.$inferSelect;
+export type LoanType = typeof loanTypes.$inferSelect;
+export type Announcement = typeof announcements.$inferSelect;
 export type PayrollRun = typeof payrollRuns.$inferSelect;
 export type PayrollBatch = typeof payrollBatches.$inferSelect;
 export type PayrollRunLineRow = typeof payrollRunLines.$inferSelect;

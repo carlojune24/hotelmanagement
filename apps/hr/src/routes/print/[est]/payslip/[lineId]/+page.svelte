@@ -26,10 +26,14 @@
 			['Withholding tax', data.deductions.withholding_tax],
 			['Late / undertime', data.deductions.tardiness_undertime],
 			['Cash advance', data.deductions.cash_advance],
-			['Loans', data.deductions.loans],
+			...(data.loans.length > 0
+				? data.loans.map((l) => [l.label, l.deducted] as [string, number])
+				: [['Loans', data.deductions.loans] as [string, number]]),
 			['Other deductions', data.deductions.other]
 		].filter(([, v]) => (v as number) > 0) as Array<[string, number]>
 	);
+	/** A loan the pay could not fully cover — shown so the shortfall is never silent. */
+	const shortLoans = $derived(data.loans.filter((l) => l.deducted < l.due));
 </script>
 
 <svelte:head><title>Payslip · {data.employee.name}</title></svelte:head>
@@ -91,7 +95,7 @@
 			<h2 class="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">Deductions</h2>
 			<table class="w-full">
 				<tbody>
-					{#each deductionRows as [label, amount] (label)}
+					{#each deductionRows as [label, amount], i (i)}
 						<tr><td class="py-0.5">{label}</td><td class="py-0.5 text-right tabular-nums">{money(amount)}</td></tr>
 					{:else}
 						<tr><td class="py-0.5 text-ink-muted">None</td><td></td></tr>
@@ -110,6 +114,11 @@
 		<span class="text-2xl font-semibold tabular-nums">{money(data.net)}</span>
 	</section>
 
+	{#if shortLoans.length > 0}
+		<p class="mt-2 text-xs text-ink-muted">
+			Pay did not cover the full loan amount for {shortLoans.map((l) => `${l.label} (${money(l.due - l.deducted)} short)`).join(', ')}; the balance carries to the next payslip.
+		</p>
+	{/if}
 	{#if data.notCovered.length > 0}
 		<p class="mt-2 text-xs text-ink-muted">Not covered / exempt: {data.notCovered.join(', ')}.</p>
 	{/if}

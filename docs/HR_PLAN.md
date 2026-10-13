@@ -227,7 +227,16 @@ Hotel gains: HR client (API key + base URL setting), `person_ref` columns, event
      released batches (`/remittances`, print, CSV), with mark-as-remitted (snapshot + reference
      no.). A remitted month's batches cannot be unlocked until it is reopened. No due dates are assumed —
      the company enters a "day N of the next month" per agency. Agency upload files (R-3, RF-1, MCRF,
-     1601-C) and government-loan deductions are not built.
+     1601-C) are not built.
+   - **Loans (2026-10-13):** `/loans` ledger per employee — SSS salary/calamity, Pag-IBIG MPL/calamity/housing, company.
+     An active loan is deducted automatically at generate: the monthly amount is split across a semi-monthly month
+     (odd centavo in the 2nd cutoff); government loans are filled before a company loan; pay that cannot cover it is
+     deducted partly, net never goes below zero, and the shortfall carries to the next cutoff. The balance is derived
+     (principal − deductions on locked/released lines), never stored. SSS and Pag-IBIG loans are their own remittance
+     schedules (`sss_loan`, `pagibig_loan`) with their own reference, due day and CSV; a company loan is on none.
+     The manual "Loans" adjustment was removed — a draft's hand-typed loan figure is dropped on its next regenerate.
+     Loan types are Main HR's own list under **Settings** (name + remit-to: SSS loans / Pag-IBIG loans / not remitted;
+     retire, never delete); the schedule a deduction lands on is snapshotted on the deduction. Not built: interest/amortization-schedule maths, loan approval flow, agency upload file formats.
 
 Phases 1–5 ship in the HR app while the hotel's own HR keeps running; 7 only after 6 is proven.
 
@@ -240,7 +249,7 @@ Leaks: `dtr-import.ts` → `server/cancellation` (transitive PayMongo/folio/fina
 `server/finance/shared`; HR reads `hotels.config` and `memberships`/`roles`. Payroll→Finance posting
 isn't built, so nothing to untangle there.
 
-## 12. Defaults assumed — need confirmation
+## 12. Defaults assumed — **confirmed by the client 2026-10-13**
 
 1. **Existing HR data in the hotel DB:** *default* — discard. Checked in the local dev DB on
    2026-10-13: 2 employees (`EMP-100`, `EMP-001`; one linked to a login), 22 schedule rows

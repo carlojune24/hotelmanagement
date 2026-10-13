@@ -202,7 +202,6 @@ describe.skipIf(!hasDb)('payroll (live DB)', async () => {
 			allowances: 500,
 			otherEarnings: 0,
 			cashAdvance: 200,
-			loans: 0,
 			otherDeductions: 0,
 			withholdingOverride: null
 		});
@@ -226,7 +225,7 @@ describe.skipIf(!hasDb)('payroll (live DB)', async () => {
 		await P.acknowledgeRates(runId, null);
 		await P.lockBatch(batchA, null);
 		const [line] = (await P.listBatchLines(batchA)).filter((l) => l.employeeId === ana);
-		await expect(P.adjustLine({ lineId: line!.id, allowances: 1, otherEarnings: 0, cashAdvance: 0, loans: 0, otherDeductions: 0, withholdingOverride: null })).rejects.toThrow(/locked/);
+		await expect(P.adjustLine({ lineId: line!.id, allowances: 1, otherEarnings: 0, cashAdvance: 0, otherDeductions: 0, withholdingOverride: null })).rejects.toThrow(/locked/);
 		await expect(P.generateBatch(batchA)).rejects.toThrow(/locked/);
 
 		await P.unlockBatch(batchA);

@@ -8,6 +8,7 @@
 
 	const tabs = $derived(
 		[
+			{ seg: '/dashboard', label: 'Dashboard', show: data.tabs.dashboard },
 			{ seg: '/employees', label: 'Employees', show: data.tabs.employees },
 			{ seg: '/schedule', label: 'Schedule', show: data.tabs.schedule },
 			{ seg: '/dtr', label: 'DTR', show: data.tabs.dtr },
@@ -26,12 +27,15 @@
 <div class="mx-auto max-w-6xl space-y-5">
 	<header class="flex flex-wrap items-end justify-between gap-3">
 		<div>
-			<p class="text-sm text-ink-muted">
-				<a href="/establishments" class="underline-offset-4 hover:underline">Establishments</a>
-			</p>
+			{#if !data.scope}
+				<p class="text-sm text-ink-muted">
+					<a href="/establishments" class="underline-offset-4 hover:underline">Establishments</a>
+				</p>
+			{/if}
 			<h1 class="text-4xl font-light tracking-tight">{data.establishment.name}</h1>
 		</div>
-		<nav class="flex flex-wrap gap-2" aria-label="Establishment sections">
+		<!-- A manager or clerk has these in the sidebar; Main HR keeps them here and the company menu there. -->
+		<nav class="flex flex-wrap gap-2 {data.scope ? 'hidden' : ''}" aria-label="Establishment sections">
 			{#each tabs as t (t.seg)}
 				<a
 					href={base + t.seg}

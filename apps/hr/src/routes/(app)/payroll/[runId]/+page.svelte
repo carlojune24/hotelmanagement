@@ -156,9 +156,14 @@
 										<p class="font-medium">{l.employeeName}</p>
 										<p class="text-xs text-ink-muted">
 											#{l.employeeNo} · {l.position}{l.sharedWith.length
-												? ` · also at ${l.sharedWith.join(', ')}`
+? ` · also at ${l.sharedWith.join(', ')}`
 												: ''}
 										</p>
+										{#if l.loans.some((x) => x.deducted < x.due)}
+											<p class="text-xs font-medium text-danger">
+												Loan only partly deducted — {money(l.loans.reduce((t, x) => t + (x.due - x.deducted), 0))} carried over
+											</p>
+										{/if}
 									</Table.Cell>
 									<Table.Cell class="text-right tabular-nums">{money(l.basic)}</Table.Cell>
 									<Table.Cell class="text-right tabular-nums">{money(l.overtime)}</Table.Cell>
@@ -216,10 +221,7 @@
 						<Label for="cashAdvance">Cash advance</Label>
 						<Input id="cashAdvance" name="cashAdvance" type="number" min="0" step="0.01" value={editing.line.adjustments.cashAdvance} />
 					</div>
-					<div class="space-y-1.5">
-						<Label for="loans">Loans</Label>
-						<Input id="loans" name="loans" type="number" min="0" step="0.01" value={editing.line.adjustments.loans} />
-					</div>
+
 					<div class="space-y-1.5">
 						<Label for="otherDeductions">Other deductions</Label>
 						<Input id="otherDeductions" name="otherDeductions" type="number" min="0" step="0.01" value={editing.line.adjustments.otherDeductions} />
@@ -228,8 +230,25 @@
 						<Label for="withholdingOverride">Withholding tax <span class="text-ink-muted">(blank = computed)</span></Label>
 						<Input id="withholdingOverride" name="withholdingOverride" type="number" min="0" step="0.01" value={editing.line.adjustments.withholdingOverride} />
 					</div>
-				</div>
-				<Dialog.Footer class="gap-2 pt-1">
+</div>
+					{#if editing.line.loans.length > 0}
+						<div class="rounded-2xl bg-ink/5 px-4 py-3 text-sm">
+							<p class="font-medium">Loans, from the ledger</p>
+							<ul class="mt-1 space-y-0.5">
+								{#each editing.line.loans as loan, i (i)}
+									<li class="flex justify-between gap-3 tabular-nums">
+										<span>{loan.label}</span>
+										<span>
+											{money(loan.deducted)}{#if loan.deducted < loan.due}
+												<span class="text-ink-muted"> of {money(loan.due)} — {money(loan.due - loan.deducted)} short, carried over</span>{/if}
+										</span>
+									</li>
+								{/each}
+							</ul>
+							<p class="mt-1 text-xs text-ink-muted">Change a loan under Loans, then regenerate this batch.</p>
+						</div>
+					{/if}
+					<Dialog.Footer class="gap-2 pt-1">
 					<Button type="button" variant="outline" onclick={() => (editing = null)}>Close</Button>
 					<Button type="submit" disabled={busy}>Save</Button>
 				</Dialog.Footer>
