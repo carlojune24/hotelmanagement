@@ -1,5 +1,11 @@
+import { eq, inArray } from 'drizzle-orm';
 import { db } from '$lib/server/db/index';
-import { organizations } from '$lib/server/db/schema/index';
+import {
+	employeeAssignments,
+	employees,
+	establishments,
+	organizations
+} from '$lib/server/db/schema/index';
 import { mintRef } from '$lib/server/ids';
 
 /** The organization the throwaway test establishments hang off: the existing one, or a
@@ -12,4 +18,57 @@ export async function testOrgId(): Promise<string> {
 		.values({ orgRef: mintRef('org'), name: 'HR test organization' })
 		.returning({ id: organizations.id });
 	return org!.id;
+}
+
+/** A person plus an open primary assignment at `establishmentId`. Employee numbers are unique
+ *  company-wide, so a random suffix keeps a test from ever colliding with real or parallel data. */
+export async function createTestStaff(
+	establishmentId: string,
+	o: { employeeNo: string; firstName: string; hiredOn?: string; enrollId?: string | null; position?: string }
+): Promise<string> {
+	const [est] = await db
+		.select({ organizationId: establishments.organizationId })
+		.from(establishments)
+		.where(eq(establishments.id, establishmentId));
+	const hiredOn = o.hiredOn ?? '2024-01-01';
+	const [e] = await db
+		.insert(employees)
+		.values({
+			organizationId: est!.organizationId,
+			personRef: mintRef('person'),
+			employeeNo: `${o.employeeNo}-${Math.random().toString(36).slice(2, 8)}`,
+			firstName: o.firstName,
+			lastName: 'Test',
+			birthdate: '1990-01-01',
+			sex: 'female',
+			hiredOn,
+			employmentType: 'regular',
+			payBasis: 'monthly',
+			baseRateCentavos: 1_000_000
+		})
+		.returning({ id: employees.id });
+	await db.insert(employeeAssignments).values({
+		employeeId: e!.id,
+		establishmentId,
+		startDate: hiredOn,
+		isPrimary: true,
+		position: o.position ?? 'Tester',
+		biometricEnrollId: o.enrollId ?? null
+	});
+	return e!.id;
+}
+
+/** Removes throwaway establishments *and* the people assigned only to them (employees are
+ *  company-wide now, so they no longer cascade from an establishment). */
+export async function cleanupTestEstablishments(ids: string[]) {
+	const live = ids.filter(Boolean);
+	if (live.length === 0) return;
+	const people = await db
+		.select({ id: employeeAssignments.employeeId })
+		.from(employeeAssignments)
+		.where(inArray(employeeAssignments.establishmentId, live));
+	if (people.length) {
+		await db.delete(employees).where(inArray(employees.id, people.map((p) => p.id)));
+	}
+	await db.delete(establishments).where(inArray(establishments.id, live));
 }

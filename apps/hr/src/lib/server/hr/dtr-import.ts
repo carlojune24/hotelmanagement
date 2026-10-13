@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import { getEstablishmentNightDiff } from './night-diff';
+import { openAssignmentAt } from './assigned';
 import { listApprovedOvertime } from './overtime';
 import { creditOvertime } from '$lib/overtime';
 import {
@@ -9,6 +10,7 @@ import {
 	biometricPunches,
 	biometricUploads,
 	dtrEntries,
+	employeeAssignments,
 	employees,
 	establishments,
 	schedules
@@ -146,10 +148,11 @@ async function employeesByEnrollKey(establishmentId: string) {
 			id: employees.id,
 			firstName: employees.firstName,
 			lastName: employees.lastName,
-			enroll: employees.biometricEnrollId
+			enroll: employeeAssignments.biometricEnrollId
 		})
-		.from(employees)
-		.where(and(eq(employees.establishmentId, establishmentId), isNull(employees.deletedAt)));
+		.from(employeeAssignments)
+		.innerJoin(employees, eq(employees.id, employeeAssignments.employeeId))
+		.where(and(openAssignmentAt(establishmentId), isNull(employees.deletedAt)));
 	const byKey = new Map<string, (typeof emps)[number]>();
 	for (const e of emps) if (e.enroll) byKey.set(normalizeEnrollId(e.enroll), e);
 	return { emps, byKey };

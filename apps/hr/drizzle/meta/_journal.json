@@ -15,6 +15,20 @@
       "when": 1791865638820,
       "tag": "0001_hr_core_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791867302243,
+      "tag": "0002_assignments_expand",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791867304026,
+      "tag": "0003_assignments_contract",
+      "breakpoints": true
     }
   ]
 }

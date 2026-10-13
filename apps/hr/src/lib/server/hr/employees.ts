@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, gte, isNull, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
 	disbursementMethod,
@@ -8,7 +8,8 @@ import {
 	sex
 } from '@mm/hr-core';
 import { db } from '$lib/server/db/index';
-import { employees } from '$lib/server/db/schema/index';
+import { employeeAssignments, employees, establishments } from '$lib/server/db/schema/index';
+import { openAssignmentAt, toStaff, type StaffMember } from './assigned';
 import { mintRef } from '$lib/server/ids';
 import { normalizeEnrollId } from '$lib/hr-import';
 
@@ -43,9 +44,9 @@ export const employeeFormSchema = z.object({
 });
 export type EmployeeFormInput = z.infer<typeof employeeFormSchema>;
 
-function toInsertValues(establishmentId: string, input: EmployeeFormInput) {
+/** The person-level fields. Where they work (post, department, device ID) is the assignment. */
+function toEmployeeValues(input: EmployeeFormInput) {
 	return {
-		establishmentId,
 		employeeNo: input.employeeNo,
 		firstName: input.firstName,
 		lastName: input.lastName,
@@ -56,10 +57,7 @@ function toInsertValues(establishmentId: string, input: EmployeeFormInput) {
 		hiredOn: input.hiredOn,
 		employmentType: input.employmentType,
 		status: input.status,
-		position: input.position,
 		email: input.email || null,
-		biometricEnrollId: input.biometricEnrollId || null,
-		department: input.department || null,
 		costCenter: input.costCenter || null,
 		payBasis: input.payBasis,
 		baseRateCentavos: Math.round(input.baseRatePesos * 100),
@@ -75,75 +73,179 @@ function toInsertValues(establishmentId: string, input: EmployeeFormInput) {
 			account_name: input.accountName || undefined,
 			account_no: input.accountNo || undefined
 		}
-		// `userId` is deliberately not set here — the Employee create/update form never
-		// touches it, so a routine edit (pay rate, position, etc.) can't clobber a link
 	};
 }
 
-export async function listEmployees(establishmentId: string) {
-	return db
-		.select()
-		.from(employees)
-		.where(and(eq(employees.establishmentId, establishmentId), isNull(employees.deletedAt)))
+/** The assignment-level fields of the form. */
+function toAssignmentValues(input: EmployeeFormInput) {
+	return {
+		position: input.position,
+		department: input.department || null,
+		biometricEnrollId: input.biometricEnrollId || null
+	};
+}
+
+/** The establishment's current staff, each carrying *this* establishment's assignment. */
+export async function listEmployees(establishmentId: string): Promise<StaffMember[]> {
+	const rows = await db
+		.select({ e: employees, a: employeeAssignments })
+		.from(employeeAssignments)
+		.innerJoin(employees, eq(employees.id, employeeAssignments.employeeId))
+		.where(and(openAssignmentAt(establishmentId), isNull(employees.deletedAt)))
 		.orderBy(asc(employees.lastName), asc(employees.firstName));
+	return rows.map((r) => toStaff(r.e, r.a));
 }
 
-export async function getEmployee(establishmentId: string, id: string) {
-	return db
-		.select()
-		.from(employees)
-		.where(and(eq(employees.establishmentId, establishmentId), eq(employees.id, id)))
-		.then((r) => r.at(0) ?? null);
+export async function getEmployee(establishmentId: string, id: string): Promise<StaffMember | null> {
+	const row = await db
+		.select({ e: employees, a: employeeAssignments })
+		.from(employeeAssignments)
+		.innerJoin(employees, eq(employees.id, employeeAssignments.employeeId))
+		.where(and(openAssignmentAt(establishmentId), eq(employees.id, id), isNull(employees.deletedAt)))
+		.then((r) => r.at(0));
+	return row ? toStaff(row.e, row.a) : null;
 }
 
-/** Biometric import matches punches by this id, so two employees must never share one
- *  (compared the way the import does: `0042`, `42` and `42.0` are the same id). */
-async function assertEnrollIdFree(establishmentId: string, enrollId: string | undefined, exceptId?: string) {
+/** Biometric import matches punches by this id, so two people at one establishment must never
+ *  share one (compared the way the import does: `0042`, `42` and `42.0` are the same id). */
+export async function assertEnrollIdFree(
+	establishmentId: string,
+	enrollId: string | null | undefined,
+	exceptEmployeeId?: string
+) {
 	if (!enrollId) return;
 	const wanted = normalizeEnrollId(enrollId);
 	const rows = await db
 		.select({
-			id: employees.id,
+			employeeId: employeeAssignments.employeeId,
 			firstName: employees.firstName,
 			lastName: employees.lastName,
-			enroll: employees.biometricEnrollId
+			enroll: employeeAssignments.biometricEnrollId
 		})
-		.from(employees)
-		.where(and(eq(employees.establishmentId, establishmentId), isNull(employees.deletedAt)));
-	const clash = rows.find((r) => r.id !== exceptId && r.enroll && normalizeEnrollId(r.enroll) === wanted);
+		.from(employeeAssignments)
+		.innerJoin(employees, eq(employees.id, employeeAssignments.employeeId))
+		.where(and(openAssignmentAt(establishmentId), isNull(employees.deletedAt)));
+	const clash = rows.find(
+		(r) => r.employeeId !== exceptEmployeeId && r.enroll && normalizeEnrollId(r.enroll) === wanted
+	);
 	if (clash) {
 		throw new EmployeeError(`Biometric ID ${enrollId} is already used by ${clash.firstName} ${clash.lastName}.`);
 	}
 }
 
-export async function createEmployee(establishmentId: string, input: EmployeeFormInput, photoUrl: string | null) {
-	await assertEnrollIdFree(establishmentId, input.biometricEnrollId);
-	const [row] = await db
-		.insert(employees)
-		.values({ ...toInsertValues(establishmentId, input), photoUrl, personRef: mintRef('person') })
-		.returning();
-	return row!;
+async function assertEmployeeNoFree(organizationId: string, employeeNo: string, exceptId?: string) {
+	const clash = await db
+		.select({ id: employees.id, firstName: employees.firstName, lastName: employees.lastName })
+		.from(employees)
+		.where(
+			and(
+				eq(employees.organizationId, organizationId),
+				eq(employees.employeeNo, employeeNo),
+				exceptId ? ne(employees.id, exceptId) : undefined
+			)
+		)
+		.then((r) => r.at(0));
+	if (clash) {
+		throw new EmployeeError(
+			`Employee # ${employeeNo} is already used by ${clash.firstName} ${clash.lastName}. Numbers are unique across the whole company.`
+		);
+	}
 }
 
+/** Registers a person company-wide and assigns them here as their home establishment. */
+export async function createEmployee(establishmentId: string, input: EmployeeFormInput, photoUrl: string | null) {
+	const est = await db
+		.select({ organizationId: establishments.organizationId })
+		.from(establishments)
+		.where(eq(establishments.id, establishmentId))
+		.then((r) => r.at(0));
+	if (!est) throw new EmployeeError('Establishment not found.');
+	await assertEmployeeNoFree(est.organizationId, input.employeeNo);
+	await assertEnrollIdFree(establishmentId, input.biometricEnrollId);
+
+	return db.transaction(async (tx) => {
+		const [row] = await tx
+			.insert(employees)
+			.values({
+				...toEmployeeValues(input),
+				organizationId: est.organizationId,
+				photoUrl,
+				personRef: mintRef('person')
+			})
+			.returning();
+		await tx.insert(employeeAssignments).values({
+			employeeId: row!.id,
+			establishmentId,
+			startDate: input.hiredOn,
+			isPrimary: true,
+			...toAssignmentValues(input)
+		});
+		return row!;
+	});
+}
+
+/** Edits the person and, for the open assignment *here*, their post/department/device ID. */
 export async function updateEmployee(
 	establishmentId: string,
 	id: string,
 	input: EmployeeFormInput,
 	photoUrl: string | null
 ) {
+	const current = await getEmployee(establishmentId, id);
+	if (!current) return null;
+	await assertEmployeeNoFree(current.organizationId, input.employeeNo, id);
 	await assertEnrollIdFree(establishmentId, input.biometricEnrollId, id);
-	const [row] = await db
-		.update(employees)
-		.set({ ...toInsertValues(establishmentId, input), photoUrl, updatedAt: new Date() })
-		.where(and(eq(employees.establishmentId, establishmentId), eq(employees.id, id)))
-		.returning();
-	return row ?? null;
+
+	return db.transaction(async (tx) => {
+		const [row] = await tx
+			.update(employees)
+			.set({ ...toEmployeeValues(input), photoUrl, updatedAt: new Date() })
+			.where(eq(employees.id, id))
+			.returning();
+		await tx
+			.update(employeeAssignments)
+			.set({ ...toAssignmentValues(input), updatedAt: new Date() })
+			.where(eq(employeeAssignments.id, current.assignmentId));
+		return row ?? null;
+	});
 }
 
-/** Soft-delete — an employee record is kept for payroll/DTR history, never hard-deleted. */
+/** Removes this person from this establishment's staff *now*. The person, their history and any
+ *  other assignment are kept; if this was their home, the oldest remaining one becomes home.
+ *  An assignment that only started today never took effect, so it is deleted outright rather than
+ *  ended "yesterday" (before it began). */
 export async function archiveEmployee(establishmentId: string, id: string) {
-	await db
-		.update(employees)
-		.set({ deletedAt: new Date(), updatedAt: new Date() })
-		.where(and(eq(employees.establishmentId, establishmentId), eq(employees.id, id)));
+	const current = await getEmployee(establishmentId, id);
+	if (!current) return;
+	await db.transaction(async (tx) => {
+		const startsToday = await tx
+			.select({ id: employeeAssignments.id })
+			.from(employeeAssignments)
+			.where(and(eq(employeeAssignments.id, current.assignmentId), gte(employeeAssignments.startDate, sql`current_date`)))
+			.then((r) => r.length > 0);
+		if (startsToday) {
+			await tx.delete(employeeAssignments).where(eq(employeeAssignments.id, current.assignmentId));
+		} else {
+			// Inclusive end date: yesterday means "no longer here today".
+			await tx
+				.update(employeeAssignments)
+				.set({ endDate: sql`(current_date - 1)`, isPrimary: false, updatedAt: new Date() })
+				.where(eq(employeeAssignments.id, current.assignmentId));
+		}
+		if (current.isPrimary) {
+			const next = await tx
+				.select({ id: employeeAssignments.id })
+				.from(employeeAssignments)
+				.where(and(eq(employeeAssignments.employeeId, id), isNull(employeeAssignments.endDate)))
+				.orderBy(asc(employeeAssignments.startDate))
+				.limit(1)
+				.then((r) => r.at(0));
+			if (next) {
+				await tx
+					.update(employeeAssignments)
+					.set({ isPrimary: true, updatedAt: new Date() })
+					.where(eq(employeeAssignments.id, next.id));
+			}
+		}
+	});
 }

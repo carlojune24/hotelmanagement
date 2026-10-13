@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { testOrgId } from './test-helpers';
+import { cleanupTestEstablishments, createTestStaff, testOrgId } from './test-helpers';
 import { eq, inArray } from 'drizzle-orm';
 
 /**
@@ -35,27 +35,8 @@ describe.skipIf(!hasDb)('DTR with leave, holidays and biometric punches (live DB
 	const REST = { isRestDay: true, startTime: null, endTime: null, breakMinutes: 0 };
 	const MONTH = '2026-03'; // fully in the past relative to the test clock
 
-	const mkEmployee = async (no: string, first: string, hiredOn: string, enroll: string | null) => {
-		const [e] = await db
-			.insert(employees)
-			.values({
-				establishmentId: establishment,
-				personRef: mintRef('person'),
-				employeeNo: no,
-				firstName: first,
-				lastName: 'Test',
-				birthdate: '1990-01-01',
-				sex: 'female',
-				hiredOn,
-				employmentType: 'regular',
-				position: 'Tester',
-				payBasis: 'monthly',
-				baseRateCentavos: 1_000_000,
-				biometricEnrollId: enroll
-			})
-			.returning({ id: employees.id });
-		return e!.id;
-	};
+	const mkEmployee = (no: string, first: string, hiredOn: string, enroll: string | null) =>
+		createTestStaff(establishment, { employeeNo: no, firstName: first, hiredOn, enrollId: enroll });
 
 	// ATTLOG-style rows: id, datetime
 	const rows = (...punches: Array<[string, string]>) => punches.map(([id, dt]) => [id, dt]);
@@ -94,7 +75,7 @@ describe.skipIf(!hasDb)('DTR with leave, holidays and biometric punches (live DB
 	});
 
 	afterAll(async () => {
-		await db.delete(establishments).where(eq(establishments.id, establishment));
+		await cleanupTestEstablishments([establishment]);
 	});
 
 	const annRec = async (date: string) => {

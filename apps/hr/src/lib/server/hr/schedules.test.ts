@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { testOrgId } from './test-helpers';
+import { cleanupTestEstablishments, createTestStaff, testOrgId } from './test-helpers';
 import { and, eq, inArray } from 'drizzle-orm';
 
 /**
@@ -50,26 +50,8 @@ describe.skipIf(!hasDb)('roster writes (live DB)', async () => {
 			.returning({ id: establishments.id });
 		return h!.id;
 	}
-	async function mkEmployee(establishmentId: string, no: string, first: string) {
-		const [e] = await db
-			.insert(employees)
-			.values({
-				establishmentId,
-				personRef: mintRef('person'),
-				employeeNo: no,
-				firstName: first,
-				lastName: 'Test',
-				birthdate: '1990-01-01',
-				sex: 'female',
-				hiredOn: '2024-01-01',
-				employmentType: 'regular',
-				position: 'Tester',
-				payBasis: 'monthly',
-				baseRateCentavos: 1_000_000
-			})
-			.returning({ id: employees.id });
-		return e!.id;
-	}
+	const mkEmployee = (establishmentId: string, no: string, first: string) =>
+		createTestStaff(establishmentId, { employeeNo: no, firstName: first });
 
 	beforeAll(async () => {
 		hotelA = await mkHotel('a');
@@ -80,8 +62,8 @@ describe.skipIf(!hasDb)('roster writes (live DB)', async () => {
 	});
 
 	afterAll(async () => {
-		// Hotels cascade to employees, schedules, dtr entries and shift templates.
-		await db.delete(establishments).where(inArray(establishments.id, [hotelA, hotelB].filter(Boolean)));
+		// Employees are company-wide, so remove them explicitly; the rest cascades from the establishment.
+		await cleanupTestEstablishments([hotelA, hotelB]);
 	});
 
 	const rows = (establishmentId: string, from: string, to: string) => listSchedules(establishmentId, from, to);

@@ -26,11 +26,11 @@
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import FingerprintIcon from '@lucide/svelte/icons/fingerprint';
 	import type { ActionData, PageData } from './$types';
-	import type { Employee } from '$lib/server/db/schema/hr';
+	import type { StaffMember } from '$lib/server/hr/assigned';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
-	type EmployeeRow = Employee;
+	type EmployeeRow = StaffMember;
 
 	const peso = (centavos: number) => `₱${(centavos / 100).toFixed(2)}`;
 
@@ -172,7 +172,7 @@
 	</div>
 </div>
 
-{#snippet employeeFields(emp: Employee | null, idPrefix: string)}
+{#snippet employeeFields(emp: StaffMember | null, idPrefix: string)}
 	<section class="rounded-xl bg-brand/5 p-4">
 		<div class="flex items-center gap-2.5">
 			<div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">

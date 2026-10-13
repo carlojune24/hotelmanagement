@@ -15,7 +15,7 @@ import {
 	uuid
 } from 'drizzle-orm/pg-core';
 import { createdAt, deletedAt, pk, updatedAt } from './_shared';
-import { establishments } from './org';
+import { establishments, organizations } from './org';
 import { users } from './auth';
 
 /**
@@ -37,12 +37,13 @@ export const employees = pgTable(
 	'employees',
 	{
 		id: pk(),
-		establishmentId: uuid('establishment_id')
+		/** The company the person works for. Where they work is `employee_assignments`. */
+		organizationId: uuid('organization_id')
 			.notNull()
-			.references(() => establishments.id, { onDelete: 'cascade' }),
+			.references(() => organizations.id, { onDelete: 'restrict' }),
 		/** `per_<ULID>` — cross-app identity, minted via `mintRef('person')`. */
 		personRef: text('person_ref').notNull().unique(),
-		/** Org-assigned, natural key within this establishment. */
+		/** Org-assigned, natural key within the company. */
 		employeeNo: text('employee_no').notNull(),
 		firstName: text('first_name').notNull(),
 		lastName: text('last_name').notNull(),
@@ -57,13 +58,10 @@ export const employees = pgTable(
 		/** @mm/hr-core's `employeeStatus` enum. */
 		status: text('status').notNull().default('active'),
 		separatedOn: date('separated_on', { mode: 'string' }),
-		/** `/uploads/<establishmentId>/<file>` via `lib/server/uploads.ts`, same pattern as branding's
-		    logo/hero images — unset shows a generic avatar, never a broken-image icon. */
+		/** `/uploads/<establishmentId>/<file>` via `lib/server/uploads.ts` — unset shows a generic avatar. */
 		photoUrl: text('photo_url'),
 		/** The employee's own contact email — for sending payslips. */
 		email: text('email'),
-		position: text('position').notNull(),
-		department: text('department'),
 		/** Ties payroll cost to a GL dimension. */
 		costCenter: text('cost_center'),
 		/** @mm/hr-core's `payBasis` enum. */
@@ -74,16 +72,60 @@ export const employees = pgTable(
 		govIds: jsonb('gov_ids').notNull().default({}),
 		/** `{ method, bank_code?, account_name?, account_no? }` — @mm/hr-core's `disbursement` shape. */
 		disbursement: jsonb('disbursement').notNull().default({ method: 'cash' }),
-		/** Matches punch rows on biometric import. */
-		biometricEnrollId: text('biometric_enroll_id'),
 		extensions: jsonb('extensions').notNull().default({}),
 		createdAt: createdAt(),
 		updatedAt: updatedAt(),
 		deletedAt: deletedAt()
 	},
 	(t) => [
-		index('employees_establishment_idx').on(t.establishmentId),
-		uniqueIndex('employees_establishment_employee_no_idx').on(t.establishmentId, t.employeeNo)
+		index('employees_organization_idx').on(t.organizationId),
+		uniqueIndex('employees_organization_employee_no_idx').on(t.organizationId, t.employeeNo)
+	]
+);
+
+// ---------------------------------------------------------------------------
+// Assignments — where an employee works
+// ---------------------------------------------------------------------------
+
+/**
+ * An employee's place of work, with dates. Visibility, roster membership and biometric matching
+ * at an establishment all follow an open assignment (`end_date` null or not yet passed). Position,
+ * department and the biometric device ID are per-assignment because a person can hold a different
+ * post, and a different device ID, at each site.
+ */
+export const employeeAssignments = pgTable(
+	'employee_assignments',
+	{
+		id: pk(),
+		employeeId: uuid('employee_id')
+			.notNull()
+			.references(() => employees.id, { onDelete: 'cascade' }),
+		establishmentId: uuid('establishment_id')
+			.notNull()
+			.references(() => establishments.id, { onDelete: 'cascade' }),
+		startDate: date('start_date', { mode: 'string' }).notNull(),
+		/** Inclusive last day; null = ongoing. */
+		endDate: date('end_date', { mode: 'string' }),
+		/** The person's home establishment — exactly one open assignment is primary. */
+		isPrimary: boolean('is_primary').notNull().default(false),
+		position: text('position').notNull(),
+		department: text('department'),
+		/** Matches punch rows on biometric import for this establishment. */
+		biometricEnrollId: text('biometric_enroll_id'),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [
+		index('employee_assignments_establishment_idx').on(t.establishmentId),
+		index('employee_assignments_employee_idx').on(t.employeeId),
+		// At most one open assignment per person per establishment.
+		uniqueIndex('employee_assignments_open_idx')
+			.on(t.employeeId, t.establishmentId)
+			.where(sql`end_date is null`),
+		// At most one open primary assignment per person.
+		uniqueIndex('employee_assignments_primary_idx')
+			.on(t.employeeId)
+			.where(sql`is_primary and end_date is null`)
 	]
 );
 
@@ -490,12 +532,21 @@ export const calendarDays = pgTable(
 // ---------------------------------------------------------------------------
 
 export const employeesRelations = relations(employees, ({ one, many }) => ({
-	establishment: one(establishments, {
-		fields: [employees.establishmentId],
-		references: [establishments.id]
+	organization: one(organizations, {
+		fields: [employees.organizationId],
+		references: [organizations.id]
 	}),
+	assignments: many(employeeAssignments),
 	schedules: many(schedules),
 	dtrEntries: many(dtrEntries)
+}));
+
+export const employeeAssignmentsRelations = relations(employeeAssignments, ({ one }) => ({
+	employee: one(employees, { fields: [employeeAssignments.employeeId], references: [employees.id] }),
+	establishment: one(establishments, {
+		fields: [employeeAssignments.establishmentId],
+		references: [establishments.id]
+	})
 }));
 
 export const schedulesRelations = relations(schedules, ({ one }) => ({
@@ -515,3 +566,4 @@ export type Schedule = typeof schedules.$inferSelect;
 export type NewSchedule = typeof schedules.$inferInsert;
 export type DtrEntry = typeof dtrEntries.$inferSelect;
 export type NewDtrEntry = typeof dtrEntries.$inferInsert;
+export type EmployeeAssignment = typeof employeeAssignments.$inferSelect;

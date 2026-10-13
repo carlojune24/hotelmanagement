@@ -2,6 +2,7 @@ import { and, asc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import { employees, schedules } from '$lib/server/db/schema/index';
+import { assignedHere } from './assigned';
 import {
 	addDays,
 	breakWindowError,
@@ -103,20 +104,14 @@ function dedupe(cells: CellRef[]): CellRef[] {
 	return [...new Map(cells.map((c) => [key(c), c])).values()];
 }
 
-/** `schedules.employee_id` is not establishment-scoped by its FK — every write proves the employee is this establishment's. */
+/** `schedules.employee_id` is not establishment-scoped by its FK — every write proves the employee is assigned to this establishment. */
 async function assertEmployees(tx: Tx, establishmentId: string, ids: string[]) {
 	const unique = [...new Set(ids)];
 	if (unique.length === 0) return;
 	const rows = await tx
 		.select({ id: employees.id })
 		.from(employees)
-		.where(
-			and(
-				eq(employees.establishmentId, establishmentId),
-				isNull(employees.deletedAt),
-				inArray(employees.id, unique)
-			)
-		);
+		.where(and(assignedHere(establishmentId), isNull(employees.deletedAt), inArray(employees.id, unique)));
 	if (rows.length !== unique.length) throw new ScheduleError('Unknown employee.');
 }
 

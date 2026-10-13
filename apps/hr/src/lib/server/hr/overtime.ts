@@ -1,7 +1,8 @@
-import { and, desc, eq, gte, lte, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, lte, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
-import { employees, overtimeRequests } from '$lib/server/db/schema/index';
+import { employeeAssignments, employees, overtimeRequests } from '$lib/server/db/schema/index';
+import { assignedHere } from './assigned';
 import { overtimeMinutes, overtimeRangeError, rangesOverlap } from '$lib/overtime';
 import { isDateString, timeToMinutes, toHHMM } from '$lib/roster';
 
@@ -31,7 +32,7 @@ export async function fileOvertime(establishmentId: string, input: OvertimeFormI
 	const [emp] = await db
 		.select({ id: employees.id, status: employees.status })
 		.from(employees)
-		.where(and(eq(employees.establishmentId, establishmentId), eq(employees.id, input.employeeId)));
+		.where(and(assignedHere(establishmentId), eq(employees.id, input.employeeId)));
 	if (!emp) throw new OvertimeError('That employee no longer exists.');
 	if (emp.status === 'separated') throw new OvertimeError('That employee has separated.');
 
@@ -97,7 +98,7 @@ export async function listOvertime(establishmentId: string, from: string, to: st
 			id: overtimeRequests.id,
 			employeeId: overtimeRequests.employeeId,
 			employeeName: sql<string>`${employees.lastName} || ', ' || ${employees.firstName}`,
-			position: employees.position,
+			position: sql<string>`coalesce(${employeeAssignments.position}, '')`,
 			date: overtimeRequests.date,
 			startTime: overtimeRequests.startTime,
 			endTime: overtimeRequests.endTime,
@@ -108,6 +109,14 @@ export async function listOvertime(establishmentId: string, from: string, to: st
 		})
 		.from(overtimeRequests)
 		.innerJoin(employees, eq(employees.id, overtimeRequests.employeeId))
+		.leftJoin(
+			employeeAssignments,
+			and(
+				eq(employeeAssignments.employeeId, overtimeRequests.employeeId),
+				eq(employeeAssignments.establishmentId, overtimeRequests.establishmentId),
+				isNull(employeeAssignments.endDate)
+			)
+		)
 		.where(
 			and(
 				eq(overtimeRequests.establishmentId, establishmentId),

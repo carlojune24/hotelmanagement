@@ -13,6 +13,7 @@ export const load: LayoutServerLoad = async ({ locals, url }) => {
 		// Nav items show only for a user who holds the capability somewhere; never as disabled stubs.
 		nav: {
 			establishments: locals.user.isSystemAdmin || canAnywhere(access, 'establishment:read'),
+			people: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'employee:read'),
 			users: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'user:*')
 		}
 	};

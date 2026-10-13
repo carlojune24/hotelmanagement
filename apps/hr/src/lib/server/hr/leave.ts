@@ -16,6 +16,7 @@ import {
 	type LeavePolicy
 } from '$lib/leave';
 import { datesBetween } from '$lib/roster';
+import { assignedHere } from './assigned';
 import { listSchedules } from '$lib/server/hr/schedules';
 
 export class LeaveError extends Error {}
@@ -241,7 +242,7 @@ export async function previewLeave(establishmentId: string, input: LeaveFormInpu
 		db
 			.select()
 			.from(employees)
-			.where(and(eq(employees.establishmentId, establishmentId), eq(employees.id, input.employeeId)))
+			.where(and(assignedHere(establishmentId), eq(employees.id, input.employeeId)))
 			.then((r) => r[0])
 	]);
 	if (!type) throw new LeaveError('That leave type no longer exists.');
@@ -404,7 +405,7 @@ export async function addAdjustment(
 export async function leaveBalances(establishmentId: string, year: number) {
 	const [types, emps] = await Promise.all([
 		listLeaveTypes(establishmentId).then((t) => t.filter((x) => x.active)),
-		db.select().from(employees).where(and(eq(employees.establishmentId, establishmentId))).orderBy(asc(employees.lastName))
+		db.select().from(employees).where(assignedHere(establishmentId)).orderBy(asc(employees.lastName))
 	]);
 	const people = emps.filter((e) => !e.deletedAt && e.status !== 'separated');
 	const rows = await Promise.all(

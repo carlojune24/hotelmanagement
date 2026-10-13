@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { testOrgId } from './test-helpers';
+import { cleanupTestEstablishments, createTestStaff, testOrgId } from './test-helpers';
 import { eq } from 'drizzle-orm';
 
 /**
@@ -42,25 +42,7 @@ describe.skipIf(!hasDb)('DTR overtime applications (live DB)', async () => {
 			.values({ organizationId: await testOrgId(), kind: 'business', slug: tag, name: 'DTR OT test', orgRef: mintRef('org'), timezone: 'Asia/Manila' })
 			.returning({ id: establishments.id });
 		establishment = h!.id;
-		const [e] = await db
-			.insert(employees)
-			.values({
-				establishmentId: establishment,
-				personRef: mintRef('person'),
-				employeeNo: 'OT1',
-				firstName: 'Ann',
-				lastName: 'Test',
-				birthdate: '1990-01-01',
-				sex: 'female',
-				hiredOn: '2024-01-01',
-				employmentType: 'regular',
-				position: 'Tester',
-				payBasis: 'monthly',
-				baseRateCentavos: 1_000_000,
-				biometricEnrollId: '701'
-			})
-			.returning({ id: employees.id });
-		ann = e!.id;
+		ann = await createTestStaff(establishment, { employeeNo: 'OT1', firstName: 'Ann', enrollId: '701' });
 		const days = ['2026-03-02', '2026-03-03', '2026-03-04', '2026-03-05'];
 		await applyShiftToCells(establishment, days.map((date) => ({ employeeId: ann, date })), DAY);
 		await storePunches(
@@ -77,7 +59,7 @@ describe.skipIf(!hasDb)('DTR overtime applications (live DB)', async () => {
 	});
 
 	afterAll(async () => {
-		await db.delete(establishments).where(eq(establishments.id, establishment));
+		await cleanupTestEstablishments([establishment]);
 	});
 
 	it('flags overtime with no application and credits none of it', async () => {

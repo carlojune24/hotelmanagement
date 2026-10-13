@@ -172,6 +172,10 @@ Hotel gains: HR client (API key + base URL setting), `person_ref` columns, event
    pages/tables were deliberately not moved (phase 8); employees stay per-establishment until phase 3.
 3. **Central registry + assignments** — organization-wide employees, `employee_assignments`,
    business-scoped views, assignment-based biometric match.
+   **Done 2026-10-13** on `feature/hr-app`: employees are company-wide (`employee_no` unique per
+   organization); post, department and device ID live on the assignment; roster, DTR, leave and
+   import follow an open assignment. `/people` is the registry (assign, end, set home). Leave policy
+   stays per-establishment until phase 4.
 4. **Approvals** — statuses, `schedule_periods`, manager submit actions, Main HR inbox.
 5. **DTR submission/receive/return.**
 6. **Hotel integration** — API + events, `person_ref` columns, Team picker, auto-suspend, fallback sync.

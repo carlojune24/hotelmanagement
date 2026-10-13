@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import BuildingIcon from '@lucide/svelte/icons/building-2';
 	import UsersIcon from '@lucide/svelte/icons/users';
+	import ContactIcon from '@lucide/svelte/icons/contact';
 	import KeyIcon from '@lucide/svelte/icons/key-round';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
@@ -12,6 +13,7 @@
 	const items = $derived(
 		[
 			{ seg: 'establishments', label: 'Establishments', icon: BuildingIcon, show: data.nav.establishments },
+			{ seg: 'people', label: 'People', icon: ContactIcon, show: data.nav.people },
 			{ seg: 'users', label: 'Users', icon: UsersIcon, show: data.nav.users }
 		].filter((i) => i.show)
 	);
