@@ -7,7 +7,6 @@ import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { createInvite, revokeInvite } from '$lib/server/auth/invite';
 import { sendStaffInvite } from '$lib/server/email/send-invite';
-import { linkMemberToEmployee, listEmployeesForLinking } from '$lib/server/hr/employees';
 import { HrLinkError, fetchAssigned, getConnection, type HrPerson } from '$lib/server/hr-link/client';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -38,10 +37,6 @@ export const load: PageServerLoad = async ({ locals }) => {
 		.innerJoin(users, eq(users.id, memberships.userId))
 		.innerJoin(roles, eq(roles.id, memberships.roleId))
 		.where(eq(memberships.hotelId, hotelId));
-
-	// For each member's own "Linked employee" picker — every HR employee record,
-	// each already flagged with whichever member (if any) currently holds it.
-	const employees = await listEmployeesForLinking(hotelId);
 
 	// Excludes pending hotel_admin invites (created from the platform /admin console) — those
 	// belong to that console's own pending-invites list, not this self-service screen.
@@ -85,7 +80,6 @@ export const load: PageServerLoad = async ({ locals }) => {
 		members,
 		pendingInvites,
 		assignableRoles,
-		employees,
 		hr: { connected: !!connection, people: hrPeople, error: hrError }
 	};
 };
@@ -221,28 +215,6 @@ export const actions: Actions = {
 		return { ok: 'Role updated.' };
 	},
 
-	linkEmployee: async (event) => {
-		requireCap(event.locals.user, event.locals.role, 'team:*');
-		const hotelId = event.locals.hotel!.id;
-
-		const fd = await event.request.formData();
-		const parsed = z
-			.object({ userId: z.string().uuid(), employeeId: z.string().uuid().optional().or(z.literal('')) })
-			.safeParse(Object.fromEntries(fd));
-		if (!parsed.success) return fail(400, { error: 'Invalid link.' });
-
-		await linkMemberToEmployee(hotelId, parsed.data.userId, parsed.data.employeeId || null);
-		await writeAudit({
-			hotelId,
-			actor: event.locals.user,
-			action: 'employee.link_user',
-			entityType: 'membership',
-			entityId: parsed.data.userId,
-			after: { employeeId: parsed.data.employeeId || null }
-		});
-		return { ok: parsed.data.employeeId ? 'Linked to an employee record.' : 'Unlinked.' };
-	},
-
 	removeMember: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'team:*');
 		const hotelId = event.locals.hotel!.id;
@@ -267,10 +239,6 @@ export const actions: Actions = {
 		await db
 			.delete(memberships)
 			.where(and(eq(memberships.hotelId, hotelId), eq(memberships.userId, userId.data)));
-		// The membership is gone, but the `users` row (and any employee link to it)
-		// isn't — clear it too, so no employee is left showing as "linked" to someone
-		// who's no longer part of this hotel.
-		await linkMemberToEmployee(hotelId, userId.data, null);
 		await writeAudit({
 			hotelId,
 			actor: event.locals.user,

@@ -196,6 +196,11 @@ Hotel gains: HR client (API key + base URL setting), `person_ref` columns, event
    moved. HR down never removes anyone; a hotel admin is flagged, not removed. A push event was
    deliberately left out (no retry queue to run); add it if 15 minutes proves too slow.
 7. **Hotel HR removal** — delete routes/code/tables, caps backfill.
+   **Done 2026-10-13** on `feature/remove-hotel-hr` (migration `0085`): hotel routes (HR, payroll,
+   leave settings, DTR/roster prints), `lib/server/hr`, the pure HR libs, `schema/hr.ts` and the old
+   Team "Linked employee" picker are gone; the 16 HR tables, the `hr` role and HR-only capabilities were
+   dropped (guarded: the migration aborts if anyone still holds the `hr` role). Finance's `payroll`
+   category, `@mm/finance-core` and `hr-connection` are kept. Backups taken first.
 8. **Payroll + payslips** — company-wide run, release, business download.
    ⚠ **Blocker independent of this plan:** `@mm/hr-core/statutory` (SSS/PhilHealth/Pag-IBIG/BIR) and
    `compute.ts` still throw; "Generate lines" refuses by design. Phase 8 cannot produce real numbers

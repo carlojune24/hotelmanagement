@@ -38,25 +38,10 @@ describe('roleCan', () => {
 		expect(roleCan(ROLE_CAPS.accountant, 'shift:close')).toBe(true);
 	});
 
-	it('hr manages employees/schedule/dtr/payroll but not cash-drawer shifts', () => {
-		expect(roleCan(ROLE_CAPS.hr, 'hr:read')).toBe(true);
-		expect(roleCan(ROLE_CAPS.hr, 'employee:read')).toBe(true);
-		expect(roleCan(ROLE_CAPS.hr, 'schedule:write')).toBe(true);
-		expect(roleCan(ROLE_CAPS.hr, 'dtr:read')).toBe(true);
-		expect(roleCan(ROLE_CAPS.hr, 'payroll:run')).toBe(true);
-		expect(roleCan(ROLE_CAPS.hr, 'reports:read')).toBe(true);
-		// 'shift:*' is the cash-drawer domain (front_desk/accountant) — hr must not get it,
-		// and front_desk's cash-drawer access must not satisfy hr's schedule/dtr domains.
-		expect(roleCan(ROLE_CAPS.hr, 'shift:open')).toBe(false);
-		expect(roleCan(ROLE_CAPS.front_desk, 'schedule:write')).toBe(false);
-		expect(roleCan(ROLE_CAPS.front_desk, 'employee:read')).toBe(false);
-	});
-
 	it('only hotel_admin satisfies the hotel:admin settings gate', () => {
 		expect(roleCan(ROLE_CAPS.hotel_admin, 'hotel:admin')).toBe(true);
 		expect(roleCan(ROLE_CAPS.front_desk, 'hotel:admin')).toBe(false);
 		expect(roleCan(ROLE_CAPS.accountant, 'hotel:admin')).toBe(false);
-		expect(roleCan(ROLE_CAPS.hr, 'hotel:admin')).toBe(false);
 		expect(roleCan(ROLE_CAPS.read_only, 'hotel:admin')).toBe(false);
 	});
 
@@ -78,7 +63,7 @@ describe('roleCan', () => {
 
 	it('lands only cook-only roles on the Kitchen', () => {
 		expect(isKitchenOnly(ROLE_CAPS.kitchen)).toBe(true);
-		for (const role of ['hotel_admin', 'front_desk', 'housekeeping', 'accountant', 'hr', 'read_only'] as const) {
+		for (const role of ['hotel_admin', 'front_desk', 'housekeeping', 'accountant', 'read_only'] as const) {
 			expect(isKitchenOnly(ROLE_CAPS[role])).toBe(false);
 		}
 	});
@@ -90,7 +75,7 @@ describe('homePathFor', () => {
 		expect(homePathFor(base, ROLE_CAPS.kitchen)).toBe('/hotel1/management/kitchen');
 	});
 	it('sends everyone else to the Dashboard', () => {
-		for (const role of ['hotel_admin', 'front_desk', 'housekeeping', 'accountant', 'hr', 'read_only'] as const) {
+		for (const role of ['hotel_admin', 'front_desk', 'housekeeping', 'accountant', 'read_only'] as const) {
 			expect(homePathFor(base, ROLE_CAPS[role])).toBe('/hotel1/management/dashboard');
 		}
 		expect(homePathFor(base, null)).toBe('/hotel1/management/dashboard');
@@ -114,7 +99,7 @@ describe('the dining role', () => {
 	});
 	it('is "dining only"; front desk and the manager are not', () => {
 		expect(isDiningOnly(ROLE_CAPS.dining)).toBe(true);
-		for (const role of ['hotel_admin', 'front_desk', 'housekeeping', 'kitchen', 'accountant', 'hr', 'read_only'] as const) {
+		for (const role of ['hotel_admin', 'front_desk', 'housekeeping', 'kitchen', 'accountant', 'read_only'] as const) {
 			expect(isDiningOnly(ROLE_CAPS[role])).toBe(false);
 		}
 		expect(isKitchenOnly(ROLE_CAPS.dining)).toBe(false);

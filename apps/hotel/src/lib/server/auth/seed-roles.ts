@@ -14,7 +14,6 @@ const ROLE_LABELS: Record<string, string> = {
 	dining: 'Dining',
 	kitchen: 'Kitchen',
 	accountant: 'Accountant',
-	hr: 'HR',
 	read_only: 'Read Only',
 	group_owner: 'Group Owner'
 };

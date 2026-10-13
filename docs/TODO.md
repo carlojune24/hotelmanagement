@@ -284,59 +284,20 @@ the diagram expects and we don't have yet.
 
 ---
 
-## Phase 4 — HR & Payroll (Philippine)  *(builds `@mm/hr-core`)*
+## Phase 4 — HR & Payroll (Philippine)  *(superseded — now its own app)*
 
-**RBAC foundation landed ahead of this phase (2026-09-14):** roles are no longer a hardcoded
-`MembershipRole` TS enum — `roles`/`role_permissions` tables (`db/schema/roles.ts`) make roles
-DB-backed per hotel, seeded from the old `ROLE_CAPS` catalog (`seedDefaultRoles`) at
-hotel-creation time. `apps/hotel/src/lib/authz.ts` now carries `PERMISSION_CATALOG` (every
-capability real code checks, labeled/grouped for a future permission UI) alongside the legacy
-`ROLE_CAPS` (kept only as seed data). New capability domains reserved for this phase:
-`employee:*`, `schedule:*` (deliberately not `shift:*`, which stays the cash-drawer domain),
-`dtr:*`, `payroll:*` — all already granted to the seeded `hr` role. A v1 role-*editor* (hotel
-admin defining brand-new custom roles from scratch) was deliberately deferred — the data model
-supports it, but nothing needs it yet; today a hotel can only assign one of the 6 seeded roles.
-Confirmed scope for this phase, per product decision: **hotel-scoped only** — employee
-management, scheduling, DTR, payroll/payslip. Ships as a normal module every hotel gets once
-built, no per-hotel feature flag — a hotel that never assigns anyone `employee:*`/`schedule:*`/
-`dtr:*`/`payroll:*` simply never sees HR/payroll screens (nav is capability-gated). The
-group-scoped/centralized-HR sub-bullets below are unchanged/still pending — not part of this
-confirmed scope.
+**HR no longer lives in the hotel app.** On 2026-10-13 it was split out into `apps/hr` — its own
+app, database and domain — and removed from the hotel (migration `0085`, branch
+`feature/remove-hotel-hr`). The plan, decisions, data model and phase log are in
+**[`docs/HR_PLAN.md`](./HR_PLAN.md)**; product and design truth in `apps/hr/PRODUCT.md` / `DESIGN.md`.
 
-Also landed: hotel-level self-service Team management
-(`[hotel]/(staff)/settings/team`) — a hotel_admin now invites/manages their own hotel's staff
-(every role except `hotel_admin` itself) without going through the platform `/admin` console.
-`/admin/hotels/[hotelId]` now only grants/revokes `hotel_admin` accounts (platform admin can
-still create more than one hotel_admin per hotel — no single-admin cap).
+What the hotel keeps: **Settings → HR connection** and the **Team → From HR** picker
+(`lib/server/hr-link/`), which let a hotel create staff logins from HR employee records and have
+access follow HR (separation / transfer). Nothing else in the hotel reads HR.
 
-### Standard package
-- [x] `@mm/hr-core` (2026-09-15): org model, employee master (identity + `person_ref`/`org_ref`, gov IDs, employment, pay basis, disbursement, `extensions` jsonb, `updated_at`/soft-delete), schedule model, payroll-run result + line model — Zod shapes in `packages/hr-core/src/index.ts`, built on `@mm/integration`'s shared primitives (`personRef`, `orgRef`, `amountMinor`, `plainDate`, etc.)
-- [~] `@mm/hr-core/statutory`: `sss-2026`, `philhealth-2026`, `pagibig-2026`, `bir-train` modules exist with `effective_date` constants and correctly-shaped functions, but every function **throws — bracket tables are not filled in** and there are no unit tests yet. Filling these in against a verified circular/advisory/RMC is its own follow-up.
-- [~] `@mm/hr-core/compute.ts` / `thirteenth-month.ts`: placeholder functions with the right input/output shape, both throw — real computation is the same follow-up as the statutory tables above.
-- [ ] Finalize `docs/standards/hr.md` — still accurate for what's built, but not yet updated for anything group-scoped (unchanged, see below)
-- [ ] ⚠️ Verify statutory values against latest SSS circular / PhilHealth advisory / Pag-IBIG circular / BIR RMC before go-live
-
-### Schema — group-scoped HR (centralization)
-- [ ] `hotel_groups`: add `org_ref`, `legal_name`, `trade_name`, `tin`, `default_currency` (nullable, populated when a group is HR-active)
-- [ ] `employees.org_ref` (resolves to `hotel_groups.org_ref` when grouped, else the standalone hotel's own `hotels.org_ref`) + `employees.primary_hotel_id` (nullable FK → `hotels.id`, home base)
-- [x] `schedules.hotel_id` (required FK → `hotels.id`, per-shift property); `dtr_entries.hotel_id` denormalized from schedule
-- [ ] `group_memberships(user_id, group_id, role_id)` — mirrors `memberships`'s shape (now `role_id` → `roles`, not a bare enum); group-scoped roles seeded from a new `group_owner`/`hr`/`accountant`/`read_only` template set (no `front_desk`/`housekeeping` at group scope)
-- [ ] `hooks.server.ts`: resolve `/group/{groupSlug}/…` — load `hotel_groups` by slug, resolve `locals.groupRole` via `group_memberships`, separately from the existing hotel-path `locals.hotel`/`locals.role`
-- [ ] Admin: create/edit `hotel_groups`, assign `hotels.group_id`, set the group's org identity fields, manage `group_memberships`
-
-### App
-- [x] Employees CRUD (2026-09-15) — hotel-scoped `/{slug}/hr/employees`, gated by `employee:*`. `employees` table (`db/schema/hr.ts`), no FK to `users`/`memberships` (an employee record doesn't require a login; `employees.userId` is an optional, separately-set link). Group-scoped `/group/{groupSlug}/hr` view is **not built** — deferred with the rest of group-scoped HR below.
-- [~] Scheduling (2026-09-15; roster grid + shift templates 2026-09-30) — `schedules` table + `/{slug}/management/hr/schedule`, gated by `schedule:*`. The page is now a Mon–Sun **roster grid** (employees × days, grouped by department, per-employee weekly hours, on-duty headcount per day) over reusable **shift templates** (`shift_templates`, migration `0058`; app-level, *not* part of `@mm/hr-core` — applying one copies its times into ordinary `schedules` rows, so editing/deleting a template never rewrites a built roster). Fill it by arming a shift and click/drag-painting (shift-click extends), or click a cell for a popover with the templates + custom hours; keyboard: arrows, `1`–`9` apply, Delete clears. **Copy last week** (skips filled days unless "replace") and Clear both give an 8-second **Undo** (`restoreCells`). Advisory warnings only, never blocking: working while on leave/suspended/separated, over 48h paid that week, overnight shift marker (`lib/roster.ts`). One-shift-per-day stays a hard DB rule. "Today"/week resolve in the hotel's timezone. Logic: `lib/roster.ts` (pure), `lib/server/hr/{schedules,shift-templates}.ts`; tests `lib/roster.test.ts` + live-DB `lib/server/hr/schedules.test.ts` (throwaway hotels, self-cleaning). **Printable roster (2026-09-30)** — `/{slug}/print/schedule` (`schedule:*`, from the schedule page's Print menu): a landscape **week** grid, a landscape **month** grid using shift codes + a legend built from the shifts actually used, and portrait **by-employee** sheets (one per person, week or month, with a "received by" line); grids carry prepared-by/approved-by lines and paid-hour totals. Code/legend logic is unit-tested (`lib/roster.test.ts`); the printed layout itself has **not** been eyeballed in a browser or PDF yet. **Not built:** publish/draft state + staff notifications, swap requests, leave, holiday calendar, coverage targets, an "also scheduled at another hotel" warning (a person is one `employees` row per hotel today, so it can't fire until group-scoped HR links them), a phone-optimised editor (tablet scrolls the grid; phone not yet collapsed to a day list).
-- [x] Biometric data + DTR (2026-10-09): **DTR › Biometric data** uploads raw files by year-month (saved 2-column mapping templates; every punch stored for every ID, no employee mapping; search by ID; staff can add a forgotten punch with a reason; files removable) → `biometric_uploads` / `biometric_punches` (`lib/hr-import.ts`, `server/hr/{parse-sheet,dtr-import,dtr-view}.ts`). **DTR** page: pick employee + month, Preview (live from punches + roster, split shifts via `schedules.break_start/break_end`) / Saved toggle, Add time, Save record / Save all → `dtr_entries` (biometric rows replaced, manual never touched). Print from Saved at `/{slug}/print/dtr` (two copies per A4). OT, leave, overtime/payslip prints deliberately deferred. Not yet verified against real device files beyond the sample ATTLOG.
-- [x] Leave, holidays & memos (2026-10-09): **Settings → Leave & holidays** holds editable leave types (PH statutory seeded: SIL, maternity, paternity, solo parent, VAWC, special leave for women; company VL/SL/EL/BL/birthday off by default; paid, allowance, working/calendar days, tenure, employment type, sex, half day, carry-over, document) and a holiday/memo calendar. **HR → Leave**: file/cancel (HR files and approves, `leave:*`), live day count + balance, balances grid with adjustments. Approved leave overlays the roster (chips) and DTR Preview/Save/Print: not absent, paid leave credited as worked (`dtr_entries.leave_minutes`); holiday/memo credits the day (`credit_minutes`, optional late/undertime waiver). Precedence manual DTR > leave > calendar > punches > absent. Past approvals keep a paid snapshot. Holiday premium pay and cash conversion payout left to payroll. Not yet verified in the browser; no unit tests yet (testing paused).
-- [~] DTR (2026-09-15) — `dtr_entries` table + `/{slug}/hr/dtr` week-view list with manual entry/correction (worked/OT/night-diff/tardiness/undertime minutes, absent flag, audit via `correctedByUserId`/`correctionNote`), gated by `dtr:*`. **Not built:** `pair-punches.ts` (pairing biometric punches against a schedule) — the schema has `dtrEntries.scheduleId`/`biometricEnrollId` columns ready for it, and `source: 'biometric'` rows once that lands.
-- [ ] DTR print `/{slug}/print/dtr` (and `/group/{groupSlug}/print/dtr` for centralized HR) — not started.
-- [~] Payroll run (2026-09-15) — `payroll_runs`/`payroll_run_lines` tables + `/{slug}/payroll` run list and run-detail view, gated by its own `payroll:*` cap. Creating a run just records its cutoff/pay dates (status `draft`); **"Generate lines" intentionally fails** with a clear error rather than writing fabricated numbers, since `computePayrollLine` is still a stub — real generation (pull DTR → compute → review → lock → post to cashflow) is blocked on the statutory-table follow-up above. Payroll-cost-by-property derived report not built (group-scoped, deferred below).
-- [ ] Cash advances: `cash_advances` table exists (`db/schema/hr.ts`) but no request/approval/disbursement UI yet.
-- [~] Payslips — `payslips` table exists (delivery tracking only: `emailedAt`/`emailedTo`), following this app's existing print-document pattern of rendering live from source data rather than a stored file. No `/{slug}/print/payslip` route yet (blocks on payroll lines existing, which blocks on the statutory follow-up).
-- [ ] Payroll register export (CSV/Excel); remittance summaries (SSS R-3-style, PhilHealth, Pag-IBIG, BIR 1601-C figures) — not started.
-- [ ] `@mm/integration`: `GET /api/v1/hr/orgs|employees|schedules|payroll-runs` (cursor + `updated_since`) + `employee.updated` / `payroll_run.posted` events
-- [ ] Verify: create a `hotel_group` with 2 hotels + an HR-role `group_membership` → add an employee with `primary_hotel_id` = hotel A → schedule shifts at both hotel A and hotel B → upload sample `ATTLOG.TXT` → DTR correct per hotel → run one group-wide payroll → payroll-cost-by-property report splits correctly between A and B → deductions match an independent 2026 calculator (±₱1) → payslip PDF → net pay as cash-out → `GET /api/v1/hr/employees` returns standard shape with `person_ref`
+Still open (tracked in `docs/HR_PLAN.md` §10): company-wide **payroll and payslips** (phase 8),
+blocked on filling in and verifying the statutory tables in `@mm/hr-core`
+(SSS / PhilHealth / Pag-IBIG / BIR).
 
 ---
 

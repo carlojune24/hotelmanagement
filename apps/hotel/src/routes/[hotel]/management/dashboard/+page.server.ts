@@ -84,7 +84,6 @@ export const load: PageServerLoad = async ({ locals }) => {
 		// Housekeeping sees the Rooms board via `room:read` but can't open front desk.
 		roomsHref: can('booking:read') ? 'front-desk' : 'housekeeping',
 		// Room/rate setup lives under Settings, which is hotel-admin only.
-		canSetup: can('hotel:admin'),
-		canHr: can('hr:read')
+		canSetup: can('hotel:admin')
 	};
 };

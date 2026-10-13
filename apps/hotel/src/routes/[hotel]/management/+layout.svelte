@@ -112,7 +112,6 @@
 			{ seg: 'kitchen', label: 'Kitchen', icon: ChefHatIcon, show: kitchenOnly },
 			{ seg: 'reviews', label: 'Reviews', icon: StarIcon, show: can('review:read') },
 			{ seg: 'finance', label: 'Finance', icon: WalletIcon, show: can('finance:read') },
-			{ seg: 'hr', label: 'HR', icon: UsersIcon, show: can('hr:read') },
 			{ seg: 'reports', label: 'Reports', icon: ChartColumnIcon, show: can('reports:read') },
 			{
 				seg: 'settings/audit',

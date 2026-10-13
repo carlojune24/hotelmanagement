@@ -15,7 +15,6 @@
 	const base = $derived(`/${page.params.hotel}/management`);
 
 	let roleForms: Record<string, HTMLFormElement> = {};
-	let linkForms: Record<string, HTMLFormElement> = {};
 	let inviteRole = $state<string>('');
 	let inviteEmail = $state('');
 	/** The HR person chosen in the picker; '' when the invite is by email only. */
@@ -26,10 +25,6 @@
 		const p = data.hr.people.find((x) => x.person_ref === ref);
 		// Prefill, never overwrite what the admin already typed by hand.
 		if (p?.email && !inviteEmail) inviteEmail = p.email;
-	}
-
-	function linkedEmployeeId(userId: string): string {
-		return data.employees.find((e) => e.userId === userId)?.id ?? '';
 	}
 
 	$effect(() => {
@@ -105,27 +100,6 @@
 										</Select.Root>
 									</form>
 								{/if}
-							</Table.Cell>
-							<Table.Cell>
-								<form
-									method="POST"
-									action="?/linkEmployee"
-									use:enhance
-									bind:this={linkForms[m.userId]}
-								>
-									<input type="hidden" name="userId" value={m.userId} />
-									<select
-										name="employeeId"
-										value={linkedEmployeeId(m.userId)}
-										onchange={() => linkForms[m.userId]?.requestSubmit()}
-										class="rounded-md border border-input bg-transparent px-2 py-1 text-xs"
-									>
-										<option value="">— no linked employee —</option>
-										{#each data.employees.filter((e) => e.userId == null || e.userId === m.userId) as e (e.id)}
-											<option value={e.id}>{e.firstName} {e.lastName} ({e.employeeNo})</option>
-										{/each}
-									</select>
-								</form>
 							</Table.Cell>
 							<Table.Cell>
 								{#if !m.isProtected}
