@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import BuildingIcon from '@lucide/svelte/icons/building-2';
+	import UsersIcon from '@lucide/svelte/icons/users';
+	import KeyIcon from '@lucide/svelte/icons/key-round';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import type { LayoutData } from './$types';
@@ -9,7 +11,8 @@
 
 	const items = $derived(
 		[
-			{ seg: 'establishments', label: 'Establishments', icon: BuildingIcon, show: data.nav.establishments }
+			{ seg: 'establishments', label: 'Establishments', icon: BuildingIcon, show: data.nav.establishments },
+			{ seg: 'users', label: 'Users', icon: UsersIcon, show: data.nav.users }
 		].filter((i) => i.show)
 	);
 	const active = (seg: string) => page.url.pathname.startsWith(`/${seg}`);
@@ -55,6 +58,16 @@
 			</div>
 			<form method="POST" action="/auth/logout">
 				<Sidebar.Menu>
+					<Sidebar.MenuItem>
+						<Sidebar.MenuButton isActive={active('account')} tooltipContent="Account">
+							{#snippet child({ props })}
+								<a href="/account" {...props}>
+									<KeyIcon />
+									<span>Account</span>
+								</a>
+							{/snippet}
+						</Sidebar.MenuButton>
+					</Sidebar.MenuItem>
 					<Sidebar.MenuItem>
 						<Sidebar.MenuButton tooltipContent="Sign out">
 							{#snippet child({ props })}

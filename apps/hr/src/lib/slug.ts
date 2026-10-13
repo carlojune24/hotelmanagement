@@ -2,6 +2,8 @@
 export const RESERVED_SLUGS = new Set([
 	'auth',
 	'establishments',
+	'users',
+	'account',
 	'print',
 	'api',
 	'uploads',

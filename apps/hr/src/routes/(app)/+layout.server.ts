@@ -1,6 +1,6 @@
 import { requireUser } from '$lib/server/auth/rbac';
 import { getOrganization } from '$lib/server/establishments';
-import { canAnywhere } from '$lib/authz';
+import { canAnywhere, roleCan } from '$lib/authz';
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = async ({ locals, url }) => {
@@ -12,7 +12,8 @@ export const load: LayoutServerLoad = async ({ locals, url }) => {
 		orgName: org?.name ?? 'HR',
 		// Nav items show only for a user who holds the capability somewhere; never as disabled stubs.
 		nav: {
-			establishments: locals.user.isSystemAdmin || canAnywhere(access, 'establishment:read')
+			establishments: locals.user.isSystemAdmin || canAnywhere(access, 'establishment:read'),
+			users: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'user:*')
 		}
 	};
 };
