@@ -27,6 +27,7 @@ import {
 import { listEmployees } from '$lib/server/hr/employees';
 import { listCalendar } from '$lib/server/hr/calendar';
 import { listLeaveDays } from '$lib/server/hr/leave';
+import { parseNightDiff } from '$lib/server/hr/night-diff';
 import { addDays, isDateString, mondayOf, weekDates } from '$lib/roster';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -71,6 +72,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		employees: rosterEmployees,
 		templates,
 		previousWeekShiftCount: previousWeek.length,
+		/** Hotel-wide default night window, used by shifts that set none. */
+		nightDiff: parseNightDiff(hotel.config),
 		/** `employeeId|date` → leave covering that day (an overlay: the shift itself is untouched). */
 		leave: Object.fromEntries(
 			[...leaveDays].map(([key, l]) => [key, { code: l.code, name: l.name, half: l.halfDay }])
@@ -215,7 +218,9 @@ export const actions: Actions = {
 			startTime: raw.startTime || undefined,
 			endTime: raw.endTime || undefined,
 			breakStart: raw.breakStart || undefined,
-			breakEnd: raw.breakEnd || undefined
+			breakEnd: raw.breakEnd || undefined,
+			nightStart: raw.nightStart || undefined,
+			nightEnd: raw.nightEnd || undefined
 		});
 		if (!parsed.success) {
 			return fail(400, { error: parsed.error.issues[0]?.message ?? 'Check the shift details.' });

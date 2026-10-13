@@ -368,5 +368,45 @@ describe.skipIf(!hasDb)('roster writes (live DB)', async () => {
 			const row = (await rows(hotelB, '2026-12-01', '2026-12-01'))[0];
 			expect(row).toMatchObject({ startTime: '07:00', endTime: '15:00' });
 		});
+
+		it('keeps a per-shift night window through paint, copy-week and undo', async () => {
+			const win = { start: '20:00', end: '04:00' };
+			const cell = { employeeId: ann, date: '2027-01-04' }; // a Monday
+			await applyShiftToCells(hotelA, [cell], { ...MORNING, nightDiffWindow: win });
+			expect((await rows(hotelA, '2027-01-04', '2027-01-04'))[0]?.nightDiffWindow).toEqual(win);
+
+			await copyWeek(hotelA, '2027-01-04', '2027-01-11', true);
+			expect((await rows(hotelA, '2027-01-11', '2027-01-11'))[0]?.nightDiffWindow).toEqual(win);
+
+			// Repainting without a window clears it; undo puts the old window back.
+			const repaint = await applyShiftToCells(hotelA, [cell], MORNING);
+			expect((await rows(hotelA, '2027-01-04', '2027-01-04'))[0]?.nightDiffWindow).toBeNull();
+			await restoreCells(hotelA, repaint.previous);
+			expect((await rows(hotelA, '2027-01-04', '2027-01-04'))[0]?.nightDiffWindow).toEqual(win);
+		});
+
+		it('stores a template night window and rejects a half-set one', async () => {
+			const t = await createShiftTemplate(hotelA, {
+				name: 'Late',
+				isRestDay: false,
+				startTime: '18:00',
+				endTime: '02:00',
+				breakMinutes: 0,
+				nightStart: '21:00',
+				nightEnd: '05:00',
+				tag: 'neutral'
+			});
+			const listed = (await listShiftTemplates(hotelA)).find((x) => x.id === t!.id);
+			expect(listed?.nightDiffWindow).toEqual({ start: '21:00', end: '05:00' });
+			const { shiftTemplateFormSchema } = await import('./shift-templates');
+			expect(
+				shiftTemplateFormSchema.safeParse({
+					name: 'X',
+					startTime: '18:00',
+					endTime: '02:00',
+					nightStart: '21:00'
+				}).success
+			).toBe(false);
+		});
 	});
 });

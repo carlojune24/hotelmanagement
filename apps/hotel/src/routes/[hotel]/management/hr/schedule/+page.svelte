@@ -33,6 +33,7 @@
 		formatHours,
 		netShiftMinutes,
 		sameShift,
+		scheduledNightMinutes,
 		timeToMinutes,
 		type RosterWarning
 	} from '$lib/roster';
@@ -50,6 +51,8 @@
 		/** Split shift: the unpaid gap between the two parts. */
 		breakStart?: string | null;
 		breakEnd?: string | null;
+		/** Per-shift night-differential window; null = the default window. */
+		nightDiffWindow?: { start: string; end: string } | null;
 	};
 	type Cell = { employeeId: string; date: string };
 	type CellState = Cell & { shift: Shift | null };
@@ -77,7 +80,8 @@
 				endTime: e.endTime,
 				breakMinutes: e.breakMinutes,
 				breakStart: e.breakStart,
-				breakEnd: e.breakEnd
+				breakEnd: e.breakEnd,
+				nightDiffWindow: e.nightDiffWindow
 			});
 		}
 		for (const [key, shift] of overlay) {
@@ -130,6 +134,16 @@
 		}
 		return total;
 	}
+	// A shift's own window wins, then the hotel-wide setting.
+	const nightMins = (s: Shift) => scheduledNightMinutes(s, s.nightDiffWindow ?? data.nightDiff);
+	function weekNightMinutes(employeeId: string): number {
+		let total = 0;
+		for (const d of data.days) {
+			const s = shifts.get(k(employeeId, d));
+			if (s) total += nightMins(s);
+		}
+		return total;
+	}
 	function headcount(date: string): number {
 		let n = 0;
 		for (const e of data.employees) {
@@ -177,7 +191,8 @@
 		endTime: t.endTime,
 		breakMinutes: t.breakMinutes,
 		breakStart: t.breakStart,
-		breakEnd: t.breakEnd
+		breakEnd: t.breakEnd,
+		nightDiffWindow: t.nightDiffWindow
 	});
 	const matchTemplate = (s: Shift) => data.templates.find((t) => sameShift(templateShift(t), s));
 
@@ -467,9 +482,13 @@
 	let customSplit = $state(false);
 	let customBreakStart = $state('12:00');
 	let customBreakEnd = $state('13:00');
+	let customNdStart = $state('');
+	let customNdEnd = $state('');
 	$effect(() => {
 		if (!editing) return;
 		const s = shifts.get(editing);
+		customNdStart = s?.nightDiffWindow?.start ?? '';
+		customNdEnd = s?.nightDiffWindow?.end ?? '';
 		if (s && !s.isRestDay && s.startTime && s.endTime) {
 			customStart = s.startTime;
 			customEnd = s.endTime;
@@ -512,6 +531,11 @@
 			toast.error('Enter a start and end time that differ.');
 			return;
 		}
+		if (Boolean(customNdStart) !== Boolean(customNdEnd) || (customNdStart && customNdStart === customNdEnd)) {
+			toast.error('Enter both night differential times, and make them different.');
+			return;
+		}
+		const nightDiffWindow = customNdStart ? { start: customNdStart, end: customNdEnd } : null;
 		if (customSplit) {
 			if (customSplitError) {
 				toast.error(customSplitError);
@@ -523,7 +547,8 @@
 				endTime: customEnd,
 				breakMinutes: breakWindowMinutes(customBreakStart, customBreakEnd),
 				breakStart: customBreakStart,
-				breakEnd: customBreakEnd
+				breakEnd: customBreakEnd,
+				nightDiffWindow
 			});
 			return;
 		}
@@ -531,7 +556,8 @@
 			isRestDay: false,
 			startTime: customStart,
 			endTime: customEnd,
-			breakMinutes: Number(customBreak) || 0
+			breakMinutes: Number(customBreak) || 0,
+			nightDiffWindow
 		});
 	}
 
@@ -576,6 +602,8 @@
 		split: boolean;
 		breakStart: string;
 		breakEnd: string;
+		nightStart: string;
+		nightEnd: string;
 		tag: string;
 	};
 	const blankDraft = (): TplDraft => ({
@@ -588,6 +616,8 @@
 		split: false,
 		breakStart: '12:00',
 		breakEnd: '13:00',
+		nightStart: '',
+		nightEnd: '',
 		tag: 'neutral'
 	});
 	let draft = $state<TplDraft>(blankDraft());
@@ -602,6 +632,8 @@
 			split: Boolean(t.breakStart && t.breakEnd),
 			breakStart: t.breakStart ?? '12:00',
 			breakEnd: t.breakEnd ?? '13:00',
+			nightStart: t.nightDiffWindow?.start ?? '',
+			nightEnd: t.nightDiffWindow?.end ?? '',
 			tag: t.tag
 		});
 	function startDraftSplit() {
@@ -910,6 +942,7 @@
 							{/if}
 							{#each g.employees as emp (emp.id)}
 								{@const mins = weekMinutes(emp.id)}
+								{@const ndMins = weekNightMinutes(emp.id)}
 								{@const wk = weeklyWarning.get(emp.id)}
 								<tr>
 									<th
@@ -931,6 +964,7 @@
 										{@const cell = { employeeId: emp.id, date: d }}
 										{@const s = shifts.get(key)}
 										{@const tpl = s ? matchTemplate(s) : undefined}
+										{@const nd = s ? nightMins(s) : 0}
 										{@const cellWarnings = warningsByCell.get(key) ?? []}
 										{@const isSel = selected.has(key) || dragKeys.has(key)}
 										{@const lv = data.leave[key]}
@@ -949,7 +983,7 @@
 													aria-label="{fullName(emp)}, {dayName(d)} {dayNum(d)}: {s
 														? s.isRestDay
 															? 'rest day'
-															: `${tpl ? tpl.name + ', ' : ''}${range(s)}`
+															: `${tpl ? tpl.name + ', ' : ''}${range(s)}${nd > 0 ? ', ' + formatHours(nd) + ' night differential' : ''}`
 														: 'no shift'}{cellWarnings.length
 														? '. ' + cellWarnings.map((w) => w.message).join(' ')
 														: ''}"
@@ -957,7 +991,7 @@
 													onpointerenter={() => onCellPointerEnter(cell)}
 													onclick={(e) => onCellClick(e, cell)}
 													onkeydown={(e) => onCellKeydown(e, cell)}
-													class="group relative flex h-11 w-full min-w-28 flex-col items-start justify-center rounded-md border px-2 text-left leading-tight transition-colors focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none {s
+													class="group relative flex min-h-11 w-full min-w-28 flex-col items-start justify-center rounded-md border px-2 text-left leading-tight transition-colors focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none {s
 														? s.isRestDay
 															? 'border-transparent text-ink-muted'
 															: tagClass(tpl?.tag)
@@ -976,6 +1010,11 @@
 																	? 'text-[11px]'
 																	: 'text-xs text-ink'}">{range(s)}</span
 															>
+															{#if nd > 0}
+																<span class="text-[11px] text-ink-muted tabular-nums"
+																	>ND {formatHours(nd)}</span
+																>
+															{/if}
 														{/if}
 													{:else}
 														<PlusIcon
@@ -1110,6 +1149,17 @@
 																{/if}
 															{/if}
 														</div>
+														<div class="grid grid-cols-2 gap-2">
+																<div>
+																	<Label for="cns" class="text-xs">Night diff. from</Label>
+																	<Input id="cns" type="time" bind:value={customNdStart} class="mt-1 h-8 px-2 text-sm" />
+																</div>
+																<div>
+																	<Label for="cne" class="text-xs">to</Label>
+																	<Input id="cne" type="time" bind:value={customNdEnd} class="mt-1 h-8 px-2 text-sm" />
+																</div>
+																<p class="col-span-2 -mt-1 text-xs text-ink-muted">Blank uses the hotel default ({data.nightDiff.start}–{data.nightDiff.end}).</p>
+															</div>
 														<div class="flex items-center justify-between gap-2">
 															<div class="flex gap-1.5">
 																<Button
@@ -1151,6 +1201,11 @@
 											{#if wk}<TriangleAlertIcon class="size-3.5" />{/if}
 											{mins > 0 ? formatHours(mins) : '—'}
 										</span>
+										{#if ndMins > 0}
+											<div class="text-[11px] font-normal text-ink-muted">
+												ND {formatHours(ndMins)}
+											</div>
+										{/if}
 									</td>
 								</tr>
 							{/each}
@@ -1337,6 +1392,17 @@
 								</Button>
 							{/if}
 						{/if}
+						<div class="grid grid-cols-2 gap-2">
+								<div>
+									<Label for="tplNdStart">Night differential from</Label>
+									<Input id="tplNdStart" name="nightStart" type="time" bind:value={draft.nightStart} class="mt-1" />
+								</div>
+								<div>
+									<Label for="tplNdEnd">to</Label>
+									<Input id="tplNdEnd" name="nightEnd" type="time" bind:value={draft.nightEnd} class="mt-1" />
+								</div>
+								<p class="col-span-2 text-xs text-ink-muted">Leave blank to use the hotel default ({data.nightDiff.start}–{data.nightDiff.end}). Hours inside this window earn the night differential.</p>
+							</div>
 					{/if}
 					<fieldset>
 						<legend class="mb-1 text-sm font-medium text-ink">Colour</legend>

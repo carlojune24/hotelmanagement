@@ -13,6 +13,9 @@ export const WEEKLY_HOURS_WARNING_MINUTES = 48 * 60;
 export const TEMPLATE_TAGS = ['neutral', 'brand', 'ok', 'warning'] as const;
 export type TemplateTag = (typeof TEMPLATE_TAGS)[number];
 
+/** A night-differential window, both `HH:MM`; `end <= start` wraps past midnight. */
+export type NightWindow = { start: string; end: string };
+
 /** `HH:MM` or Postgres's `HH:MM:SS` → minutes since midnight; null if unparseable/unset. */
 export function timeToMinutes(t: string | null | undefined): number | null {
 	if (!t) return null;
@@ -60,6 +63,48 @@ export function netShiftMinutes(shift: {
 }): number {
 	if (shift.isRestDay) return 0;
 	return Math.max(0, shiftSpanMinutes(shift.startTime, shift.endTime) - shift.breakMinutes);
+}
+
+/**
+ * Scheduled minutes that fall inside the night-differential window. `window` may wrap midnight
+ * (22:00–06:00). A split shift's unpaid gap is excluded; a plain shift's `breakMinutes` has no
+ * position, so (like DTR) it is not subtracted — shortcut: the rare break inside the window is
+ * over-counted, upgrade if breaks get a position.
+ */
+export function scheduledNightMinutes(
+	shift: {
+		isRestDay: boolean;
+		startTime: string | null | undefined;
+		endTime: string | null | undefined;
+		breakStart?: string | null;
+		breakEnd?: string | null;
+	},
+	window: { start: string; end: string }
+): number {
+	if (shift.isRestDay) return 0;
+	const s = timeToMinutes(shift.startTime);
+	const span = shiftSpanMinutes(shift.startTime, shift.endTime);
+	const ws = timeToMinutes(window.start);
+	const we = timeToMinutes(window.end);
+	if (s === null || span === 0 || ws === null || we === null || ws === we) return 0;
+	const wEnd = we > ws ? we : we + MINUTES_PER_DAY;
+	const inWindow = (from: number, to: number) => {
+		let total = 0;
+		// Window repeats daily; a shift of under 24h touches at most the days -1..1 around it.
+		for (let d = -1; d <= 1; d++) {
+			const lo = Math.max(from, ws + d * MINUTES_PER_DAY);
+			const hi = Math.min(to, wEnd + d * MINUTES_PER_DAY);
+			if (hi > lo) total += hi - lo;
+		}
+		return total;
+	};
+	let night = inWindow(s, s + span);
+	const bs = timeToMinutes(shift.breakStart);
+	const be = timeToMinutes(shift.breakEnd);
+	if (bs !== null && be !== null && be > bs) {
+		night -= inWindow(bs, be);
+	}
+	return Math.max(0, night);
 }
 
 /**

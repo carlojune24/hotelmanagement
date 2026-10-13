@@ -7,12 +7,19 @@ import {
 	breakWindowError,
 	breakWindowMinutes,
 	shiftSpanMinutes,
-	toHHMM
+	toHHMM,
+	type NightWindow
 } from '$lib/roster';
 
 export class ShiftTemplateError extends Error {}
 
 const hhmm = z.string().regex(/^\d{2}:\d{2}$/);
+
+/** jsonb → a well-formed window or null (never trust a stored blob's shape). */
+function toWindow(v: unknown): NightWindow | null {
+	const p = z.object({ start: hhmm, end: hhmm }).safeParse(v);
+	return p.success ? p.data : null;
+}
 
 export const shiftTemplateFormSchema = z
 	.object({
@@ -24,10 +31,22 @@ export const shiftTemplateFormSchema = z
 		/** Split shift: both or neither. `breakMinutes` is then derived from them. */
 		breakStart: hhmm.optional(),
 		breakEnd: hhmm.optional(),
+		/** Optional night-differential window; both or neither (blank = hotel default). */
+		nightStart: hhmm.optional(),
+		nightEnd: hhmm.optional(),
 		tag: z.enum(TEMPLATE_TAGS).default('neutral')
 	})
 	.superRefine((v, ctx) => {
 		if (v.isRestDay) return;
+		const ndPartial = Boolean(v.nightStart) !== Boolean(v.nightEnd);
+		if (ndPartial || (v.nightStart && v.nightStart === v.nightEnd)) {
+			ctx.addIssue({
+				code: 'custom',
+				path: ['nightStart'],
+				message: 'Enter both night differential times, and make them different.'
+			});
+			return;
+		}
 		if (!v.startTime || !v.endTime || shiftSpanMinutes(v.startTime, v.endTime) === 0) {
 			ctx.addIssue({
 				code: 'custom',
@@ -87,6 +106,7 @@ export async function listShiftTemplates(hotelId: string) {
 		breakMinutes: r.breakMinutes,
 		breakStart: toHHMM(r.breakStart),
 		breakEnd: toHHMM(r.breakEnd),
+		nightDiffWindow: toWindow(r.nightDiffWindow),
 		tag: r.tag
 	}));
 }
@@ -105,6 +125,10 @@ function toValues(input: ShiftTemplateFormInput) {
 				: input.breakMinutes,
 		breakStart: split ? input.breakStart! : null,
 		breakEnd: split ? input.breakEnd! : null,
+		nightDiffWindow:
+			!input.isRestDay && input.nightStart && input.nightEnd
+				? { start: input.nightStart, end: input.nightEnd }
+				: null,
 		tag: input.tag
 	};
 }

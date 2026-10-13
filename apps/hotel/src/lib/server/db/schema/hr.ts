@@ -165,6 +165,8 @@ export const shiftTemplates = pgTable(
 		breakMinutes: integer('break_minutes').notNull().default(0),
 		breakStart: time('break_start'),
 		breakEnd: time('break_end'),
+		/** `{ start, end }` (`HH:MM`) copied into `schedules.night_diff_window` on apply; null = hotel default. */
+		nightDiffWindow: jsonb('night_diff_window'),
 		/** `neutral` | `brand` | `ok` | `warning` — a fixed set of staff-theme tokens, never a free colour. */
 		tag: text('tag').notNull().default('neutral'),
 		sortOrder: integer('sort_order').notNull().default(0),
@@ -231,6 +233,9 @@ export const dtrEntries = pgTable(
 		}),
 		/** Minutes credited as paid leave (counted inside `workedMinutes`). */
 		leaveMinutes: integer('leave_minutes').notNull().default(0),
+		/** Minutes past scheduled end that were punched but have no approved overtime
+		 *  application; `otMinutes` carries only the approved part. */
+		unapprovedOtMinutes: integer('unapproved_ot_minutes').notNull().default(0),
 		createdAt: createdAt(),
 		updatedAt: updatedAt(),
 		deletedAt: deletedAt()
@@ -409,6 +414,44 @@ export const leaveRequests = pgTable(
 	(t) => [
 		index('leave_requests_hotel_dates_idx').on(t.hotelId, t.startDate, t.endDate),
 		index('leave_requests_employee_idx').on(t.employeeId)
+	]
+);
+
+/**
+ * An overtime application: HR files it for an employee and it is approved on the spot
+ * (like leave). The DTR credits `ot_minutes` only for time worked inside an approved range.
+ */
+export const overtimeRequests = pgTable(
+	'overtime_requests',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		employeeId: uuid('employee_id')
+			.notNull()
+			.references(() => employees.id, { onDelete: 'cascade' }),
+		/** The shift's date; `endTime <= startTime` means the overtime runs into the next day. */
+		date: date('date', { mode: 'string' }).notNull(),
+		startTime: time('start_time').notNull(),
+		endTime: time('end_time').notNull(),
+		/** Length of the range, snapshotted when filed. */
+		minutes: integer('minutes').notNull(),
+		reason: text('reason'),
+		/** 'approved' | 'cancelled' (HR files and approves in one step). */
+		status: text('status').notNull().default('approved'),
+		filedByUserId: uuid('filed_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		cancelledByUserId: uuid('cancelled_by_user_id').references(() => users.id, {
+			onDelete: 'set null'
+		}),
+		cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+		cancelNote: text('cancel_note'),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [
+		index('overtime_requests_hotel_date_idx').on(t.hotelId, t.date),
+		index('overtime_requests_employee_date_idx').on(t.employeeId, t.date)
 	]
 );
 

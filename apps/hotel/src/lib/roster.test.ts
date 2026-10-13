@@ -11,6 +11,7 @@ import {
 	mondayOf,
 	monthBounds,
 	netShiftMinutes,
+	scheduledNightMinutes,
 	shiftSpanMinutes,
 	timeToMinutes,
 	toHHMM,
@@ -65,6 +66,37 @@ describe('shift duration', () => {
 	it('formats hours', () => {
 		expect(formatHours(480)).toBe('8h');
 		expect(formatHours(510)).toBe('8h 30m');
+	});
+});
+
+describe('scheduledNightMinutes', () => {
+	const win = { start: '22:00', end: '06:00' };
+	const s = (startTime: string, endTime: string, extra = {}) => ({
+		isRestDay: false,
+		startTime,
+		endTime,
+		...extra
+	});
+	it('counts the whole overnight window', () => {
+		expect(scheduledNightMinutes(s('22:00', '06:00'), win)).toBe(480);
+	});
+	it('is zero for a day shift and a rest day', () => {
+		expect(scheduledNightMinutes(s('14:00', '22:00'), win)).toBe(0);
+		expect(scheduledNightMinutes({ ...s('22:00', '06:00'), isRestDay: true }, win)).toBe(0);
+	});
+	it('counts a shift that only touches the window', () => {
+		expect(scheduledNightMinutes(s('18:00', '02:00'), win)).toBe(240);
+		expect(scheduledNightMinutes(s('04:00', '12:00'), win)).toBe(120);
+	});
+	it('honours a custom same-day window and a split-shift gap', () => {
+		expect(scheduledNightMinutes(s('18:00', '23:00'), { start: '20:00', end: '23:00' })).toBe(180);
+		// 22:00–23:30 is night (90); a 22:30–23:00 gap takes 30 off, a gap before 22:00 takes none.
+		expect(
+			scheduledNightMinutes(s('20:00', '23:30', { breakStart: '22:30', breakEnd: '23:00' }), win)
+		).toBe(60);
+		expect(
+			scheduledNightMinutes(s('20:00', '23:30', { breakStart: '21:00', breakEnd: '21:30' }), win)
+		).toBe(90);
 	});
 });
 

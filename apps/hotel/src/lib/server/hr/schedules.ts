@@ -8,7 +8,8 @@ import {
 	breakWindowMinutes,
 	isDateString,
 	shiftSpanMinutes,
-	toHHMM
+	toHHMM,
+	type NightWindow
 } from '$lib/roster';
 
 export class ScheduleError extends Error {}
@@ -31,7 +32,9 @@ export const cellShiftSchema = z
 		breakMinutes: z.coerce.number().int().min(0).max(600).default(0),
 		/** Split shift: both or neither. `breakMinutes` is then derived from them. */
 		breakStart: hhmm.nullable().optional(),
-		breakEnd: hhmm.nullable().optional()
+		breakEnd: hhmm.nullable().optional(),
+		/** Per-shift night-differential window; null/absent = the hotel default. */
+		nightDiffWindow: z.object({ start: hhmm, end: hhmm }).nullable().optional()
 	})
 	.superRefine((v, ctx) => {
 		if (v.isRestDay) return;
@@ -55,7 +58,14 @@ export type CellShift = {
 	breakMinutes: number;
 	breakStart: string | null;
 	breakEnd: string | null;
+	nightDiffWindow: NightWindow | null;
 };
+
+/** jsonb → a well-formed window or null (never trust a stored blob's shape). */
+function toWindow(v: unknown): NightWindow | null {
+	const p = z.object({ start: hhmm, end: hhmm }).safeParse(v);
+	return p.success ? p.data : null;
+}
 
 /** A cell and what it held (`null` = empty) — the payload Undo sends back to `restoreCells`. */
 export const cellStateSchema = cellRefSchema.extend({ shift: cellShiftSchema.nullable() });
@@ -72,7 +82,8 @@ function normalizeShift(s: z.infer<typeof cellShiftSchema>): CellShift {
 			endTime: null,
 			breakMinutes: 0,
 			breakStart: null,
-			breakEnd: null
+			breakEnd: null,
+			nightDiffWindow: null
 		};
 	}
 	const split = Boolean(s.breakStart && s.breakEnd);
@@ -83,7 +94,8 @@ function normalizeShift(s: z.infer<typeof cellShiftSchema>): CellShift {
 		// A split shift's unpaid break is exactly the gap between its two parts.
 		breakMinutes: split ? breakWindowMinutes(s.breakStart, s.breakEnd) : s.breakMinutes,
 		breakStart: split ? s.breakStart! : null,
-		breakEnd: split ? s.breakEnd! : null
+		breakEnd: split ? s.breakEnd! : null,
+		nightDiffWindow: s.nightDiffWindow ?? null
 	};
 }
 
@@ -133,7 +145,8 @@ async function readCells(tx: Tx, hotelId: string, cells: CellRef[]) {
 			endTime: toHHMM(r.endTime),
 			breakMinutes: r.breakMinutes,
 			breakStart: toHHMM(r.breakStart),
-			breakEnd: toHHMM(r.breakEnd)
+			breakEnd: toHHMM(r.breakEnd),
+			nightDiffWindow: toWindow(r.nightDiffWindow)
 		});
 	}
 	return out;
@@ -153,7 +166,8 @@ async function upsertRows(tx: Tx, hotelId: string, rows: Array<CellRef & { shift
 				endTime: r.shift.endTime,
 				breakMinutes: r.shift.breakMinutes,
 				breakStart: r.shift.breakStart,
-				breakEnd: r.shift.breakEnd
+				breakEnd: r.shift.breakEnd,
+				nightDiffWindow: r.shift.nightDiffWindow
 			}))
 		)
 		.onConflictDoUpdate({
@@ -165,6 +179,7 @@ async function upsertRows(tx: Tx, hotelId: string, rows: Array<CellRef & { shift
 				breakMinutes: sql`excluded.break_minutes`,
 				breakStart: sql`excluded.break_start`,
 				breakEnd: sql`excluded.break_end`,
+				nightDiffWindow: sql`excluded.night_diff_window`,
 				deletedAt: null,
 				updatedAt: new Date()
 			}
@@ -182,7 +197,8 @@ function toState(cell: CellRef, prev: CellShift | undefined): CellState {
 					endTime: prev.endTime,
 					breakMinutes: prev.breakMinutes,
 					breakStart: prev.breakStart,
-					breakEnd: prev.breakEnd
+					breakEnd: prev.breakEnd,
+					nightDiffWindow: prev.nightDiffWindow
 				}
 			: null
 	};
@@ -204,7 +220,8 @@ export async function listSchedules(hotelId: string, from: string, to: string) {
 			endTime: schedules.endTime,
 			breakMinutes: schedules.breakMinutes,
 			breakStart: schedules.breakStart,
-			breakEnd: schedules.breakEnd
+			breakEnd: schedules.breakEnd,
+			nightDiffWindow: schedules.nightDiffWindow
 		})
 		.from(schedules)
 		.where(
@@ -221,7 +238,8 @@ export async function listSchedules(hotelId: string, from: string, to: string) {
 		startTime: toHHMM(r.startTime),
 		endTime: toHHMM(r.endTime),
 		breakStart: toHHMM(r.breakStart),
-		breakEnd: toHHMM(r.breakEnd)
+		breakEnd: toHHMM(r.breakEnd),
+		nightDiffWindow: toWindow(r.nightDiffWindow)
 	}));
 }
 
@@ -311,7 +329,8 @@ export async function copyWeek(
 				endTime: schedules.endTime,
 				breakMinutes: schedules.breakMinutes,
 				breakStart: schedules.breakStart,
-				breakEnd: schedules.breakEnd
+				breakEnd: schedules.breakEnd,
+				nightDiffWindow: schedules.nightDiffWindow
 			})
 			.from(schedules)
 			.innerJoin(
@@ -341,7 +360,8 @@ export async function copyWeek(
 				endTime: toHHMM(s.endTime),
 				breakMinutes: s.breakMinutes,
 				breakStart: toHHMM(s.breakStart),
-				breakEnd: toHHMM(s.breakEnd)
+				breakEnd: toHHMM(s.breakEnd),
+				nightDiffWindow: toWindow(s.nightDiffWindow)
 			} satisfies CellShift
 		}));
 

@@ -1,6 +1,9 @@
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
+import { getHotelNightDiff } from './night-diff';
+import { listApprovedOvertime } from './overtime';
+import { creditOvertime } from '$lib/overtime';
 import {
 	biometricImportTemplates,
 	biometricPunches,
@@ -426,6 +429,8 @@ export type GeneratedRecord = DtrMetrics & {
 	calendar: { id: string; name: string; kind: string; waiveLateness: boolean } | null;
 	/** Paid-leave minutes counted inside `workedMinutes`. */
 	leaveMinutes: number;
+	/** Punched past scheduled end with no approved overtime application; `otMinutes` is the approved part. */
+	unapprovedOtMinutes: number;
 	action: DtrAction;
 };
 
@@ -455,6 +460,7 @@ export async function computeMonthDtr(
 	employeeId?: string
 ): Promise<MonthDtr> {
 	const tz = await hotelTimezone(hotelId);
+	const hotelNight = await getHotelNightDiff(hotelId);
 	const range = monthBounds(`${month}-01`);
 	const today = businessDateFor(tz);
 	// A little slack either side so an overnight shift that crosses a month edge pairs correctly.
@@ -567,6 +573,7 @@ export async function computeMonthDtr(
 		return !prior ? 'create' : prior.source === 'manual' ? 'keep_manual' : 'update';
 	};
 
+	const approvedOt = await listApprovedOvertime(hotelId, range.start, range.end);
 	const records: GeneratedRecord[] = clustered.map(({ emp, enrollId, date, cluster }) => {
 		const key = `${emp.id}|${date}`;
 		const sched = schedByKey.get(key) ?? null;
@@ -595,7 +602,7 @@ export async function computeMonthDtr(
 		}
 
 		const win = nightWindowParts(
-			(sched?.nightDiffWindow as { start: string; end: string } | null | undefined) ?? null
+			(sched?.nightDiffWindow as { start: string; end: string } | null | undefined) ?? hotelNight
 		);
 		const nightWindows: Array<[number, number]> = [-1, 0, 1].map((offset) => {
 			const day = addDays(date, offset);
@@ -606,6 +613,22 @@ export async function computeMonthDtr(
 		});
 
 		const { metrics, flags, slots } = computeMetrics(cluster, scheduleInput, nightWindows);
+		// Only overtime an application covers counts; the rest is flagged for HR.
+		let unapprovedOtMinutes = 0;
+		if (metrics.otMinutes > 0 && scheduleInput?.endMs != null) {
+			const ranges = (approvedOt.get(key) ?? []).map((a) => {
+				const s0 = timeToMinutes(a.startTime)!;
+				const e0 = timeToMinutes(a.endTime)!;
+				return [
+					wallTimeToUtcMs(date, `${a.startTime}:00`, tz),
+					wallTimeToUtcMs(e0 <= s0 ? addDays(date, 1) : date, `${a.endTime}:00`, tz)
+				] as [number, number];
+			});
+			const end = scheduleInput.endMs;
+			const credit = creditOvertime([end, end + metrics.otMinutes * 60_000], ranges);
+			metrics.otMinutes = credit.approvedMinutes;
+			unapprovedOtMinutes = credit.unapprovedMinutes;
+		}
 		return {
 			employeeId: emp.id,
 			employeeName: `${emp.firstName} ${emp.lastName}`,
@@ -622,6 +645,7 @@ export async function computeMonthDtr(
 			leave: null,
 			calendar: null,
 			leaveMinutes: 0,
+			unapprovedOtMinutes,
 			action: actionFor(key),
 			...metrics
 		};
@@ -670,6 +694,7 @@ export async function computeMonthDtr(
 				workedMinutes: lv.paid ? sm : 0,
 				leaveMinutes: lv.paid ? sm : 0,
 				otMinutes: 0,
+				unapprovedOtMinutes: 0,
 				nightDiffMinutes: 0,
 				tardinessMinutes: 0,
 				undertimeMinutes: 0
@@ -736,6 +761,7 @@ export async function computeMonthDtr(
 				action,
 				workedMinutes: credit,
 				otMinutes: 0,
+				unapprovedOtMinutes: 0,
 				nightDiffMinutes: 0,
 				tardinessMinutes: 0,
 				undertimeMinutes: 0
@@ -785,6 +811,7 @@ export async function computeMonthDtr(
 			action,
 			workedMinutes: covered,
 			otMinutes: 0,
+			unapprovedOtMinutes: 0,
 			nightDiffMinutes: 0,
 			tardinessMinutes: 0,
 			undertimeMinutes: 0
@@ -846,6 +873,7 @@ export async function saveMonthDtr(
 					breakIn: r.breakIn === null ? null : new Date(r.breakIn),
 					workedMinutes: r.workedMinutes,
 					otMinutes: r.otMinutes,
+					unapprovedOtMinutes: r.unapprovedOtMinutes,
 					nightDiffMinutes: r.nightDiffMinutes,
 					tardinessMinutes: r.tardinessMinutes,
 					undertimeMinutes: r.undertimeMinutes,

@@ -11,7 +11,8 @@
 			{ seg: '/employees', label: 'Employees', show: data.hr.canEmployee },
 			{ seg: '/schedule', label: 'Schedule', show: data.hr.canSchedule },
 			{ seg: '/dtr', label: 'DTR', show: data.hr.canDtr },
-			{ seg: '/leave', label: 'Leave', show: data.hr.canLeave }
+			{ seg: '/leave', label: 'Leave', show: data.hr.canLeave },
+			{ seg: '/settings', label: 'Settings', show: data.hr.canSchedule }
 		].filter((t) => t.show === undefined || t.show)
 	);
 
