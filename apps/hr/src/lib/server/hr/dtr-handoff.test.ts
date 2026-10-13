@@ -95,6 +95,9 @@ describe.skipIf(!hasDb)('DTR hand-off (live DB)', async () => {
 
 		await submitDtr(est, MONTH, null);
 		expect((await getHandoff(est, MONTH)).status).toBe('submitted');
+		// The hand-off exposes its id, so Main HR can receive or return it from the establishment's own DTR.
+		expect((await getHandoff(est, MONTH)).id).toBeTruthy();
+		expect((await getHandoff(est, '2099-12')).id).toBeNull();
 		await expect(submitDtr(est, MONTH, null)).rejects.toThrow(/already/);
 	});
 

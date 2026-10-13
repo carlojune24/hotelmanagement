@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, isNotNull, lte } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import { calendarDays } from '$lib/server/db/schema/index';
@@ -80,9 +80,10 @@ export async function deleteCalendarDay(establishmentId: string, id: string) {
 /** A manager's suggestion (a local holiday, a memo letting staff go early). It affects nothing
  *  until Main HR approves it. */
 export async function proposeCalendarDay(
-	establishmentId: string,
-	input: CalendarFormInput,
-	userId: string | null
+establishmentId: string,
+input: CalendarFormInput,
+userId: string | null,
+note: string | null = null
 ) {
 	const [dupe] = await db
 		.select({ id: calendarDays.id })
@@ -98,8 +99,9 @@ export async function proposeCalendarDay(
 			kind: input.kind,
 			creditMinutes: input.creditHours === null ? null : Math.round(input.creditHours * 60),
 			waiveLateness: input.waiveLateness,
-			status: 'submitted',
-			submittedByUserId: userId,
+status: 'submitted',
+proposalNote: note?.trim() || null,
+submittedByUserId: userId,
 			submittedAt: new Date()
 		})
 		.returning();
@@ -127,4 +129,25 @@ export async function decideCalendarDay(
 		.returning();
 	if (!row) throw new CalendarError('That proposal is no longer waiting for approval.');
 	return row;
+}
+
+/** What this establishment has sent to Main HR (newest first), with how each was decided. */
+export async function listMemoProposals(establishmentId: string) {
+	return db
+		.select({
+			id: calendarDays.id,
+			date: calendarDays.date,
+			name: calendarDays.name,
+			kind: calendarDays.kind,
+			creditMinutes: calendarDays.creditMinutes,
+			waiveLateness: calendarDays.waiveLateness,
+			status: calendarDays.status,
+			proposalNote: calendarDays.proposalNote,
+			decisionNote: calendarDays.decisionNote,
+			submittedAt: calendarDays.submittedAt,
+			decidedAt: calendarDays.decidedAt
+		})
+		.from(calendarDays)
+		.where(and(eq(calendarDays.establishmentId, establishmentId), isNotNull(calendarDays.submittedAt)))
+		.orderBy(desc(calendarDays.submittedAt));
 }

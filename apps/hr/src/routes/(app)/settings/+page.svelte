@@ -3,7 +3,11 @@
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
-	import PlusIcon from '@lucide/svelte/icons/plus';
+import PlusIcon from '@lucide/svelte/icons/plus';
+	import PencilIcon from '@lucide/svelte/icons/pencil';
+	import Trash2Icon from '@lucide/svelte/icons/trash-2';
+	import { Textarea } from '$lib/components/ui/textarea/index.js';
+	import { EMPLOYMENT_TYPES, EMPLOYMENT_TYPE_LABEL } from '$lib/leave';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
@@ -16,11 +20,13 @@
 
 	const TABS = [
 		{ key: 'establishments', label: 'Establishment types' },
+{ key: 'leave', label: 'Leave types' },
 		{ key: 'loans', label: 'Loan types' }
 	] as const;
 	type Tab = (typeof TABS)[number]['key'];
 	// The tab lives in the address (?tab=) so a reload or a shared link lands on the same one.
-	let tab = $state<Tab>(page.url.searchParams.get('tab') === 'loans' ? 'loans' : 'establishments');
+const tabParam = page.url.searchParams.get('tab');
+	let tab = $state<Tab>(tabParam === 'loans' ? 'loans' : tabParam === 'leave' ? 'leave' : 'establishments');
 	function pick(next: Tab) {
 		tab = next;
 		replaceState(`?tab=${next}`, {});
@@ -28,6 +34,23 @@
 
 	let adding = $state(false);
 	let editingId = $state<string | null>(null);
+type LeaveType = PageData['leaveTypes'][number];
+	let editingLeave = $state<LeaveType | 'new' | null>(null);
+	let deletingLeave = $state<LeaveType | null>(null);
+	const blankLeave: LeaveType = {
+		id: '', code: '', name: '', description: '', statutory: false, paid: true, daysPerYear: 0,
+		dayCount: 'working', minServiceMonths: 0, employmentTypes: [], sexRestriction: null,
+		halfDayAllowed: false, carryOverDays: 0, cashConvertible: false, requiresDocument: false, active: true
+	};
+	const leaveDraft = $derived(editingLeave === 'new' || editingLeave === null ? blankLeave : editingLeave);
+	function leaveRule(t: LeaveType): string {
+		const bits: string[] = [];
+		bits.push(t.daysPerYear > 0 ? `${t.daysPerYear} ${t.dayCount === 'calendar' ? 'calendar' : 'working'} days` : 'No fixed allowance');
+		if (t.minServiceMonths) bits.push(`after ${t.minServiceMonths} mo`);
+		if (t.employmentTypes.length) bits.push(t.employmentTypes.map((e) => e.replace('_', '-')).join(', '));
+		if (t.sexRestriction) bits.push(`${t.sexRestriction} only`);
+		return bits.join(' · ');
+	}
 	let addingEst = $state(false);
 	let editingEstId = $state<string | null>(null);
 	let busy = $state(false);
@@ -43,9 +66,11 @@
 			toast.success(form.ok);
 			adding = false;
 			editingId = null;
-			addingEst = false;
-			editingEstId = null;
-		}
+addingEst = false;
+editingEstId = null;
+editingLeave = null;
+deletingLeave = null;
+}
 	});
 
 	function submit() {
@@ -121,8 +146,8 @@
 			</Table.Body>
 		</Table.Root>
 	</div>
-	{:else}
-	<div id="panel-loans" role="tabpanel" aria-labelledby="tab-loans" class="panel space-y-5 p-5 md:p-6" aria-label="Loan types">
+{:else if tab === 'loans'}
+<div id="panel-loans" role="tabpanel" aria-labelledby="tab-loans" class="panel space-y-5 p-5 md:p-6" aria-label="Loan types">
 		<div class="flex flex-wrap items-start justify-between gap-3">
 			<div class="max-w-2xl">
 				<h2 class="text-2xl font-light">Loan types</h2>
@@ -163,8 +188,67 @@
 				{/each}
 			</Table.Body>
 		</Table.Root>
-	</div>
-	{/if}
+</div>
+{:else}
+<div id="panel-leave" role="tabpanel" aria-labelledby="tab-leave" class="panel space-y-5 p-5 md:p-6" aria-label="Leave types">
+<div class="flex flex-wrap items-start justify-between gap-3">
+<div class="max-w-2xl">
+<h2 class="text-2xl font-light">Leave types</h2>
+<p class="mt-1 text-sm text-ink-muted">
+The leave rules for the whole company. Every establishment files leave under this list and can only
+read it. A change applies to new requests; leave already approved keeps what it was filed with.
+Statutory leaves follow Philippine law as commonly summarised — check them with DOLE or counsel.
+</p>
+</div>
+<div class="flex gap-2">
+<form method="POST" action="?/restoreLeaveDefaults" use:enhance={submit} class="contents">
+<Button type="submit" variant="outline" disabled={busy}>Restore legal defaults</Button>
+</form>
+<Button variant="gold" onclick={() => (editingLeave = 'new')}><PlusIcon /> Add leave</Button>
+</div>
+</div>
+<Table.Root>
+<Table.Header>
+<Table.Row class="hover:bg-transparent">
+<Table.Head>Leave</Table.Head>
+<Table.Head>Rule</Table.Head>
+<Table.Head>Pay</Table.Head>
+<Table.Head>Status</Table.Head>
+<Table.Head class="w-24"><span class="sr-only">Actions</span></Table.Head>
+</Table.Row>
+</Table.Header>
+<Table.Body>
+{#each data.leaveTypes as t (t.id)}
+<Table.Row class={t.active ? '' : 'text-ink-muted'}>
+<Table.Cell>
+<span class="font-mono text-xs">{t.code}</span>
+<span class="ml-1 font-medium">{t.name}</span>
+{#if t.statutory}<Badge variant="muted" class="ml-1">Statutory</Badge>{/if}
+</Table.Cell>
+<Table.Cell class="text-sm">{leaveRule(t)}</Table.Cell>
+<Table.Cell>{t.paid ? 'Paid' : 'Unpaid'}</Table.Cell>
+<Table.Cell>
+<Badge variant={t.active ? 'ok' : 'muted'}>
+<span class="size-1.5 rounded-full bg-current opacity-70"></span>
+{t.active ? 'In use' : 'Off'}
+</Badge>
+</Table.Cell>
+<Table.Cell class="text-right whitespace-nowrap">
+<Button variant="ghost" size="icon-sm" aria-label="Edit {t.name}" onclick={() => (editingLeave = t)}>
+<PencilIcon />
+</Button>
+{#if !t.statutory}
+<Button variant="ghost" size="icon-sm" aria-label="Delete {t.name}" onclick={() => (deletingLeave = t)}>
+<Trash2Icon />
+</Button>
+{/if}
+</Table.Cell>
+</Table.Row>
+{/each}
+</Table.Body>
+</Table.Root>
+</div>
+{/if}
 </div>
 
 <Dialog.Root open={adding} onOpenChange={(o) => (adding = o)}>
@@ -288,5 +372,109 @@
 				</Dialog.Footer>
 			</form>
 		{/if}
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root open={editingLeave !== null} onOpenChange={(o) => !o && (editingLeave = null)}>
+	<Dialog.Content class="flex max-h-[90vh] flex-col sm:max-w-2xl">
+		<Dialog.Header>
+			<Dialog.Title class="font-display text-2xl font-light">
+				{editingLeave === 'new' ? 'Add leave' : `Edit ${leaveDraft.name}`}
+			</Dialog.Title>
+			{#if leaveDraft.description}<Dialog.Description>{leaveDraft.description}</Dialog.Description>{/if}
+		</Dialog.Header>
+		{#key editingLeave === 'new' ? 'new' : leaveDraft.id}
+			<form method="POST" action="?/saveLeaveType" use:enhance={submit} class="flex min-h-0 flex-1 flex-col gap-3">
+				<input type="hidden" name="id" value={leaveDraft.id} />
+				<div class="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+					<div class="grid gap-3 sm:grid-cols-[8rem_1fr]">
+						<div class="space-y-1.5">
+							<Label for="ltCode">Code</Label>
+							<Input id="ltCode" name="code" value={leaveDraft.code} class="font-mono uppercase" required maxlength={8} />
+						</div>
+						<div class="space-y-1.5">
+							<Label for="ltName">Name</Label>
+							<Input id="ltName" name="name" value={leaveDraft.name} required />
+						</div>
+					</div>
+					<div class="space-y-1.5">
+						<Label for="ltDesc">Notes</Label>
+						<Textarea id="ltDesc" name="description" value={leaveDraft.description} rows={2} />
+					</div>
+					<div class="grid gap-3 sm:grid-cols-3">
+						<div class="space-y-1.5">
+							<Label for="ltDays">Days per year</Label>
+							<Input id="ltDays" name="daysPerYear" type="number" min="0" step="0.5" value={leaveDraft.daysPerYear} />
+							<p class="text-xs text-ink-muted">0 = no fixed allowance</p>
+						</div>
+						<div class="space-y-1.5">
+							<Label for="ltCount">Days counted as</Label>
+							<select id="ltCount" name="dayCount" class={selectClass}>
+								<option value="working" selected={leaveDraft.dayCount === 'working'}>Working days</option>
+								<option value="calendar" selected={leaveDraft.dayCount === 'calendar'}>Calendar days</option>
+							</select>
+						</div>
+						<div class="space-y-1.5">
+							<Label for="ltTenure">Months of service</Label>
+							<Input id="ltTenure" name="minServiceMonths" type="number" min="0" value={leaveDraft.minServiceMonths} />
+						</div>
+					</div>
+					<div class="grid gap-3 sm:grid-cols-2">
+						<div class="space-y-1.5">
+							<Label for="ltSex">Open to</Label>
+							<select id="ltSex" name="sexRestriction" class={selectClass}>
+								<option value="" selected={!leaveDraft.sexRestriction}>Everyone</option>
+								<option value="female" selected={leaveDraft.sexRestriction === 'female'}>Female employees</option>
+								<option value="male" selected={leaveDraft.sexRestriction === 'male'}>Male employees</option>
+							</select>
+						</div>
+						<div class="space-y-1.5">
+							<Label for="ltCarry">Carry over to next year (days)</Label>
+							<Input id="ltCarry" name="carryOverDays" type="number" min="0" step="0.5" value={leaveDraft.carryOverDays} />
+						</div>
+					</div>
+					<fieldset>
+						<legend class="text-sm font-medium">Employment types allowed</legend>
+						<p class="text-xs text-ink-muted">Leave all unticked for everyone.</p>
+						<div class="mt-1.5 flex flex-wrap gap-x-4 gap-y-1.5">
+							{#each EMPLOYMENT_TYPES as e (e)}
+								<label class="flex items-center gap-1.5 text-sm">
+									<input type="checkbox" name="employmentTypes" value={e} checked={leaveDraft.employmentTypes.includes(e)} class="size-4 accent-black" />
+									{EMPLOYMENT_TYPE_LABEL[e]}
+								</label>
+							{/each}
+						</div>
+					</fieldset>
+					<div class="grid gap-2 sm:grid-cols-2">
+						{#each [['paid', 'Paid leave', leaveDraft.paid], ['halfDayAllowed', 'Can be taken as a half day', leaveDraft.halfDayAllowed], ['cashConvertible', 'Unused days convertible to cash', leaveDraft.cashConvertible], ['requiresDocument', 'Needs a supporting document', leaveDraft.requiresDocument], ['active', 'In use (employees can file it)', leaveDraft.active]] as const as [name, label, on] (name)}
+							<label class="flex items-center gap-2 text-sm">
+								<input type="checkbox" {name} checked={on} class="size-4 accent-black" />
+								{label}
+							</label>
+						{/each}
+					</div>
+				</div>
+				<Dialog.Footer class="gap-2 pt-1">
+					<Button type="button" variant="outline" onclick={() => (editingLeave = null)}>Cancel</Button>
+					<Button type="submit" disabled={busy}>{editingLeave === 'new' ? 'Add leave' : 'Save changes'}</Button>
+				</Dialog.Footer>
+			</form>
+		{/key}
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root open={deletingLeave !== null} onOpenChange={(o) => !o && (deletingLeave = null)}>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title class="font-display text-2xl font-light">Delete {deletingLeave?.name}?</Dialog.Title>
+			<Dialog.Description>A leave with requests on file can't be deleted; switch it off instead.</Dialog.Description>
+		</Dialog.Header>
+		<form method="POST" action="?/deleteLeaveType" use:enhance={submit}>
+			<input type="hidden" name="id" value={deletingLeave?.id ?? ''} />
+			<Dialog.Footer class="gap-2">
+				<Button type="button" variant="outline" onclick={() => (deletingLeave = null)}>Keep</Button>
+				<Button type="submit" variant="destructive" disabled={busy}>Delete</Button>
+			</Dialog.Footer>
+		</form>
 	</Dialog.Content>
 </Dialog.Root>

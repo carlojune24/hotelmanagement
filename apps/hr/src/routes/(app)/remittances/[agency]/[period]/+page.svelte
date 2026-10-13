@@ -54,6 +54,19 @@
 			{data.draftBatches === 1 ? 'it is' : 'they are'} locked.
 		</p>
 	{/if}
+	{#if data.skipped.length > 0}
+		<section class="rounded-lg border border-dashed border-ink/30 px-4 py-3 text-sm">
+			<p class="font-medium">Skipped this month — not deducted, so not on this schedule</p>
+			<p class="mt-0.5 text-ink-muted">The agency still expects these payments; the loan may show as behind until they are made.</p>
+			<ul class="mt-2">
+				{#each data.skipped as k (k.employeeNo + (k.reference ?? ''))}
+					<li>
+						{k.name} <span class="text-ink-muted">(#{k.employeeNo}{k.reference ? ` · ref ${k.reference}` : ''})</span> — {k.reason}
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
 	{#if data.schedule.missingId.length > 0}
 		<p class="rounded-lg border border-dashed border-ink/30 px-4 py-3 text-sm">
 			No {isBir ? 'TIN' : 'ID number'} on file for: {data.schedule.missingId.join('; ')}.

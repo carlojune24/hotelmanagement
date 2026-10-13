@@ -14,13 +14,19 @@ import {
 } from '$lib/server/hr/night-diff';
 import type { Actions, PageServerLoad } from './$types';
 
+/** The establishment's pay rules are Main HR's to change; its managers and clerks only read them. */
+const mayEditNightDiff = (locals: App.Locals, establishmentId: string) =>
+	locals.user!.isSystemAdmin || canAt(locals.access!, 'establishment:write', establishmentId);
+
 /** Keys are Main HR's to issue — org-wide only, never a manager's, even for their own business. */
 const mayManageKeys = (locals: App.Locals) =>
 	locals.user!.isSystemAdmin || canAt(locals.access!, 'apikey:*');
 
 export const load: PageServerLoad = async ({ locals }) => {
 	requireCap(locals.user, locals.access, 'schedule:*', locals.establishment!.id);
-	const canKeys = mayManageKeys(locals);
+const canKeys = mayManageKeys(locals);
+	// Managers and clerks see the night differential; only Main HR changes it.
+	const canEditNightDiff = mayEditNightDiff(locals, locals.establishment!.id);
 	const keys = canKeys
 		? await db
 				.select({
@@ -37,15 +43,18 @@ export const load: PageServerLoad = async ({ locals }) => {
 		: [];
 	return {
 		nightDiff: parseNightDiff(locals.establishment!.config),
-		canKeys,
+canEditNightDiff,
+canKeys,
 		keys
 	};
 };
 
 export const actions: Actions = {
 	saveNightDiff: async (event) => {
-		requireCap(event.locals.user, event.locals.access, 'schedule:*', event.locals.establishment!.id);
-		const establishment = event.locals.establishment!;
+const establishment = event.locals.establishment!;
+if (!mayEditNightDiff(event.locals, establishment.id)) {
+return fail(403, { error: 'Only Main HR can change the night differential.' });
+}
 		const raw = Object.fromEntries(await event.request.formData());
 		const parsed = nightDiffSchema.safeParse(raw);
 		if (!parsed.success) {

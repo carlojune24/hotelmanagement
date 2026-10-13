@@ -1,12 +1,42 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import type { Action } from 'svelte/action';
+	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
+
+	/**
+	 * On a wide screen, size the element to the space left under it so the page itself never needs a
+	 * scrollbar and only the element's own contents scroll. Measured, not guessed, because what sits above
+	 * (hand-off strip, notes) varies. Narrow screens fall back to the CSS max-height on the element.
+	 */
+	const fitToViewport: Action<HTMLElement, { prop: 'height' | 'maxHeight'; min: number }> = (node, opts) => {
+		const reserve = 64; // the panel's and the page's bottom padding
+		const fit = () => {
+			if (!window.matchMedia('(min-width: 1024px)').matches) {
+				node.style[opts!.prop] = '';
+				return;
+			}
+			const top = node.getBoundingClientRect().top + window.scrollY;
+			node.style[opts!.prop] = `${Math.max(opts!.min, window.innerHeight - top - reserve)}px`;
+		};
+		fit();
+		window.addEventListener('resize', fit);
+		const ro = new ResizeObserver(fit);
+		ro.observe(document.body);
+		return {
+			destroy() {
+				window.removeEventListener('resize', fit);
+				ro.disconnect();
+			}
+		};
+	};
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
+	import { Textarea } from '$lib/components/ui/textarea/index.js';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import PrinterIcon from '@lucide/svelte/icons/printer';
 	import SaveIcon from '@lucide/svelte/icons/save';
@@ -18,9 +48,31 @@
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
-	let mode = $state<'preview' | 'saved'>('preview');
+	/** Sent to Main HR (waiting or already received): the cards take the colour of the Send button. */
+	const sent = $derived(data.handoff.status === 'submitted' || data.handoff.status === 'received');
+	const handoffBadge = $derived(
+		(
+			{
+				draft: { label: 'Not sent to Main HR', variant: 'muted' },
+				returned: { label: 'Returned by Main HR', variant: 'destructive' },
+				submitted: { label: 'Sent · awaiting Main HR', variant: 'gold' },
+				received: { label: 'Received by Main HR', variant: 'ok' }
+			} as const
+		)[data.handoff.status]
+	);
+
+	// A saved record is what people come to look at, so it opens first; Preview is one tap away.
+	const defaultMode = () => (untrack(() => data.savedState) !== 'none' ? 'saved' : 'preview');
+	let mode = $state<'preview' | 'saved'>(defaultMode());
+	// Opening another person or month starts from that default again; saving or toggling does not.
+	$effect(() => {
+		void data.selected?.id;
+		void data.month;
+		mode = defaultMode();
+	});
 	let search = $state('');
-	let addOpen = $state(false);
+let addOpen = $state(false);
+	let returnOpen = $state(false);
 	let addDate = $state('');
 	let addTime = $state('');
 	let addNote = $state('');
@@ -93,22 +145,24 @@
 		addOpen = true;
 	}
 
-	const run: SubmitFunction = ({ action }) => {
-		busy = true;
-		const isSave = action.search === '?/save';
-		return async ({ result, update }) => {
-			busy = false;
-			await update({ reset: false });
-			if (isSave && result.type === 'success') mode = 'saved';
-		};
-	};
+const run: SubmitFunction = ({ action }) => {
+busy = true;
+const isSave = action.search === '?/save';
+const isReturn = action.search === '?/returnMonth';
+return async ({ result, update }) => {
+busy = false;
+await update({ reset: false });
+if (isSave && result.type === 'success') mode = 'saved';
+if (isReturn && result.type === 'success') returnOpen = false;
+};
+};
 </script>
 
 <!-- Hand-off to Main HR -->
 <div class="mx-auto w-full max-w-7xl px-4 pt-6 sm:px-6">
 	<div class="flex flex-wrap items-start justify-between gap-3 rounded-2xl bg-white/70 p-4">
 		<div class="min-w-0 space-y-1">
-			<p class="flex flex-wrap items-center gap-2 text-sm font-medium">
+			<div class="flex flex-wrap items-center gap-2 text-sm font-medium">
 				Hand-off to Main HR
 				<span
 					class="inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium {data.handoff.status === 'received'
@@ -125,10 +179,22 @@
 						: data.handoff.status === 'submitted'
 							? 'Waiting for Main HR — locked'
 							: data.handoff.status === 'returned'
-								? 'Returned for correction'
-								: 'Not sent yet'}
-				</span>
-			</p>
+? 'Returned for correction'
+: 'Not sent yet'}
+</span>
+{#if data.canApprove && (data.handoff.status === 'submitted' || data.handoff.status === 'received')}
+<!-- Main HR, opening the establishment's DTR, decides it here instead of going to Approvals. -->
+{#if data.handoff.status === 'submitted'}
+<form method="POST" action="?/receiveMonth" use:enhance={run} class="contents">
+<input type="hidden" name="month" value={data.month} />
+<Button type="submit" variant="gold" size="sm" disabled={busy}>Receive DTR</Button>
+</form>
+{/if}
+<Button variant="outline" size="sm" disabled={busy} onclick={() => (returnOpen = true)}>
+Return for correction
+</Button>
+{/if}
+			</div>
 			{#if data.handoff.status === 'returned' && data.handoff.note}
 				<p class="text-sm"><strong class="font-medium">Main HR says:</strong> {data.handoff.note}</p>
 			{/if}
@@ -153,12 +219,12 @@
 				{/if}
 			{/if}
 		</div>
-		{#if !data.canApprove && (data.handoff.status === 'draft' || data.handoff.status === 'returned')}
-			<form method="POST" action="?/submitMonth" use:enhance={run}>
-				<input type="hidden" name="month" value={data.month} />
-				<Button type="submit" variant="gold" disabled={busy}>Send to Main HR</Button>
-			</form>
-		{/if}
+{#if !data.canApprove && (data.handoff.status === 'draft' || data.handoff.status === 'returned')}
+<form method="POST" action="?/submitMonth" use:enhance={run}>
+<input type="hidden" name="month" value={data.month} />
+<Button type="submit" variant="gold" disabled={busy}>Send to Main HR</Button>
+</form>
+{/if}
 	</div>
 </div>
 
@@ -271,7 +337,8 @@
 		<!-- Only the day list scrolls; the month title and totals stay put. Height leaves room for the
 		     page header and the hand-off strip above, with a floor so a short window still has a list. -->
 		<section
-			class="flex min-w-0 flex-col gap-3 max-lg:max-h-[75dvh] lg:h-[max(24rem,calc(100dvh-16rem))]"
+			class="flex min-w-0 flex-col gap-3 max-lg:max-h-[75dvh]"
+			use:fitToViewport={{ prop: 'height', min: 384 }}
 		>
 			<div class="flex shrink-0 flex-wrap items-center justify-between gap-2">
 				<h2 class="text-base font-semibold text-ink">
@@ -279,8 +346,14 @@
 				</h2>
 				{#if view}
 					<div class="flex flex-wrap gap-1.5 text-xs">
+						<Badge variant="outline">{view.totals.scheduledDays} scheduled</Badge>
 						<Badge variant="outline">{view.totals.workedDays} days worked</Badge>
 						<Badge variant="outline">{view.totals.absentDays} absent</Badge>
+						{#if view.totals.unscheduledDays > 0}
+							<span title="Absences can only be counted on days that have a shift on the roster.">
+								<Badge variant="outline">{view.totals.unscheduledDays} with no schedule</Badge>
+							</span>
+						{/if}
 						<Badge variant="outline">Late {view.totals.lateMinutes ? hm(view.totals.lateMinutes) : '—'}</Badge>
 						<Badge variant="outline">
 							Undertime {view.totals.undertimeMinutes ? hm(view.totals.undertimeMinutes) : '—'}
@@ -367,16 +440,20 @@
 				<SearchIcon class="absolute top-2.5 left-2.5 size-4 text-ink-muted" />
 				<Input bind:value={search} placeholder="Search name or Biometric ID" class="pl-8" aria-label="Search employees" />
 			</div>
-			<ul class="max-h-[75vh] lg:max-h-[max(20rem,calc(100dvh-20rem))] divide-y divide-border overflow-y-auto rounded-lg border border-border bg-surface">
+			<ul use:fitToViewport={{ prop: 'maxHeight', min: 240 }} class="max-h-[75vh] divide-y divide-border overflow-y-auto rounded-lg border border-border bg-surface">
 				{#each people as p (p.id)}
 					<li>
 						<a
 							href={href({ employee: p.id })}
-							class="block px-3 py-2.5 hover:bg-muted/60 {data.selected.id === p.id ? 'bg-muted' : ''}"
+							class="block px-3 py-2.5 {sent
+								? 'bg-gold hover:bg-gold-deep'
+								: 'hover:bg-muted/60'} {data.selected.id === p.id ? (sent ? 'ring-2 ring-inset ring-ink' : 'bg-muted') : ''}"
 							aria-current={data.selected.id === p.id ? 'true' : undefined}
 						>
 							<p class="truncate text-sm font-medium text-ink">{p.name}</p>
 							<p class="font-mono text-xs text-ink-muted">{p.enrollId}</p>
+							<!-- The hand-off is per establishment and month, so every row carries the same state. -->
+							<Badge variant={sent ? 'default' : handoffBadge.variant} class="mt-1">{handoffBadge.label}</Badge>
 						</a>
 					</li>
 				{:else}
@@ -428,3 +505,42 @@
 		</Dialog.Content>
 	</Dialog.Root>
 {/if}
+
+<Dialog.Root bind:open={returnOpen}>
+	<Dialog.Content class="sm:max-w-lg">
+		<Dialog.Header>
+			<Dialog.Title class="font-display text-2xl font-light">Return for correction</Dialog.Title>
+			<Dialog.Description>
+				{monthName} {year} · the establishment sees your note and can correct the DTR and send it again.
+			</Dialog.Description>
+		</Dialog.Header>
+		<div class="space-y-2">
+			<p class="text-sm font-medium">Earlier remarks</p>
+			{#if data.returnHistory.length === 0}
+				<p class="text-sm text-ink-muted">This month has not been returned before.</p>
+			{:else}
+				<ul class="max-h-48 space-y-2 overflow-y-auto">
+					{#each data.returnHistory as r, i (i)}
+						<li class="rounded-2xl bg-ink/5 px-3 py-2 text-sm">
+							<p class="whitespace-pre-line">{r.note}</p>
+							<p class="mt-0.5 text-xs text-ink-muted tabular-nums">
+								{r.by} · {new Date(r.at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}
+							</p>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</div>
+		<form method="POST" action="?/returnMonth" use:enhance={run} class="space-y-3">
+			<input type="hidden" name="month" value={data.month} />
+			<div class="space-y-1.5">
+				<Label for="returnNote">What needs correcting</Label>
+				<Textarea id="returnNote" name="note" rows={4} required maxlength={300} placeholder="e.g. Oct 8–10 punches missing for Caimen; please re-import." />
+			</div>
+			<Dialog.Footer class="gap-2 pt-1">
+				<Button type="button" variant="outline" onclick={() => (returnOpen = false)}>Cancel</Button>
+				<Button type="submit" disabled={busy}>Return to establishment</Button>
+			</Dialog.Footer>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>

@@ -85,6 +85,62 @@
       "when": 1791893155087,
       "tag": "0011_announcements",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791895470302,
+      "tag": "0012_leave_types_org_step1",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791895483088,
+      "tag": "0013_leave_types_org_step2",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791896010335,
+      "tag": "0014_memo_proposal_note",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1791898842338,
+      "tag": "0015_loan_prior_paid_and_skips",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791902422193,
+      "tag": "0016_loan_payments_documents_term",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791905619185,
+      "tag": "0017_separations",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791906280593,
+      "tag": "0018_thirteenth_month",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791906603511,
+      "tag": "0019_bonuses",
+      "breakpoints": true
     }
   ]
 }

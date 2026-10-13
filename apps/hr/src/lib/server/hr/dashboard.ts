@@ -1,6 +1,7 @@
 import { and, asc, eq, gte, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db/index';
 import {
+	biometricPunches,
 	calendarDays,
 	dtrEntries,
 	employeeAssignments,
@@ -12,6 +13,8 @@ import {
 	schedules
 } from '$lib/server/db/schema/index';
 import { addDays, monthBounds, mondayOf, weekDates } from '$lib/roster';
+import { normalizeEnrollId } from '$lib/hr-import';
+import { wallTimeToUtcMs } from '$lib/server/time';
 import { getHandoff } from './dtr-submissions';
 
 export interface AttentionItem {
@@ -28,6 +31,15 @@ export interface Dashboard {
 	roster: { working: number; rest: number; onLeave: number; unscheduled: number };
 	onLeave: Array<{ name: string; position: string; leaveType: string; start: string; end: string; today: boolean }>;
 	week: Array<{ date: string; working: number; isToday: boolean }>;
+	/**
+	 * Information only — never written to a DTR. Rostered to work today, shift already started, no
+	 * punch yet, not on leave. `state` says whether the list can be trusted at all.
+	 */
+	absentToday: {
+		state: 'ok' | 'no_punches_today' | 'holiday';
+		holiday: string | null;
+		people: Array<{ name: string; position: string; shift: string }>;
+	};
 	attention: AttentionItem[];
 }
 
@@ -36,7 +48,13 @@ const monthOf = (date: string) => date.slice(0, 7);
 const prevMonth = (date: string) => monthOf(addDays(`${monthOf(date)}-01`, -1));
 
 /** Everything the establishment dashboard shows, from the establishment's own data only. */
-export async function getDashboard(establishmentId: string, slug: string, today: string): Promise<Dashboard> {
+export async function getDashboard(
+	establishmentId: string,
+	slug: string,
+	today: string,
+	timezone = 'Asia/Manila',
+	nowMs = Date.now()
+): Promise<Dashboard> {
 	const base = `/${slug}`;
 	const weekStart = mondayOf(today);
 	const days = weekDates(weekStart);
@@ -50,7 +68,8 @@ export async function getDashboard(establishmentId: string, slug: string, today:
 			id: employees.id,
 			last: employees.lastName,
 			first: employees.firstName,
-			position: employeeAssignments.position
+			position: employeeAssignments.position,
+			enrollId: employeeAssignments.biometricEnrollId
 		})
 		.from(employeeAssignments)
 		.innerJoin(employees, eq(employees.id, employeeAssignments.employeeId))
@@ -73,7 +92,13 @@ export async function getDashboard(establishmentId: string, slug: string, today:
 	const [weekRows, leaveRows, filedLeave, filedOt, pendingMemos, weeks, unapprovedOt, openPunches, unscheduledPunches, nextWeekRows] =
 		await Promise.all([
 			db
-				.select({ employeeId: schedules.employeeId, date: schedules.date, isRestDay: schedules.isRestDay, start: schedules.startTime })
+				.select({
+					employeeId: schedules.employeeId,
+					date: schedules.date,
+					isRestDay: schedules.isRestDay,
+					start: schedules.startTime,
+					end: schedules.endTime
+				})
 				.from(schedules)
 				.where(
 					and(
@@ -327,9 +352,72 @@ export async function getDashboard(establishmentId: string, slug: string, today:
 		});
 	}
 
+	// ---- absent today (information only)
+	const dayStart = wallTimeToUtcMs(today, '00:00:00', timezone);
+	const dayEnd = wallTimeToUtcMs(addDays(today, 1), '00:00:00', timezone);
+	const [todayPunches, todayCalendar, todayDtr] = await Promise.all([
+		db
+			.select({ enrollKey: biometricPunches.enrollKey })
+			.from(biometricPunches)
+			.where(
+				and(
+					eq(biometricPunches.establishmentId, establishmentId),
+					gte(biometricPunches.punchedAt, new Date(dayStart)),
+					lte(biometricPunches.punchedAt, new Date(dayEnd))
+				)
+			),
+		db
+			.select({ name: calendarDays.name })
+			.from(calendarDays)
+			.where(
+				and(
+					eq(calendarDays.establishmentId, establishmentId),
+					eq(calendarDays.date, today),
+					eq(calendarDays.status, 'approved')
+				)
+			),
+		db
+			.select({ employeeId: dtrEntries.employeeId })
+			.from(dtrEntries)
+			.where(
+				and(
+					eq(dtrEntries.establishmentId, establishmentId),
+					eq(dtrEntries.date, today),
+					isNull(dtrEntries.deletedAt),
+					isNotNull(dtrEntries.timeIn)
+				)
+			)
+	]);
+	const absentToday: Dashboard['absentToday'] = { state: 'ok', holiday: null, people: [] };
+	if (todayCalendar.length > 0) {
+		absentToday.state = 'holiday';
+		absentToday.holiday = todayCalendar[0]!.name;
+	} else if (todayPunches.length === 0) {
+		// Nothing synced for today: everyone would look absent, which would be false.
+		absentToday.state = 'no_punches_today';
+	} else {
+		const punched = new Set(todayPunches.map((p) => p.enrollKey));
+		const hasEntry = new Set(todayDtr.map((r) => r.employeeId));
+		const hm = (t: string | null) => (t ? t.slice(0, 5) : '');
+		for (const s of staff) {
+			const row = todayRows.get(s.id);
+			if (!row || row.isRestDay || !row.start) continue;
+			if (onLeaveToday.has(s.id) || hasEntry.has(s.id)) continue;
+			if (!s.enrollId) continue; // no biometric ID: cannot be told either way
+			if (nowMs < wallTimeToUtcMs(today, row.start, timezone)) continue; // shift not started yet
+			if (punched.has(normalizeEnrollId(s.enrollId))) continue;
+			absentToday.people.push({
+				name: `${s.last}, ${s.first}`,
+				position: s.position,
+				shift: `${hm(row.start)}–${hm(row.end)}`
+			});
+		}
+	}
+
 	return {
 		today,
 		staffCount: staff.length,
+		absentToday,
 		roster: { working, rest, onLeave: staffIds.filter((id) => onLeaveToday.has(id)).length, unscheduled },
 		onLeave,
 		week,

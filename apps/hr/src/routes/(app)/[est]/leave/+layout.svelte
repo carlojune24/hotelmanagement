@@ -7,8 +7,9 @@
 	const onBalances = $derived(page.url.pathname.startsWith(`${base}/balances`));
 	const tabs = $derived([
 		{ href: base, label: 'Requests', active: !onBalances },
-		{ href: `${base}/balances`, label: 'Balances', active: onBalances }
-	]);
+{ href: `${base}/balances`, label: 'Balances', active: onBalances },
+{ href: `/${page.params.est}/settings/leave`, label: 'Leave rules & holidays', active: false }
+]);
 </script>
 
 <div>

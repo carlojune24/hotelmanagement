@@ -24,7 +24,7 @@ describe('dashboard scope', () => {
 
 describe.skipIf(!hasDb)('establishment dashboard (live DB)', async () => {
 	const { db } = await import('$lib/server/db/index');
-	const { announcements, establishments, leaveRequests, leaveTypes, schedules } = await import(
+	const { announcements, biometricPunches, establishments, leaveRequests, leaveTypes, schedules } = await import(
 		'$lib/server/db/schema/index'
 	);
 	const { mintRef } = await import('$lib/server/ids');
@@ -41,6 +41,9 @@ describe.skipIf(!hasDb)('establishment dashboard (live DB)', async () => {
 	let bo = '';
 	let cy = '';
 	const noticeIds: string[] = [];
+	// Leave types are company-wide: this one has a code of its own and is removed by that code only.
+	const leaveCode = `D${tag.slice(-5).toUpperCase()}`;
+	const made: string[] = [];
 
 	const mkEst = async (suffix: string) => {
 		const [e] = await db
@@ -65,7 +68,7 @@ describe.skipIf(!hasDb)('establishment dashboard (live DB)', async () => {
 		]);
 		const [lt] = await db
 			.insert(leaveTypes)
-			.values({ establishmentId: est, code: 'VL', name: 'Vacation leave' })
+			.values({ organizationId: org, code: leaveCode, name: 'Vacation leave' })
 			.returning({ id: leaveTypes.id });
 		await db.insert(leaveRequests).values([
 			{ establishmentId: est, employeeId: cy, leaveTypeId: lt!.id, startDate: '2026-06-09', endDate: '2026-06-11', days: 3, paid: true, status: 'approved' },
@@ -76,7 +79,8 @@ describe.skipIf(!hasDb)('establishment dashboard (live DB)', async () => {
 
 	afterAll(async () => {
 		for (const id of noticeIds) await db.delete(announcements).where(eq(announcements.id, id));
-		await cleanupTestEstablishments([est, other]);
+		await cleanupTestEstablishments([est, other, ...made]);
+		await db.delete(leaveTypes).where(eq(leaveTypes.code, leaveCode));
 	});
 
 	it("counts today's roster and keeps a person on leave out of 'working'", async () => {
@@ -119,5 +123,40 @@ describe.skipIf(!hasDb)('establishment dashboard (live DB)', async () => {
 
 		await A.setAnnouncementStatus(org, everyone.id, 'archived');
 		expect((await A.announcementsFor(org, est, today)).map((n) => n.title)).not.toContain(`All ${tag}`);
+	});
+	it('lists who is rostered, past their shift start, and has not punched — information only', async () => {
+		const abs = await mkEst('abs');
+		const pia = await createTestStaff(abs, { employeeNo: 'A1', firstName: 'Pia', enrollId: '0201' });
+		const quin = await createTestStaff(abs, { employeeNo: 'A2', firstName: 'Quin', enrollId: '0202' });
+		const rey = await createTestStaff(abs, { employeeNo: 'A3', firstName: 'Rey', enrollId: '0203' });
+		const sol = await createTestStaff(abs, { employeeNo: 'A4', firstName: 'Sol', enrollId: '0204' });
+		const shift = { isRestDay: false, startTime: '08:00', endTime: '17:00', breakMinutes: 60 };
+		await db.insert(schedules).values(
+			[pia, quin, rey].map((employeeId) => ({ establishmentId: abs, employeeId, date: today, ...shift }))
+		);
+		// Sol is on a rest day; Pia punched in; Quin and Rey did not. Rey's shift has not started yet.
+		await db.update(schedules).set({ startTime: '13:00', endTime: '21:00' }).where(eq(schedules.employeeId, rey));
+		await db.insert(schedules).values({ establishmentId: abs, employeeId: sol, date: today, isRestDay: true });
+		await db.insert(biometricPunches).values({
+			establishmentId: abs,
+			enrollId: '0201',
+			enrollKey: '201',
+			punchedAt: new Date('2026-06-10T00:05:00Z') // 08:05 Manila
+		});
+		const noon = Date.parse('2026-06-10T04:00:00Z'); // 12:00 Manila
+
+		const d = await D.getDashboard(abs, `${tag}-abs`, today, 'Asia/Manila', noon);
+		expect(d.absentToday.state).toBe('ok');
+		expect(d.absentToday.people.map((p) => p.name)).toEqual(['Test, Quin']);
+
+		// Before anyone's shift has started, nobody is absent.
+		const early = await D.getDashboard(abs, `${tag}-abs`, today, 'Asia/Manila', Date.parse('2026-06-09T23:30:00Z'));
+		expect(early.absentToday.people).toEqual([]);
+
+		// No punches uploaded for today at all: the list is withheld rather than naming everyone.
+		const none = await D.getDashboard(est, tag, today, 'Asia/Manila', noon);
+		expect(none.absentToday.state).toBe('no_punches_today');
+		expect(none.absentToday.people).toEqual([]);
+		made.push(abs);
 	});
 });

@@ -21,32 +21,36 @@
 </script>
 
 <div class="mx-auto max-w-xl space-y-6 p-4 sm:p-6">
-	{#if data.tabs.leavePolicy}
-		<a
-			href="settings/leave"
-			class="flex items-center justify-between rounded-2xl bg-white/70 px-4 py-3 text-sm font-medium hover:bg-gold-soft"
-		>
-			<span>Leave policy &amp; holiday calendar</span>
-			<span aria-hidden="true">&rarr;</span>
-		</a>
-	{/if}
+<a
+href="settings/leave"
+class="flex items-center justify-between rounded-2xl bg-white/70 px-4 py-3 text-sm font-medium hover:bg-gold-soft"
+>
+<span>
+Leave policy &amp; holiday calendar
+{#if !data.tabs.leavePolicy}<span class="font-normal text-ink-muted"> · view only</span>{/if}
+</span>
+<span aria-hidden="true">&rarr;</span>
+</a>
 	<div>
 		<h1 class="text-lg font-semibold text-ink">Night differential</h1>
 		<p class="mt-1 text-sm text-ink-muted">
 			Hours worked inside this window earn the premium. A shift can set its own window in Schedule
-			&rarr; Shifts; this one applies to every shift that doesn't.
-		</p>
+			&rarr; Shifts;this one applies to every shift that doesn't.
+{#if !data.canEditNightDiff}
+<strong class="font-medium text-ink">View only</strong> — Main HR sets this for your establishment.
+{/if}
+</p>
 	</div>
 
 	<form method="POST" action="?/saveNightDiff" use:enhance class="space-y-4">
 		<div class="grid grid-cols-3 gap-3">
 			<div>
 				<Label for="ndStart">From</Label>
-				<Input id="ndStart" name="start" type="time" required value={data.nightDiff.start} class="mt-1" />
+<Input id="ndStart" name="start" type="time" required value={data.nightDiff.start} class="mt-1" disabled={!data.canEditNightDiff} />
 			</div>
 			<div>
 				<Label for="ndEnd">To</Label>
-				<Input id="ndEnd" name="end" type="time" required value={data.nightDiff.end} class="mt-1" />
+<Input id="ndEnd" name="end" type="time" required value={data.nightDiff.end} class="mt-1" disabled={!data.canEditNightDiff} />
 			</div>
 			<div>
 				<Label for="ndRate">Premium (%)</Label>
@@ -58,9 +62,10 @@
 					max="100"
 					step="0.01"
 					required
-					value={data.nightDiff.ratePct}
-					class="mt-1"
-				/>
+value={data.nightDiff.ratePct}
+class="mt-1"
+disabled={!data.canEditNightDiff}
+/>
 			</div>
 		</div>
 		<p class="text-xs text-ink-muted">
@@ -85,8 +90,8 @@
 				</li>
 			</ul>
 		</div>
-		<Button type="submit">Save</Button>
-	</form>
+{#if data.canEditNightDiff}<Button type="submit">Save</Button>{/if}
+</form>
 
 	{#if data.canKeys}
 		<section class="space-y-3 border-t border-dotted border-foreground/20 pt-6" aria-label="Hotel connection">

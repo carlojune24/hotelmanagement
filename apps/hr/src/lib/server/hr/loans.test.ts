@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { agencyOfRemit, allocate, dueNow, isSecondHalf, scheduledShare } from './loans';
+import { agencyOfRemit, allocate, dueNow, isSecondHalf, monthsAfter, scheduleStatus, scheduledShare } from './loans';
 import { buildSchedule, toCsv, type ScheduleLine } from './remittance';
 import { cleanupTestEstablishments, createTestStaff, testOrgId } from './test-helpers';
 
@@ -33,6 +33,41 @@ describe('loan rules', () => {
 		expect(agencyOfRemit('sss')).toBe('sss_loan');
 		expect(agencyOfRemit('pagibig')).toBe('pagibig_loan');
 		expect(agencyOfRemit('none')).toBeNull();
+	});
+});
+
+describe('loan schedule', () => {
+	const base = { principal: 120_000, alreadyPaid: 0, amortization: 10_000, startPeriod: '2026-01', thisMonth: '2026-04' };
+
+	it('adds months across a year boundary', () => {
+		expect(monthsAfter('2026-11', 2)).toBe('2027-01');
+		expect(monthsAfter('2026-01', -1)).toBe('2025-12');
+	});
+
+	it('is behind by what the months already due say should have been paid, skipped months excluded', () => {
+		// Jan, Mar are due (Feb skipped): 2 × 100 expected, 100 paid.
+		const s = scheduleStatus({ ...base, skips: new Set(['2026-02']), paidSince: 10_000 });
+		expect(s.behind).toBe(10_000);
+		// 1,100 left at 100 a month, from April: April + 10 more = Feb 2027.
+		expect(s.expectedEnd).toBe('2027-02');
+	});
+
+	it('pushes the end out by a future skipped month and is never behind in the month in progress', () => {
+		const s = scheduleStatus({ ...base, startPeriod: '2026-04', skips: new Set(['2026-05']), paidSince: 0 });
+		expect(s.behind).toBe(0);
+		expect(s.expectedEnd).toBe('2027-04'); // 12 payments, one month skipped
+	});
+
+	it('has no end once paid, and starts counting from a future start month', () => {
+		expect(scheduleStatus({ ...base, skips: new Set(), paidSince: 120_000 }).expectedEnd).toBeNull();
+		const future = scheduleStatus({ ...base, startPeriod: '2026-08', skips: new Set(), paidSince: 0 });
+		expect(future).toEqual({ behind: 0, expectedEnd: '2027-07' });
+	});
+
+	it('counts what was paid before this system as paid, not as ahead of schedule', () => {
+		const s = scheduleStatus({ ...base, alreadyPaid: 60_000, skips: new Set(), paidSince: 0 });
+		expect(s.behind).toBe(30_000); // Jan–Mar due, nothing taken since
+		expect(s.expectedEnd).toBe('2026-09'); // 600 owed at 100 a month from April
 	});
 });
 
@@ -92,7 +127,7 @@ async function hasEnvFile(): Promise<boolean> {
 
 describe.skipIf(!hasDb)('loans through payroll (live DB)', async () => {
 	const { db } = await import('$lib/server/db/index');
-	const { dtrEntries, dtrSubmissions, employeeLoans, establishments, loanTypes, organizations, payrollRuns, schedules } = await import(
+	const { dtrEntries, dtrSubmissions, employeeLoanPayments, employeeLoanSkips, employeeLoans, establishments, loanTypes, organizations, payrollRuns, schedules } = await import(
 		'$lib/server/db/schema/index'
 	);
 	const { mintRef } = await import('$lib/server/ids');
@@ -109,6 +144,7 @@ describe.skipIf(!hasDb)('loans through payroll (live DB)', async () => {
 	const runIds: string[] = [];
 	let loanId = '';
 	let companyId = '';
+	let priorId = '';
 	let batch1 = '';
 	let batch2 = '';
 
@@ -150,6 +186,10 @@ describe.skipIf(!hasDb)('loans through payroll (live DB)', async () => {
 	});
 	afterAll(async () => {
 		for (const id of runIds) await db.delete(payrollRuns).where(eq(payrollRuns.id, id));
+		if (priorId) {
+			await db.delete(employeeLoanSkips).where(eq(employeeLoanSkips.loanId, priorId));
+			await db.delete(employeeLoanPayments).where(eq(employeeLoanPayments.loanId, priorId));
+		}
 		await db.delete(employeeLoans).where(eq(employeeLoans.employeeId, ana));
 		await db.delete(loanTypes).where(like(loanTypes.key, `custom_emergency_${tag.replace(/-/g, '_')}%`));
 		await cleanupTestEstablishments([est]);
@@ -255,5 +295,81 @@ describe.skipIf(!hasDb)('loans through payroll (live DB)', async () => {
 		).rejects.toThrow(/active loan type/);
 		const listed = (await L.listLoanTypes(org)).find((t) => t.key === type.key)!;
 		expect(listed).toMatchObject({ active: false, loanCount: 1, remitTo: 'sss' });
+	});
+
+	it('counts what was paid before this system against the balance and what is still due', async () => {
+		await expect(
+			L.createLoan(org, { employeeId: ana, kind: 'company', principal: 1_000, amortization: 400, alreadyPaid: 1_000, startPeriod: '2026-04' }, null)
+		).rejects.toThrow(/whole loan/);
+		priorId = (
+			await L.createLoan(org, { employeeId: ana, kind: 'company', principal: 1_000, amortization: 400, alreadyPaid: 700, startPeriod: '2026-04' }, null)
+		).id;
+		const row = (await L.listLoans(org)).find((x) => x.id === priorId)!;
+		expect(row.balanceCentavos).toBe(30_000); // ₱1,000 less ₱700 paid before
+		expect(row.deductedCentavos).toBe(0); // payroll has taken nothing
+		await P.generateBatch(batch2);
+		const due = (await deductions(batch2)).loans.find((x) => x.kind === 'company')!;
+		expect(due.due).toBe(20_000); // half of ₱400, still under the ₱300 left
+	});
+
+	it('skips a chosen pay month, resumes after it, and refuses a month a locked payslip already covers', async () => {
+		const may = { id: '00000000-0000-4000-8000-000000000001', organizationId: org, cutoffStart: '2026-05-01', cutoffEnd: '2026-05-15', payDate: '2026-05-20', frequency: 'semi_monthly' };
+		const dueIn = async (run: typeof may) => (await L.loansDueFor(run, [ana])).get(ana)?.some((d) => d.loanId === priorId) ?? false;
+		expect(await dueIn(may)).toBe(true);
+
+		await expect(L.addSkip(org, { loanId: priorId, payMonth: '2026-04', reason: 'On unpaid leave' }, null)).rejects.toThrow(/locked payslip/);
+		await expect(L.addSkip(org, { loanId: priorId, payMonth: '2026-03', reason: 'Too early' }, null)).rejects.toThrow(/not deducted before/);
+
+		const { skip } = await L.addSkip(org, { loanId: priorId, payMonth: '2026-05', reason: 'On unpaid leave' }, null);
+		await expect(L.addSkip(org, { loanId: priorId, payMonth: '2026-05', reason: 'Again' }, null)).rejects.toThrow(/already skipped/);
+		expect(await dueIn(may)).toBe(false);
+		expect(await dueIn({ ...may, cutoffStart: '2026-06-01', cutoffEnd: '2026-06-15', payDate: '2026-06-20' })).toBe(true);
+		expect((await L.listSkips(priorId)).map((k) => [k.payMonth, k.locked])).toEqual([['2026-05', false]]);
+		expect((await L.upcomingSkips([priorId], '2026-05')).get(priorId)).toEqual(['2026-05']);
+
+		await L.removeSkip(org, skip.id);
+		expect(await dueIn(may)).toBe(true);
+	});
+
+	it('records a payment received outside payroll, counts it, and closes and reopens the loan with it', async () => {
+		await expect(L.addPayment(org, { loanId: priorId, paidOn: '2099-01-01', amount: 100 }, null)).rejects.toThrow(/future/);
+		await expect(L.addPayment(org, { loanId: priorId, paidOn: '2026-04-10', amount: 500 }, null)).rejects.toThrow(/more than the balance/);
+		const first = await L.addPayment(org, { loanId: priorId, paidOn: '2026-04-10', amount: 150, note: 'Cash' }, null);
+		const row = (await L.listLoans(org)).find((x) => x.id === priorId)!;
+		expect(row.paidOutsideCentavos).toBe(15_000);
+		expect(row.balanceCentavos).toBe(15_000); // ₱1,000 − ₱700 before − ₱150 cash
+		await P.generateBatch(batch2);
+		expect((await deductions(batch2)).loans.find((x) => x.kind === 'company')!.due).toBe(15_000); // capped by the balance
+
+		const last = await L.addPayment(org, { loanId: priorId, paidOn: '2026-04-11', amount: 150 }, null);
+		expect((await L.listLoans(org)).find((x) => x.id === priorId)).toMatchObject({ status: 'paid_off', balanceCentavos: 0 });
+		await expect(L.addPayment(org, { loanId: priorId, paidOn: '2026-04-12', amount: 1 }, null)).rejects.toThrow(/closed/);
+
+		expect(L.voidPaymentSchema.safeParse({ paymentId: last.payment.id, reason: 'x' }).success).toBe(false);
+		await L.voidPayment(org, { paymentId: last.payment.id, reason: 'Bounced transfer' }, null);
+		expect((await L.listLoans(org)).find((x) => x.id === priorId)).toMatchObject({ status: 'active', balanceCentavos: 15_000 });
+		await expect(L.voidPayment(org, { paymentId: last.payment.id, reason: 'Again' }, null)).rejects.toThrow(/already voided/);
+		expect(first.payment.amountCentavos).toBe(15_000);
+	});
+
+	it('lists a skipped government loan on its agency schedule for the month', async () => {
+		await L.addSkip(org, { loanId, payMonth: '2026-06', reason: 'On unpaid leave' }, null);
+		const sss = await L.skippedLoansFor(org, 'sss_loan', '2026-06');
+		expect(sss).toHaveLength(1);
+		expect(sss[0]).toMatchObject({ reference: 'L-1', reason: 'On unpaid leave' });
+		expect(await L.skippedLoansFor(org, 'pagibig_loan', '2026-06')).toHaveLength(0);
+		expect(await L.skippedLoansFor(org, 'sss_loan', '2026-07')).toHaveLength(0);
+		const [k] = await L.listSkips(loanId);
+		await L.removeSkip(org, k!.id);
+	});
+
+	it('lets the loan amount and start month be corrected only until a locked payslip has deducted it', async () => {
+		const edited = await L.editLoan(org, {
+			loanId: priorId, amortization: 400, alreadyPaid: 700, principal: 1_100, startPeriod: '2026-04', releasedOn: '2026-03-20', termMonths: 6
+		});
+		expect(edited.after).toMatchObject({ principalCentavos: 110_000, releasedOn: '2026-03-20', termMonths: 6 });
+		// The SSS loan was deducted by the locked April batch.
+		await expect(L.editLoan(org, { loanId, amortization: 10_000, principal: 12_500 })).rejects.toThrow(/locked payslip already deducted/);
+		await expect(L.editLoan(org, { loanId: priorId, amortization: 400, alreadyPaid: 700, startPeriod: '2026-04', principal: 100 })).rejects.toThrow(/more than the loan/);
 	});
 });

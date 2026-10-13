@@ -11,7 +11,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 	const today = businessDateFor(est.timezone);
 	const org = await getOrganization();
 	const [dashboard, notices] = await Promise.all([
-		getDashboard(est.id, est.slug, today),
+		getDashboard(est.id, est.slug, today, est.timezone),
 		announcementsFor(org.id, est.id, today)
 	]);
 	return {

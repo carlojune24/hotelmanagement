@@ -1,5 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { z } from 'zod';
+import { canAt } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { businessDateFor } from '$lib/server/time';
@@ -10,19 +11,15 @@ import {
 	listCalendar,
 	saveCalendarDay
 } from '$lib/server/hr/calendar';
-import {
-	LeaveError,
-	deleteLeaveType,
-	leaveTypeSchema,
-	listLeaveTypes,
-	restoreStatutoryDefaults,
-	saveLeaveType
-} from '$lib/server/hr/leave';
+import { listLeaveTypes } from '$lib/server/hr/leave';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
-	requireCap(locals.user, locals.access, 'leave:*', locals.establishment!.id);
+	// Anyone who can see the establishment may read its leave rules and holiday calendar; only
+	// Main HR (leave:*) changes them — every action below still requires that.
+	requireCap(locals.user, locals.access, 'establishment:read', locals.establishment!.id);
 	const establishment = locals.establishment!;
+	const canEdit = locals.user!.isSystemAdmin || canAt(locals.access!, 'leave:*', establishment.id);
 	const yearParam = Number(url.searchParams.get('year'));
 	const year =
 		Number.isInteger(yearParam) && yearParam >= 2000 && yearParam <= 2100
@@ -34,6 +31,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	]);
 	return {
 		year,
+		canEdit,
+		/** Leave types are company-wide; the right to change them is Main HR's, whichever establishment is open. */
+		canEditTypes: canEdit,
 		types: types.map((t) => ({
 			id: t.id,
 			code: t.code,
@@ -63,91 +63,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	};
 };
 
-function typeFromForm(fd: FormData) {
-	const sex = fd.get('sexRestriction');
-	return leaveTypeSchema.safeParse({
-		code: fd.get('code'),
-		name: fd.get('name'),
-		description: fd.get('description') ?? '',
-		paid: fd.get('paid') === 'on',
-		daysPerYear: fd.get('daysPerYear'),
-		dayCount: fd.get('dayCount'),
-		minServiceMonths: fd.get('minServiceMonths') || 0,
-		employmentTypes: fd.getAll('employmentTypes'),
-		sexRestriction: sex === 'male' || sex === 'female' ? sex : null,
-		halfDayAllowed: fd.get('halfDayAllowed') === 'on',
-		carryOverDays: fd.get('carryOverDays') || 0,
-		cashConvertible: fd.get('cashConvertible') === 'on',
-		requiresDocument: fd.get('requiresDocument') === 'on',
-		active: fd.get('active') === 'on'
-	});
-}
-
 export const actions: Actions = {
-	saveType: async (event) => {
-		requireCap(event.locals.user, event.locals.access, 'leave:*', event.locals.establishment!.id);
-		try {
-			const establishmentId = event.locals.establishment!.id;
-			const fd = await event.request.formData();
-			const parsed = typeFromForm(fd);
-			if (!parsed.success) return fail(400, { error: parsed.error.issues[0]!.message });
-			const id = fd.get('id');
-			const { before, after } = await saveLeaveType(
-				establishmentId,
-				parsed.data,
-				typeof id === 'string' && id ? id : undefined
-			);
-			await writeAudit({
-				establishmentId,
-				actor: event.locals.user,
-				action: before ? 'leave.type_update' : 'leave.type_create',
-				entityType: 'leave_type',
-				entityId: after.id,
-				before: before ?? undefined,
-				after
-			});
-			return { ok: before ? `${after.name} updated.` : `${after.name} added.` };
-		} catch (e) {
-			if (e instanceof LeaveError) return fail(400, { error: e.message });
-			throw e;
-		}
-	},
-
-	deleteType: async (event) => {
-		requireCap(event.locals.user, event.locals.access, 'leave:*', event.locals.establishment!.id);
-		try {
-			const establishmentId = event.locals.establishment!.id;
-			const id = z.string().uuid().safeParse((await event.request.formData()).get('id'));
-			if (!id.success) return fail(400, { error: 'Missing leave.' });
-			await deleteLeaveType(establishmentId, id.data);
-			await writeAudit({
-				establishmentId,
-				actor: event.locals.user,
-				action: 'leave.type_delete',
-				entityType: 'leave_type',
-				entityId: id.data
-			});
-			return { ok: 'Leave deleted.' };
-		} catch (e) {
-			if (e instanceof LeaveError) return fail(400, { error: e.message });
-			throw e;
-		}
-	},
-
-	restoreDefaults: async (event) => {
-		requireCap(event.locals.user, event.locals.access, 'leave:*', event.locals.establishment!.id);
-		const establishmentId = event.locals.establishment!.id;
-		await restoreStatutoryDefaults(establishmentId);
-		await writeAudit({
-			establishmentId,
-			actor: event.locals.user,
-			action: 'leave.restore_defaults',
-			entityType: 'leave_type',
-			entityId: null
-		});
-		return { ok: 'Statutory leaves are back to the legal defaults.' };
-	},
-
 	saveDay: async (event) => {
 		requireCap(event.locals.user, event.locals.access, 'leave:*', event.locals.establishment!.id);
 		try {

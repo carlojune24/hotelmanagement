@@ -13,7 +13,8 @@
 			{ seg: '/schedule', label: 'Schedule', show: data.tabs.schedule },
 			{ seg: '/dtr', label: 'DTR', show: data.tabs.dtr },
 			{ seg: '/leave', label: 'Leave', show: data.tabs.leave },
-			{ seg: '/overtime', label: 'Overtime', show: data.tabs.overtime },
+{ seg: '/overtime', label: 'Overtime', show: data.tabs.overtime },
+{ seg: '/memos', label: 'Memos', show: data.tabs.memos },
 			{ seg: '/payslips', label: 'Payslips', show: data.tabs.payslips },
 			{ seg: '/settings', label: 'Settings', show: data.tabs.settings }
 		].filter((t) => t.show)
@@ -25,7 +26,7 @@
 <svelte:head><title>{data.establishment.name} · HR</title></svelte:head>
 
 <div class="mx-auto max-w-6xl space-y-5">
-	<header class="flex flex-wrap items-end justify-between gap-3">
+	<header class="space-y-3">
 		<div>
 			{#if !data.scope}
 				<p class="text-sm text-ink-muted">

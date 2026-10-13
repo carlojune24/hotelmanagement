@@ -26,8 +26,7 @@
 	let reason = $state('');
 	let documentNote = $state('');
 	let statusFilter = $state<'all' | 'active' | 'submitted' | 'cancelled'>('active');
-	let memoOpen = $state(false);
-	let cancelling = $state<{ id: string; label: string } | null>(null);
+let cancelling = $state<{ id: string; label: string } | null>(null);
 
 	type Preview = {
 		days: number;
@@ -153,9 +152,7 @@
 			<Button variant="outline" size="icon" href="?year={data.year + 1}" aria-label="Next year">
 				<ChevronRightIcon class="size-4" />
 			</Button>
-			{#if data.canProposeMemo && !data.canApprove}
-				<Button variant="outline" onclick={() => (memoOpen = true)}>Propose a memo</Button>
-			{/if}
+
 			<Button onclick={openFile}>
 				<PlusIcon class="size-4" /> {data.canApprove ? 'File leave' : 'Request leave'}
 			</Button>
@@ -376,49 +373,6 @@
 			<Dialog.Footer>
 				<Button type="button" variant="outline" onclick={() => (cancelling = null)}>Keep it</Button>
 				<Button type="submit" variant="destructive" disabled={busy}>Cancel leave</Button>
-			</Dialog.Footer>
-		</form>
-	</Dialog.Content>
-</Dialog.Root>
-
-<Dialog.Root bind:open={memoOpen}>
-	<Dialog.Content>
-		<Dialog.Header>
-			<Dialog.Title>Propose a holiday or memo</Dialog.Title>
-			<Dialog.Description>
-				Main HR reviews it. Nothing changes on rosters or DTRs until it is approved.
-			</Dialog.Description>
-		</Dialog.Header>
-		<form method="POST" action="?/proposeMemo" use:enhance={run} class="space-y-3">
-			<div class="space-y-1.5">
-				<Label for="memoDate">Date</Label>
-				<Input id="memoDate" name="date" type="date" required min={data.today} />
-			</div>
-			<div class="space-y-1.5">
-				<Label for="memoName">Name</Label>
-				<Input id="memoName" name="name" required maxlength={80} placeholder="e.g. Fiesta — early release" />
-			</div>
-			<div class="space-y-1.5">
-				<Label for="memoKind">Kind</Label>
-				<select
-					id="memoKind"
-					name="kind"
-					class="h-10 w-full rounded-full border border-transparent bg-white px-4 text-sm shadow-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-				>
-					<option value="memo">Memo (staff go early / credited time)</option>
-					<option value="local_holiday">Local holiday</option>
-				</select>
-			</div>
-			<div class="space-y-1.5">
-				<Label for="memoCredit">Hours credited <span class="text-ink-muted">(blank = full day)</span></Label>
-				<Input id="memoCredit" name="creditHours" type="number" min="0" max="24" step="0.25" />
-			</div>
-			<label class="flex items-center gap-2 text-sm">
-				<input type="checkbox" name="waiveLateness" class="size-4 accent-black" /> Don't count lateness or undertime that day
-			</label>
-			<Dialog.Footer class="gap-2 pt-1">
-				<Button type="button" variant="outline" onclick={() => (memoOpen = false)}>Close</Button>
-				<Button type="submit" disabled={busy}>Send for approval</Button>
 			</Dialog.Footer>
 		</form>
 	</Dialog.Content>

@@ -136,6 +136,40 @@
 		{/if}
 	</section>
 
+	<section class="space-y-3 px-5 py-4 md:px-6" aria-label="Absent today">
+		<div>
+			<h3 class="text-lg font-light">Absent today</h3>
+			<p class="text-xs text-ink-muted">
+				For information only — it is not written to anyone's DTR. Based on punches uploaded so far.
+			</p>
+		</div>
+		{#if d.absentToday.state === 'holiday'}
+			<p class="text-sm text-ink-muted">Today is {d.absentToday.holiday}, so no one is counted absent.</p>
+		{:else if d.absentToday.state === 'no_punches_today'}
+			<p class="text-sm text-ink-muted">
+				No punches have been uploaded for today yet, so absences can't be told. Upload the biometric file under
+				DTR → Biometric data.
+			</p>
+		{:else if d.absentToday.people.length === 0}
+			<p class="text-sm text-ink-muted">No one rostered to work has missed their shift start so far.</p>
+		{:else}
+			<ul class="divide-y divide-dotted divide-ink/20">
+				{#each d.absentToday.people as p, i (i)}
+					<li class="flex flex-wrap items-baseline justify-between gap-2 py-2 text-sm">
+						<span>
+							<span class="font-medium">{p.name}</span>
+							<span class="text-ink-muted"> · {p.position}</span>
+						</span>
+						<span class="flex items-center gap-2 tabular-nums text-ink-muted">
+							Shift {p.shift}
+							<Badge variant="destructive">No punch</Badge>
+						</span>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</section>
+
 	<section class="space-y-3 px-5 py-4 md:px-6" aria-label="This week">
 		<h3 class="text-lg font-light">People working this week</h3>
 		<div class="overflow-x-auto">

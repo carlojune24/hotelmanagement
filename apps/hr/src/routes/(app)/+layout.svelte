@@ -7,6 +7,8 @@
 	import WalletIcon from '@lucide/svelte/icons/wallet';
 	import LandmarkIcon from '@lucide/svelte/icons/landmark';
 	import HandCoinsIcon from '@lucide/svelte/icons/hand-coins';
+	import UserRoundXIcon from '@lucide/svelte/icons/user-round-x';
+	import GiftIcon from '@lucide/svelte/icons/gift';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
 	import LayoutDashboardIcon from '@lucide/svelte/icons/layout-dashboard';
@@ -14,7 +16,8 @@
 	import ClockIcon from '@lucide/svelte/icons/clock';
 	import PalmtreeIcon from '@lucide/svelte/icons/tree-palm';
 	import TimerIcon from '@lucide/svelte/icons/timer';
-	import ReceiptIcon from '@lucide/svelte/icons/receipt-text';
+import ReceiptIcon from '@lucide/svelte/icons/receipt-text';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import ContactIcon from '@lucide/svelte/icons/contact';
 	import KeyIcon from '@lucide/svelte/icons/key-round';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
@@ -29,7 +32,8 @@
 		schedule: CalendarDaysIcon,
 		dtr: ClockIcon,
 		leave: PalmtreeIcon,
-		overtime: TimerIcon,
+overtime: TimerIcon,
+		memos: FileTextIcon,
 		payslips: ReceiptIcon,
 		settings: SettingsIcon
 	} as const;
@@ -48,6 +52,8 @@
 			{ seg: 'approvals', label: 'Approvals', icon: InboxIcon, show: data.nav.approvals },
 			{ seg: 'payroll', label: 'Payroll', icon: WalletIcon, show: data.nav.payroll },
 			{ seg: 'loans', label: 'Loans', icon: HandCoinsIcon, show: data.nav.loans },
+			{ seg: 'bonuses', label: 'Bonuses', icon: GiftIcon, show: data.nav.bonuses },
+			{ seg: 'separations', label: 'Separations', icon: UserRoundXIcon, show: data.nav.separations },
 			{ seg: 'announcements', label: 'Announcements', icon: MegaphoneIcon, show: data.nav.announcements },
 			{ seg: 'remittances', label: 'Remittances', icon: LandmarkIcon, show: data.nav.remittances },
 			{ seg: 'people', label: 'People', icon: ContactIcon, show: data.nav.people },

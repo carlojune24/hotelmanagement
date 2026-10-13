@@ -28,6 +28,8 @@ export const load: LayoutServerLoad = async ({ locals, url }) => {
 			announcements: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'announcement:*'),
 			remittances: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			loans: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
+			separations: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
+			bonuses: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			settings: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			users: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'user:*')
 		}

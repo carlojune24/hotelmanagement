@@ -2,6 +2,14 @@ import { fail } from '@sveltejs/kit';
 import { z } from 'zod';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
+import {
+	LeaveError,
+	deleteLeaveTypeForOrg,
+	listLeaveTypesForOrg,
+	restoreStatutoryDefaultsForOrg,
+	saveLeaveTypeForOrg
+} from '$lib/server/hr/leave';
+import { leaveTypeFromForm } from '$lib/server/hr/leave-form';
 import { EstablishmentError, getOrganization } from '$lib/server/establishments';
 import {
 	createEstablishmentType,
@@ -24,8 +32,27 @@ export const load: PageServerLoad = async ({ locals }) => {
 	requireCap(locals.user, locals.access, 'payroll:*');
 	const org = await getOrganization();
 	const types = await listLoanTypes(org.id);
-	const estTypes = await listEstablishmentTypes(org.id);
+const estTypes = await listEstablishmentTypes(org.id);
+	const leaveTypeRows = await listLeaveTypesForOrg(org.id);
 	return {
+leaveTypes: leaveTypeRows.map((t) => ({
+			id: t.id,
+			code: t.code,
+			name: t.name,
+			description: t.description ?? '',
+			statutory: t.statutory,
+			paid: t.paid,
+			daysPerYear: t.daysPerYear,
+			dayCount: t.dayCount as 'working' | 'calendar',
+			minServiceMonths: t.minServiceMonths,
+			employmentTypes: t.employmentTypes,
+			sexRestriction: t.sexRestriction as 'male' | 'female' | null,
+			halfDayAllowed: t.halfDayAllowed,
+			carryOverDays: t.carryOverDays,
+			cashConvertible: t.cashConvertible,
+			requiresDocument: t.requiresDocument,
+			active: t.active
+		})),
 		establishmentTypes: estTypes.map((t) => ({
 			id: t.id,
 			name: t.name,
@@ -50,6 +77,57 @@ export const load: PageServerLoad = async ({ locals }) => {
 const fd = async (request: Request) => Object.fromEntries(await request.formData());
 
 export const actions: Actions = {
+	saveLeaveType: async ({ request, locals }) => {
+		requireCap(locals.user, locals.access, 'leave:*');
+		try {
+			const org = await getOrganization();
+			const fd = await request.formData();
+			const parsed = leaveTypeFromForm(fd);
+			if (!parsed.success) return fail(400, { error: parsed.error.issues[0]!.message });
+			const id = fd.get('id');
+			const { before, after } = await saveLeaveTypeForOrg(
+				org.id,
+				parsed.data,
+				typeof id === 'string' && id ? id : undefined
+			);
+			await writeAudit({
+				actor: locals.user,
+				action: before ? 'leave.type_update' : 'leave.type_create',
+				entityType: 'leave_type',
+				entityId: after.id,
+				before: before ?? undefined,
+				after
+			});
+			return { ok: before ? `${after.name} updated.` : `${after.name} added.` };
+		} catch (e) {
+			if (e instanceof LeaveError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
+	deleteLeaveType: async ({ request, locals }) => {
+		requireCap(locals.user, locals.access, 'leave:*');
+		try {
+			const org = await getOrganization();
+			const id = z.string().uuid().safeParse((await request.formData()).get('id'));
+			if (!id.success) return fail(400, { error: 'Missing leave.' });
+			await deleteLeaveTypeForOrg(org.id, id.data);
+			await writeAudit({ actor: locals.user, action: 'leave.type_delete', entityType: 'leave_type', entityId: id.data });
+			return { ok: 'Leave deleted.' };
+		} catch (e) {
+			if (e instanceof LeaveError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
+	restoreLeaveDefaults: async ({ locals }) => {
+		requireCap(locals.user, locals.access, 'leave:*');
+		const org = await getOrganization();
+		await restoreStatutoryDefaultsForOrg(org.id);
+		await writeAudit({ actor: locals.user, action: 'leave.restore_defaults', entityType: 'leave_type', entityId: null });
+		return { ok: 'Statutory leaves are back to the legal defaults.' };
+	},
+
 	createEstType: async ({ request, locals }) => {
 		requireCap(locals.user, locals.access, 'payroll:*');
 		const values = await fd(request);

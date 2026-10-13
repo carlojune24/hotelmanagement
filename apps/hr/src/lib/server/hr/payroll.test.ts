@@ -237,6 +237,12 @@ describe.skipIf(!hasDb)('payroll (live DB)', async () => {
 		expect(await P.releasedPayslipsFor(B)).toEqual([]); // listed under the home only
 	});
 
+	it('will not send back a DTR that a locked or released batch was built on', async () => {
+		const { returnDtr } = await import('./dtr-submissions');
+		const [sub] = await db.select().from(dtrSubmissions).where(eq(dtrSubmissions.establishmentId, A));
+		await expect(returnDtr(sub!.id, 'Fix the Tuesday punches', null)).rejects.toThrow(/already locked/);
+	});
+
 	it('masks government numbers to their last four characters', () => {
 		expect(P.maskId('1234567890')).toBe('••••••7890');
 		expect(P.maskId('12')).toBe('12');
