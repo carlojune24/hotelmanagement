@@ -72,18 +72,23 @@ The only link is `person_ref` (`per_<ULID>`, already minted per employee):
   working, and (per policy §12) invite-by-email without a link remains available.
 - **Offboarding follows HR.** `employee.updated` (separated, or assignment ended) → hotel suspends or
   removes that membership. Hotel also pulls `updated_since` on a schedule as a fallback.
-- Team list shows the linked employee's name (cached) and "Unlinked" otherwise.
+- **This is the only place the hotel touches HR:** Settings → Team → Add staff. No other hotel
+  screen reads HR data, and the Team list does not fetch employee names (it shows the account as
+  today; a linked account just carries its `person_ref`).
 - A manager has **two logins** — hotel and HR (same email, separate accounts). No SSO in v1.
 
 ## 5. HR ↔ hotel API
 
-Server-to-server, per-hotel API key (reuse the `/admin/api-keys` pattern), contracts in
-`@mm/integration` (`GET /api/v1/hr/…`, cursor + `updated_since`, events).
+Server-to-server, contracts in `@mm/integration` (`GET /api/v1/hr/…`, cursor + `updated_since`,
+events). Keys: the HR app issues a per-hotel key (copy the hotel app's pattern — SHA-256 hash,
+visible prefix, scopes, revoke/expiry — **not** its table: the hotel's `api_keys` is inbound,
+single-hotel, `finance:read` only). The hotel stores its outbound HR key encrypted per hotel
+(same approach as its PayMongo keys). Events HR → hotel are signed; the hotel verifies and exposes
+one small inbound endpoint.
 
 | Direction | Call | Purpose |
 |---|---|---|
-| Hotel → HR | `GET employees?assigned_to=<hotel org_ref>` | Team picker |
-| Hotel → HR | `GET employees/{person_ref}` | Resolve name/status on Team list |
+| Hotel → HR | `GET employees?assigned_to=<hotel org_ref>` | Team picker (the only UI use) |
 | HR → Hotel | event `employee.updated` | Suspend/unlink membership on separation/transfer |
 | Hotel → HR | `GET employees?updated_since=` | Fallback sync |
 | HR → Hotel (later) | event `payroll_run.posted` | Optional cost posting to hotel Finance (Phase 5, not in scope) |
@@ -137,8 +142,10 @@ Remove (one clean deletion; **after** the data decision in §12 Q1):
   `PERMISSION_CATALOG` / seeded roles (backfill existing role rows); `hr` role retired.
 - `lib/server/hr/*`, `schema/hr.ts` tables (drop migration), `roster.ts`, `leave.ts`, `overtime.ts`,
   `hr-import.ts` and their tests.
-- Team page: replace employee-link picker with the HR-API picker; add `person_ref` to
-  `memberships`/`invites`; handle `employee.updated`.
+- Team page (`settings/team`): replace the "Linked employee" picker (`listEmployeesForLinking`,
+  `linkMemberToEmployee` — the only callers outside HR) with the HR-API picker on Add staff; add
+  `person_ref` to `memberships`/`invites`; handle `employee.updated`. Nothing else in the hotel
+  reads HR.
 - `docs/TODO.md` Phase 4 rewritten to point here.
 
 Hotel gains: HR client (API key + base URL setting), `person_ref` columns, event receiver.
@@ -185,9 +192,11 @@ isn't built, so nothing to untangle there.
 
 ## 12. Defaults assumed — need confirmation
 
-1. **Existing HR data in the hotel DB** (employees, schedules, DTR, leave): *default* — treat as test
-   data and discard; export/import only if real records exist. Drop migration is **destructive**:
-   do not run without confirmation.
+1. **Existing HR data in the hotel DB:** *default* — discard. Checked in the local dev DB on
+   2026-10-13: 2 employees (`EMP-100`, `EMP-001`; one linked to a login), 22 schedule rows
+   (2026-10-01 → 10-30), 12 DTR entries, 9 biometric punches, 1 leave request; no OT, payroll,
+   cash advances or payslips. Looks like test data. **Not checked: any other (production/staging)
+   database.** Drop migration is destructive — do not run it without confirmation and a fresh dump.
 2. **Invite without employee link:** *default* — allowed for `hotel_admin` and external accounts only;
    ordinary staff must link to an employee.
 3. **Manager logins:** *default* — hotel login unchanged, separate HR login; SSO deferred.
@@ -223,3 +232,42 @@ isn't built, so nothing to untangle there.
   HR tables gone only after the data decision.
 - Payroll (after statutory work): company run, cost-by-establishment correct, payslip hidden until
   released, then downloadable at the right business only.
+
+## 15. Transition checklist (verified against the code, 2026-10-13)
+
+**Verified — assumptions that held**
+- The only hotel code that links accounts to employees is `settings/team` (`listEmployeesForLinking`,
+  `linkMemberToEmployee`). Nothing else outside HR calls them.
+- Leave and OT effects consume **only** `status = 'approved'` (`eq(..., 'approved')` in
+  `leave.ts` and `overtime.ts`), so the new `draft|submitted|rejected` states are ignored by DTR/payroll
+  automatically. Cancel paths use `ne(..., 'cancelled')` — re-check when adding states.
+- Finance's `payroll` expense group and `counterpartyType: 'employee'` (shift-variance chargeback)
+  use **user ids / category codes, not HR employee ids**. They stay in the hotel untouched.
+- No membership holds the `hr` role in the dev DB (the role row exists once per hotel, 2 hotels).
+
+**Hotel removal inventory** (everything found outside the HR folders)
+- `lib/authz.ts`: `hr` role, `hr:read` in `isKitchenOnly`/`isDiningOnly`, HR caps and catalog entries
+  (`employee:*`, `schedule:*`, `dtr:*`, `leave:*`, `payroll:*`, section "HR & Employees"/"Payroll").
+- `management/+layout.svelte` nav item "HR"; `dashboard/+page.server.ts` `canHr` (and its Svelte use).
+- `management/payroll/*`, `management/settings/leave/*`, link to it in `settings/+page.svelte`.
+- `print/dtr`, `print/schedule`, `lib/components/print/{dtr-print,roster-print}.svelte`.
+- `lib/{roster,leave,overtime,hr-import}.ts` and their tests.
+- `hr` role rows (`roles`) per hotel — memberships must be reassigned/removed before deleting
+  (`memberships.role_id` is `ON DELETE RESTRICT`), then the role seed removed from `seed-roles.ts`.
+- `docs/TODO.md` Phase 4, `docs/standards/hr.md` pointers.
+
+**Do not remove:** finance `payroll` category/ledger accounts, `counterpartyType: 'employee'`,
+`@mm/hr-core` (shared by the HR app).
+
+**Order that keeps the hotel working at every step**
+1. HR app runs alone on its own DB (phases 1–5) — hotel untouched.
+2. Hotel integration added (phase 6): new nullable columns + picker + inbound event endpoint. Old
+   linker still works until the picker is verified.
+3. Only then delete hotel HR (phase 7): code and routes first, **tables last**, after a fresh dump.
+4. Retire the `hr` roles last; ensure no membership still points at one.
+
+**Still unchecked / needs a decision**
+- Any non-local (staging/production) hotel database with real HR rows.
+- `docs/standards/hr.md` content vs. the new shape (not read).
+- Whether the existing linked login (`EMP-001`) should be re-linked by `person_ref` during import.
+- Statutory tables (phase 8 blocker) — unchanged by this transition.
