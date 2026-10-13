@@ -72,6 +72,28 @@
 								<div class="text-xs text-ink-muted">
 									{m.email}{#if m.personRef}<span title="Linked to an HR employee record"> · from HR</span>{/if}
 								</div>
+								{#if m.personRef}
+									<form method="POST" action="?/unlinkMember" use:enhance class="mt-1">
+										<input type="hidden" name="userId" value={m.userId} />
+										<button class="text-xs text-ink-muted hover:underline">Unlink from HR</button>
+									</form>
+								{:else if data.hr.connected && !data.hr.error && data.hr.people.length > 0}
+									<form method="POST" action="?/linkMember" use:enhance class="mt-1 flex items-center gap-2">
+										<input type="hidden" name="userId" value={m.userId} />
+										<select
+											name="personRef"
+											required
+											aria-label="Link {m.name} to an HR employee"
+											class="h-8 rounded-md border border-input bg-transparent px-2 text-xs"
+										>
+											<option value="">Link to HR employee…</option>
+											{#each data.hr.people as p (p.person_ref)}
+												<option value={p.person_ref}>{p.last_name}, {p.first_name}</option>
+											{/each}
+										</select>
+										<button class="text-xs font-medium hover:underline">Link</button>
+									</form>
+								{/if}
 							</Table.Cell>
 							<Table.Cell>
 								{#if m.isProtected}

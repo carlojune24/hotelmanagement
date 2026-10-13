@@ -215,6 +215,85 @@ export const actions: Actions = {
 		return { ok: 'Role updated.' };
 	},
 
+	// Attaches an HR employee to an *existing* login — role and password are untouched, which is
+	// why this isn't done by re-inviting (that would reset a hotel admin's role and password).
+	linkMember: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'team:*');
+		const hotelId = event.locals.hotel!.id;
+
+		const parsed = z
+			.object({ userId: z.string().uuid(), personRef: z.string().min(1).max(64) })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: 'Choose an HR employee to link.' });
+
+		const member = await db
+			.select({ personRef: memberships.personRef })
+			.from(memberships)
+			.where(and(eq(memberships.hotelId, hotelId), eq(memberships.userId, parsed.data.userId)))
+			.then((r) => r.at(0));
+		if (!member) return fail(400, { error: 'Member not found.' });
+		if (member.personRef) return fail(400, { error: 'That login is already linked. Unlink it first.' });
+
+		try {
+			const match = (await fetchAssigned(hotelId)).find((p) => p.person_ref === parsed.data.personRef);
+			if (!match || match.status !== 'active') {
+				return fail(400, { error: 'HR no longer lists that person as active at this hotel.' });
+			}
+		} catch (e) {
+			if (e instanceof HrLinkError) return fail(400, { error: `Couldn't check with HR: ${e.message}` });
+			throw e;
+		}
+
+		const taken = await db
+			.select({ userId: memberships.userId })
+			.from(memberships)
+			.where(and(eq(memberships.hotelId, hotelId), eq(memberships.personRef, parsed.data.personRef)))
+			.then((r) => r.at(0));
+		if (taken) return fail(400, { error: 'That person already has a login at this hotel.' });
+
+		await db
+			.update(memberships)
+			.set({ personRef: parsed.data.personRef })
+			.where(and(eq(memberships.hotelId, hotelId), eq(memberships.userId, parsed.data.userId)));
+		await writeAudit({
+			hotelId,
+			actor: event.locals.user,
+			action: 'team.hr_link',
+			entityType: 'membership',
+			entityId: parsed.data.userId,
+			after: { personRef: parsed.data.personRef }
+		});
+		return { ok: 'Linked to the HR employee.' };
+	},
+
+	unlinkMember: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'team:*');
+		const hotelId = event.locals.hotel!.id;
+
+		const userId = z.string().uuid().safeParse((await event.request.formData()).get('userId'));
+		if (!userId.success) return fail(400, { error: 'Invalid user.' });
+
+		const [before] = await db
+			.select({ personRef: memberships.personRef })
+			.from(memberships)
+			.where(and(eq(memberships.hotelId, hotelId), eq(memberships.userId, userId.data)));
+		if (!before) return fail(400, { error: 'Member not found.' });
+
+		await db
+			.update(memberships)
+			.set({ personRef: null })
+			.where(and(eq(memberships.hotelId, hotelId), eq(memberships.userId, userId.data)));
+		await writeAudit({
+			hotelId,
+			actor: event.locals.user,
+			action: 'team.hr_unlink',
+			entityType: 'membership',
+			entityId: userId.data,
+			before: { personRef: before.personRef }
+		});
+		return { ok: 'Unlinked from HR.' };
+	},
+
 	removeMember: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'team:*');
 		const hotelId = event.locals.hotel!.id;
