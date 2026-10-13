@@ -1,7 +1,10 @@
 import { fail } from '@sveltejs/kit';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
+import { z } from 'zod';
 import { db } from '$lib/server/db/index';
-import { establishments } from '$lib/server/db/schema/index';
+import { apiKeys, establishments } from '$lib/server/db/schema/index';
+import { canAt } from '$lib/authz';
+import { issueApiKey, revokeApiKey } from '$lib/server/auth/api-key';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import {
@@ -11,9 +14,32 @@ import {
 } from '$lib/server/hr/night-diff';
 import type { Actions, PageServerLoad } from './$types';
 
+/** Keys are Main HR's to issue — org-wide only, never a manager's, even for their own business. */
+const mayManageKeys = (locals: App.Locals) =>
+	locals.user!.isSystemAdmin || canAt(locals.access!, 'apikey:*');
+
 export const load: PageServerLoad = async ({ locals }) => {
 	requireCap(locals.user, locals.access, 'schedule:*', locals.establishment!.id);
-	return { nightDiff: parseNightDiff(locals.establishment!.config) };
+	const canKeys = mayManageKeys(locals);
+	const keys = canKeys
+		? await db
+				.select({
+					id: apiKeys.id,
+					name: apiKeys.name,
+					prefix: apiKeys.keyPrefix,
+					createdAt: apiKeys.createdAt,
+					lastUsedAt: apiKeys.lastUsedAt,
+					revokedAt: apiKeys.revokedAt
+				})
+				.from(apiKeys)
+				.where(eq(apiKeys.establishmentId, locals.establishment!.id))
+				.orderBy(desc(apiKeys.createdAt))
+		: [];
+	return {
+		nightDiff: parseNightDiff(locals.establishment!.config),
+		canKeys,
+		keys
+	};
 };
 
 export const actions: Actions = {
@@ -40,5 +66,50 @@ export const actions: Actions = {
 			after: parsed.data
 		});
 		return { ok: 'Night differential saved.' };
+	},
+
+	/** Issues a key for this establishment. The raw value is returned once and never stored. */
+	createKey: async (event) => {
+		if (!mayManageKeys(event.locals)) return fail(403, { error: 'Only Main HR can issue keys.' });
+		const est = event.locals.establishment!;
+		const name = z.string().trim().min(1).max(80).safeParse(String((await event.request.formData()).get('name') ?? ''));
+		if (!name.success) return fail(400, { error: 'Name the key, e.g. “Hotel app”.' });
+		const { raw, key } = await issueApiKey({
+			establishmentId: est.id,
+			name: name.data,
+			createdByUserId: event.locals.user!.id
+		});
+		await writeAudit({
+			establishmentId: est.id,
+			actor: event.locals.user,
+			action: 'apikey.create',
+			entityType: 'api_key',
+			entityId: key.id,
+			after: { name: name.data, prefix: key.keyPrefix }
+		});
+		return { ok: 'Key created. Copy it now — it is not shown again.', newKey: raw };
+	},
+
+	revokeKey: async (event) => {
+		if (!mayManageKeys(event.locals)) return fail(403, { error: 'Only Main HR can revoke keys.' });
+		const est = event.locals.establishment!;
+		const id = z.string().uuid().safeParse((await event.request.formData()).get('id'));
+		if (!id.success) return fail(400, { error: 'Unknown key.' });
+		// Scoped to this establishment, so a key id from another business can never be revoked here.
+		const owned = await db
+			.select({ id: apiKeys.id })
+			.from(apiKeys)
+			.where(and(eq(apiKeys.id, id.data), eq(apiKeys.establishmentId, est.id)))
+			.then((r) => r.at(0));
+		if (!owned) return fail(404, { error: 'That key is not on this establishment.' });
+		await revokeApiKey(id.data);
+		await writeAudit({
+			establishmentId: est.id,
+			actor: event.locals.user,
+			action: 'apikey.revoke',
+			entityType: 'api_key',
+			entityId: id.data
+		});
+		return { ok: 'Key revoked.' };
 	}
 };

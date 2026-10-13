@@ -189,6 +189,12 @@ Hotel gains: HR client (API key + base URL setting), `person_ref` columns, event
    correct it. The Approvals inbox lists waiting DTRs and shows a per-month board of who has not sent.
    Cutoff is a calendar month for now; the table stores start/end so semi-monthly can follow.
 6. **Hotel integration** — API + events, `person_ref` columns, Team picker, auto-suspend, fallback sync.
+   **Done 2026-10-13** on `feature/hr-app`, as **pull, not push**: HR exposes `GET /api/v1/hr/employees`
+   (per-establishment bearer key, rate-limited, identity/post fields only); the hotel stores the key
+   encrypted (`hr_connections`), shows an HR picker on Team, carries `person_ref` on invites and
+   memberships, and a 15-minute job (plus a "check now" button) removes access for the separated or
+   moved. HR down never removes anyone; a hotel admin is flagged, not removed. A push event was
+   deliberately left out (no retry queue to run); add it if 15 minutes proves too slow.
 7. **Hotel HR removal** — delete routes/code/tables, caps backfill.
 8. **Payroll + payslips** — company-wide run, release, business download.
    ⚠ **Blocker independent of this plan:** `@mm/hr-core/statutory` (SSS/PhilHealth/Pag-IBIG/BIR) and
