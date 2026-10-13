@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "pnpm --filter @mm/hotel dev",
+    "dev:hr": "pnpm --filter @mm/hr dev",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "check": "pnpm -r check",
