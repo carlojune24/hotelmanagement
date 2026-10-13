@@ -8,6 +8,7 @@ import { writeAudit } from '$lib/server/audit';
 import { createInvite, revokeInvite } from '$lib/server/auth/invite';
 import { sendStaffInvite } from '$lib/server/email/send-invite';
 import { linkMemberToEmployee, listEmployeesForLinking } from '$lib/server/hr/employees';
+import { HrLinkError, fetchAssigned, getConnection, type HrPerson } from '$lib/server/hr-link/client';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -30,7 +31,8 @@ export const load: PageServerLoad = async ({ locals }) => {
 			roleId: roles.id,
 			roleSlug: roles.slug,
 			roleName: roles.name,
-			isProtected: roles.isProtected
+			isProtected: roles.isProtected,
+			personRef: memberships.personRef
 		})
 		.from(memberships)
 		.innerJoin(users, eq(users.id, memberships.userId))
@@ -54,8 +56,38 @@ export const load: PageServerLoad = async ({ locals }) => {
 		.where(
 			and(eq(invites.hotelId, hotelId), eq(invites.status, 'pending'), ne(invites.role, 'hotel_admin'))
 		);
+	const pendingRefs = (
+		await db
+			.select({ r: invites.personRef })
+			.from(invites)
+			.where(and(eq(invites.hotelId, hotelId), eq(invites.status, 'pending')))
+	).map((x) => x.r);
 
-	return { members, pendingInvites, assignableRoles, employees };
+	// The HR picker: who HR has assigned to this hotel and who has no login here yet. HR being
+	// down or not connected only removes the picker — inviting by email still works as before.
+	const connection = await getConnection(hotelId);
+	let hrPeople: HrPerson[] = [];
+	let hrError: string | null = null;
+	if (connection) {
+		try {
+			const taken = new Set([
+				...members.map((m) => m.personRef).filter((r): r is string => !!r),
+				...pendingRefs.map((r) => r).filter((r): r is string => !!r)
+			]);
+			hrPeople = (await fetchAssigned(hotelId)).filter((p) => p.status === 'active' && !taken.has(p.person_ref));
+		} catch (e) {
+			if (!(e instanceof HrLinkError)) throw e;
+			hrError = e.message;
+		}
+	}
+
+	return {
+		members,
+		pendingInvites,
+		assignableRoles,
+		employees,
+		hr: { connected: !!connection, people: hrPeople, error: hrError }
+	};
 };
 
 async function getAssignableRoleOr400(hotelId: string, slug: string) {
@@ -74,7 +106,11 @@ export const actions: Actions = {
 
 		const fd = await event.request.formData();
 		const parsed = z
-			.object({ email: z.string().email(), role: z.string().min(1) })
+			.object({
+				email: z.string().email(),
+				role: z.string().min(1),
+				personRef: z.string().max(64).optional().or(z.literal(''))
+			})
 			.safeParse(Object.fromEntries(fd));
 		if (!parsed.success) return fail(400, { error: 'Enter a valid email and role.' });
 
@@ -83,10 +119,33 @@ export const actions: Actions = {
 		const role = await getAssignableRoleOr400(hotelId, parsed.data.role);
 		if (!role) return fail(400, { error: 'Choose a valid role.' });
 
+		// An invite from the HR picker is checked against HR *now*, server-side — the browser's word
+		// that "this person is one of ours" is never enough to attach a person reference.
+		let personRef: string | null = null;
+		if (parsed.data.personRef) {
+			try {
+				const match = (await fetchAssigned(hotelId)).find((p) => p.person_ref === parsed.data.personRef);
+				if (!match || match.status !== 'active') {
+					return fail(400, { error: 'HR no longer lists that person as active at this hotel.' });
+				}
+				personRef = match.person_ref;
+			} catch (e) {
+				if (e instanceof HrLinkError) return fail(400, { error: `Couldn't check with HR: ${e.message}` });
+				throw e;
+			}
+			const already = await db
+				.select({ userId: memberships.userId })
+				.from(memberships)
+				.where(and(eq(memberships.hotelId, hotelId), eq(memberships.personRef, personRef)))
+				.then((r) => r.at(0));
+			if (already) return fail(400, { error: 'That person already has a login at this hotel.' });
+		}
+
 		const { token } = await createInvite({
 			email: parsed.data.email,
 			hotelId,
 			role: role.slug,
+			personRef,
 			invitedByUserId: event.locals.user?.id
 		});
 		await writeAudit({
@@ -94,7 +153,7 @@ export const actions: Actions = {
 			actor: event.locals.user,
 			action: 'team.invite_member',
 			entityType: 'invite',
-			after: { email: parsed.data.email, role: role.slug }
+			after: { email: parsed.data.email, role: role.slug, personRef }
 		});
 
 		const link = `${event.url.origin}/auth/accept-invite/${token}`;

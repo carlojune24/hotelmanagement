@@ -44,6 +44,8 @@ export const invites = pgTable(
 		tokenHash: text('token_hash').notNull().unique(),
 		hotelId: uuid('hotel_id'),
 		role: text('role'),
+		/** Set when invited from the HR picker; copied onto the membership on acceptance. */
+		personRef: text('person_ref'),
 		invitedByUserId: uuid('invited_by_user_id').references(() => users.id, {
 			onDelete: 'set null'
 		}),

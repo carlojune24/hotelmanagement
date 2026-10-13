@@ -4,6 +4,7 @@ import {
 	runAutoDayClose,
 	runErrorLogRetentionJob,
 	runHoldSweep,
+	runHrSync,
 	runNoShowAutoflag,
 	runRecurringExpenses,
 	type JobRunSummary
@@ -37,7 +38,9 @@ const QUEUES = {
 	// day is closed, so running more often just means a hotel whose shifts close late
 	// gets picked up within the hour instead of waiting for a fixed nightly slot.
 	auto_day_close: { cron: '0 * * * *', run: runAutoDayClose },
-	error_log_retention: { cron: '30 3 * * *', run: runErrorLogRetentionJob }
+	error_log_retention: { cron: '30 3 * * *', run: runErrorLogRetentionJob },
+	// Linked staff follow HR: a separation or transfer removes hotel access within the quarter hour.
+	hr_sync: { cron: '*/15 * * * *', run: runHrSync }
 } as const;
 
 async function boot(): Promise<PgBoss> {

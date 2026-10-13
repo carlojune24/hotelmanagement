@@ -1,6 +1,7 @@
 import { and, eq, inArray, lt } from 'drizzle-orm';
 import { db } from '../db/index';
-import { bookings, hotels } from '../db/schema/index';
+import { bookings, hotels, hrConnections } from '../db/schema/index';
+import { syncHrLinkedMembers } from '../hr-link/sync';
 import { expirePendingOrders } from '../orders';
 import { generateDueRecurringExpenses } from '../finance/expenses';
 import { getDayCloseStatus, runDayClose } from '../finance/dayclose';
@@ -118,4 +119,23 @@ export async function runAutoDayClose(): Promise<JobRunSummary> {
 export async function runErrorLogRetentionJob(): Promise<JobRunSummary> {
 	const { deleted } = await runErrorLogRetention();
 	return { hotelsProcessed: 0, detail: { deleted } };
+}
+
+/**
+ * Brings every hotel's HR-linked logins in line with HR (separated or moved away → access removed).
+ * The connection itself is the opt-in, so there is no per-hotel toggle. An HR outage changes
+ * nothing — `syncHrLinkedMembers` reports it and leaves access exactly as it was.
+ */
+export async function runHrSync(): Promise<JobRunSummary> {
+	const rows = await db.select({ hotelId: hrConnections.hotelId }).from(hrConnections);
+	let removed = 0;
+	let unreachable = 0;
+	let protectedKept = 0;
+	for (const { hotelId } of rows) {
+		const r = await syncHrLinkedMembers(hotelId);
+		removed += r.removed.length;
+		protectedKept += r.protectedKept.length;
+		if (r.error) unreachable += 1;
+	}
+	return { hotelsProcessed: rows.length, detail: { removed, unreachable, protectedKept } };
 }

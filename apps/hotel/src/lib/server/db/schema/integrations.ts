@@ -69,3 +69,32 @@ export const emailSettings = pgTable('email_settings', {
 
 export type PaymongoSettings = typeof paymongoSettings.$inferSelect;
 export type EmailSettings = typeof emailSettings.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// HR connection — one per hotel (docs/HR_PLAN.md §5)
+// ---------------------------------------------------------------------------
+
+/**
+ * How this hotel reaches the separate HR app: its address and the per-establishment API key Main HR
+ * issued. The key is encrypted at rest like the PayMongo keys and never sent back to the browser.
+ * Without a row the hotel simply has no HR picker — nothing else in the hotel depends on HR.
+ */
+export const hrConnections = pgTable('hr_connections', {
+	hotelId: uuid('hotel_id')
+		.primaryKey()
+		.references(() => hotels.id, { onDelete: 'cascade' }),
+	/** Origin of the HR app, e.g. `https://hr.example.com` — no path. */
+	baseUrl: text('base_url').notNull(),
+	apiKeyEnc: text('api_key_enc').notNull(),
+	apiKeyHint: text('api_key_hint').notNull(),
+	/** What HR reports for this key's establishment, for display. */
+	establishmentName: text('establishment_name'),
+	lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
+	/** Null when the last contact worked. Never a reason to remove anyone's access. */
+	lastError: text('last_error'),
+	connectedByUserId: uuid('connected_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+	createdAt: createdAt(),
+	updatedAt: updatedAt()
+});
+
+export type HrConnection = typeof hrConnections.$inferSelect;
