@@ -42,8 +42,9 @@ export async function createEstablishment(input: EstablishmentInput) {
 			.then((r) => r.at(0));
 		return !!hit;
 	});
-	// Stored exactly as given: it must match the hotel app's value byte for byte.
-	const orgRef = input.kind === 'hotel' ? input.orgRef! : mintRef('org');
+	// A given hotel reference is stored exactly as given: it must match the hotel app's value byte
+	// for byte. A hotel not set up in the hotel app yet (or a business) gets a minted one.
+	const orgRef = input.kind === 'hotel' && input.orgRef ? input.orgRef : mintRef('org');
 	const dupe = await db
 		.select({ id: establishments.id })
 		.from(establishments)
@@ -67,16 +68,36 @@ export async function createEstablishment(input: EstablishmentInput) {
 	return row!;
 }
 
-/** Kind and org reference are identity — set once, never edited (docs/HR_PLAN.md §6). */
+/** Kind is identity — set once. A hotel's reference may be (re)linked, nothing else is keyed to it yet. */
 export async function updateEstablishment(
 	id: string,
 	input: Pick<EstablishmentInput, 'name' | 'timezone' | 'legalName' | 'addressLine' | 'city'> & {
 		status?: 'active' | 'archived';
+		/** Hotels only: link to (or re-point at) the hotel app's record. */
+		orgRef?: string;
 	}
 ) {
+	if (input.orgRef) {
+		const current = await db
+			.select({ kind: establishments.kind, orgRef: establishments.orgRef })
+			.from(establishments)
+			.where(eq(establishments.id, id))
+			.then((r) => r.at(0));
+		if (!current) throw new EstablishmentError('Establishment not found.');
+		if (current.kind !== 'hotel') throw new EstablishmentError('Only a hotel can be linked to the hotel app.');
+		if (current.orgRef !== input.orgRef) {
+			const dupe = await db
+				.select({ id: establishments.id })
+				.from(establishments)
+				.where(eq(establishments.orgRef, input.orgRef))
+				.then((r) => r.at(0));
+			if (dupe) throw new EstablishmentError('That hotel is already registered.');
+		}
+	}
 	const [row] = await db
 		.update(establishments)
 		.set({
+			...(input.orgRef ? { orgRef: input.orgRef } : {}),
 			name: input.name,
 			timezone: input.timezone,
 			legalName: input.legalName || null,

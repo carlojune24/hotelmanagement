@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import SearchIcon from '@lucide/svelte/icons/search';
@@ -106,7 +107,7 @@
 				<Table.Body>
 					{#each rows as row (row.id)}
 						<Table.Row>
-							<Table.Cell class="font-medium"><a href="/{row.slug}/employees" class="underline-offset-4 hover:underline">{row.name}</a></Table.Cell>
+							<Table.Cell class="font-medium"><a href="/{row.slug}/employees" class="underline decoration-ink/30 underline-offset-4 hover:decoration-ink">{row.name}</a></Table.Cell>
 							<Table.Cell>{row.kind === 'hotel' ? 'Hotel' : 'Business'}</Table.Cell>
 							<Table.Cell class="text-ink-muted">{row.timezone}</Table.Cell>
 							<Table.Cell class="font-mono text-xs text-ink-muted" title={row.orgRef}
@@ -151,7 +152,7 @@
 			<Dialog.Description>
 				{editing
 					? 'Kind and reference are fixed once an establishment exists.'
-					: 'A hotel links to its record in the hotel app by reference; a business is created here.'}
+					: 'A hotel links to its record in the hotel app by reference; leave it blank if the hotel is not set up there yet. A business is created here.'}
 			</Dialog.Description>
 		</Dialog.Header>
 
@@ -166,7 +167,9 @@
 					busy = false;
 					if (result.type === 'success') {
 						dialogOpen = false;
-						toast.success((result.data as { ok?: string } | undefined)?.ok ?? 'Saved.');
+						const d = result.data as { ok?: string; slug?: string } | undefined;
+						toast.success(d?.ok ?? 'Saved.');
+						if (d?.slug) await goto(`/${d.slug}/employees`);
 					} else if (result.type === 'failure') {
 						const msg = (result.data as { message?: string } | undefined)?.message;
 						if (msg) toast.error(msg);
@@ -192,8 +195,8 @@
 				</div>
 				{#if kind === 'hotel'}
 					<div class="space-y-1.5">
-						<Label for="orgRef">Hotel reference</Label>
-						<Input id="orgRef" name="orgRef" placeholder="org_…" class="font-mono" required />
+						<Label for="orgRef">Hotel reference <span class="text-ink-muted">(optional)</span></Label>
+						<Input id="orgRef" name="orgRef" placeholder="org_… — blank if not in the hotel app yet" class="font-mono" />
 						{#if fieldError('orgRef')}<p class="text-sm text-destructive">{fieldError('orgRef')}</p>{/if}
 					</div>
 				{/if}
@@ -222,6 +225,15 @@
 					{/each}
 				</select>
 			</div>
+
+			{#if editing && editing.kind === 'hotel'}
+				<div class="space-y-1.5">
+					<Label for="editOrgRef">Hotel reference</Label>
+					<Input id="editOrgRef" name="orgRef" class="font-mono" value={editing.orgRef} />
+					{#if fieldError('orgRef')}<p class="text-sm text-destructive">{fieldError('orgRef')}</p>{/if}
+					<p class="text-xs text-ink-muted">Paste the hotel's reference from the hotel app to link it.</p>
+				</div>
+			{/if}
 
 			{#if editing}
 				<div class="space-y-1.5">

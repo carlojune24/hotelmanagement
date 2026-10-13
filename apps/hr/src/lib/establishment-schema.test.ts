@@ -8,10 +8,18 @@ describe('establishmentSchema', () => {
 		const r = establishmentSchema.safeParse({ name: 'Seaside', kind: 'hotel', timezone: 'Asia/Manila', orgRef: ref });
 		expect(r.success).toBe(true);
 	});
-	it('rejects a hotel without a valid org reference', () => {
-		expect(establishmentSchema.safeParse({ name: 'Seaside', kind: 'hotel', timezone: 'Asia/Manila' }).success).toBe(false);
+	it('accepts a hotel with no reference yet (linked later)', () => {
+		expect(establishmentSchema.safeParse({ name: 'Seaside', kind: 'hotel', timezone: 'Asia/Manila' }).success).toBe(true);
+		expect(
+			establishmentSchema.safeParse({ name: 'Seaside', kind: 'hotel', timezone: 'Asia/Manila', orgRef: '' }).success
+		).toBe(true);
+	});
+	it('rejects a reference that is given but malformed', () => {
 		expect(
 			establishmentSchema.safeParse({ name: 'Seaside', kind: 'hotel', timezone: 'Asia/Manila', orgRef: 'org_short' }).success
+		).toBe(false);
+		expect(
+			establishmentSchema.safeParse({ name: 'Seaside', kind: 'hotel', timezone: 'Asia/Manila', orgRef: 'org_mmgroupcompanieshoteltandag' }).success
 		).toBe(false);
 	});
 	it('accepts a business without a reference', () => {

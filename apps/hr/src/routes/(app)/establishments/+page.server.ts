@@ -10,6 +10,7 @@ import {
 	listEstablishments,
 	updateEstablishment
 } from '$lib/server/establishments';
+import { orgRefField } from '$lib/establishment-schema';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -45,8 +46,10 @@ export const actions: Actions = {
 		if (!parsed.success) {
 			return fail(400, { action: 'create', errors: z.flattenError(parsed.error).fieldErrors, values });
 		}
+		let created;
 		try {
 			const row = await createEstablishment(parsed.data);
+			created = row;
 			await writeAudit({
 				actor: locals.user,
 				action: 'establishment.create',
@@ -60,7 +63,7 @@ export const actions: Actions = {
 			}
 			throw e;
 		}
-		return { ok: 'Establishment added.' };
+		return { ok: 'Establishment added.', slug: created.slug };
 	},
 
 	update: async ({ request, locals }) => {
@@ -74,6 +77,7 @@ export const actions: Actions = {
 				legalName: establishmentSchema.shape.legalName,
 				addressLine: establishmentSchema.shape.addressLine,
 				city: establishmentSchema.shape.city,
+				orgRef: orgRefField,
 				status: z.enum(['active', 'archived'])
 			})
 			.safeParse(values);
