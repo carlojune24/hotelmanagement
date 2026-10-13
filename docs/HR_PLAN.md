@@ -221,6 +221,13 @@ Hotel gains: HR client (API key + base URL setting), `person_ref` columns, event
    - Deliberately simple, all stated in code: contributions on rate-based monthly pay, split across the
      month's periods; night differential not split regular/OT; no year-end tax true-up; the working-day
      factor (261/313/365) is a company choice with no default.
+   - **Government coverage + remittance (2026-10-13):** per-employee flags for SSS / PhilHealth / Pag-IBIG
+     coverage and withholding exemption, with a required reason and optional salary-base overrides (Main HR
+     only; frozen onto each payslip line). Remittance schedules per agency per *pay month* from locked or
+     released batches (`/payroll/remittances`, print, CSV), with mark-as-remitted (snapshot + reference
+     no.). A remitted month's batches cannot be unlocked until it is reopened. No due dates are assumed —
+     the company enters a "day N of the next month" per agency. Agency upload files (R-3, RF-1, MCRF,
+     1601-C) and government-loan deductions are not built.
 
 Phases 1–5 ship in the HR app while the hotel's own HR keeps running; 7 only after 6 is proven.
 

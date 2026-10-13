@@ -22,6 +22,7 @@ import {
 } from '$lib/server/db/schema/index';
 import { getHandoff } from './dtr-submissions';
 import { parseNightDiff } from './night-diff';
+import { AGENCY_LABEL, remittedAgenciesForBatch } from './remittance';
 
 export class PayrollError extends Error {}
 
@@ -250,6 +251,44 @@ const adjustmentsOf = (raw: unknown): PayrollAdjustments => {
 	};
 };
 
+type CoverageFields = Pick<
+	typeof employees.$inferSelect,
+	'sssCovered' | 'philhealthCovered' | 'pagibigCovered' | 'withholdingExempt' | 'coverageNote' | 'statutoryOverrides'
+>;
+
+const overridesSchema = z.object({
+	sss_msc: z.number().int().positive().optional(),
+	philhealth_base: z.number().int().positive().optional(),
+	pagibig_base: z.number().int().positive().optional()
+});
+
+/** An employee's government coverage as the engine's inputs. */
+export function coverageInputOf(emp: CoverageFields) {
+	const o = overridesSchema.safeParse(emp.statutoryOverrides).data ?? {};
+	return {
+		coverage: { sss: emp.sssCovered, philhealth: emp.philhealthCovered, pagibig: emp.pagibigCovered },
+		exemptFromWithholding: emp.withholdingExempt,
+		baseOverrides: {
+			sssCentavos: o.sss_msc ?? null,
+			philhealthCentavos: o.philhealth_base ?? null,
+			pagibigCentavos: o.pagibig_base ?? null
+		}
+	};
+}
+
+/** Frozen onto the line so a payslip keeps saying "not covered — why" after the employee is edited. */
+export function coverageSnapshotOf(emp: CoverageFields) {
+	const input = coverageInputOf(emp);
+	return {
+		coverage: {
+			...input.coverage,
+			withholdingExempt: input.exemptFromWithholding,
+			overridden: Object.values(input.baseOverrides).some((v) => v !== null),
+			note: emp.coverageNote
+		}
+	};
+}
+
 export async function generateBatch(batchId: string): Promise<GenerateResult> {
 	const batch = await db.select().from(payrollBatches).where(eq(payrollBatches.id, batchId)).then((r) => r.at(0));
 	if (!batch) throw new PayrollError('That payroll batch does not exist.');
@@ -390,7 +429,8 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 			dayFactor: run.dayFactor,
 			nightDiffRate: nd.ratePct / 100,
 			days,
-			adjustments: adjustmentsOf(keptAdjustments.get(emp.id))
+			adjustments: adjustmentsOf(keptAdjustments.get(emp.id)),
+			...coverageInputOf(emp)
 		});
 
 		// Cost by establishment: gross split by time worked at each, remainder to the home.
@@ -447,7 +487,7 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 					netPayCentavos: b.line.line.net_pay,
 					thirteenthMonthAccrualCentavos: b.line.line.thirteenth_month_accrual,
 					adjustments: adjustmentsOf(keptAdjustments.get(b.employee.id)),
-					detail: b.line.detail,
+					detail: { ...b.line.detail, ...coverageSnapshotOf(b.employee) },
 					costByEstablishment: b.cost
 				}))
 			);
@@ -564,6 +604,12 @@ export async function lockBatch(batchId: string, userId: string | null) {
 }
 
 export async function unlockBatch(batchId: string) {
+	const remitted = await remittedAgenciesForBatch(batchId);
+	if (remitted.length) {
+		throw new PayrollError(
+			`This month's ${remitted.map((a) => AGENCY_LABEL[a]).join(', ')} remittance is already marked as paid, so this batch can't be reopened. Reopen the remittance first.`
+		);
+	}
 	const [row] = await db
 		.update(payrollBatches)
 		.set({ status: 'draft', lockedByUserId: null, lockedAt: null, updatedAt: new Date() })

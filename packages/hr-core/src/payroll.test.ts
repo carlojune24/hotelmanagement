@@ -259,6 +259,39 @@ describe('computePayrollLine', () => {
 		expect(overridden.line.deductions.withholding_tax).toBe(peso(1_234.56));
 	});
 
+	it('a person not covered by an agency pays no employee or employer share to it', () => {
+		const input = {
+			...base,
+			payBasis: 'monthly' as const,
+			baseRateCentavos: peso(30_000),
+			days: Array.from({ length: 13 }, () => day())
+		};
+		const full = computePayrollLine(input).line;
+		expect(full.deductions.sss_ee).toBeGreaterThan(0);
+		const off = computePayrollLine({ ...input, coverage: { sss: false, philhealth: true, pagibig: false } }).line;
+		expect(off.deductions.sss_ee).toBe(0);
+		expect(off.employer_contributions.sss_er).toBe(0);
+		expect(off.employer_contributions.ecc).toBe(0);
+		expect(off.deductions.pagibig_ee).toBe(0);
+		expect(off.employer_contributions.pagibig_er).toBe(0);
+		expect(off.deductions.philhealth_ee).toBe(full.deductions.philhealth_ee);
+		expect(off.net_pay).toBe(off.gross - Object.values(off.deductions).reduce((a, b) => a + b, 0));
+	});
+
+	it('a base override changes the salary base, not the rate', () => {
+		const input = {
+			...base,
+			payBasis: 'monthly' as const,
+			baseRateCentavos: peso(30_000),
+			days: Array.from({ length: 13 }, () => day())
+		};
+		const capped = computePayrollLine({ ...input, baseOverrides: { sssCentavos: peso(10_000) } }).line;
+		// 10,000 MSC → 5% employee, split over two periods
+		expect(capped.deductions.sss_ee).toBe(peso(250));
+		expect(capped.employer_contributions.sss_er).toBe(peso(500));
+		expect(capped.deductions.philhealth_ee).toBe(computePayrollLine(input).line.deductions.philhealth_ee);
+	});
+
 	it('always adds up: net = gross − every deduction', () => {
 		const { line } = computePayrollLine({
 			...base,

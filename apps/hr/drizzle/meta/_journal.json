@@ -50,6 +50,13 @@
       "when": 1791872294966,
       "tag": "0006_payroll",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791879065155,
+      "tag": "0007_gov_coverage_remittances",
+      "breakpoints": true
     }
   ]
 }

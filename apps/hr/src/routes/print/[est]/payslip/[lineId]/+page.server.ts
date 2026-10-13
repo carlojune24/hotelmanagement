@@ -12,6 +12,18 @@ import type { PageServerLoad } from './$types';
  * payslip of someone whose home establishment is the one in the URL — checked here, not just in
  * the list, so a guessed line id can never expose another business's pay.
  */
+/** Which deductions were left out because Main HR marked the person not covered (frozen on the line). */
+function notCoveredLabels(detail: unknown): string[] {
+	const c = (detail as { coverage?: Record<string, unknown> } | null)?.coverage;
+	if (!c) return [];
+	return [
+		c.sss === false ? 'SSS' : null,
+		c.philhealth === false ? 'PhilHealth' : null,
+		c.pagibig === false ? 'Pag-IBIG' : null,
+		c.withholdingExempt === true ? 'withholding tax' : null
+	].filter((x): x is string => x !== null);
+}
+
 export const load: PageServerLoad = async ({ locals, params, url }) => {
 	requireUser(locals.user, url.pathname);
 	const est = locals.establishment;
@@ -53,6 +65,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		time: { days: l.daysWorked, regularMinutes: l.minutesRegular, otMinutes: l.minutesOvertime, nightMinutes: l.minutesNightDiff },
 		earnings: l.earnings as Record<string, number>,
 		deductions: l.deductions as Record<string, number>,
+		notCovered: notCoveredLabels(l.detail),
 		gross: l.grossCentavos,
 		net: l.netPayCentavos
 	};

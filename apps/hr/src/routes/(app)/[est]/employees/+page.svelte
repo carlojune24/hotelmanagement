@@ -508,6 +508,66 @@
 			</div>
 		</div>
 	</section>
+
+	<section class="rounded-xl bg-ok/5 p-4">
+		<div>
+			<p class="text-sm font-semibold text-ink">Government coverage</p>
+			<p class="text-xs text-ink-muted">
+				Everyone is charged all four by default. Untick only when the person is genuinely not covered
+				or exempt, and say why.
+			</p>
+		</div>
+		<input type="hidden" name="coverageSubmitted" value="1" />
+		<div class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+			<label class="flex items-center gap-2">
+				<input type="checkbox" name="sssCovered" checked={emp?.sssCovered ?? true} class="size-4" />
+				SSS covered
+			</label>
+			<label class="flex items-center gap-2">
+				<input type="checkbox" name="philhealthCovered" checked={emp?.philhealthCovered ?? true} class="size-4" />
+				PhilHealth covered
+			</label>
+			<label class="flex items-center gap-2">
+				<input type="checkbox" name="pagibigCovered" checked={emp?.pagibigCovered ?? true} class="size-4" />
+				Pag-IBIG covered
+			</label>
+			<label class="flex items-center gap-2">
+				<input type="checkbox" name="withholdingExempt" checked={emp?.withholdingExempt ?? false} class="size-4" />
+				Exempt from withholding tax
+			</label>
+		</div>
+		<div class="mt-3 grid grid-cols-3 gap-3">
+			{#each [['sssBasePesos', 'SSS base (₱/mo)', 'sss_msc'], ['philhealthBasePesos', 'PhilHealth base (₱/mo)', 'philhealth_base'], ['pagibigBasePesos', 'Pag-IBIG base (₱/mo)', 'pagibig_base']] as [name, label, key] (name)}
+				{@const cents = (emp?.statutoryOverrides as Record<string, number> | null)?.[key as string]}
+				<div>
+					<Label for="{idPrefix}{name}">{label}</Label>
+					<Input
+						id="{idPrefix}{name}"
+						name={name as string}
+						type="number"
+						step="0.01"
+						min="0"
+						placeholder="computed"
+						value={cents ? (cents / 100).toString() : ''}
+						class="mt-1"
+					/>
+				</div>
+			{/each}
+		</div>
+		<p class="mt-1 text-xs text-ink-muted">
+			A base replaces the monthly salary the contribution is computed on; the rate still applies.
+		</p>
+		<div class="mt-3">
+			<Label for="{idPrefix}coverageNote">Reason</Label>
+			<Input
+				id="{idPrefix}coverageNote"
+				name="coverageNote"
+				value={emp?.coverageNote ?? ''}
+				placeholder="e.g. minimum-wage earner; contributes through another employer"
+				class="mt-1"
+			/>
+		</div>
+	</section>
 {/snippet}
 
 <Dialog.Root bind:open={createOpen}>

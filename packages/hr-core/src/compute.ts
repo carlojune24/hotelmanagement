@@ -62,6 +62,21 @@ export const NO_ADJUSTMENTS: PayrollAdjustments = {
 	withholdingOverrideCentavos: null
 };
 
+/** Which agencies this person is charged by; absent = covered by all (the default). */
+export interface StatutoryCoverage {
+	sss: boolean;
+	philhealth: boolean;
+	pagibig: boolean;
+}
+export const FULL_COVERAGE: StatutoryCoverage = { sss: true, philhealth: true, pagibig: true };
+
+/** Replaces the monthly salary base a contribution is computed on — never the contribution itself. */
+export interface StatutoryBaseOverrides {
+	sssCentavos?: number | null;
+	philhealthCentavos?: number | null;
+	pagibigCentavos?: number | null;
+}
+
 export interface ComputePayrollLineInput {
 	personRef: string;
 	costCenter: string | null;
@@ -76,6 +91,9 @@ export interface ComputePayrollLineInput {
 	days: PayrollDayInput[];
 	adjustments?: PayrollAdjustments;
 	exemptFromWithholding?: boolean;
+	/** Not covered → that agency's employee *and* employer share (and SSS EC) are zero. */
+	coverage?: StatutoryCoverage;
+	baseOverrides?: StatutoryBaseOverrides;
 }
 
 export interface ComputedPayrollLine {
@@ -170,9 +188,18 @@ export function computePayrollLine(input: ComputePayrollLineInput): ComputedPayr
 
 	// ---- statutory: a month's amount, split across that month's periods
 	const pay = gross > 0;
-	const sss = pay ? computeSss2026(monthly) : { employeeShare: 0, employerShare: 0, ec: 0 };
-	const ph = pay ? computePhilhealth2026(monthly) : { employeeShare: 0, employerShare: 0 };
-	const pi = pay ? computePagibig2026(monthly) : { employeeShare: 0, employerShare: 0 };
+	const cover = input.coverage ?? FULL_COVERAGE;
+	const over = input.baseOverrides ?? {};
+	const sss =
+		pay && cover.sss ? computeSss2026(over.sssCentavos ?? monthly) : { employeeShare: 0, employerShare: 0, ec: 0 };
+	const ph =
+		pay && cover.philhealth
+			? computePhilhealth2026(over.philhealthCentavos ?? monthly)
+			: { employeeShare: 0, employerShare: 0 };
+	const pi =
+		pay && cover.pagibig
+			? computePagibig2026(over.pagibigCentavos ?? monthly)
+			: { employeeShare: 0, employerShare: 0 };
 	const part = (monthlyAmount: number) => r(monthlyAmount / periodsPerMonth);
 
 	const sssEe = part(sss.employeeShare);

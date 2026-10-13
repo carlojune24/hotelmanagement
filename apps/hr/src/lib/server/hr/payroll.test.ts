@@ -175,6 +175,25 @@ describe.skipIf(!hasDb)('payroll (live DB)', async () => {
 		expect((await P.listBatchLines(batchB)).length).toBe(0);
 	});
 
+	it('charges nothing to an agency the person is not covered by, and freezes why on the line', async () => {
+		const { employees } = await import('$lib/server/db/schema/index');
+		await db
+			.update(employees)
+			.set({ sssCovered: false, coverageNote: 'covered through another employer' })
+			.where(eq(employees.id, ana));
+		await P.generateBatch(batchA);
+		const [off] = (await P.listBatchLines(batchA)).filter((l) => l.employeeId === ana);
+		expect((off!.deductions as { sss_ee: number }).sss_ee).toBe(0);
+		expect((off!.employerContributions as { sss_er: number; ecc: number })).toMatchObject({ sss_er: 0, ecc: 0 });
+		expect((off!.deductions as { philhealth_ee: number }).philhealth_ee).toBeGreaterThan(0);
+		expect(off!.detail).toMatchObject({ coverage: { sss: false, philhealth: true, note: 'covered through another employer' } });
+
+		await db.update(employees).set({ sssCovered: true, coverageNote: null }).where(eq(employees.id, ana));
+		await P.generateBatch(batchA);
+		const [on] = (await P.listBatchLines(batchA)).filter((l) => l.employeeId === ana);
+		expect((on!.deductions as { sss_ee: number }).sss_ee).toBeGreaterThan(0);
+	});
+
 	it('re-prices a line from adjustments and keeps them across a regenerate', async () => {
 		const [line] = (await P.listBatchLines(batchA)).filter((l) => l.employeeId === ana);
 		const before = line!.netPayCentavos;

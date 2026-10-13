@@ -15,6 +15,10 @@ import { normalizeEnrollId } from '$lib/hr-import';
 
 export class EmployeeError extends Error {}
 
+/** An empty form field arrives as ''; treat it as "not given". */
+const blankToUndefined = <T extends z.ZodTypeAny>(schema: T) =>
+	z.preprocess((v) => (v === '' || v === null ? undefined : v), schema);
+
 export const employeeFormSchema = z.object({
 	employeeNo: z.string().trim().min(1).max(40),
 	firstName: z.string().trim().min(1).max(120),
@@ -37,12 +41,50 @@ export const employeeFormSchema = z.object({
 	philhealth: z.string().trim().max(40).optional(),
 	pagibig: z.string().trim().max(40).optional(),
 	tin: z.string().trim().max(40).optional(),
+	/** Present when the coverage section was on the submitted form (an unticked box isn't posted). */
+	coverageSubmitted: z.string().optional(),
+	sssCovered: z.string().optional(),
+	philhealthCovered: z.string().optional(),
+	pagibigCovered: z.string().optional(),
+	withholdingExempt: z.string().optional(),
+	coverageNote: z.string().trim().max(300).optional(),
+	sssBasePesos: blankToUndefined(z.coerce.number().positive().max(10_000_000).optional()),
+	philhealthBasePesos: blankToUndefined(z.coerce.number().positive().max(10_000_000).optional()),
+	pagibigBasePesos: blankToUndefined(z.coerce.number().positive().max(10_000_000).optional()),
 	disbursementMethod,
 	bankCode: z.string().trim().max(40).optional(),
 	accountName: z.string().trim().max(160).optional(),
 	accountNo: z.string().trim().max(60).optional()
 });
 export type EmployeeFormInput = z.infer<typeof employeeFormSchema>;
+
+/** Government coverage columns from the form; empty when the section wasn't submitted (keeps what's stored). */
+function toCoverageValues(input: EmployeeFormInput) {
+	if (!input.coverageSubmitted) return {};
+	const statutoryOverrides = {
+		...(input.sssBasePesos ? { sss_msc: Math.round(input.sssBasePesos * 100) } : {}),
+		...(input.philhealthBasePesos ? { philhealth_base: Math.round(input.philhealthBasePesos * 100) } : {}),
+		...(input.pagibigBasePesos ? { pagibig_base: Math.round(input.pagibigBasePesos * 100) } : {})
+	};
+	const values = {
+		sssCovered: input.sssCovered === 'on',
+		philhealthCovered: input.philhealthCovered === 'on',
+		pagibigCovered: input.pagibigCovered === 'on',
+		withholdingExempt: input.withholdingExempt === 'on',
+		coverageNote: input.coverageNote || null,
+		statutoryOverrides
+	};
+	const departs =
+		!values.sssCovered ||
+		!values.philhealthCovered ||
+		!values.pagibigCovered ||
+		values.withholdingExempt ||
+		Object.keys(statutoryOverrides).length > 0;
+	if (departs && !values.coverageNote) {
+		throw new EmployeeError('Say why this person is not covered or has a different salary base.');
+	}
+	return values;
+}
 
 /** The person-level fields. Where they work (post, department, device ID) is the assignment. */
 function toEmployeeValues(input: EmployeeFormInput) {
@@ -67,6 +109,7 @@ function toEmployeeValues(input: EmployeeFormInput) {
 			pagibig: input.pagibig || undefined,
 			tin: input.tin || undefined
 		},
+		...toCoverageValues(input),
 		disbursement: {
 			method: input.disbursementMethod,
 			bank_code: input.bankCode || undefined,

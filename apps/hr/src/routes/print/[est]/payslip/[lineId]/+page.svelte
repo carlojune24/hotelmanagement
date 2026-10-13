@@ -110,6 +110,10 @@
 		<span class="text-2xl font-semibold tabular-nums">{money(data.net)}</span>
 	</section>
 
+	{#if data.notCovered.length > 0}
+		<p class="mt-2 text-xs text-ink-muted">Not covered / exempt: {data.notCovered.join(', ')}.</p>
+	{/if}
+
 	<footer class="mt-6 space-y-1 text-xs text-ink-muted">
 		<p>
 			SSS {data.employee.sss} · PhilHealth {data.employee.philhealth} · Pag-IBIG {data.employee.pagibig} · TIN {data.employee.tin}

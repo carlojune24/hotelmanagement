@@ -22,7 +22,10 @@
 <svelte:head><title>Payroll · HR</title></svelte:head>
 
 <div class="mx-auto max-w-5xl space-y-6">
-	<h1 class="text-5xl font-light tracking-tight">Payroll</h1>
+	<div class="flex flex-wrap items-end justify-between gap-3">
+		<h1 class="text-5xl font-light tracking-tight">Payroll</h1>
+		<Button variant="outline" href="/payroll/remittances">Remittances</Button>
+	</div>
 
 	<section class="panel space-y-4 p-5 md:p-6" aria-label="Payroll settings">
 		<div>

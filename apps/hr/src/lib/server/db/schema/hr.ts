@@ -70,6 +70,15 @@ export const employees = pgTable(
 		baseRateCentavos: bigint('base_rate_centavos', { mode: 'number' }).notNull(),
 		/** `{ sss?, philhealth?, pagibig?, tin? }` — @mm/hr-core's `govIds` shape. */
 		govIds: jsonb('gov_ids').notNull().default({}),
+		/** Government coverage — a person is covered by everything unless Main HR says otherwise. */
+		sssCovered: boolean('sss_covered').notNull().default(true),
+		philhealthCovered: boolean('philhealth_covered').notNull().default(true),
+		pagibigCovered: boolean('pagibig_covered').notNull().default(true),
+		withholdingExempt: boolean('withholding_exempt').notNull().default(false),
+		/** Why they're not covered / exempt, or why a base is overridden. */
+		coverageNote: text('coverage_note'),
+		/** `{ sss_msc?, philhealth_base?, pagibig_base? }` centavos — replaces the salary base, not the rate. */
+		statutoryOverrides: jsonb('statutory_overrides').notNull().default({}),
 		/** `{ method, bank_code?, account_name?, account_no? }` — @mm/hr-core's `disbursement` shape. */
 		disbursement: jsonb('disbursement').notNull().default({ method: 'cash' }),
 		extensions: jsonb('extensions').notNull().default({}),
@@ -735,6 +744,38 @@ export const payrollRunLines = pgTable(
 	]
 );
 
+/**
+ * One agency's remittance for one calendar month (month of the pay date). Amounts are computed live
+ * from locked/released payroll lines while `open`; marking it `remitted` snapshots the total, and the
+ * batches feeding it can no longer be unlocked.
+ */
+export const remittances = pgTable(
+	'remittances',
+	{
+		id: pk(),
+		organizationId: uuid('organization_id')
+			.notNull()
+			.references(() => organizations.id, { onDelete: 'restrict' }),
+		/** 'sss' | 'philhealth' | 'pagibig' | 'bir' */
+		agency: text('agency').notNull(),
+		/** `YYYY-MM` */
+		period: text('period').notNull(),
+		/** 'open' | 'remitted' */
+		status: text('status').notNull().default('open'),
+		dueDate: date('due_date', { mode: 'string' }),
+		remittedOn: date('remitted_on', { mode: 'string' }),
+		referenceNo: text('reference_no'),
+		/** Snapshot at the moment it was marked remitted. */
+		amountCentavos: bigint('amount_centavos', { mode: 'number' }),
+		lineCount: integer('line_count'),
+		remittedByUserId: uuid('remitted_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		note: text('note'),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [uniqueIndex('remittances_org_agency_period_idx').on(t.organizationId, t.agency, t.period)]
+);
+
 // ---------------------------------------------------------------------------
 // Relations
 // ---------------------------------------------------------------------------
@@ -780,3 +821,4 @@ export type DtrSubmission = typeof dtrSubmissions.$inferSelect;
 export type PayrollRun = typeof payrollRuns.$inferSelect;
 export type PayrollBatch = typeof payrollBatches.$inferSelect;
 export type PayrollRunLineRow = typeof payrollRunLines.$inferSelect;
+export type Remittance = typeof remittances.$inferSelect;
