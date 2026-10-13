@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '../db/index';
-import { hrConnections, type HrConnection } from '../db/schema/index';
+import { hotels, hrConnections, type HrConnection } from '../db/schema/index';
 import { decryptSecret, encryptSecret, maskSecret } from '../secrets';
 
 /**
@@ -52,6 +52,16 @@ export function normalizeBaseUrl(raw: string): string {
 		throw new HrLinkError('bad_response', 'The HR app address must start with https://');
 	}
 	return u.origin;
+}
+
+/** Pure: a key issued for a different establishment would silently link the wrong people. */
+export function assertSameEstablishment(hotelOrgRef: string, keyOrgRef: string, keyName: string) {
+	if (hotelOrgRef !== keyOrgRef) {
+		throw new HrLinkError(
+			'bad_response',
+			`This key belongs to "${keyName}" in HR, which is not this hotel. Ask Main HR for the key of this hotel's establishment.`
+		);
+	}
 }
 
 export async function getConnection(hotelId: string): Promise<HrConnection | null> {
@@ -127,6 +137,9 @@ export async function saveConnection(
 	const key = apiKey.trim();
 	if (!key) throw new HrLinkError('unauthorized', 'Paste the key Main HR gave you.');
 	const probe = await call(baseUrl, key); // throws a specific, readable HrLinkError
+	const hotel = await db.select({ orgRef: hotels.orgRef }).from(hotels).where(eq(hotels.id, hotelId)).then((r) => r.at(0));
+	if (!hotel) throw new HrLinkError('not_connected', 'Hotel not found.');
+	assertSameEstablishment(hotel.orgRef, probe.establishment.org_ref, probe.establishment.name);
 	const values = {
 		baseUrl,
 		apiKeyEnc: encryptSecret(key),

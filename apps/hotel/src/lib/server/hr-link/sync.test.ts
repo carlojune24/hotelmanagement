@@ -7,7 +7,7 @@ vi.mock('./client', async (orig) => ({
 	fetchPeople: fetchPeopleMock
 }));
 
-import { HrLinkError, normalizeBaseUrl, type HrPerson } from './client';
+import { HrLinkError, assertSameEstablishment, normalizeBaseUrl, type HrPerson } from './client';
 import { fateOf } from './sync';
 
 describe('normalizeBaseUrl', () => {
@@ -21,6 +21,13 @@ describe('normalizeBaseUrl', () => {
 	it('rejects things that are not addresses', () => {
 		expect(() => normalizeBaseUrl('not a url')).toThrow(HrLinkError);
 		expect(() => normalizeBaseUrl('ftp://hr.example.com')).toThrow(HrLinkError);
+	});
+});
+
+describe('assertSameEstablishment', () => {
+	it('accepts only the key of this hotel', () => {
+		expect(() => assertSameEstablishment('org_A', 'org_A', 'Mine')).not.toThrow();
+		expect(() => assertSameEstablishment('org_A', 'org_B', 'Other')).toThrow(/not this hotel/);
 	});
 });
 
