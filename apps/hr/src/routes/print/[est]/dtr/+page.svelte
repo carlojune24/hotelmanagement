@@ -51,13 +51,17 @@
 <DtrPrint sheets={data.sheets} month={data.month} hotelName={data.establishment.name} />
 
 <style>
+	/* The paper sits on a dark desk so the white sheets read as paper and the white month label is legible. */
+	:global(body) {
+		background: #3a3a37;
+	}
 	.dp-controls {
 		display: flex;
 		flex-wrap: wrap;
 		justify-content: center;
 		align-items: center;
 		gap: 10px 22px;
-		padding: 0 16px 16px;
+		padding: 16px 16px 16px;
 		font:
 			500 13px/1 'Inter Variable',
 			system-ui,
@@ -91,6 +95,9 @@
 		padding: 8px 10px;
 	}
 	@media print {
+		:global(body) {
+			background: #fff;
+		}
 		.dp-controls {
 			display: none;
 		}
