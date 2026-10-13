@@ -24,7 +24,10 @@ describe.skipIf(!hasDb)('DTR with leave, holidays and biometric punches (live DB
 	const { applyShiftToCells } = await import('./schedules');
 	const { addManualPunch, computeMonthDtr, saveMonthDtr, storePunches, removeUpload, listUploads } =
 		await import('./dtr-import');
-	const { LeaveError, cancelLeave, fileLeave, leaveBalances, listLeaveTypes, saveLeaveType } = await import('./leave');
+	const { LeaveError, cancelLeave, fileLeave: fileLeaveAs, leaveBalances, listLeaveTypes, saveLeaveType } = await import('./leave');
+	// These tests model Main HR, who files and approves in one step.
+	const fileLeave = (est: string, input: Parameters<typeof fileLeaveAs>[1], userId: string | null) =>
+		fileLeaveAs(est, input, userId, true);
 	const { saveCalendarDay } = await import('./calendar');
 
 	const tag = `dtrleave-${Math.random().toString(36).slice(2, 10)}`;

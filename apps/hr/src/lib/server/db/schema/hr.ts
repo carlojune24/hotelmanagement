@@ -427,7 +427,8 @@ export const leaveRequests = pgTable(
 		paid: boolean('paid').notNull(),
 		reason: text('reason'),
 		documentNote: text('document_note'),
-		/** 'approved' | 'cancelled' (HR files and approves in one step). */
+		/** 'submitted' | 'approved' | 'rejected' | 'cancelled'. Main HR files and approves in one step;
+		 *  anyone else's request waits as 'submitted'. Only 'approved' ever reaches the DTR. */
 		status: text('status').notNull().default('approved'),
 		filedByUserId: uuid('filed_by_user_id').references(() => users.id, { onDelete: 'set null' }),
 		cancelledByUserId: uuid('cancelled_by_user_id').references(() => users.id, {
@@ -435,6 +436,13 @@ export const leaveRequests = pgTable(
 		}),
 		cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
 		cancelNote: text('cancel_note'),
+		/** Who sent it for approval and when; who decided and when, with an optional note. Null on
+		 *  rows that predate approvals (they were approved on the spot). */
+		submittedByUserId: uuid('submitted_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		submittedAt: timestamp('submitted_at', { withTimezone: true }),
+		decidedByUserId: uuid('decided_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		decidedAt: timestamp('decided_at', { withTimezone: true }),
+		decisionNote: text('decision_note'),
 		createdAt: createdAt(),
 		updatedAt: updatedAt()
 	},
@@ -465,7 +473,7 @@ export const overtimeRequests = pgTable(
 		/** Length of the range, snapshotted when filed. */
 		minutes: integer('minutes').notNull(),
 		reason: text('reason'),
-		/** 'approved' | 'cancelled' (HR files and approves in one step). */
+		/** 'submitted' | 'approved' | 'rejected' | 'cancelled'. Only 'approved' credits overtime. */
 		status: text('status').notNull().default('approved'),
 		filedByUserId: uuid('filed_by_user_id').references(() => users.id, { onDelete: 'set null' }),
 		cancelledByUserId: uuid('cancelled_by_user_id').references(() => users.id, {
@@ -473,6 +481,13 @@ export const overtimeRequests = pgTable(
 		}),
 		cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
 		cancelNote: text('cancel_note'),
+		/** Who sent it for approval and when; who decided and when, with an optional note. Null on
+		 *  rows that predate approvals (they were approved on the spot). */
+		submittedByUserId: uuid('submitted_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		submittedAt: timestamp('submitted_at', { withTimezone: true }),
+		decidedByUserId: uuid('decided_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		decidedAt: timestamp('decided_at', { withTimezone: true }),
+		decisionNote: text('decision_note'),
 		createdAt: createdAt(),
 		updatedAt: updatedAt()
 	},
@@ -521,10 +536,51 @@ export const calendarDays = pgTable(
 		creditMinutes: integer('credit_minutes'),
 		/** Late/undertime are not counted that day (a memo letting staff go early, for instance). */
 		waiveLateness: boolean('waive_lateness').notNull().default(false),
+		/** 'submitted' (a manager's proposal) | 'approved' | 'rejected'. Only 'approved' days affect
+		 *  rosters and DTRs; entries made by Main HR are approved on the spot. */
+		status: text('status').notNull().default('approved'),
+		/** Who sent it for approval and when; who decided and when, with an optional note. Null on
+		 *  rows that predate approvals (they were approved on the spot). */
+		submittedByUserId: uuid('submitted_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		submittedAt: timestamp('submitted_at', { withTimezone: true }),
+		decidedByUserId: uuid('decided_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		decidedAt: timestamp('decided_at', { withTimezone: true }),
+		decisionNote: text('decision_note'),
 		createdAt: createdAt(),
 		updatedAt: updatedAt()
 	},
 	(t) => [uniqueIndex('calendar_days_establishment_date_idx').on(t.establishmentId, t.date)]
+);
+
+// ---------------------------------------------------------------------------
+// Roster approval — one row per establishment-week
+// ---------------------------------------------------------------------------
+
+/**
+ * The approval state of one establishment's Monday–Sunday roster. Absence of a row means the
+ * week is a plain draft. Editing a submitted/approved week as a manager sends it back to draft,
+ * so "approved" always describes exactly what was approved.
+ */
+export const schedulePeriods = pgTable(
+	'schedule_periods',
+	{
+		id: pk(),
+		establishmentId: uuid('establishment_id')
+			.notNull()
+			.references(() => establishments.id, { onDelete: 'cascade' }),
+		/** The Monday of the week. */
+		weekStart: date('week_start', { mode: 'string' }).notNull(),
+		/** 'draft' | 'submitted' | 'approved' | 'returned' */
+		status: text('status').notNull().default('draft'),
+		submittedByUserId: uuid('submitted_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		submittedAt: timestamp('submitted_at', { withTimezone: true }),
+		decidedByUserId: uuid('decided_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		decidedAt: timestamp('decided_at', { withTimezone: true }),
+		decisionNote: text('decision_note'),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [uniqueIndex('schedule_periods_week_idx').on(t.establishmentId, t.weekStart)]
 );
 
 // ---------------------------------------------------------------------------
@@ -567,3 +623,4 @@ export type NewSchedule = typeof schedules.$inferInsert;
 export type DtrEntry = typeof dtrEntries.$inferSelect;
 export type NewDtrEntry = typeof dtrEntries.$inferInsert;
 export type EmployeeAssignment = typeof employeeAssignments.$inferSelect;
+export type SchedulePeriod = typeof schedulePeriods.$inferSelect;

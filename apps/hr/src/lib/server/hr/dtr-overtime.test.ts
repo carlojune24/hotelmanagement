@@ -23,7 +23,10 @@ describe.skipIf(!hasDb)('DTR overtime applications (live DB)', async () => {
 	const { mintRef } = await import('$lib/server/ids');
 	const { applyShiftToCells } = await import('./schedules');
 	const { computeMonthDtr, storePunches } = await import('./dtr-import');
-	const { OvertimeError, cancelOvertime, fileOvertime, listOvertime } = await import('./overtime');
+	const { OvertimeError, cancelOvertime, fileOvertime: fileOvertimeAs, listOvertime } = await import('./overtime');
+	// These tests model Main HR, who files and approves in one step.
+	const fileOvertime = (est: string, input: Parameters<typeof fileOvertimeAs>[1], userId: string | null) =>
+		fileOvertimeAs(est, input, userId, true);
 
 	const tag = `dtrot-${Math.random().toString(36).slice(2, 10)}`;
 	let establishment = '';

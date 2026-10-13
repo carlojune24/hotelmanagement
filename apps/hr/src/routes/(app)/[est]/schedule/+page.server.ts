@@ -28,6 +28,8 @@ import { listEmployees } from '$lib/server/hr/employees';
 import { listCalendar } from '$lib/server/hr/calendar';
 import { listLeaveDays } from '$lib/server/hr/leave';
 import { parseNightDiff } from '$lib/server/hr/night-diff';
+import { PeriodError, getWeek, submitWeek } from '$lib/server/hr/schedule-periods';
+import { canAt } from '$lib/authz';
 import { addDays, isDateString, mondayOf, weekDates } from '$lib/roster';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -72,6 +74,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		employees: rosterEmployees,
 		templates,
 		previousWeekShiftCount: previousWeek.length,
+		/** Approval state of this week's roster, and whether the viewer is the approver. */
+		week: await getWeek(establishment.id, weekStart),
+		canApprove: isApprover(locals),
 		/** Establishment-wide default night window, used by shifts that set none. */
 		nightDiff: parseNightDiff(establishment.config),
 		/** `employeeId|date` → leave covering that day (an overlay: the shift itself is untouched). */
@@ -95,8 +100,12 @@ function json(raw: FormDataEntryValue | null): unknown {
 }
 
 /** Maps the two expected, user-facing failures to a 400; anything else is a real bug and rethrows. */
+function isApprover(locals: App.Locals): boolean {
+	return locals.user!.isSystemAdmin || canAt(locals.access!, 'approval:*', locals.establishment!.id);
+}
+
 function userFailure(e: unknown) {
-	if (e instanceof ScheduleError || e instanceof ShiftTemplateError) {
+	if (e instanceof ScheduleError || e instanceof ShiftTemplateError || e instanceof PeriodError) {
 		return fail(400, { error: e.message });
 	}
 	throw e;
@@ -116,7 +125,9 @@ export const actions: Actions = {
 			});
 		}
 		try {
-			const result = await applyShiftToCells(establishmentId, cells.data, shift.data);
+			const result = await applyShiftToCells(establishmentId, cells.data, shift.data, {
+				approver: isApprover(event.locals)
+			});
 			await writeAudit({
 				establishmentId,
 				actor: event.locals.user,
@@ -138,7 +149,7 @@ export const actions: Actions = {
 		const cells = cellsField.safeParse(json(fd.get('cells')));
 		if (!cells.success) return fail(400, { error: 'Select at least one day to clear.' });
 		try {
-			const result = await clearCells(establishmentId, cells.data);
+			const result = await clearCells(establishmentId, cells.data, { approver: isApprover(event.locals) });
 			if (result.cleared > 0) {
 				await writeAudit({
 					establishmentId,
@@ -167,7 +178,9 @@ export const actions: Actions = {
 		const fromMonday = mondayOf(from);
 		const toMonday = mondayOf(to);
 		try {
-			const result = await copyWeek(establishmentId, fromMonday, toMonday, fd.get('overwrite') === '1');
+			const result = await copyWeek(establishmentId, fromMonday, toMonday, fd.get('overwrite') === '1', {
+				approver: isApprover(event.locals)
+			});
 			await writeAudit({
 				establishmentId,
 				actor: event.locals.user,
@@ -193,7 +206,7 @@ export const actions: Actions = {
 			.safeParse(json(fd.get('states')));
 		if (!states.success) return fail(400, { error: 'Nothing to undo.' });
 		try {
-			const result = await restoreCells(establishmentId, states.data);
+			const result = await restoreCells(establishmentId, states.data, { approver: isApprover(event.locals) });
 			await writeAudit({
 				establishmentId,
 				actor: event.locals.user,
@@ -285,6 +298,28 @@ export const actions: Actions = {
 						? `Added ${added} starter shift${added === 1 ? '' : 's'}.`
 						: 'Starter shifts are already there.'
 			};
+		} catch (e) {
+			return userFailure(e);
+		}
+	},
+
+	/** Manager → Main HR: send this week's roster for approval. */
+	submitWeek: async (event) => {
+		requireCap(event.locals.user, event.locals.access, 'schedule:*', event.locals.establishment!.id);
+		try {
+			const establishmentId = event.locals.establishment!.id;
+			const fd = await event.request.formData();
+			const weekStart = String(fd.get('weekStart') ?? '');
+			await submitWeek(establishmentId, weekStart, event.locals.user?.id ?? null);
+			await writeAudit({
+				establishmentId,
+				actor: event.locals.user,
+				action: 'roster.submit',
+				entityType: 'schedule_period',
+				entityId: weekStart,
+				after: { weekStart }
+			});
+			return { ok: 'Roster sent to Main HR for approval.' };
 		} catch (e) {
 			return userFailure(e);
 		}

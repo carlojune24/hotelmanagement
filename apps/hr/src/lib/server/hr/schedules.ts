@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import { employees, schedules } from '$lib/server/db/schema/index';
 import { assignedHere } from './assigned';
+import { touchWeeks } from './schedule-periods';
 import {
 	addDays,
 	breakWindowError,
@@ -246,7 +247,8 @@ export async function listSchedules(establishmentId: string, from: string, to: s
 export async function applyShiftToCells(
 	establishmentId: string,
 	cellsIn: CellRef[],
-	shiftIn: z.infer<typeof cellShiftSchema>
+	shiftIn: z.infer<typeof cellShiftSchema>,
+	opts: { approver?: boolean } = {}
 ): Promise<{ applied: number; previous: CellState[] }> {
 	const cells = dedupe(cellsIn);
 	if (cells.length === 0) return { applied: 0, previous: [] };
@@ -265,6 +267,7 @@ export async function applyShiftToCells(
 			establishmentId,
 			cells.map((c) => ({ ...c, shift }))
 		);
+		await touchWeeks(tx, establishmentId, cells.map((c) => c.date), opts.approver ?? false);
 		return { applied: cells.length, previous: cells.map((c) => toState(c, before.get(key(c)))) };
 	});
 }
@@ -275,7 +278,8 @@ export async function applyShiftToCells(
  */
 export async function clearCells(
 	establishmentId: string,
-	cellsIn: CellRef[]
+	cellsIn: CellRef[],
+	opts: { approver?: boolean } = {}
 ): Promise<{ cleared: number; previous: CellState[] }> {
 	const cells = dedupe(cellsIn);
 	if (cells.length === 0) return { cleared: 0, previous: [] };
@@ -294,6 +298,7 @@ export async function clearCells(
 				.delete(schedules)
 				.where(and(eq(schedules.establishmentId, establishmentId), inArray(schedules.id, ids)));
 		}
+		await touchWeeks(tx, establishmentId, cells.map((c) => c.date), opts.approver ?? false);
 		return {
 			cleared: ids.length,
 			previous: cells.filter((c) => before.has(key(c))).map((c) => toState(c, before.get(key(c))))
@@ -310,7 +315,8 @@ export async function copyWeek(
 	establishmentId: string,
 	fromWeekStart: string,
 	toWeekStart: string,
-	overwrite: boolean
+	overwrite: boolean,
+	opts: { approver?: boolean } = {}
 ): Promise<{ copied: number; skipped: number; previous: CellState[] }> {
 	if (fromWeekStart === toWeekStart) throw new ScheduleError('Pick a different week to copy from.');
 
@@ -363,6 +369,7 @@ export async function copyWeek(
 		const existing = await readCells(tx, establishmentId, targets);
 		const toWrite = targets.filter((t) => overwrite || !existing.has(key(t)));
 		await upsertRows(tx, establishmentId, toWrite);
+		if (toWrite.length > 0) await touchWeeks(tx, establishmentId, [toWeekStart], opts.approver ?? false);
 		return {
 			copied: toWrite.length,
 			skipped: targets.length - toWrite.length,
@@ -372,7 +379,11 @@ export async function copyWeek(
 }
 
 /** Undo: puts each cell back the way it was (`shift: null` → empty). */
-export async function restoreCells(establishmentId: string, statesIn: z.infer<typeof cellStateSchema>[]) {
+export async function restoreCells(
+	establishmentId: string,
+	statesIn: z.infer<typeof cellStateSchema>[],
+	opts: { approver?: boolean } = {}
+) {
 	const byKey = new Map(statesIn.map((s) => [key(s), s]));
 	const states = [...byKey.values()];
 	if (states.length === 0) return { restored: 0 };
@@ -403,6 +414,7 @@ export async function restoreCells(establishmentId: string, statesIn: z.infer<ty
 				shift: normalizeShift(s.shift!)
 			}))
 		);
+		await touchWeeks(tx, establishmentId, states.map((x) => x.date), opts.approver ?? false);
 		return { restored: states.length };
 	});
 }

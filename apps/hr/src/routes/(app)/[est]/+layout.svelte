@@ -12,6 +12,7 @@
 			{ seg: '/schedule', label: 'Schedule', show: data.tabs.schedule },
 			{ seg: '/dtr', label: 'DTR', show: data.tabs.dtr },
 			{ seg: '/leave', label: 'Leave', show: data.tabs.leave },
+			{ seg: '/overtime', label: 'Overtime', show: data.tabs.overtime },
 			{ seg: '/settings', label: 'Settings', show: data.tabs.settings }
 		].filter((t) => t.show)
 	);

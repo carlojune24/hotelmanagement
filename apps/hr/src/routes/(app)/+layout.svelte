@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import BuildingIcon from '@lucide/svelte/icons/building-2';
 	import UsersIcon from '@lucide/svelte/icons/users';
+	import InboxIcon from '@lucide/svelte/icons/inbox';
 	import ContactIcon from '@lucide/svelte/icons/contact';
 	import KeyIcon from '@lucide/svelte/icons/key-round';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
@@ -13,6 +14,7 @@
 	const items = $derived(
 		[
 			{ seg: 'establishments', label: 'Establishments', icon: BuildingIcon, show: data.nav.establishments },
+			{ seg: 'approvals', label: 'Approvals', icon: InboxIcon, show: data.nav.approvals },
 			{ seg: 'people', label: 'People', icon: ContactIcon, show: data.nav.people },
 			{ seg: 'users', label: 'Users', icon: UsersIcon, show: data.nav.users }
 		].filter((i) => i.show)
@@ -44,6 +46,12 @@
 									<a href="/{item.seg}" {...props}>
 										<item.icon />
 										<span>{item.label}</span>
+										{#if item.seg === 'approvals' && data.pendingApprovals > 0}
+											<span
+												class="ml-auto rounded-full bg-gold px-2 text-xs font-medium text-ink group-data-[collapsible=icon]:hidden"
+												aria-label="{data.pendingApprovals} waiting">{data.pendingApprovals}</span
+											>
+										{/if}
 									</a>
 								{/snippet}
 							</Sidebar.MenuButton>

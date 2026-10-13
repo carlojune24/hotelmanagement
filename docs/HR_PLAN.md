@@ -177,6 +177,11 @@ Hotel gains: HR client (API key + base URL setting), `person_ref` columns, event
    import follow an open assignment. `/people` is the registry (assign, end, set home). Leave policy
    stays per-establishment until phase 4.
 4. **Approvals** — statuses, `schedule_periods`, manager submit actions, Main HR inbox.
+   **Done 2026-10-13** on `feature/hr-app`: leave, overtime and memos carry
+   `submitted → approved|rejected` (+ withdraw); roster weeks `draft → submitted → approved|returned`;
+   `/approvals` is Main HR's inbox with a sidebar count. Managers file/submit; only `approved`
+   reaches the DTR. A manager edit to a submitted/approved week reopens it as draft; Main HR edits keep
+   the state (audit-logged). Overtime gained its first screen (`/{slug}/overtime`).
 5. **DTR submission/receive/return.**
 6. **Hotel integration** — API + events, `person_ref` columns, Team picker, auto-suspend, fallback sync.
 7. **Hotel HR removal** — delete routes/code/tables, caps backfill.

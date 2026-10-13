@@ -200,7 +200,7 @@ async function balanceFor(
 					eq(leaveRequests.establishmentId, establishmentId),
 					eq(leaveRequests.employeeId, employeeId),
 					eq(leaveRequests.leaveTypeId, type.id),
-					eq(leaveRequests.status, 'approved'),
+					inArray(leaveRequests.status, ['approved', 'submitted']),
 					gte(leaveRequests.startDate, from),
 					lte(leaveRequests.startDate, to)
 				)
@@ -285,7 +285,7 @@ export async function previewLeave(establishmentId: string, input: LeaveFormInpu
 			and(
 				eq(leaveRequests.establishmentId, establishmentId),
 				eq(leaveRequests.employeeId, emp.id),
-				eq(leaveRequests.status, 'approved'),
+				inArray(leaveRequests.status, ['approved', 'submitted']),
 				lte(leaveRequests.startDate, input.endDate),
 				gte(leaveRequests.endDate, input.startDate)
 			)
@@ -301,7 +301,14 @@ export async function previewLeave(establishmentId: string, input: LeaveFormInpu
 	return { type, emp, days, balance: bal, capped, after: bal.remaining - days };
 }
 
-export async function fileLeave(establishmentId: string, input: LeaveFormInput, userId: string | null) {
+/** `asApprover` (Main HR) files and approves in one step, as before; anyone else's request waits
+ *  as `submitted` until Main HR decides it. */
+export async function fileLeave(
+	establishmentId: string,
+	input: LeaveFormInput,
+	userId: string | null,
+	asApprover: boolean
+) {
 	const p = await previewLeave(establishmentId, input);
 	if (p.capped && p.after < 0) {
 		throw new LeaveError(
@@ -321,14 +328,25 @@ export async function fileLeave(establishmentId: string, input: LeaveFormInput, 
 			paid: p.type.paid,
 			reason: input.reason || null,
 			documentNote: input.documentNote || null,
-			status: 'approved',
-			filedByUserId: userId
+			status: asApprover ? 'approved' : 'submitted',
+			filedByUserId: userId,
+			submittedByUserId: userId,
+			submittedAt: new Date(),
+			...(asApprover ? { decidedByUserId: userId, decidedAt: new Date() } : {})
 		})
 		.returning();
 	return { request: row!, type: p.type, emp: p.emp };
 }
 
-export async function cancelLeave(establishmentId: string, id: string, note: string, userId: string | null) {
+/** `onlySubmitted`: a manager may withdraw a request still waiting; cancelling an approved one
+ *  is Main HR's call. */
+export async function cancelLeave(
+	establishmentId: string,
+	id: string,
+	note: string,
+	userId: string | null,
+	opts: { onlySubmitted?: boolean } = {}
+) {
 	const [row] = await db
 		.update(leaveRequests)
 		.set({
@@ -338,9 +356,46 @@ export async function cancelLeave(establishmentId: string, id: string, note: str
 			cancelNote: note || null,
 			updatedAt: new Date()
 		})
-		.where(and(eq(leaveRequests.establishmentId, establishmentId), eq(leaveRequests.id, id), ne(leaveRequests.status, 'cancelled')))
+		.where(
+			and(
+				eq(leaveRequests.establishmentId, establishmentId),
+				eq(leaveRequests.id, id),
+				opts.onlySubmitted
+					? eq(leaveRequests.status, 'submitted')
+					: inArray(leaveRequests.status, ['submitted', 'approved'])
+			)
+		)
 		.returning();
-	if (!row) throw new LeaveError('That leave is already cancelled.');
+	if (!row) {
+		throw new LeaveError(
+			opts.onlySubmitted
+				? 'Only a request still waiting for approval can be withdrawn.'
+				: 'That leave is already cancelled or decided.'
+		);
+	}
+	return row;
+}
+
+/** Main HR: approve or reject a submitted request. */
+export async function decideLeave(
+	id: string,
+	decision: 'approved' | 'rejected',
+	note: string,
+	userId: string | null
+) {
+	if (decision === 'rejected' && !note.trim()) throw new LeaveError('Give a reason so they know why.');
+	const [row] = await db
+		.update(leaveRequests)
+		.set({
+			status: decision,
+			decidedByUserId: userId,
+			decidedAt: new Date(),
+			decisionNote: note.trim() || null,
+			updatedAt: new Date()
+		})
+		.where(and(eq(leaveRequests.id, id), eq(leaveRequests.status, 'submitted')))
+		.returning();
+	if (!row) throw new LeaveError('That request is no longer waiting for approval.');
 	return row;
 }
 
@@ -362,6 +417,7 @@ export async function listLeaveRequests(establishmentId: string, year: number) {
 			documentNote: leaveRequests.documentNote,
 			status: leaveRequests.status,
 			cancelNote: leaveRequests.cancelNote,
+			decisionNote: leaveRequests.decisionNote,
 			createdAt: leaveRequests.createdAt
 		})
 		.from(leaveRequests)

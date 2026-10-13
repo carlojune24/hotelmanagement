@@ -8,17 +8,27 @@ export type Role = OrgRole | EstablishmentRole;
 export const ORG_ROLES: OrgRole[] = ['main_hr', 'owner_readonly'];
 export const ESTABLISHMENT_ROLES: EstablishmentRole[] = ['business_manager', 'hr_clerk'];
 
+// A manager/clerk builds and submits the roster, files leave and overtime and proposes memos —
+// Main HR (`*`) decides them. `approval:*` is deliberately in no manager bundle.
+const MANAGER_CAPS = [
+	'establishment:read',
+	'employee:read',
+	'schedule:*',
+	'dtr:*',
+	'leave:file',
+	'overtime:file',
+	'memo:propose'
+];
+
 // shortcut: static role→caps map, not DB-backed rows like the hotel app's `roles` table.
 // Upgrade when a client needs to edit role capabilities without a deploy.
 export const ROLE_CAPS: Record<Role, string[]> = {
 	// Everything HR: registry, assignments, approvals, payroll, payslips, settings.
 	main_hr: ['*'],
 	owner_readonly: ['*:read'],
-	// A manager sees their own establishments and staff and runs roster + biometric/DTR for them.
-	// Employee writes and leave stay with Main HR for now (docs/HR_PLAN.md §3): manager leave/OT
-	// filing arrives with the approval states in phase 4, so no one can self-approve before that.
-	business_manager: ['establishment:read', 'employee:read', 'schedule:*', 'dtr:*'],
-	hr_clerk: ['establishment:read', 'employee:read', 'schedule:*', 'dtr:*']
+	// Managers: see MANAGER_CAPS above. Employee writes, leave policy and every decision stay with Main HR.
+	business_manager: MANAGER_CAPS,
+	hr_clerk: MANAGER_CAPS
 };
 
 export const ROLE_LABEL: Record<Role, string> = {

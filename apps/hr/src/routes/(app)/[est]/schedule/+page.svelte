@@ -669,6 +669,11 @@
 <svelte:window onpointerup={endDrag} onkeydown={onWindowKeydown} />
 
 <div class="mx-auto w-full max-w-[90rem] px-4 py-6 sm:px-6">
+	{#if data.week.status === 'returned' && data.week.note}
+		<p class="mb-3 rounded-2xl bg-destructive/10 px-4 py-3 text-sm">
+			<strong class="font-medium">Main HR sent this week back:</strong> {data.week.note}
+		</p>
+	{/if}
 	<!-- Header -->
 	<div class="flex flex-wrap items-end justify-between gap-3">
 		<div>
@@ -678,6 +683,41 @@
 			</p>
 		</div>
 		<div class="flex flex-wrap items-center gap-2">
+			<!-- Approval state of this week's roster -->
+			<span
+				class="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium {data.week.status === 'approved'
+					? 'bg-ok/15 text-ink'
+					: data.week.status === 'submitted'
+						? 'bg-gold text-ink'
+						: data.week.status === 'returned'
+							? 'bg-destructive/15 text-ink'
+							: 'bg-ink/10 text-ink'}"
+				title={data.week.note ?? ''}
+			>
+				<span class="size-1.5 rounded-full bg-current opacity-70"></span>
+				{data.week.status === 'approved'
+					? 'Approved'
+					: data.week.status === 'submitted'
+						? 'Waiting for approval'
+						: data.week.status === 'returned'
+							? 'Returned — see note'
+							: 'Draft'}
+			</span>
+			{#if !data.canApprove && (data.week.status === 'draft' || data.week.status === 'returned')}
+				<form
+					method="POST"
+					action="?/submitWeek"
+					use:enhance={() => async ({ result, update }) => {
+						await update({ reset: false });
+						if (result.type === 'success') toast.success('Roster sent to Main HR for approval.');
+						else if (result.type === 'failure')
+							toast.error((result.data as { error?: string } | undefined)?.error ?? 'Could not submit.');
+					}}
+				>
+					<input type="hidden" name="weekStart" value={data.weekStart} />
+					<Button type="submit" size="sm" variant="gold">Submit for approval</Button>
+				</form>
+			{/if}
 			{#if reviewList.length > 0}
 				<Button
 					variant="outline"

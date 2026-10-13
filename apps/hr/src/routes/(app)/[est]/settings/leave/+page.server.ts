@@ -30,7 +30,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			: Number(businessDateFor(establishment.timezone).slice(0, 4));
 	const [types, calendar] = await Promise.all([
 		listLeaveTypes(establishment.id),
-		listCalendar(establishment.id, `${year}-01-01`, `${year}-12-31`)
+		listCalendar(establishment.id, `${year}-01-01`, `${year}-12-31`, { includePending: true })
 	]);
 	return {
 		year,

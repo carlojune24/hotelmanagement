@@ -6,7 +6,7 @@ import { addAdjustment, adjustmentSchema, leaveBalances } from '$lib/server/hr/l
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
-	requireCap(locals.user, locals.access, 'leave:*', locals.establishment!.id);
+	requireCap(locals.user, locals.access, 'leave:file', locals.establishment!.id);
 	const establishment = locals.establishment!;
 	const yearParam = Number(url.searchParams.get('year'));
 	const year =

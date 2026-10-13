@@ -21,11 +21,25 @@ export type CalendarFormInput = z.infer<typeof calendarFormSchema>;
 
 export type CalendarDay = typeof calendarDays.$inferSelect;
 
-export async function listCalendar(establishmentId: string, from: string, to: string): Promise<CalendarDay[]> {
+/** Approved days only by default — a proposal must never move a roster or a DTR. Settings passes
+ *  `includePending` so Main HR can see what is waiting. */
+export async function listCalendar(
+	establishmentId: string,
+	from: string,
+	to: string,
+	opts: { includePending?: boolean } = {}
+): Promise<CalendarDay[]> {
 	return db
 		.select()
 		.from(calendarDays)
-		.where(and(eq(calendarDays.establishmentId, establishmentId), gte(calendarDays.date, from), lte(calendarDays.date, to)))
+		.where(
+			and(
+				eq(calendarDays.establishmentId, establishmentId),
+				gte(calendarDays.date, from),
+				lte(calendarDays.date, to),
+				opts.includePending ? undefined : eq(calendarDays.status, 'approved')
+			)
+		)
 		.orderBy(asc(calendarDays.date));
 }
 
@@ -61,4 +75,56 @@ export async function saveCalendarDay(establishmentId: string, input: CalendarFo
 
 export async function deleteCalendarDay(establishmentId: string, id: string) {
 	await db.delete(calendarDays).where(and(eq(calendarDays.establishmentId, establishmentId), eq(calendarDays.id, id)));
+}
+
+/** A manager's suggestion (a local holiday, a memo letting staff go early). It affects nothing
+ *  until Main HR approves it. */
+export async function proposeCalendarDay(
+	establishmentId: string,
+	input: CalendarFormInput,
+	userId: string | null
+) {
+	const [dupe] = await db
+		.select({ id: calendarDays.id })
+		.from(calendarDays)
+		.where(and(eq(calendarDays.establishmentId, establishmentId), eq(calendarDays.date, input.date)));
+	if (dupe) throw new CalendarError('That date already has an entry or a pending proposal.');
+	const [row] = await db
+		.insert(calendarDays)
+		.values({
+			establishmentId,
+			date: input.date,
+			name: input.name,
+			kind: input.kind,
+			creditMinutes: input.creditHours === null ? null : Math.round(input.creditHours * 60),
+			waiveLateness: input.waiveLateness,
+			status: 'submitted',
+			submittedByUserId: userId,
+			submittedAt: new Date()
+		})
+		.returning();
+	return row!;
+}
+
+/** Main HR: approve or reject a proposed day. */
+export async function decideCalendarDay(
+	id: string,
+	decision: 'approved' | 'rejected',
+	note: string,
+	userId: string | null
+) {
+	if (decision === 'rejected' && !note.trim()) throw new CalendarError('Give a reason so they know why.');
+	const [row] = await db
+		.update(calendarDays)
+		.set({
+			status: decision,
+			decidedByUserId: userId,
+			decidedAt: new Date(),
+			decisionNote: note.trim() || null,
+			updatedAt: new Date()
+		})
+		.where(and(eq(calendarDays.id, id), eq(calendarDays.status, 'submitted')))
+		.returning();
+	if (!row) throw new CalendarError('That proposal is no longer waiting for approval.');
+	return row;
 }

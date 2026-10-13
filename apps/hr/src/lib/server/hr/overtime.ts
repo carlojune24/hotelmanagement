@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNull, lte, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import { employeeAssignments, employees, overtimeRequests } from '$lib/server/db/schema/index';
@@ -25,7 +25,13 @@ function span(start: string, end: string): [number, number] {
 	return [s, s + overtimeMinutes(start, end)];
 }
 
-export async function fileOvertime(establishmentId: string, input: OvertimeFormInput, userId: string | null) {
+/** `asApprover` (Main HR) files and approves in one step; anyone else's waits as `submitted`. */
+export async function fileOvertime(
+	establishmentId: string,
+	input: OvertimeFormInput,
+	userId: string | null,
+	asApprover: boolean
+) {
 	const why = overtimeRangeError(input.startTime, input.endTime);
 	if (why) throw new OvertimeError(why);
 
@@ -44,7 +50,7 @@ export async function fileOvertime(establishmentId: string, input: OvertimeFormI
 				eq(overtimeRequests.establishmentId, establishmentId),
 				eq(overtimeRequests.employeeId, emp.id),
 				eq(overtimeRequests.date, input.date),
-				eq(overtimeRequests.status, 'approved')
+				inArray(overtimeRequests.status, ['approved', 'submitted'])
 			)
 		);
 	const mine = span(input.startTime, input.endTime);
@@ -62,14 +68,25 @@ export async function fileOvertime(establishmentId: string, input: OvertimeFormI
 			endTime: input.endTime,
 			minutes: overtimeMinutes(input.startTime, input.endTime),
 			reason: input.reason || null,
-			status: 'approved',
-			filedByUserId: userId
+			status: asApprover ? 'approved' : 'submitted',
+			filedByUserId: userId,
+			submittedByUserId: userId,
+			submittedAt: new Date(),
+			...(asApprover ? { decidedByUserId: userId, decidedAt: new Date() } : {})
 		})
 		.returning();
 	return row!;
 }
 
-export async function cancelOvertime(establishmentId: string, id: string, note: string, userId: string | null) {
+/** `onlySubmitted`: a manager may withdraw a request still waiting; cancelling an approved one
+ *  is Main HR's call. */
+export async function cancelOvertime(
+	establishmentId: string,
+	id: string,
+	note: string,
+	userId: string | null,
+	opts: { onlySubmitted?: boolean } = {}
+) {
 	const [row] = await db
 		.update(overtimeRequests)
 		.set({
@@ -83,11 +100,42 @@ export async function cancelOvertime(establishmentId: string, id: string, note: 
 			and(
 				eq(overtimeRequests.establishmentId, establishmentId),
 				eq(overtimeRequests.id, id),
-				ne(overtimeRequests.status, 'cancelled')
+				opts.onlySubmitted
+					? eq(overtimeRequests.status, 'submitted')
+					: inArray(overtimeRequests.status, ['submitted', 'approved'])
 			)
 		)
 		.returning();
-	if (!row) throw new OvertimeError('That overtime is already cancelled.');
+	if (!row) {
+		throw new OvertimeError(
+			opts.onlySubmitted
+				? 'Only a request still waiting for approval can be withdrawn.'
+				: 'That overtime is already cancelled or decided.'
+		);
+	}
+	return row;
+}
+
+/** Main HR: approve or reject a submitted overtime application. */
+export async function decideOvertime(
+	id: string,
+	decision: 'approved' | 'rejected',
+	note: string,
+	userId: string | null
+) {
+	if (decision === 'rejected' && !note.trim()) throw new OvertimeError('Give a reason so they know why.');
+	const [row] = await db
+		.update(overtimeRequests)
+		.set({
+			status: decision,
+			decidedByUserId: userId,
+			decidedAt: new Date(),
+			decisionNote: note.trim() || null,
+			updatedAt: new Date()
+		})
+		.where(and(eq(overtimeRequests.id, id), eq(overtimeRequests.status, 'submitted')))
+		.returning();
+	if (!row) throw new OvertimeError('That request is no longer waiting for approval.');
 	return row;
 }
 
@@ -105,7 +153,8 @@ export async function listOvertime(establishmentId: string, from: string, to: st
 			minutes: overtimeRequests.minutes,
 			reason: overtimeRequests.reason,
 			status: overtimeRequests.status,
-			cancelNote: overtimeRequests.cancelNote
+			cancelNote: overtimeRequests.cancelNote,
+			decisionNote: overtimeRequests.decisionNote
 		})
 		.from(overtimeRequests)
 		.innerJoin(employees, eq(employees.id, overtimeRequests.employeeId))

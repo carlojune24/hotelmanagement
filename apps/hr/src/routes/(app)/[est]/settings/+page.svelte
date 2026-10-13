@@ -15,7 +15,7 @@
 </script>
 
 <div class="mx-auto max-w-xl space-y-6 p-4 sm:p-6">
-	{#if data.tabs.leave}
+	{#if data.tabs.leavePolicy}
 		<a
 			href="settings/leave"
 			class="flex items-center justify-between rounded-2xl bg-white/70 px-4 py-3 text-sm font-medium hover:bg-gold-soft"

@@ -25,7 +25,8 @@
 	let halfDay = $state<'' | 'am' | 'pm'>('');
 	let reason = $state('');
 	let documentNote = $state('');
-	let statusFilter = $state<'all' | 'approved' | 'cancelled'>('approved');
+	let statusFilter = $state<'all' | 'active' | 'submitted' | 'cancelled'>('active');
+	let memoOpen = $state(false);
 	let cancelling = $state<{ id: string; label: string } | null>(null);
 
 	type Preview = {
@@ -56,7 +57,9 @@
 		const q = search.trim().toLowerCase();
 		const mm = monthFilter === 'all' ? null : monthFilter.padStart(2, '0');
 		return data.requests.filter((r) => {
-			if (statusFilter !== 'all' && r.status !== statusFilter) return false;
+			if (statusFilter === 'active' && !(r.status === 'approved' || r.status === 'submitted')) return false;
+			if (statusFilter === 'submitted' && r.status !== 'submitted') return false;
+			if (statusFilter === 'cancelled' && !(r.status === 'cancelled' || r.status === 'rejected')) return false;
 			if (q && !r.employeeName.toLowerCase().includes(q)) return false;
 			if (typeFilter !== 'all' && r.leaveTypeId !== typeFilter) return false;
 			// A leave belongs to every month it touches.
@@ -150,13 +153,18 @@
 			<Button variant="outline" size="icon" href="?year={data.year + 1}" aria-label="Next year">
 				<ChevronRightIcon class="size-4" />
 			</Button>
-			<Button onclick={openFile}><PlusIcon class="size-4" /> File leave</Button>
+			{#if data.canProposeMemo && !data.canApprove}
+				<Button variant="outline" onclick={() => (memoOpen = true)}>Propose a memo</Button>
+			{/if}
+			<Button onclick={openFile}>
+				<PlusIcon class="size-4" /> {data.canApprove ? 'File leave' : 'Request leave'}
+			</Button>
 		</div>
 	</div>
 
 	<div class="mt-4 flex flex-wrap items-center gap-2">
 		<div class="flex gap-1.5" role="group" aria-label="Status">
-			{#each [['approved', 'Active'], ['cancelled', 'Cancelled'], ['all', 'All']] as const as [v, label] (v)}
+			{#each [['active', 'Active'], ['submitted', 'Waiting'], ['cancelled', 'Cancelled / rejected'], ['all', 'All']] as const as [v, label] (v)}
 				<Button
 					variant={statusFilter === v ? 'default' : 'outline'}
 					size="sm"
@@ -201,7 +209,7 @@
 			</Table.Header>
 			<Table.Body>
 				{#each rows as r (r.id)}
-					<Table.Row class={r.status === 'cancelled' ? 'text-ink-muted' : ''}>
+					<Table.Row class={r.status === 'cancelled' || r.status === 'rejected' ? 'text-ink-muted' : ''}>
 						<Table.Cell class="font-medium">{r.employeeName}</Table.Cell>
 						<Table.Cell>
 							<span class="font-mono text-xs">{r.code}</span>
@@ -212,18 +220,29 @@
 						<Table.Cell class="text-right tabular-nums">{r.days}</Table.Cell>
 						<Table.Cell>{r.paid ? 'Paid' : 'Unpaid'}</Table.Cell>
 						<Table.Cell>
-							<Badge variant={r.status === 'approved' ? 'secondary' : 'outline'}>
-								{r.status === 'approved' ? 'Approved' : 'Cancelled'}
+							<Badge
+								variant={r.status === 'approved' ? 'ok' : r.status === 'submitted' ? 'gold' : 'muted'}
+							>
+								{r.status === 'approved'
+									? 'Approved'
+									: r.status === 'submitted'
+										? 'Waiting'
+										: r.status === 'rejected'
+											? 'Rejected'
+											: 'Cancelled'}
 							</Badge>
+							{#if r.status === 'rejected' && r.decisionNote}
+								<p class="mt-1 text-xs text-ink-muted">{r.decisionNote}</p>
+							{/if}
 						</Table.Cell>
 						<Table.Cell class="text-right">
-							{#if r.status === 'approved'}
+							{#if r.status === 'submitted' || (r.status === 'approved' && data.canApprove)}
 								<Button
 									variant="ghost"
 									size="sm"
 									onclick={() => (cancelling = { id: r.id, label: `${r.employeeName} · ${r.code} ${range(r)}` })}
 								>
-									Cancel
+									{r.status === 'submitted' ? 'Withdraw' : 'Cancel'}
 								</Button>
 							{/if}
 						</Table.Cell>
@@ -357,6 +376,49 @@
 			<Dialog.Footer>
 				<Button type="button" variant="outline" onclick={() => (cancelling = null)}>Keep it</Button>
 				<Button type="submit" variant="destructive" disabled={busy}>Cancel leave</Button>
+			</Dialog.Footer>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={memoOpen}>
+	<Dialog.Content>
+		<Dialog.Header>
+			<Dialog.Title>Propose a holiday or memo</Dialog.Title>
+			<Dialog.Description>
+				Main HR reviews it. Nothing changes on rosters or DTRs until it is approved.
+			</Dialog.Description>
+		</Dialog.Header>
+		<form method="POST" action="?/proposeMemo" use:enhance={run} class="space-y-3">
+			<div class="space-y-1.5">
+				<Label for="memoDate">Date</Label>
+				<Input id="memoDate" name="date" type="date" required min={data.today} />
+			</div>
+			<div class="space-y-1.5">
+				<Label for="memoName">Name</Label>
+				<Input id="memoName" name="name" required maxlength={80} placeholder="e.g. Fiesta — early release" />
+			</div>
+			<div class="space-y-1.5">
+				<Label for="memoKind">Kind</Label>
+				<select
+					id="memoKind"
+					name="kind"
+					class="h-10 w-full rounded-full border border-transparent bg-white px-4 text-sm shadow-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+				>
+					<option value="memo">Memo (staff go early / credited time)</option>
+					<option value="local_holiday">Local holiday</option>
+				</select>
+			</div>
+			<div class="space-y-1.5">
+				<Label for="memoCredit">Hours credited <span class="text-ink-muted">(blank = full day)</span></Label>
+				<Input id="memoCredit" name="creditHours" type="number" min="0" max="24" step="0.25" />
+			</div>
+			<label class="flex items-center gap-2 text-sm">
+				<input type="checkbox" name="waiveLateness" class="size-4 accent-black" /> Don't count lateness or undertime that day
+			</label>
+			<Dialog.Footer class="gap-2 pt-1">
+				<Button type="button" variant="outline" onclick={() => (memoOpen = false)}>Close</Button>
+				<Button type="submit" disabled={busy}>Send for approval</Button>
 			</Dialog.Footer>
 		</form>
 	</Dialog.Content>
