@@ -237,6 +237,56 @@ Hotel gains: HR client (API key + base URL setting), `person_ref` columns, event
      The manual "Loans" adjustment was removed — a draft's hand-typed loan figure is dropped on its next regenerate.
      Loan types are Main HR's own list under **Settings** (name + remit-to: SSS loans / Pag-IBIG loans / not remitted;
      retire, never delete); the schedule a deduction lands on is snapshotted on the deduction. Not built: interest/amortization-schedule maths, loan approval flow, agency upload file formats.
+     **Added 2026-10-13:** an "already paid before this system" amount per loan (counts against the principal,
+     never on a remittance schedule) and **skipped months** — a pay month + reason + who/when per loan
+     (`employee_loan_skips`); payroll takes nothing in a skipped month and the loan runs one month longer. A skip
+     can be removed until that person's payslip for the month is in a locked/released batch. The open-ended
+     Pause stays. Migration `0015`.
+     **Added 2026-10-13 (migration `0016`):** loan amount and start month are correctable until a locked payslip has
+     deducted the loan; optional release date and term (months); **payments received directly** (cash/transfer —
+     counted in the balance, never on an agency schedule, voided with a reason, never deleted; a clearing payment
+     closes the loan and voiding it reopens it); **documents** (PDF/image, served only to payroll users, not via the
+     public `/uploads` route); a **schedule check** per active loan (behind-by amount and expected end month, skipped
+     months excluded); a summary strip (open, still owed, behind, ending within 3 months, by type); a printable
+     **statement of account** (`/print/loan/{id}`); a warning on skipping a remitted loan and a list of skipped
+     loans on that month's SSS/Pag-IBIG loan schedule. Separated employees with a balance are flagged on Loans.
+     Still not built: interest maths (the "total to pay back" is entered, not derived), loan approval flow, taking a
+     separated employee's balance from final pay automatically.
+   - **Separations (2026-10-13, phase 1, migration `0017`):** `/separations` — one page per leaving employee:
+     last day (ends their assignments; marked separated on that date), a final-pay statement (credits owed to
+     them, charges against it), loans settled from final pay (each recorded as a payment received on that loan,
+     company loan first if the admin chooses), what is still owed (loan balances + uncovered charges, reduced by
+     cash received or written off), a clearance checklist, and **Mark cleared** — allowed only when final pay is
+     handed over, nothing is owed and the checklist is done. A person stays listed as owing until then. Not yet:
+     13th month and leave conversion are entered by hand (phase 2: computed from payslip accruals and
+     cash-convertible leave balances — formula still to be verified against a real payslip); printable
+     final-pay / clearance statement and the Loans-page link to the separation (phase 3, built: `/print/separation/{id}`
+     and an "Open separation" link on a separated person's loan).
+     **Phase 2 (migration `0018`):** the 13th month (PD 851) is computed from final payslips — (basic earned −
+     late/undertime) ÷ 12, up to the last day; not due under one month's service or when Main HR marks the person
+     as not entitled (managerial); draft payslips are reported, not counted — and added to the statement once as a
+     credit. The payslip accrual now also excludes late/undertime. Income-tax exemption (₱90,000 with other
+     benefits) is stated, not computed. **Planned:** a separate Bonuses page — year-end 13th-month run for all
+     staff (mid-year installment, December 24 deadline, register print) and a ledger for other bonuses.
+     **Built (migration `0019`):** `/bonuses` — per-establishment batches: 13th-month mid-year installment (accrued to a
+     chosen date) and year-end balance (full accrual less the installment and any 13th month paid with final pay,
+     so nobody is paid twice), and other bonuses (a name and an amount per person). Issue freezes the amounts;
+     reopen is blocked once a later batch depends on it; the year-end cannot be issued while a mid-year draft
+     exists. Prints per establishment: register (A4 landscape, signatures) and slips. Benefits over the ₱90,000
+     tax exemption are flagged, not withheld. Paid outside payroll.
+   - **PLANNED — editable statutory rates (added 2026-10-13, not started).** Today the rates are hard-coded in
+     `packages/hr-core/src/statutory/*` and the run page's "Rates in force" text is a separate hand-copy
+     (`RATES_IN_FORCE` in `payroll.ts`), so a rate change is a code release and the two can drift. Plan:
+     - Rates become **effective-dated rows under Settings** (Main HR). A change is a *new* row with an
+       effective-from date; old rows are never edited. The engine picks the row covering the cutoff date.
+     - Past payslips are unaffected: lines already store computed `deductions` / `employerContributions`, and
+       remittances read those, never recompute. Settings is an input to future computation only (no FK from a
+       payslip to a rate row). Stamp each run/batch with the rate version (effective date) it used.
+     - **Guard:** a locked or released batch must never regenerate (verify it is blocked today).
+     - The "Rates in force" panel is generated from the same data, replacing `RATES_IN_FORCE`.
+     - Editable = simple parameters only (percentages, floors/ceilings, MSC range, EC amounts). The BIR TRAIN
+       bracket table and SSS schedule stay in code / a guarded import — typo risk on statutory money.
+     - Cheap interim: derive `RATES_IN_FORCE` from the hr-core constants to remove the drift.
 
 Phases 1–5 ship in the HR app while the hotel's own HR keeps running; 7 only after 6 is proven.
 
