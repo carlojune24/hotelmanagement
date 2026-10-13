@@ -1,4 +1,4 @@
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 import {
 	bigint,
 	index,
@@ -86,11 +86,19 @@ export const memberships = pgTable(
 		roleId: uuid('role_id')
 			.notNull()
 			.references(() => roles.id, { onDelete: 'restrict' }),
+		/** The HR app's `per_<ULID>` for the employee this login belongs to, when it was invited from
+		 *  the HR picker. HR is the authority for employment; this hotel only keeps the link, so that
+		 *  access can follow a separation or transfer (docs/HR_PLAN.md §4). Null for unlinked accounts. */
+		personRef: text('person_ref'),
 		createdAt: createdAt()
 	},
 	(t) => [
 		primaryKey({ columns: [t.userId, t.hotelId] }),
-		uniqueIndex('memberships_hotel_user_idx').on(t.hotelId, t.userId)
+		uniqueIndex('memberships_hotel_user_idx').on(t.hotelId, t.userId),
+		// One login per person per hotel.
+		uniqueIndex('memberships_hotel_person_idx')
+			.on(t.hotelId, t.personRef)
+			.where(sql`person_ref is not null`)
 	]
 );
 

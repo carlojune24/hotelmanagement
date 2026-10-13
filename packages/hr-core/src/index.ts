@@ -229,5 +229,6 @@ export * from './statutory/sss-2026';
 export * from './statutory/philhealth-2026';
 export * from './statutory/pagibig-2026';
 export * from './statutory/bir-train';
+export * from './premium';
 export * from './compute';
 export * from './thirteenth-month';

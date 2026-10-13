@@ -30,7 +30,6 @@
 		"@internationalized/date": "^3.12.3",
 		"@lucide/svelte": "^1.46.0",
 		"@mm/finance-core": "github:carlojune24/core#finance-core@0.2.0&path:finance-core",
-		"@mm/hr-core": "workspace:*",
 		"@mm/integration": "github:carlojune24/core#integration@1.0.0&path:integration",
 		"@mm/paymongo": "workspace:*",
 		"@node-rs/argon2": "^2.0.2",
@@ -53,7 +52,6 @@
 		"tailwind-merge": "^3.6.0",
 		"tailwind-variants": "^3.3.1",
 		"ulid": "^2.3.0",
-		"xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
 		"zod": "^4.0.0"
 	},
 	"devDependencies": {

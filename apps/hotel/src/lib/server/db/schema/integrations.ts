@@ -1,4 +1,4 @@
-import { boolean, integer, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { boolean, integer, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, updatedAt } from './_shared';
 import { hotels } from './hotels';
 import { users } from './auth';
@@ -69,3 +69,54 @@ export const emailSettings = pgTable('email_settings', {
 
 export type PaymongoSettings = typeof paymongoSettings.$inferSelect;
 export type EmailSettings = typeof emailSettings.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// HR connection — one per hotel (docs/HR_PLAN.md §5)
+// ---------------------------------------------------------------------------
+
+/**
+ * How this hotel reaches the separate HR app: its address and the per-establishment API key Main HR
+ * issued. The key is encrypted at rest like the PayMongo keys and never sent back to the browser.
+ * Without a row the hotel simply has no HR picker — nothing else in the hotel depends on HR.
+ */
+export const hrConnections = pgTable('hr_connections', {
+	hotelId: uuid('hotel_id')
+		.primaryKey()
+		.references(() => hotels.id, { onDelete: 'cascade' }),
+	/** Origin of the HR app, e.g. `https://hr.example.com` — no path. */
+	baseUrl: text('base_url').notNull(),
+	apiKeyEnc: text('api_key_enc').notNull(),
+	apiKeyHint: text('api_key_hint').notNull(),
+	/** What HR reports for this key's establishment, for display. */
+	establishmentName: text('establishment_name'),
+	lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
+	/** Null when the last contact worked. Never a reason to remove anyone's access. */
+	lastError: text('last_error'),
+	connectedByUserId: uuid('connected_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+	createdAt: createdAt(),
+	updatedAt: updatedAt()
+});
+
+export type HrConnection = typeof hrConnections.$inferSelect;
+
+/**
+ * Display-only copy of an HR employee's name and position, keyed by `person_ref` rather than by
+ * login so it outlives a removed membership (reports still name who did what). HR stays the
+ * authority; this is refreshed by the link sync. Never holds pay, IDs or contact details.
+ */
+export const hrPersonSnapshots = pgTable(
+	'hr_person_snapshots',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		personRef: text('person_ref').notNull(),
+		fullName: text('full_name').notNull(),
+		employeeNo: text('employee_no').notNull(),
+		position: text('position'),
+		department: text('department'),
+		syncedAt: timestamp('synced_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(t) => [uniqueIndex('hr_person_snapshots_hotel_person_idx').on(t.hotelId, t.personRef)]
+);

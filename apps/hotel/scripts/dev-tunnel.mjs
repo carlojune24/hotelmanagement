@@ -67,7 +67,15 @@ function runCloudflare() {
 }
 
 function runNgrok() {
-	const proc = spawn('ngrok', ['http', port, '--log=stdout']);
+	// A free static domain (*.ngrok-free.dev) keeps the URL stable across runs; read it from
+	// NGROK_DOMAIN (shell env or .env). Without it ngrok hands out a random hostname.
+	const envDomain = existsSync(envFile)
+		? readFileSync(envFile, 'utf8').match(/^NGROK_DOMAIN=(.+)$/m)?.[1]?.trim()
+		: undefined;
+	const domain = (process.env.NGROK_DOMAIN || envDomain)?.replace(/^https?:\/\//, '');
+	const args = ['http', port, '--log=stdout'];
+	if (domain) args.push(`--url=https://${domain}`);
+	const proc = spawn('ngrok', args);
 	proc.stdout.on('data', (chunk) => process.stdout.write(chunk));
 	proc.stderr.on('data', (chunk) => process.stderr.write(chunk));
 

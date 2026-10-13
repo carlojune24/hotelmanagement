@@ -1,10 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ROLE_CAPS } from '$lib/authz';
 
 /**
  * What a kitchen-only account (kitchen@example.com) can and cannot open. These are the route guards
  * themselves with a hand-built session, so no database is needed.
  */
+// Each test below imports a whole route module (the dashboard's load pulls in finance, folio and
+// the DB layer) for the first time. Alone that takes 2–4 s; with the full suite's workers competing
+// for CPU it can pass the 5 s default and fail a test whose logic is fine.
+vi.setConfig({ testTimeout: 30_000 });
+
 const hotel = { id: 'h1', slug: 'hotel1', name: 'Demo Hotel', timezone: 'Asia/Manila' };
 const asRole = (caps: string[], isPlatformAdmin = false) =>
 	({
@@ -40,8 +45,7 @@ describe('a kitchen-only account', () => {
 	it("is shut out of the manager's areas with a 403", async () => {
 		const dining = await import('./dining/+layout.server');
 		const finance = await import('./finance/+layout.server');
-		const hr = await import('./hr/+layout.server');
-		for (const load of [dining.load, finance.load, hr.load]) {
+		for (const load of [dining.load, finance.load]) {
 			expect(await thrown(() => (load as (e: never) => unknown)({ locals: cook, depends: () => {} } as never))).toMatchObject({ status: 403 });
 		}
 	});
@@ -83,11 +87,10 @@ describe('a dining-only account', () => {
 		expect(out).toMatchObject({ status: 302, location: '/hotel1/management/dining' });
 	});
 
-	it('is shut out of the Kitchen, Finance and HR', async () => {
+	it('is shut out of the Kitchen and Finance', async () => {
 		const kitchen = await import('./kitchen/+layout.server');
 		const finance = await import('./finance/+layout.server');
-		const hr = await import('./hr/+layout.server');
-		for (const load of [kitchen.load, finance.load, hr.load]) {
+		for (const load of [kitchen.load, finance.load]) {
 			expect(await thrown(() => (load as (e: never) => unknown)({ locals: waiter, depends: () => {} } as never))).toMatchObject({ status: 403 });
 		}
 	});

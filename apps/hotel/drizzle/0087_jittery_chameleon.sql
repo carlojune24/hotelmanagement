@@ -1,0 +1,1 @@
+ALTER TABLE "shift_templates" ADD COLUMN "night_diff_window" jsonb;

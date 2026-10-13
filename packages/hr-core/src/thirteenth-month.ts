@@ -1,13 +1,9 @@
 /**
- * 13th-month pay accrual — placeholder. Philippine statutory 13th-month pay is
- * 1/12 of total basic salary earned within the calendar year, accrued per payroll
- * run (`payrollRunLine.thirteenth_month_accrual`) and typically released by
- * December 24. Real accrual logic is a dedicated follow-up.
+ * 13th-month pay accrual: one twelfth of the basic salary actually earned in the calendar year
+ * (Presidential Decree 851), accrued per payroll run and released by December 24. Only basic pay
+ * counts — overtime, premiums, allowances and night differential do not — so the input is the
+ * basic earned in the run, after absences.
  */
-
-/** @throws Always — not yet implemented. */
-export function accrueThirteenthMonth(
-	_basicEarnedThisRunCentavos: number
-): number {
-	throw new Error('13th-month accrual not yet implemented — see docs/standards/hr.md');
+export function accrueThirteenthMonth(basicEarnedThisRunCentavos: number): number {
+	return Math.round(Math.max(0, basicEarnedThisRunCentavos) / 12);
 }

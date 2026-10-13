@@ -1,7 +1,7 @@
 /**
  * Aggregated Drizzle schema. Domain files are added here as each phase lands.
  * App-only tables live in this folder; canonical HR/finance shapes come from
- * @mm/hr-core and @mm/finance-core (wired in Phases 3–5).
+ * @mm/finance-core (HR moved to its own app, docs/HR_PLAN.md).
  */
 export * from './auth';
 export * from './roles';
@@ -27,6 +27,5 @@ export * from './sc-pwd';
 export * from './promo-codes';
 export * from './email-log';
 export * from './guest-messages';
-export * from './hr';
 export * from './integrations';
 export * from './error-log';

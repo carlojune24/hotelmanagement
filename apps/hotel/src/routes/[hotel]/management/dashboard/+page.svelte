@@ -258,13 +258,7 @@
 
 	{#if nothingForRole}
 		<p class="mb-8 text-sm text-ink-muted">
-			{#if data.canHr}
-				Your work lives in <a href="{staffBase}/hr" class="text-brand underline underline-offset-4"
-					>HR</a
-				>.
-			{:else}
-				Nothing needs you here right now — use the menu to get to your work.
-			{/if}
+					Nothing needs you here right now — use the menu to get to your work.
 		</p>
 	{/if}
 

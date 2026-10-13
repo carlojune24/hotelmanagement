@@ -19,7 +19,6 @@
 	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import WalletIcon from '@lucide/svelte/icons/wallet';
-	import UsersIcon from '@lucide/svelte/icons/users';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	import ShieldIcon from '@lucide/svelte/icons/shield';
@@ -123,7 +122,6 @@
 			{ seg: 'kitchen', label: 'Kitchen', icon: ChefHatIcon, show: kitchenOnly || can('kitchen:manage') },
 			{ seg: 'reviews', label: 'Reviews', icon: StarIcon, show: can('review:read') },
 			{ seg: 'finance', label: 'Finance', icon: WalletIcon, show: can('finance:read') },
-			{ seg: 'hr', label: 'HR', icon: UsersIcon, show: can('hr:read') },
 			{
 				seg: 'settings/audit',
 				label: 'Audit log',

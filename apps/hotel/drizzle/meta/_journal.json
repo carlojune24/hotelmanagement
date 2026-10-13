@@ -610,6 +610,41 @@
       "when": 1791698097092,
       "tag": "0086_gifted_cobalt_man",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1791775837702,
+      "tag": "0087_jittery_chameleon",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1791786343770,
+      "tag": "0088_organic_red_wolf",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1791869769521,
+      "tag": "0089_hr_link",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1791871030877,
+      "tag": "0090_remove_hotel_hr",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1791875291173,
+      "tag": "0091_hr_person_snapshots",
+      "breakpoints": true
     }
   ]
 }

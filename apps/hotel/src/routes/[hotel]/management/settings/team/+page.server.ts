@@ -2,12 +2,13 @@ import { fail } from '@sveltejs/kit';
 import { and, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
-import { invites, memberships, roles, users } from '$lib/server/db/schema/index';
+import { hrPersonSnapshots, invites, memberships, roles, users } from '$lib/server/db/schema/index';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { createInvite, revokeInvite } from '$lib/server/auth/invite';
 import { sendStaffInvite } from '$lib/server/email/send-invite';
-import { linkMemberToEmployee, listEmployeesForLinking } from '$lib/server/hr/employees';
+import { HrLinkError, fetchAssigned, getConnection, type HrPerson } from '$lib/server/hr-link/client';
+import { saveSnapshots } from '$lib/server/hr-link/snapshots';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -21,7 +22,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 		.from(roles)
 		.where(and(eq(roles.hotelId, hotelId), eq(roles.isProtected, false)));
 
-	const members = await db
+	const rows = await db
 		.select({
 			userId: users.id,
 			name: users.name,
@@ -30,16 +31,20 @@ export const load: PageServerLoad = async ({ locals }) => {
 			roleId: roles.id,
 			roleSlug: roles.slug,
 			roleName: roles.name,
-			isProtected: roles.isProtected
+			isProtected: roles.isProtected,
+			personRef: memberships.personRef
 		})
 		.from(memberships)
 		.innerJoin(users, eq(users.id, memberships.userId))
 		.innerJoin(roles, eq(roles.id, memberships.roleId))
 		.where(eq(memberships.hotelId, hotelId));
-
-	// For each member's own "Linked employee" picker — every HR employee record,
-	// each already flagged with whichever member (if any) currently holds it.
-	const employees = await listEmployeesForLinking(hotelId);
+	const snaps = new Map(
+		(await db.select().from(hrPersonSnapshots).where(eq(hrPersonSnapshots.hotelId, hotelId))).map((s) => [s.personRef, s])
+	);
+	const members = rows.map((m) => {
+		const s = m.personRef ? snaps.get(m.personRef) : undefined;
+		return { ...m, hrName: s?.fullName ?? null, hrPosition: s?.position ?? null };
+	});
 
 	// Excludes pending hotel_admin invites (created from the platform /admin console) — those
 	// belong to that console's own pending-invites list, not this self-service screen.
@@ -54,8 +59,37 @@ export const load: PageServerLoad = async ({ locals }) => {
 		.where(
 			and(eq(invites.hotelId, hotelId), eq(invites.status, 'pending'), ne(invites.role, 'hotel_admin'))
 		);
+	const pendingRefs = (
+		await db
+			.select({ r: invites.personRef })
+			.from(invites)
+			.where(and(eq(invites.hotelId, hotelId), eq(invites.status, 'pending')))
+	).map((x) => x.r);
 
-	return { members, pendingInvites, assignableRoles, employees };
+	// The HR picker: who HR has assigned to this hotel and who has no login here yet. HR being
+	// down or not connected only removes the picker — inviting by email still works as before.
+	const connection = await getConnection(hotelId);
+	let hrPeople: HrPerson[] = [];
+	let hrError: string | null = null;
+	if (connection) {
+		try {
+			const taken = new Set([
+				...members.map((m) => m.personRef).filter((r): r is string => !!r),
+				...pendingRefs.map((r) => r).filter((r): r is string => !!r)
+			]);
+			hrPeople = (await fetchAssigned(hotelId)).filter((p) => p.status === 'active' && !taken.has(p.person_ref));
+		} catch (e) {
+			if (!(e instanceof HrLinkError)) throw e;
+			hrError = e.message;
+		}
+	}
+
+	return {
+		members,
+		pendingInvites,
+		assignableRoles,
+		hr: { connected: !!connection, people: hrPeople, error: hrError }
+	};
 };
 
 async function getAssignableRoleOr400(hotelId: string, slug: string) {
@@ -74,7 +108,11 @@ export const actions: Actions = {
 
 		const fd = await event.request.formData();
 		const parsed = z
-			.object({ email: z.string().email(), role: z.string().min(1) })
+			.object({
+				email: z.string().email(),
+				role: z.string().min(1),
+				personRef: z.string().max(64).optional().or(z.literal(''))
+			})
 			.safeParse(Object.fromEntries(fd));
 		if (!parsed.success) return fail(400, { error: 'Enter a valid email and role.' });
 
@@ -83,10 +121,33 @@ export const actions: Actions = {
 		const role = await getAssignableRoleOr400(hotelId, parsed.data.role);
 		if (!role) return fail(400, { error: 'Choose a valid role.' });
 
+		// An invite from the HR picker is checked against HR *now*, server-side — the browser's word
+		// that "this person is one of ours" is never enough to attach a person reference.
+		let personRef: string | null = null;
+		if (parsed.data.personRef) {
+			try {
+				const match = (await fetchAssigned(hotelId)).find((p) => p.person_ref === parsed.data.personRef);
+				if (!match || match.status !== 'active') {
+					return fail(400, { error: 'HR no longer lists that person as active at this hotel.' });
+				}
+				personRef = match.person_ref;
+			} catch (e) {
+				if (e instanceof HrLinkError) return fail(400, { error: `Couldn't check with HR: ${e.message}` });
+				throw e;
+			}
+			const already = await db
+				.select({ userId: memberships.userId })
+				.from(memberships)
+				.where(and(eq(memberships.hotelId, hotelId), eq(memberships.personRef, personRef)))
+				.then((r) => r.at(0));
+			if (already) return fail(400, { error: 'That person already has a login at this hotel.' });
+		}
+
 		const { token } = await createInvite({
 			email: parsed.data.email,
 			hotelId,
 			role: role.slug,
+			personRef,
 			invitedByUserId: event.locals.user?.id
 		});
 		await writeAudit({
@@ -94,7 +155,7 @@ export const actions: Actions = {
 			actor: event.locals.user,
 			action: 'team.invite_member',
 			entityType: 'invite',
-			after: { email: parsed.data.email, role: role.slug }
+			after: { email: parsed.data.email, role: role.slug, personRef }
 		});
 
 		const link = `${event.url.origin}/auth/accept-invite/${token}`;
@@ -162,26 +223,86 @@ export const actions: Actions = {
 		return { ok: 'Role updated.' };
 	},
 
-	linkEmployee: async (event) => {
+	// Attaches an HR employee to an *existing* login — role and password are untouched, which is
+	// why this isn't done by re-inviting (that would reset a hotel admin's role and password).
+	linkMember: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'team:*');
 		const hotelId = event.locals.hotel!.id;
 
-		const fd = await event.request.formData();
 		const parsed = z
-			.object({ userId: z.string().uuid(), employeeId: z.string().uuid().optional().or(z.literal('')) })
-			.safeParse(Object.fromEntries(fd));
-		if (!parsed.success) return fail(400, { error: 'Invalid link.' });
+			.object({ userId: z.string().uuid(), personRef: z.string().min(1).max(64) })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: 'Choose an HR employee to link.' });
 
-		await linkMemberToEmployee(hotelId, parsed.data.userId, parsed.data.employeeId || null);
+		const member = await db
+			.select({ personRef: memberships.personRef })
+			.from(memberships)
+			.where(and(eq(memberships.hotelId, hotelId), eq(memberships.userId, parsed.data.userId)))
+			.then((r) => r.at(0));
+		if (!member) return fail(400, { error: 'Member not found.' });
+		if (member.personRef) return fail(400, { error: 'That login is already linked. Unlink it first.' });
+
+		let matched: HrPerson;
+		try {
+			const match = (await fetchAssigned(hotelId)).find((p) => p.person_ref === parsed.data.personRef);
+			if (!match || match.status !== 'active') {
+				return fail(400, { error: 'HR no longer lists that person as active at this hotel.' });
+			}
+			matched = match;
+		} catch (e) {
+			if (e instanceof HrLinkError) return fail(400, { error: `Couldn't check with HR: ${e.message}` });
+			throw e;
+		}
+
+		const taken = await db
+			.select({ userId: memberships.userId })
+			.from(memberships)
+			.where(and(eq(memberships.hotelId, hotelId), eq(memberships.personRef, parsed.data.personRef)))
+			.then((r) => r.at(0));
+		if (taken) return fail(400, { error: 'That person already has a login at this hotel.' });
+
+		await db
+			.update(memberships)
+			.set({ personRef: parsed.data.personRef })
+			.where(and(eq(memberships.hotelId, hotelId), eq(memberships.userId, parsed.data.userId)));
+		await saveSnapshots(hotelId, [matched]);
 		await writeAudit({
 			hotelId,
 			actor: event.locals.user,
-			action: 'employee.link_user',
+			action: 'team.hr_link',
 			entityType: 'membership',
 			entityId: parsed.data.userId,
-			after: { employeeId: parsed.data.employeeId || null }
+			after: { personRef: parsed.data.personRef }
 		});
-		return { ok: parsed.data.employeeId ? 'Linked to an employee record.' : 'Unlinked.' };
+		return { ok: 'Linked to the HR employee.' };
+	},
+
+	unlinkMember: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'team:*');
+		const hotelId = event.locals.hotel!.id;
+
+		const userId = z.string().uuid().safeParse((await event.request.formData()).get('userId'));
+		if (!userId.success) return fail(400, { error: 'Invalid user.' });
+
+		const [before] = await db
+			.select({ personRef: memberships.personRef })
+			.from(memberships)
+			.where(and(eq(memberships.hotelId, hotelId), eq(memberships.userId, userId.data)));
+		if (!before) return fail(400, { error: 'Member not found.' });
+
+		await db
+			.update(memberships)
+			.set({ personRef: null })
+			.where(and(eq(memberships.hotelId, hotelId), eq(memberships.userId, userId.data)));
+		await writeAudit({
+			hotelId,
+			actor: event.locals.user,
+			action: 'team.hr_unlink',
+			entityType: 'membership',
+			entityId: userId.data,
+			before: { personRef: before.personRef }
+		});
+		return { ok: 'Unlinked from HR.' };
 	},
 
 	removeMember: async (event) => {
@@ -208,10 +329,6 @@ export const actions: Actions = {
 		await db
 			.delete(memberships)
 			.where(and(eq(memberships.hotelId, hotelId), eq(memberships.userId, userId.data)));
-		// The membership is gone, but the `users` row (and any employee link to it)
-		// isn't — clear it too, so no employee is left showing as "linked" to someone
-		// who's no longer part of this hotel.
-		await linkMemberToEmployee(hotelId, userId.data, null);
 		await writeAudit({
 			hotelId,
 			actor: event.locals.user,

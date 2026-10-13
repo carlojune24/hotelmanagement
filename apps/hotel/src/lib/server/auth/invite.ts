@@ -20,6 +20,8 @@ export async function createInvite(input: {
 	hotelId?: string | null;
 	/** A role *slug* (see `roles.slug`) — hotelId: null (platform admin) invites pass null. */
 	role?: string | null;
+	/** The HR app's person reference, when invited from the HR picker. */
+	personRef?: string | null;
 	invitedByUserId?: string | null;
 	ttlDays?: number;
 }): Promise<{ token: string; id: string }> {
@@ -48,6 +50,7 @@ export async function createInvite(input: {
 			tokenHash: hashInviteToken(token),
 			hotelId,
 			role: input.role ?? null,
+			personRef: input.personRef ?? null,
 			invitedByUserId: input.invitedByUserId ?? null,
 			expiresAt: new Date(Date.now() + (input.ttlDays ?? 7) * DAY)
 		})
@@ -146,11 +149,16 @@ export async function acceptInvite(
 					.values({
 						userId,
 						hotelId: invite.hotelId,
-						roleId: role.id
+						roleId: role.id,
+						personRef: invite.personRef
 					})
 					.onConflictDoUpdate({
 						target: [memberships.userId, memberships.hotelId],
-						set: { roleId: role.id }
+						// A re-invite from the picker links an existing login; one without a person
+						// never clears a link that is already there.
+						set: invite.personRef
+							? { roleId: role.id, personRef: invite.personRef }
+							: { roleId: role.id }
 					});
 			}
 

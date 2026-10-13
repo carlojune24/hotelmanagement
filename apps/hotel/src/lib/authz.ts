@@ -7,7 +7,6 @@ export type MembershipRole =
 	| 'dining'
 	| 'kitchen'
 	| 'accountant'
-	| 'hr'
 	| 'read_only'
 	| 'group_owner';
 
@@ -18,7 +17,6 @@ export const MEMBERSHIP_ROLES: MembershipRole[] = [
 	'dining',
 	'kitchen',
 	'accountant',
-	'hr',
 	'read_only',
 	'group_owner'
 ];
@@ -31,7 +29,6 @@ export const ASSIGNABLE_HOTEL_ROLES: MembershipRole[] = [
 	'dining',
 	'kitchen',
 	'accountant',
-	'hr',
 	'read_only'
 ];
 
@@ -53,7 +50,7 @@ export const SELF_SERVICE_ASSIGNABLE_ROLES: MembershipRole[] = ASSIGNABLE_HOTEL_
  * Capability grammar: `"<domain>:<action>"`. A grant may be `"*"` (everything),
  * `"<domain>:*"` (any action in a domain), or `"*:<action>"` (an action across every domain).
  * Only two segments are ever matched — do not introduce three-segment capability strings
- * (e.g. `hr:employee:read`); use a distinct domain instead (e.g. `employee:read`).
+ * (e.g. `finance:report:read`); use a distinct domain instead (e.g. `report:read`).
  */
 export const ROLE_CAPS: Record<MembershipRole, string[]> = {
 	hotel_admin: ['*'],
@@ -96,12 +93,8 @@ export const ROLE_CAPS: Record<MembershipRole, string[]> = {
 		'receivable:*',
 		'dayclose:*'
 	],
-	// HR manages employees/scheduling/DTR/payroll — a people/business domain, distinct from
-	// `team:*` (app account & role administration, which stays hotel_admin-only). `hr:read`
-	// is a coarse section-visibility grant only (gates the "HR" nav entry, same role
-	// `finance:read` plays for the Finance section) — the actual per-feature gates within
-	// HR pages are `employee:*`/`schedule:*`/`dtr:*` below.
-	hr: ['hr:read', 'employee:*', 'schedule:*', 'dtr:*', 'leave:*', 'payroll:*', 'reports:read'],
+	// People, scheduling, DTR and payroll moved to the separate HR app (docs/HR_PLAN.md); a
+	// hotel only keeps the Team link to HR employees (`hr-link`).
 	read_only: ['*:read']
 };
 
@@ -116,7 +109,7 @@ export function roleCan(capabilities: string[], cap: string): boolean {
 export function isKitchenOnly(capabilities: string[]): boolean {
 	return (
 		roleCan(capabilities, 'kitchen:read') &&
-		!['booking:read', 'room:read', 'dining:read', 'finance:read', 'hr:read', 'reports:read', 'hotel:admin'].some(
+		!['booking:read', 'room:read', 'dining:read', 'finance:read', 'reports:read', 'hotel:admin'].some(
 			(cap) => roleCan(capabilities, cap)
 		)
 	);
@@ -128,7 +121,7 @@ export function isKitchenOnly(capabilities: string[]): boolean {
 export function isDiningOnly(capabilities: string[]): boolean {
 	return (
 		roleCan(capabilities, 'dining:read') &&
-		!['booking:read', 'room:read', 'finance:read', 'hr:read', 'reports:read', 'hotel:admin'].some((cap) =>
+		!['booking:read', 'room:read', 'finance:read', 'reports:read', 'hotel:admin'].some((cap) =>
 			roleCan(capabilities, cap)
 		)
 	);
@@ -172,8 +165,6 @@ export const PERMISSION_SECTIONS = [
 	'Housekeeping',
 	'Finance',
 	'Team & Access',
-	'HR & Employees',
-	'Payroll',
 	'Dining',
 	'Kitchen',
 	'Settings'
@@ -229,13 +220,7 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 
 	{ cap: 'team:*', label: 'Invite and manage staff accounts', section: 'Team & Access' },
 
-	{ cap: 'hr:read', label: 'See the HR section', section: 'HR & Employees' },
-	{ cap: 'employee:*', label: 'Register and manage employee records', section: 'HR & Employees' },
-	{ cap: 'schedule:*', label: 'Create and manage employee work schedules', section: 'HR & Employees' },
-	{ cap: 'dtr:*', label: 'Manage time records / biometric import', section: 'HR & Employees' },
-	{ cap: 'leave:*', label: 'File and cancel leave, set leave policy and the holiday calendar', section: 'HR & Employees' },
 
-	{ cap: 'payroll:*', label: 'Run payroll, manage payslips and cash advances', section: 'Payroll' },
 
 	{ cap: 'dining:read', label: 'See the Dining section (menu, orders, reservations)', section: 'Dining' },
 	{ cap: 'dining:write', label: 'Take and update dining orders and reservations', section: 'Dining' },

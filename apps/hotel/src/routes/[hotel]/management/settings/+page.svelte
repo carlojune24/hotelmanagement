@@ -71,10 +71,10 @@
 			desc: 'Background jobs that run on a schedule instead of a manual button.'
 		},
 		{
-			href: 'leave',
-			icon: CalendarOffIcon,
-			label: 'Leave & holidays',
-			desc: 'Leave types and their rules, plus the holiday and memorandum calendar that cover employee schedules.'
+			href: 'hr-connection',
+			icon: UsersIcon,
+			label: 'HR connection',
+			desc: 'Link this hotel to the company HR app so staff logins can be created from, and follow, HR employee records.'
 		},
 		{
 			href: 'team',
