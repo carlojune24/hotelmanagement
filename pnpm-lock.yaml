@@ -35,9 +35,6 @@ importers:
       '@mm/finance-core':
         specifier: github:carlojune24/core#finance-core@0.2.0&path:finance-core
         version: https://codeload.github.com/carlojune24/core/tar.gz/3118bd74e4d804f508c1928f39187e12e6e21092#path:finance-core
-      '@mm/hr-core':
-        specifier: workspace:*
-        version: link:../../packages/hr-core
       '@mm/integration':
         specifier: github:carlojune24/core#integration@1.0.0&path:integration
         version: https://codeload.github.com/carlojune24/core/tar.gz/4840f3be01258be24057a0825ada099c0e8c72be#path:integration
@@ -104,9 +101,6 @@ importers:
       ulid:
         specifier: ^2.3.0
         version: 2.4.0
-      xlsx:
-        specifier: https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
-        version: https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
       zod:
         specifier: ^4.0.0
         version: 4.5.4
