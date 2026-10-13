@@ -1,4 +1,4 @@
-import { boolean, integer, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { boolean, integer, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, updatedAt } from './_shared';
 import { hotels } from './hotels';
 import { users } from './auth';
@@ -98,3 +98,25 @@ export const hrConnections = pgTable('hr_connections', {
 });
 
 export type HrConnection = typeof hrConnections.$inferSelect;
+
+/**
+ * Display-only copy of an HR employee's name and position, keyed by `person_ref` rather than by
+ * login so it outlives a removed membership (reports still name who did what). HR stays the
+ * authority; this is refreshed by the link sync. Never holds pay, IDs or contact details.
+ */
+export const hrPersonSnapshots = pgTable(
+	'hr_person_snapshots',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		personRef: text('person_ref').notNull(),
+		fullName: text('full_name').notNull(),
+		employeeNo: text('employee_no').notNull(),
+		position: text('position'),
+		department: text('department'),
+		syncedAt: timestamp('synced_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(t) => [uniqueIndex('hr_person_snapshots_hotel_person_idx').on(t.hotelId, t.personRef)]
+);

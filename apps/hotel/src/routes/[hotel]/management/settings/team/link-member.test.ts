@@ -15,7 +15,7 @@ const hasDb = Boolean(
 
 describe.skipIf(!hasDb)('Team linkMember / unlinkMember (live DB)', async () => {
 	const { db } = await import('$lib/server/db/index');
-	const { hotels, memberships, roles, users } = await import('$lib/server/db/schema/index');
+	const { hotels, hrPersonSnapshots, memberships, roles, users } = await import('$lib/server/db/schema/index');
 	const { mintRef } = await import('$lib/server/ids');
 	const { seedDefaultRoles } = await import('$lib/server/auth/seed-roles');
 	const { and, eq } = await import('drizzle-orm');
@@ -45,8 +45,8 @@ describe.skipIf(!hasDb)('Team linkMember / unlinkMember (live DB)', async () => 
 			await db.insert(memberships).values({ userId: u!.id, hotelId, roleId });
 		}
 		fetchAssignedMock.mockResolvedValue([
-			{ person_ref: 'per_A', status: 'active' },
-			{ person_ref: 'per_GONE', status: 'separated' }
+			{ person_ref: 'per_A', status: 'active', first_name: 'Ana', last_name: 'Cruz', employee_no: 'E-1', position: 'Cook', department: null },
+			{ person_ref: 'per_GONE', status: 'separated', first_name: 'G', last_name: 'One', employee_no: 'E-2', position: null, department: null }
 		]);
 	});
 	afterAll(async () => {
@@ -59,6 +59,11 @@ describe.skipIf(!hasDb)('Team linkMember / unlinkMember (live DB)', async () => 
 		expect(await refOf(0)).toBe('per_A');
 		const m = (await db.select({ r: memberships.roleId }).from(memberships).where(eq(memberships.userId, uid[0]!)))[0];
 		expect(m?.r).toBe(roleId);
+	});
+
+	it('keeps a display snapshot of the HR name and position, even after unlinking', async () => {
+		const [snap] = await db.select().from(hrPersonSnapshots).where(and(eq(hrPersonSnapshots.hotelId, hotelId), eq(hrPersonSnapshots.personRef, 'per_A')));
+		expect(snap).toMatchObject({ fullName: 'Ana Cruz', position: 'Cook', employeeNo: 'E-1' });
 	});
 
 	it('refuses a person who is not active at this hotel, or already linked elsewhere', async () => {

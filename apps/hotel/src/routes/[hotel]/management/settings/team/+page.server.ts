@@ -2,12 +2,13 @@ import { fail } from '@sveltejs/kit';
 import { and, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
-import { invites, memberships, roles, users } from '$lib/server/db/schema/index';
+import { hrPersonSnapshots, invites, memberships, roles, users } from '$lib/server/db/schema/index';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { createInvite, revokeInvite } from '$lib/server/auth/invite';
 import { sendStaffInvite } from '$lib/server/email/send-invite';
 import { HrLinkError, fetchAssigned, getConnection, type HrPerson } from '$lib/server/hr-link/client';
+import { saveSnapshots } from '$lib/server/hr-link/snapshots';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -21,7 +22,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 		.from(roles)
 		.where(and(eq(roles.hotelId, hotelId), eq(roles.isProtected, false)));
 
-	const members = await db
+	const rows = await db
 		.select({
 			userId: users.id,
 			name: users.name,
@@ -37,6 +38,13 @@ export const load: PageServerLoad = async ({ locals }) => {
 		.innerJoin(users, eq(users.id, memberships.userId))
 		.innerJoin(roles, eq(roles.id, memberships.roleId))
 		.where(eq(memberships.hotelId, hotelId));
+	const snaps = new Map(
+		(await db.select().from(hrPersonSnapshots).where(eq(hrPersonSnapshots.hotelId, hotelId))).map((s) => [s.personRef, s])
+	);
+	const members = rows.map((m) => {
+		const s = m.personRef ? snaps.get(m.personRef) : undefined;
+		return { ...m, hrName: s?.fullName ?? null, hrPosition: s?.position ?? null };
+	});
 
 	// Excludes pending hotel_admin invites (created from the platform /admin console) — those
 	// belong to that console's own pending-invites list, not this self-service screen.
@@ -234,11 +242,13 @@ export const actions: Actions = {
 		if (!member) return fail(400, { error: 'Member not found.' });
 		if (member.personRef) return fail(400, { error: 'That login is already linked. Unlink it first.' });
 
+		let matched: HrPerson;
 		try {
 			const match = (await fetchAssigned(hotelId)).find((p) => p.person_ref === parsed.data.personRef);
 			if (!match || match.status !== 'active') {
 				return fail(400, { error: 'HR no longer lists that person as active at this hotel.' });
 			}
+			matched = match;
 		} catch (e) {
 			if (e instanceof HrLinkError) return fail(400, { error: `Couldn't check with HR: ${e.message}` });
 			throw e;
@@ -255,6 +265,7 @@ export const actions: Actions = {
 			.update(memberships)
 			.set({ personRef: parsed.data.personRef })
 			.where(and(eq(memberships.hotelId, hotelId), eq(memberships.userId, parsed.data.userId)));
+		await saveSnapshots(hotelId, [matched]);
 		await writeAudit({
 			hotelId,
 			actor: event.locals.user,

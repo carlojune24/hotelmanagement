@@ -72,6 +72,11 @@
 								<div class="text-xs text-ink-muted">
 									{m.email}{#if m.personRef}<span title="Linked to an HR employee record"> · from HR</span>{/if}
 								</div>
+								{#if m.hrName}
+									<div class="text-xs text-ink-muted">
+										HR: {m.hrName}{m.hrPosition ? ` — ${m.hrPosition}` : ''}
+									</div>
+								{/if}
 								{#if m.personRef}
 									<form method="POST" action="?/unlinkMember" use:enhance class="mt-1">
 										<input type="hidden" name="userId" value={m.userId} />

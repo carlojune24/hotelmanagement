@@ -3,6 +3,7 @@ import { db } from '../db/index';
 import { hrConnections, invites, memberships, roles, users } from '../db/schema/index';
 import { writeAudit } from '../audit';
 import { HrLinkError, fetchPeople, type HrPerson } from './client';
+import { saveSnapshots } from './snapshots';
 
 export type LinkFate = 'keep' | 'remove' | 'unknown';
 
@@ -73,6 +74,7 @@ export async function syncHrLinkedMembers(hotelId: string): Promise<SyncResult> 
 		}
 		throw e;
 	}
+	await saveSnapshots(hotelId, people);
 	const byRef = new Map(people.map((p) => [p.person_ref, p]));
 	const reasonOf = (p: HrPerson | undefined) =>
 		p?.status === 'separated' ? 'separated in HR' : 'no longer assigned to this hotel in HR';

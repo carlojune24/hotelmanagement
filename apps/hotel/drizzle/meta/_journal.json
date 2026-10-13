@@ -603,6 +603,13 @@
       "when": 1791871030877,
       "tag": "0085_remove_hotel_hr",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1791875291173,
+      "tag": "0086_hr_person_snapshots",
+      "breakpoints": true
     }
   ]
 }
