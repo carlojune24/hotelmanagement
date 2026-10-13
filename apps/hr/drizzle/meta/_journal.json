@@ -8,6 +8,13 @@
       "when": 1791864449763,
       "tag": "0000_init_hr_app",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791865638820,
+      "tag": "0001_hr_core_tables",
+      "breakpoints": true
     }
   ]
 }

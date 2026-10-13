@@ -1,4 +1,4 @@
-import { index, pgTable, primaryKey, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { index, jsonb, pgTable, primaryKey, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, deletedAt, pk, updatedAt } from './_shared';
 import { users } from './auth';
 
@@ -30,13 +30,21 @@ export const establishments = pgTable(
 			.references(() => organizations.id, { onDelete: 'restrict' }),
 		/** For kind=hotel: the hotel app's `hotels.org_ref`. For a business: minted here. */
 		orgRef: text('org_ref').notNull().unique(),
+		/** URL segment: `/{slug}/…`. Lowercase, unique, never a reserved prefix (`lib/slug.ts`). */
+		slug: text('slug').notNull().unique(),
 		name: text('name').notNull(),
+		/** Printed on DTRs and rosters; all optional. */
+		legalName: text('legal_name'),
+		addressLine: text('address_line'),
+		city: text('city'),
 		/** 'hotel' | 'business' — validated at the app layer. */
 		kind: text('kind').notNull(),
 		/** IANA timezone; DTR business dates and roster weeks resolve from it. */
 		timezone: text('timezone').notNull().default('Asia/Manila'),
 		/** 'active' | 'archived' */
 		status: text('status').notNull().default('active'),
+		/** Free-form per-establishment settings (e.g. `nightDiff`). */
+		config: jsonb('config').notNull().default({}),
 		createdAt: createdAt(),
 		updatedAt: updatedAt(),
 		deletedAt: deletedAt()

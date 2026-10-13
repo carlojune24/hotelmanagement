@@ -25,7 +25,8 @@ Not part of the hotel booking product. HR-only: no POS, Finance or Dining. Busin
 
 ## Capabilities and Constraints
 
-- Phase 1 (this build): sign-in, app shell, establishments registry. Employees, roster, leave, OT, DTR, payroll arrive in later phases (`docs/HR_PLAN.md` §10).
+- Built: sign-in, shell, establishments registry (phase 1); employees, roster + shift templates, leave policy/requests/balances, holiday calendar, overtime, biometric import and DTR with printable DTR/roster, night-differential settings (phase 2, moved from the hotel app with parity behaviour). Company-wide registry + assignments, approvals, DTR hand-off and payroll are later phases (`docs/HR_PLAN.md` §10).
+- Until approvals exist (phase 4) HR files and approves leave/overtime in one step, so only Main HR holds leave/employee-write capabilities; managers get roster, DTR and read-only employees.
 - Hotel and HR are authorities for different things: HR for people, hotel for logins. HR never grants hotel access.
 - Payroll numbers are blocked on the statutory tables in `@mm/hr-core` (not yet filled in).
 

@@ -168,6 +168,8 @@ Hotel gains: HR client (API key + base URL setting), `person_ref` columns, event
 1. **HR app foundation** — scaffold, DB, auth, roles, domain mapping, establishments, API key plumbing.
 2. **Extract existing HR** into `apps/hr` (employees, schedule, leave, OT, DTR, biometric, settings)
    running on the new DB, with approval statuses defaulting to `approved` (parity with today).
+   **Done 2026-10-13** on `feature/hr-app`. Routes are `/{slug}/…` and `/print/{slug}/…`; payroll
+   pages/tables were deliberately not moved (phase 8); employees stay per-establishment until phase 3.
 3. **Central registry + assignments** — organization-wide employees, `employee_assignments`,
    business-scoped views, assignment-based biometric match.
 4. **Approvals** — statuses, `schedule_periods`, manager submit actions, Main HR inbox.

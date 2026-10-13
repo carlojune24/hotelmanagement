@@ -21,9 +21,13 @@ export const load: PageServerLoad = async ({ locals }) => {
 	return {
 		establishments: rows.map((e) => ({
 			id: e.id,
+			slug: e.slug,
 			name: e.name,
 			kind: e.kind as 'hotel' | 'business',
 			timezone: e.timezone,
+			legalName: e.legalName ?? '',
+			addressLine: e.addressLine ?? '',
+			city: e.city ?? '',
 			status: e.status as 'active' | 'archived',
 			orgRef: e.orgRef
 		})),
@@ -67,6 +71,9 @@ export const actions: Actions = {
 				id: z.string().uuid(),
 				name: z.string().trim().min(1, 'Enter a name.').max(120),
 				timezone: establishmentSchema.shape.timezone,
+				legalName: establishmentSchema.shape.legalName,
+				addressLine: establishmentSchema.shape.addressLine,
+				city: establishmentSchema.shape.city,
 				status: z.enum(['active', 'archived'])
 			})
 			.safeParse(values);

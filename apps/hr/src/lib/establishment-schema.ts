@@ -9,6 +9,10 @@ export const establishmentSchema = z
 		name: z.string().trim().min(1, 'Enter a name.').max(120),
 		kind: z.enum(['hotel', 'business']),
 		timezone: z.enum(TIMEZONES),
+		/** Printed on DTRs and rosters. */
+		legalName: z.string().trim().max(160).optional(),
+		addressLine: z.string().trim().max(200).optional(),
+		city: z.string().trim().max(80).optional(),
 		/** Required for kind=hotel, ignored for a business. */
 		orgRef: z.string().trim().optional()
 	})

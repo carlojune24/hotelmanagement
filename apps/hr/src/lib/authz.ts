@@ -14,9 +14,11 @@ export const ROLE_CAPS: Record<Role, string[]> = {
 	// Everything HR: registry, assignments, approvals, payroll, payslips, settings.
 	main_hr: ['*'],
 	owner_readonly: ['*:read'],
-	// A business manager sees their own establishments; later phases add roster/leave/OT/DTR.
-	business_manager: ['establishment:read'],
-	hr_clerk: ['establishment:read']
+	// A manager sees their own establishments and staff and runs roster + biometric/DTR for them.
+	// Employee writes and leave stay with Main HR for now (docs/HR_PLAN.md §3): manager leave/OT
+	// filing arrives with the approval states in phase 4, so no one can self-approve before that.
+	business_manager: ['establishment:read', 'employee:read', 'schedule:*', 'dtr:*'],
+	hr_clerk: ['establishment:read', 'employee:read', 'schedule:*', 'dtr:*']
 };
 
 export const ROLE_LABEL: Record<Role, string> = {

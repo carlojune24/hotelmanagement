@@ -18,6 +18,12 @@
 	--color-gold-soft: var(--gold-soft);
 	--color-ink: var(--ink);
 	--color-ink-muted: var(--ink-muted);
+	/* Aliases for class names the moved HR screens already use (bg-surface, text-brand, …). */
+	--color-surface: var(--surface);
+	--color-surface-2: var(--surface-2);
+	--color-brand: var(--ink);
+	--color-brand-ink: var(--primary-foreground);
+	--color-danger: var(--danger);
 	--color-ok: var(--ok);
 	--color-warning: var(--warning);
 	--font-sans: 'Inter Variable', sans-serif;
@@ -76,6 +82,8 @@
 	--ok: oklch(0.6 0.13 155);
 	--warning: oklch(0.65 0.16 70);
 	--danger: oklch(0.58 0.19 25);
+	--surface: oklch(0.998 0.004 95);
+	--surface-2: oklch(0.965 0.01 95);
 
 	/* shadcn semantic aliases. Surfaces stay >=85% opaque so text always has AA contrast. */
 	--background: oklch(0.975 0.012 95);

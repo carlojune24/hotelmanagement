@@ -106,7 +106,7 @@
 				<Table.Body>
 					{#each rows as row (row.id)}
 						<Table.Row>
-							<Table.Cell class="font-medium">{row.name}</Table.Cell>
+							<Table.Cell class="font-medium"><a href="/{row.slug}/employees" class="underline-offset-4 hover:underline">{row.name}</a></Table.Cell>
 							<Table.Cell>{row.kind === 'hotel' ? 'Hotel' : 'Business'}</Table.Cell>
 							<Table.Cell class="text-ink-muted">{row.timezone}</Table.Cell>
 							<Table.Cell class="font-mono text-xs text-ink-muted" title={row.orgRef}
@@ -198,6 +198,21 @@
 					</div>
 				{/if}
 			{/if}
+
+			<div class="space-y-1.5">
+				<Label for="legalName">Legal name <span class="text-ink-muted">(printed on DTRs)</span></Label>
+				<Input id="legalName" name="legalName" maxlength={160} value={editing?.legalName ?? ''} />
+			</div>
+			<div class="grid grid-cols-2 gap-3">
+				<div class="space-y-1.5">
+					<Label for="addressLine">Address</Label>
+					<Input id="addressLine" name="addressLine" maxlength={200} value={editing?.addressLine ?? ''} />
+				</div>
+				<div class="space-y-1.5">
+					<Label for="city">City</Label>
+					<Input id="city" name="city" maxlength={80} value={editing?.city ?? ''} />
+				</div>
+			</div>
 
 			<div class="space-y-1.5">
 				<Label for="timezone">Timezone</Label>
