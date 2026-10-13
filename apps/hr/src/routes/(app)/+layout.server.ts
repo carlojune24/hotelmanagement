@@ -19,6 +19,7 @@ export const load: LayoutServerLoad = async ({ locals, url }) => {
 			establishments: locals.user.isSystemAdmin || canAnywhere(access, 'establishment:read'),
 			people: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'employee:read'),
 			approvals: approver,
+			payroll: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			users: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'user:*')
 		}
 	};

@@ -19,6 +19,8 @@ const MANAGER_CAPS = [
 	'overtime:file',
 	'memo:propose'
 ];
+// Pay is more sensitive than the roster: only the manager reads released payslips, not the clerk.
+const MANAGER_ONLY_CAPS = [...MANAGER_CAPS, 'payslip:read'];
 
 // shortcut: static role→caps map, not DB-backed rows like the hotel app's `roles` table.
 // Upgrade when a client needs to edit role capabilities without a deploy.
@@ -27,7 +29,7 @@ export const ROLE_CAPS: Record<Role, string[]> = {
 	main_hr: ['*'],
 	owner_readonly: ['*:read'],
 	// Managers: see MANAGER_CAPS above. Employee writes, leave policy and every decision stay with Main HR.
-	business_manager: MANAGER_CAPS,
+	business_manager: MANAGER_ONLY_CAPS,
 	hr_clerk: MANAGER_CAPS
 };
 

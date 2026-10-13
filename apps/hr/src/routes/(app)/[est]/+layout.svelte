@@ -13,6 +13,7 @@
 			{ seg: '/dtr', label: 'DTR', show: data.tabs.dtr },
 			{ seg: '/leave', label: 'Leave', show: data.tabs.leave },
 			{ seg: '/overtime', label: 'Overtime', show: data.tabs.overtime },
+			{ seg: '/payslips', label: 'Payslips', show: data.tabs.payslips },
 			{ seg: '/settings', label: 'Settings', show: data.tabs.settings }
 		].filter((t) => t.show)
 	);

@@ -13,6 +13,8 @@ export const organizations = pgTable('organizations', {
 	name: text('name').notNull(),
 	legalName: text('legal_name'),
 	tin: text('tin'),
+	/** Company-wide settings, e.g. `{ payroll: { dayFactor: 313 } }`. */
+	config: jsonb('config').notNull().default({}),
 	createdAt: createdAt(),
 	updatedAt: updatedAt()
 });

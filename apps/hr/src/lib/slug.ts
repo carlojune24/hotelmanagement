@@ -5,6 +5,7 @@ export const RESERVED_SLUGS = new Set([
 	'users',
 	'people',
 	'approvals',
+	'payroll',
 	'account',
 	'print',
 	'api',

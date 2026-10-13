@@ -21,6 +21,7 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 			leave: can('leave:file'),
 			overtime: can('overtime:file'),
 			leavePolicy: can('leave:*'),
+			payslips: can('payslip:read'),
 			settings: can('schedule:*')
 		}
 	};

@@ -618,6 +618,124 @@ export const dtrSubmissions = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Payroll — a company cutoff, worked and released per establishment
+// ---------------------------------------------------------------------------
+
+/**
+ * One company-wide cutoff. A person is paid once per run (so their statutory contributions are
+ * computed once, on their total pay), but everything operational is per establishment — see
+ * `payroll_batches`. All money is integer centavos.
+ */
+export const payrollRuns = pgTable(
+	'payroll_runs',
+	{
+		id: pk(),
+		organizationId: uuid('organization_id')
+			.notNull()
+			.references(() => organizations.id, { onDelete: 'restrict' }),
+		cutoffStart: date('cutoff_start', { mode: 'string' }).notNull(),
+		cutoffEnd: date('cutoff_end', { mode: 'string' }).notNull(),
+		payDate: date('pay_date', { mode: 'string' }).notNull(),
+		/** 'semi_monthly' | 'monthly' */
+		frequency: text('frequency').notNull(),
+		/** Working days a year (261 | 313 | 365) snapshotted from the company setting at creation. */
+		dayFactor: integer('day_factor').notNull(),
+		/** Someone confirmed the statutory rates in force for this period before anything was locked. */
+		ratesCheckedByUserId: uuid('rates_checked_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		ratesCheckedAt: timestamp('rates_checked_at', { withTimezone: true }),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [index('payroll_runs_organization_idx').on(t.organizationId, t.cutoffStart)]
+);
+
+/** One establishment's payroll within a run: generated, locked and released on its own. */
+export const payrollBatches = pgTable(
+	'payroll_batches',
+	{
+		id: pk(),
+		runId: uuid('run_id')
+			.notNull()
+			.references(() => payrollRuns.id, { onDelete: 'cascade' }),
+		establishmentId: uuid('establishment_id')
+			.notNull()
+			.references(() => establishments.id, { onDelete: 'cascade' }),
+		/** 'draft' | 'locked' | 'released' */
+		status: text('status').notNull().default('draft'),
+		generatedAt: timestamp('generated_at', { withTimezone: true }),
+		lockedByUserId: uuid('locked_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		lockedAt: timestamp('locked_at', { withTimezone: true }),
+		releasedByUserId: uuid('released_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		releasedAt: timestamp('released_at', { withTimezone: true }),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [uniqueIndex('payroll_batches_run_establishment_idx').on(t.runId, t.establishmentId)]
+);
+
+/**
+ * One person's pay for a run, grouped under their home establishment. The identity fields are
+ * snapshots so a payslip never changes when an employee record is edited later.
+ */
+export const payrollRunLines = pgTable(
+	'payroll_run_lines',
+	{
+		id: pk(),
+		runId: uuid('run_id')
+			.notNull()
+			.references(() => payrollRuns.id, { onDelete: 'cascade' }),
+		batchId: uuid('batch_id')
+			.notNull()
+			.references(() => payrollBatches.id, { onDelete: 'cascade' }),
+		employeeId: uuid('employee_id')
+			.notNull()
+			.references(() => employees.id, { onDelete: 'restrict' }),
+		/** The establishment this payslip is listed under (the person's home). */
+		establishmentId: uuid('establishment_id')
+			.notNull()
+			.references(() => establishments.id, { onDelete: 'restrict' }),
+		personRef: text('person_ref').notNull(),
+		employeeNo: text('employee_no').notNull(),
+		employeeName: text('employee_name').notNull(),
+		position: text('position').notNull(),
+		department: text('department'),
+		payBasis: text('pay_basis').notNull(),
+		baseRateCentavos: bigint('base_rate_centavos', { mode: 'number' }).notNull(),
+		/** Snapshots of the government numbers, shown masked on the payslip. */
+		govIds: jsonb('gov_ids').notNull().default({}),
+		daysWorked: integer('days_worked').notNull().default(0),
+		minutesRegular: integer('minutes_regular').notNull().default(0),
+		minutesOvertime: integer('minutes_overtime').notNull().default(0),
+		minutesNightDiff: integer('minutes_night_diff').notNull().default(0),
+		/** `{ basic, overtime, holiday_premium, night_diff, allowances, other }` — @mm/hr-core's shape. */
+		earnings: jsonb('earnings').notNull(),
+		grossCentavos: bigint('gross_centavos', { mode: 'number' }).notNull(),
+		/** `{ sss_ee, philhealth_ee, pagibig_ee, withholding_tax, cash_advance, loans, tardiness_undertime, other }` */
+		deductions: jsonb('deductions').notNull(),
+		/** `{ sss_er, philhealth_er, pagibig_er, ecc }` — for remittance, not netted. */
+		employerContributions: jsonb('employer_contributions').notNull(),
+		netPayCentavos: bigint('net_pay_centavos', { mode: 'number' }).notNull(),
+		thirteenthMonthAccrualCentavos: bigint('thirteenth_month_accrual_centavos', { mode: 'number' })
+			.notNull()
+			.default(0),
+		/** What Main HR keyed in on top of the computed pay: allowances, other earnings, advances, loans,
+		 *  other deductions, a withholding override, and a note — preserved across a regenerate. */
+		adjustments: jsonb('adjustments').notNull().default({}),
+		/** Daily/hourly rate used, absent days, monthly basis, taxable income — shown on the payslip. */
+		detail: jsonb('detail').notNull().default({}),
+		/** `{ [establishmentId]: gross centavos }` — who bears the cost of a multi-site person. */
+		costByEstablishment: jsonb('cost_by_establishment').notNull().default({}),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [
+		uniqueIndex('payroll_run_lines_run_employee_idx').on(t.runId, t.employeeId),
+		index('payroll_run_lines_batch_idx').on(t.batchId)
+	]
+);
+
+// ---------------------------------------------------------------------------
 // Relations
 // ---------------------------------------------------------------------------
 
@@ -659,3 +777,6 @@ export type NewDtrEntry = typeof dtrEntries.$inferInsert;
 export type EmployeeAssignment = typeof employeeAssignments.$inferSelect;
 export type SchedulePeriod = typeof schedulePeriods.$inferSelect;
 export type DtrSubmission = typeof dtrSubmissions.$inferSelect;
+export type PayrollRun = typeof payrollRuns.$inferSelect;
+export type PayrollBatch = typeof payrollBatches.$inferSelect;
+export type PayrollRunLineRow = typeof payrollRunLines.$inferSelect;

@@ -43,6 +43,13 @@
       "when": 1791869259486,
       "tag": "0005_dtr_handoff",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791872294966,
+      "tag": "0006_payroll",
+      "breakpoints": true
     }
   ]
 }

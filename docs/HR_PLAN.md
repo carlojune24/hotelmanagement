@@ -201,10 +201,22 @@ Hotel gains: HR client (API key + base URL setting), `person_ref` columns, event
    Team "Linked employee" picker are gone; the 16 HR tables, the `hr` role and HR-only capabilities were
    dropped (guarded: the migration aborts if anyone still holds the `hr` role). Finance's `payroll`
    category, `@mm/finance-core` and `hr-connection` are kept. Backups taken first.
-8. **Payroll + payslips** — company-wide run, release, business download.
-   ⚠ **Blocker independent of this plan:** `@mm/hr-core/statutory` (SSS/PhilHealth/Pag-IBIG/BIR) and
-   `compute.ts` still throw; "Generate lines" refuses by design. Phase 8 cannot produce real numbers
-   until the tables are filled and checked against current circulars. Phases 1–7 don't depend on it.
+8. **Payroll + payslips** — **built 2026-10-13** on `feature/hr-payroll`.
+   - `@mm/hr-core` now has the real statutory engine (SSS 15% schedule with MSC clamp/EC, PhilHealth 5% with
+     floor/ceiling, Pag-IBIG 2% capped, BIR TRAIN per-period tables built from the annual brackets) and
+     `computePayrollLine` (basic by pay basis, absences, lateness, OT 125%/holiday/rest-day multipliers,
+     holiday premium, night differential, 13th-month accrual), 26 unit tests. Figures follow the published
+     schedules **but are not verified against 2026 circulars**: every run shows them and Main HR must tick
+     "I've checked these" before any batch can be locked.
+   - **One run per company cutoff, worked per establishment** (`payroll_runs` → `payroll_batches`):
+     generate only from a *received* DTR, review/adjust, lock, release. A person is paid once under their
+     home establishment (statutory computed once on total pay); an establishment they also worked at bears
+     its share via `cost_by_establishment`. A multi-site person is held until every site's DTR is received.
+   - Payslips are rendered from the line (`/print/{slug}/payslip/{id}`): Main HR any state (draft
+     watermarked); a manager only a *released* one of their own people; government numbers masked.
+   - Deliberately simple, all stated in code: contributions on rate-based monthly pay, split across the
+     month's periods; night differential not split regular/OT; no year-end tax true-up; the working-day
+     factor (261/313/365) is a company choice with no default.
 
 Phases 1–5 ship in the HR app while the hotel's own HR keeps running; 7 only after 6 is proven.
 
