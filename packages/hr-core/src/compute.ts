@@ -244,7 +244,8 @@ export function computePayrollLine(input: ComputePayrollLineInput): ComputedPayr
 				ecc: part(sss.ec)
 			},
 			net_pay: gross - totalDeductions,
-			thirteenth_month_accrual: accrueThirteenthMonth(basic)
+			// Basic actually earned: pay for time not worked (late, undertime) is not part of the 13th-month base.
+			thirteenth_month_accrual: accrueThirteenthMonth(basic - tardinessUndertime)
 		},
 		detail: {
 			dailyRateCentavos: daily,
