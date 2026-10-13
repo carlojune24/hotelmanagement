@@ -584,6 +584,40 @@ export const schedulePeriods = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// DTR hand-off — one row per establishment-cutoff
+// ---------------------------------------------------------------------------
+
+/**
+ * A business sending its generated DTR for a cutoff to Main HR. While `submitted` or `received`
+ * the cutoff is locked for managers (raw punches and saved records); Main HR may `return` it
+ * with a note, which unlocks it. No row means the cutoff is still a draft.
+ */
+export const dtrSubmissions = pgTable(
+	'dtr_submissions',
+	{
+		id: pk(),
+		establishmentId: uuid('establishment_id')
+			.notNull()
+			.references(() => establishments.id, { onDelete: 'cascade' }),
+		/** Inclusive dates. Today always a calendar month; semi-monthly cutoffs fit the same shape. */
+		cutoffStart: date('cutoff_start', { mode: 'string' }).notNull(),
+		cutoffEnd: date('cutoff_end', { mode: 'string' }).notNull(),
+		/** 'draft' | 'submitted' | 'received' | 'returned' */
+		status: text('status').notNull().default('draft'),
+		submittedByUserId: uuid('submitted_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		submittedAt: timestamp('submitted_at', { withTimezone: true }),
+		decidedByUserId: uuid('decided_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		decidedAt: timestamp('decided_at', { withTimezone: true }),
+		decisionNote: text('decision_note'),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [
+		uniqueIndex('dtr_submissions_cutoff_idx').on(t.establishmentId, t.cutoffStart, t.cutoffEnd)
+	]
+);
+
+// ---------------------------------------------------------------------------
 // Relations
 // ---------------------------------------------------------------------------
 
@@ -624,3 +658,4 @@ export type DtrEntry = typeof dtrEntries.$inferSelect;
 export type NewDtrEntry = typeof dtrEntries.$inferInsert;
 export type EmployeeAssignment = typeof employeeAssignments.$inferSelect;
 export type SchedulePeriod = typeof schedulePeriods.$inferSelect;
+export type DtrSubmission = typeof dtrSubmissions.$inferSelect;

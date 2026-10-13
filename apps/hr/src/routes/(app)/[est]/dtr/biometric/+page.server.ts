@@ -1,4 +1,5 @@
 import { fail } from '@sveltejs/kit';
+import { canAt } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { businessDateFor } from '$lib/server/time';
@@ -24,6 +25,10 @@ import {
 import { ParseSheetError, parseImportFile } from '$lib/server/hr/parse-sheet';
 import { normalizeEnrollId } from '$lib/hr-import';
 import type { Actions, PageServerLoad } from './$types';
+
+/** Main HR may still correct a cutoff it is holding; a manager may not. */
+const isApprover = (locals: App.Locals) =>
+	locals.user!.isSystemAdmin || canAt(locals.access!, 'approval:*', locals.establishment!.id);
 
 export const load: PageServerLoad = async ({ locals, url }) => {
 	requireCap(locals.user, locals.access, 'dtr:*', locals.establishment!.id);
@@ -127,7 +132,8 @@ export const actions: Actions = {
 				mapping,
 				file.name,
 				period.data,
-				event.locals.user?.id ?? null
+				event.locals.user?.id ?? null,
+				{ approver: isApprover(event.locals) }
 			);
 			await writeAudit({
 				establishmentId,
@@ -163,7 +169,13 @@ export const actions: Actions = {
 		const establishmentId = event.locals.establishment!.id;
 		const id = (await event.request.formData()).get('id');
 		if (typeof id !== 'string') return fail(400, { error: 'Missing file.' });
-		const gone = await removeUpload(establishmentId, id);
+		let gone;
+		try {
+			gone = await removeUpload(establishmentId, id, { approver: isApprover(event.locals) });
+		} catch (e) {
+			if (e instanceof DtrImportError) return fail(400, { error: e.message });
+			throw e;
+		}
 		if (!gone) return fail(404, { error: 'That file is already gone.' });
 		await writeAudit({
 			establishmentId,
@@ -181,7 +193,12 @@ export const actions: Actions = {
 		const establishmentId = event.locals.establishment!.id;
 		const id = (await event.request.formData()).get('id');
 		if (typeof id !== 'string') return fail(400, { error: 'Missing punch.' });
-		await removePunch(establishmentId, id);
+		try {
+			await removePunch(establishmentId, id, { approver: isApprover(event.locals) });
+		} catch (e) {
+			if (e instanceof DtrImportError) return fail(400, { error: e.message });
+			throw e;
+		}
 		await writeAudit({
 			establishmentId,
 			actor: event.locals.user,
@@ -199,7 +216,9 @@ export const actions: Actions = {
 			const establishmentId = event.locals.establishment!.id;
 			const parsed = addPunchSchema.safeParse(Object.fromEntries(await event.request.formData()));
 			if (!parsed.success) throw new DtrImportError(parsed.error.issues[0]!.message);
-			const p = await addManualPunch(establishmentId, parsed.data, event.locals.user?.id ?? null);
+			const p = await addManualPunch(establishmentId, parsed.data, event.locals.user?.id ?? null, {
+				approver: isApprover(event.locals)
+			});
 			await writeAudit({
 				establishmentId,
 				actor: event.locals.user,

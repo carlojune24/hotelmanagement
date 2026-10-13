@@ -9,7 +9,8 @@
 	let busy = $state(false);
 
 	const total = $derived(
-		data.pending.weeks.length +
+		data.pending.dtr.length +
+			data.pending.weeks.length +
 			data.pending.leave.length +
 			data.pending.overtime.length +
 			data.pending.memos.length
@@ -58,6 +59,26 @@
 			<Button type="submit" name="decision" value="rejected" size="sm" variant="outline" disabled={busy}>{rejectLabel}</Button>
 		</form>
 	{/snippet}
+
+	{#if data.pending.dtr.length}
+		<section class="panel space-y-3 p-5" aria-label="DTRs">
+			<h2 class="text-xl font-light">DTRs</h2>
+			{#each data.pending.dtr as d (d.id)}
+				<div class="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/70 p-3">
+					<div>
+						<p class="font-medium">{d.establishmentName}</p>
+						<p class="text-sm text-ink-muted">
+							{d.month} · sent by {d.submittedBy ?? 'unknown'} · {when(d.submittedAt)}
+						</p>
+						<a class="text-xs underline underline-offset-4" href="/{d.establishmentSlug}/dtr?month={d.month}"
+							>Review the DTR</a
+						>
+					</div>
+					{@render decide('decideDtr', { id: d.id }, 'Receive', 'Return')}
+				</div>
+			{/each}
+		</section>
+	{/if}
 
 	{#if data.pending.weeks.length}
 		<section class="panel space-y-3 p-5" aria-label="Rosters">
@@ -139,6 +160,47 @@
 			{/each}
 		</section>
 	{/if}
+
+	<section class="panel space-y-3 p-5" aria-label="DTR hand-off by month">
+		<div class="flex flex-wrap items-center justify-between gap-3">
+			<h2 class="text-xl font-light">DTR hand-off</h2>
+			<form method="GET" class="flex items-center gap-2">
+				<Input type="month" name="month" value={data.month} aria-label="Month" class="h-9 w-44" />
+				<Button type="submit" variant="outline" size="sm">Show</Button>
+			</form>
+		</div>
+		{#if data.board.length === 0}
+			<p class="text-sm text-ink-muted">No establishments yet.</p>
+		{:else}
+			<ul class="divide-y divide-dotted divide-foreground/20">
+				{#each data.board as b (b.establishmentId)}
+					<li class="flex flex-wrap items-center justify-between gap-2 py-2.5">
+						<a class="font-medium underline-offset-4 hover:underline" href="/{b.establishmentSlug}/dtr?month={data.month}"
+							>{b.establishmentName}</a
+						>
+						<span
+							class="inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium {b.status === 'received'
+								? 'bg-ok/15'
+								: b.status === 'submitted'
+									? 'bg-gold'
+									: b.status === 'returned'
+										? 'bg-destructive/15'
+										: 'bg-ink/10'}"
+						>
+							<span class="size-1.5 rounded-full bg-current opacity-70"></span>
+							{b.status === 'received'
+								? 'Received'
+								: b.status === 'submitted'
+									? 'Waiting for you'
+									: b.status === 'returned'
+										? 'Returned'
+										: 'Not sent'}
+						</span>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</section>
 
 	{#if total === 0}
 		<div class="hatch rounded-3xl px-6 py-16 text-center">

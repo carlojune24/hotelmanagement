@@ -104,6 +104,64 @@
 	};
 </script>
 
+<!-- Hand-off to Main HR -->
+<div class="mx-auto w-full max-w-7xl px-4 pt-6 sm:px-6">
+	<div class="flex flex-wrap items-start justify-between gap-3 rounded-2xl bg-white/70 p-4">
+		<div class="min-w-0 space-y-1">
+			<p class="flex flex-wrap items-center gap-2 text-sm font-medium">
+				Hand-off to Main HR
+				<span
+					class="inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium {data.handoff.status === 'received'
+						? 'bg-ok/15'
+						: data.handoff.status === 'submitted'
+							? 'bg-gold'
+							: data.handoff.status === 'returned'
+								? 'bg-destructive/15'
+								: 'bg-ink/10'}"
+				>
+					<span class="size-1.5 rounded-full bg-current opacity-70"></span>
+					{data.handoff.status === 'received'
+						? 'Received — locked'
+						: data.handoff.status === 'submitted'
+							? 'Waiting for Main HR — locked'
+							: data.handoff.status === 'returned'
+								? 'Returned for correction'
+								: 'Not sent yet'}
+				</span>
+			</p>
+			{#if data.handoff.status === 'returned' && data.handoff.note}
+				<p class="text-sm"><strong class="font-medium">Main HR says:</strong> {data.handoff.note}</p>
+			{/if}
+			{#if data.locked}
+				<p class="text-sm text-ink-muted">
+					Records and punches for this month can't be changed until Main HR returns it.
+				</p>
+			{:else if data.handoff.status === 'draft' || data.handoff.status === 'returned'}
+				{#if data.warnings.unapprovedWeeks.length > 0}
+					<p class="text-sm text-ink-muted">
+						{data.warnings.unapprovedWeeks.length} roster week{data.warnings.unapprovedWeeks.length === 1 ? '' : 's'}
+						this month {data.warnings.unapprovedWeeks.length === 1 ? 'is' : 'are'} not approved yet.
+					</p>
+				{/if}
+				{#if data.warnings.missingEmployees.length > 0}
+					<p class="text-sm text-ink-muted">
+						No saved DTR yet for {data.warnings.missingEmployees.length}:
+						{data.warnings.missingEmployees.slice(0, 4).join('; ')}{data.warnings.missingEmployees.length > 4
+							? '…'
+							: ''}
+					</p>
+				{/if}
+			{/if}
+		</div>
+		{#if !data.canApprove && (data.handoff.status === 'draft' || data.handoff.status === 'returned')}
+			<form method="POST" action="?/submitMonth" use:enhance={run}>
+				<input type="hidden" name="month" value={data.month} />
+				<Button type="submit" variant="gold" disabled={busy}>Send to Main HR</Button>
+			</form>
+		{/if}
+	</div>
+</div>
+
 <div class="mx-auto grid w-full max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[16rem_minmax(0,1fr)_18rem]">
 	{#if !data.selected}
 		<div class="rounded-xl border border-dashed border-border p-10 text-center lg:col-span-3">
@@ -169,19 +227,19 @@
 
 			{#if mode === 'preview'}
 				<div class="grid gap-2">
-					<Button variant="outline" onclick={() => openAdd(`${data.month}-01`)}>
+					<Button variant="outline" disabled={data.locked} onclick={() => openAdd(`${data.month}-01`)}>
 						<PlusIcon class="size-4" /> Add time
 					</Button>
 					<form method="POST" action="?/save" use:enhance={run} class="contents">
 						<input type="hidden" name="month" value={data.month} />
 						<input type="hidden" name="employeeId" value={data.selected.id} />
-						<Button type="submit" disabled={busy}>
+						<Button type="submit" disabled={busy || data.locked}>
 							<SaveIcon class="size-4" /> Save record
 						</Button>
 					</form>
 					<form method="POST" action="?/save" use:enhance={run} class="contents">
 						<input type="hidden" name="month" value={data.month} />
-						<Button type="submit" variant="outline" disabled={busy}>
+						<Button type="submit" variant="outline" disabled={busy || data.locked}>
 							Save all ({data.unsavedCount} unsaved)
 						</Button>
 					</form>

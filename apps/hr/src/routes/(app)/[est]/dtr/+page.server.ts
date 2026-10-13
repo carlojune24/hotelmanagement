@@ -30,6 +30,18 @@ function sameDays(a: DtrDay[], b: DtrDay[]): boolean {
 	return a.length === b.length && a.every((d, i) => sig(d) === sig(b[i]!));
 }
 
+import { canAt } from '$lib/authz';
+import {
+	DtrSubmissionError,
+	getHandoff,
+	handoffWarnings,
+	submitDtr
+} from '$lib/server/hr/dtr-submissions';
+
+/** Main HR may still correct a cutoff it is holding; a manager may not. */
+const isApprover = (locals: App.Locals) =>
+	locals.user!.isSystemAdmin || canAt(locals.access!, 'approval:*', locals.establishment!.id);
+
 export const load: PageServerLoad = async ({ locals, url }) => {
 	requireCap(locals.user, locals.access, 'dtr:*', locals.establishment!.id);
 	const establishment = locals.establishment!;
@@ -40,6 +52,19 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			? monthParam
 			: businessDateFor(establishment.timezone).slice(0, 7);
 	const range = monthBounds(`${month}-01`);
+
+	// Hand-off state travels with every return below, including the "nobody has a device ID" one.
+	const canApprove = isApprover(locals);
+	const [handoff, warnings] = await Promise.all([
+		getHandoff(establishment.id, month),
+		handoffWarnings(establishment.id, month)
+	]);
+	const handoffInfo = {
+		handoff,
+		warnings,
+		canApprove,
+		locked: !canApprove && (handoff.status === 'submitted' || handoff.status === 'received')
+	};
 
 	const all = await listEmployees(establishment.id);
 	const people = all
@@ -56,7 +81,17 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const selected = people.find((p) => p.id === requested) ?? people[0] ?? null;
 
 	if (!selected) {
-		return { month, range, people, unsavedCount: people.length, selected: null, preview: null, saved: null, savedState: 'none' as const };
+		return {
+			month,
+			range,
+			people,
+			unsavedCount: people.length,
+			selected: null,
+			preview: null,
+			saved: null,
+			savedState: 'none' as const,
+			...handoffInfo
+		};
 	}
 
 	const [generated, entries, roster] = await Promise.all([
@@ -86,7 +121,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const savedIds = new Set(entries.map((e) => e.employeeId));
 	const unsavedCount = people.filter((p) => !savedIds.has(p.id)).length;
 
-	return { month, range, people, unsavedCount, selected, preview, saved, savedState };
+	return { month, range, people, unsavedCount, selected, preview, saved, savedState, ...handoffInfo };
 };
 
 const addTimeSchema = z.object({
@@ -97,7 +132,7 @@ const addTimeSchema = z.object({
 });
 
 function failure(e: unknown) {
-	if (e instanceof DtrImportError) return fail(400, { error: e.message });
+	if (e instanceof DtrImportError || e instanceof DtrSubmissionError) return fail(400, { error: e.message });
 	throw e;
 }
 
@@ -112,7 +147,9 @@ export const actions: Actions = {
 			if (!month.success) throw new DtrImportError('Pick a month.');
 			const emp = fd.get('employeeId');
 			const employeeId = typeof emp === 'string' && emp ? emp : undefined;
-			const r = await saveMonthDtr(establishmentId, month.data, employeeId);
+			const r = await saveMonthDtr(establishmentId, month.data, employeeId, {
+				approver: isApprover(event.locals)
+			});
 			await writeAudit({
 				establishmentId,
 				actor: event.locals.user,
@@ -147,7 +184,8 @@ export const actions: Actions = {
 					time: parsed.data.time,
 					note: parsed.data.note
 				},
-				event.locals.user?.id ?? null
+				event.locals.user?.id ?? null,
+				{ approver: isApprover(event.locals) }
 			);
 			await writeAudit({
 				establishmentId,
@@ -158,6 +196,28 @@ export const actions: Actions = {
 				after: { employeeId: emp.id, date: parsed.data.date, time: parsed.data.time, note: parsed.data.note }
 			});
 			return { ok: 'Time added.' };
+		} catch (e) {
+			return failure(e);
+		}
+	},
+
+	/** Manager → Main HR: send this month's saved DTR. Locks it until Main HR receives or returns it. */
+	submitMonth: async (event) => {
+		requireCap(event.locals.user, event.locals.access, 'dtr:*', event.locals.establishment!.id);
+		try {
+			const establishmentId = event.locals.establishment!.id;
+			const month = monthSchema.safeParse((await event.request.formData()).get('month'));
+			if (!month.success) throw new DtrSubmissionError('Pick a month.');
+			await submitDtr(establishmentId, month.data, event.locals.user?.id ?? null);
+			await writeAudit({
+				establishmentId,
+				actor: event.locals.user,
+				action: 'dtr.submit',
+				entityType: 'dtr_submission',
+				entityId: month.data,
+				after: { month: month.data }
+			});
+			return { ok: 'DTR sent to Main HR. It is locked until they receive or return it.' };
 		} catch (e) {
 			return failure(e);
 		}

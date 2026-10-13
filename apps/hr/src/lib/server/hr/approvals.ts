@@ -11,6 +11,8 @@ import {
 	users
 } from '$lib/server/db/schema/index';
 import { addDays } from '$lib/roster';
+import { dtrSubmissions } from '$lib/server/db/schema/index';
+import { listSubmittedDtr, type PendingDtr } from './dtr-submissions';
 
 export interface PendingLeave {
 	id: string;
@@ -65,6 +67,7 @@ export interface PendingWeek {
 }
 
 export interface PendingApprovals {
+	dtr: PendingDtr[];
 	weeks: PendingWeek[];
 	leave: PendingLeave[];
 	overtime: PendingOvertime[];
@@ -75,7 +78,8 @@ const submitter = users.name;
 
 /** Everything waiting on Main HR across the company, oldest first. */
 export async function listPendingApprovals(): Promise<PendingApprovals> {
-	const [weeks, leave, overtime, memos] = await Promise.all([
+	const [dtr, weeks, leave, overtime, memos] = await Promise.all([
+		listSubmittedDtr(),
 		db
 			.select({
 				establishmentId: schedulePeriods.establishmentId,
@@ -152,6 +156,7 @@ export async function listPendingApprovals(): Promise<PendingApprovals> {
 			.orderBy(asc(calendarDays.submittedAt))
 	]);
 	return {
+		dtr,
 		weeks: weeks.map((w) => ({ ...w, weekEnd: addDays(w.weekStart, 6) })),
 		leave,
 		overtime,
@@ -161,18 +166,19 @@ export async function listPendingApprovals(): Promise<PendingApprovals> {
 
 /** Cheap total for the sidebar badge. */
 export async function pendingApprovalCount(): Promise<number> {
-	const count = async (table: typeof leaveRequests | typeof overtimeRequests | typeof calendarDays | typeof schedulePeriods) => {
+	const count = async (table: typeof leaveRequests | typeof overtimeRequests | typeof calendarDays | typeof schedulePeriods | typeof dtrSubmissions) => {
 		const [r] = await db
 			.select({ n: sql<number>`count(*)::int` })
 			.from(table)
 			.where(eq(table.status, 'submitted'));
 		return r?.n ?? 0;
 	};
-	const [a, b, c, d] = await Promise.all([
+	const [a, b, c, d, e] = await Promise.all([
 		count(leaveRequests),
 		count(overtimeRequests),
 		count(calendarDays),
-		count(schedulePeriods)
+		count(schedulePeriods),
+		count(dtrSubmissions)
 	]);
-	return a + b + c + d;
+	return a + b + c + d + e;
 }

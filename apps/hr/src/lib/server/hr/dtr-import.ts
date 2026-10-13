@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import { getEstablishmentNightDiff } from './night-diff';
 import { openAssignmentAt } from './assigned';
+import { dtrLockMessage } from './dtr-submissions';
 import { listApprovedOvertime } from './overtime';
 import { creditOvertime } from '$lib/overtime';
 import {
@@ -165,8 +166,10 @@ export async function storePunches(
 	mapping: ImportMapping,
 	fileName: string,
 	period: string,
-	userId: string | null
+	userId: string | null,
+	opts: { approver?: boolean } = {}
 ): Promise<StoreResult> {
+	await assertUnlocked(establishmentId, period, opts.approver);
 	const tz = await hotelTimezone(establishmentId);
 	const dateOf = new Intl.DateTimeFormat('en-CA', { timeZone: tz });
 	const dataRows = mapping.hasHeader ? rows.slice(1) : rows;
@@ -358,7 +361,19 @@ export async function listPunchesForId(establishmentId: string, month: string, e
 }
 
 /** Deleting a file takes its punches with it; punches added by hand are never in a file. */
-export async function removeUpload(establishmentId: string, id: string) {
+/** Throws the lock message as an ordinary, user-facing import error. */
+async function assertUnlocked(establishmentId: string, month: string, approver = false) {
+	const why = await dtrLockMessage(establishmentId, month, approver);
+	if (why) throw new DtrImportError(why);
+}
+
+export async function removeUpload(establishmentId: string, id: string, opts: { approver?: boolean } = {}) {
+	const upload = await db
+		.select({ period: biometricUploads.period })
+		.from(biometricUploads)
+		.where(and(eq(biometricUploads.establishmentId, establishmentId), eq(biometricUploads.id, id)))
+		.then((r) => r.at(0));
+	if (upload) await assertUnlocked(establishmentId, upload.period, opts.approver);
 	const res = await db
 		.delete(biometricUploads)
 		.where(and(eq(biometricUploads.establishmentId, establishmentId), eq(biometricUploads.id, id)))
@@ -366,7 +381,17 @@ export async function removeUpload(establishmentId: string, id: string) {
 	return res[0] ?? null;
 }
 
-export async function removePunch(establishmentId: string, id: string) {
+export async function removePunch(establishmentId: string, id: string, opts: { approver?: boolean } = {}) {
+	const punch = await db
+		.select({ at: biometricPunches.punchedAt })
+		.from(biometricPunches)
+		.where(and(eq(biometricPunches.establishmentId, establishmentId), eq(biometricPunches.id, id)))
+		.then((r) => r.at(0));
+	if (punch) {
+		const tz = await hotelTimezone(establishmentId);
+		const month = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(punch.at).slice(0, 7);
+		await assertUnlocked(establishmentId, month, opts.approver);
+	}
 	await db
 		.delete(biometricPunches)
 		.where(and(eq(biometricPunches.establishmentId, establishmentId), eq(biometricPunches.id, id)));
@@ -383,8 +408,10 @@ export const addPunchSchema = z.object({
 export async function addManualPunch(
 	establishmentId: string,
 	input: z.infer<typeof addPunchSchema>,
-	userId: string | null
+	userId: string | null,
+	opts: { approver?: boolean } = {}
 ) {
+	await assertUnlocked(establishmentId, input.date.slice(0, 7), opts.approver);
 	const tz = await hotelTimezone(establishmentId);
 	const ms = wallTimeToUtcMs(input.date, `${input.time}:00`, tz);
 	if (!Number.isFinite(ms)) throw new DtrImportError('That date or time is not valid.');
@@ -843,8 +870,10 @@ export async function computeMonthDtr(
 export async function saveMonthDtr(
 	establishmentId: string,
 	month: string,
-	employeeId?: string
+	employeeId?: string,
+	opts: { approver?: boolean } = {}
 ): Promise<{ saved: number; absent: number; keptManual: number; month: MonthDtr }> {
+	await assertUnlocked(establishmentId, month, opts.approver);
 	const result = await computeMonthDtr(establishmentId, month, employeeId);
 	const scopeIds = result.scopeIds;
 	const writable = result.records.filter((r) => r.action !== 'keep_manual');

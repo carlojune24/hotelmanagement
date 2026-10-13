@@ -183,6 +183,11 @@ Hotel gains: HR client (API key + base URL setting), `person_ref` columns, event
    reaches the DTR. A manager edit to a submitted/approved week reopens it as draft; Main HR edits keep
    the state (audit-logged). Overtime gained its first screen (`/{slug}/overtime`).
 5. **DTR submission/receive/return.**
+   **Done 2026-10-13** on `feature/hr-app`: a manager sends a saved month (`dtr_submissions`); while it
+   is `submitted` or `received` raw punches and saved records are locked for managers (one guard,
+   `dtrLockMessage`, in every DTR write); Main HR receives or returns it with a note, and may still
+   correct it. The Approvals inbox lists waiting DTRs and shows a per-month board of who has not sent.
+   Cutoff is a calendar month for now; the table stores start/end so semi-monthly can follow.
 6. **Hotel integration** — API + events, `person_ref` columns, Team picker, auto-suspend, fallback sync.
 7. **Hotel HR removal** — delete routes/code/tables, caps backfill.
 8. **Payroll + payslips** — company-wide run, release, business download.
