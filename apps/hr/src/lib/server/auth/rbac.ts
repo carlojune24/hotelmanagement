@@ -1,5 +1,5 @@
 import { error, redirect } from '@sveltejs/kit';
-import { canAt, type Access } from '$lib/authz';
+import { canAnywhere, canAt, type Access } from '$lib/authz';
 import type { SessionUser } from './session';
 
 /** Require an authenticated user; redirect to sign-in otherwise. */
@@ -19,4 +19,11 @@ export function requireCap(
 ): void {
 	if (user?.isSystemAdmin) return;
 	if (!access || !canAt(access, cap, establishmentId)) error(403, `Missing capability: ${cap}`);
+}
+
+/** 403 unless the user holds `cap` org-wide or at any establishment — for a page that then
+ *  narrows its own data to the establishments they can actually see. */
+export function requireCapAnywhere(user: SessionUser | null, access: Access | null, cap: string): void {
+	if (user?.isSystemAdmin) return;
+	if (!access || !canAnywhere(access, cap)) error(403, `Missing capability: ${cap}`);
 }

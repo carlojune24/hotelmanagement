@@ -1,7 +1,7 @@
 import { fail } from '@sveltejs/kit';
 import { z } from 'zod';
 import { canAt } from '$lib/authz';
-import { requireCap } from '$lib/server/auth/rbac';
+import { requireCap, requireCapAnywhere } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import {
 	EstablishmentError,
@@ -14,7 +14,7 @@ import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
 	const { user, access } = locals;
-	requireCap(user, access, 'establishment:read');
+	requireCapAnywhere(user, access, 'establishment:read');
 	const orgWide = user!.isSystemAdmin || canAt(access!, 'establishment:read');
 	// A manager sees only the establishments they hold a role at; org-wide roles see all.
 	const rows = await listEstablishments(orgWide ? undefined : Object.keys(access!.establishments));
