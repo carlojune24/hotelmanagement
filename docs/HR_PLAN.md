@@ -208,6 +208,10 @@ Hotel gains: HR client (API key + base URL setting), `person_ref` columns, event
      holiday premium, night differential, 13th-month accrual), 26 unit tests. Figures follow the published
      schedules **but are not verified against 2026 circulars**: every run shows them and Main HR must tick
      "I've checked these" before any batch can be locked.
+   - **Rates cross-check, 2026-10-13:** SSS (15%, MSC 5,000–35,000 in 500 steps, EC 10/30), PhilHealth (5%,
+     10,000–100,000), Pag-IBIG (2%, max fund salary 10,000, 1% employee at ≤1,500) and the BIR TRAIN
+     brackets all agree with several *secondary* 2026 guides. The primary circulars (SSS, PhilHealth, HDMF,
+     BIR RR 11-2018 Annex E) could not be fetched, so the figures remain **unverified**; the lock gate stays.
    - **One run per company cutoff, worked per establishment** (`payroll_runs` → `payroll_batches`):
      generate only from a *received* DTR, review/adjust, lock, release. A person is paid once under their
      home establishment (statutory computed once on total pay); an establishment they also worked at bears
