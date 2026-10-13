@@ -1,0 +1,109 @@
+/** In-memory fixed-window limiter. Originally for the unauthenticated auth endpoints
+ *  (login, invite-accept) — only *failures* recorded there, a success clears the key, so a
+ *  legitimate user is never penalised for prior good logins. Also used for the external
+ *  Finance API's per-key request throttling (`lib/server/auth/api-key.ts`), which instead
+ *  counts every call via `consume` — there's no "failure" concept for a plain GET.
+ *
+ *  Process-local: a restart clears it and multiple app instances don't share counts. That's
+ *  acceptable for brute-force throttling and this app's single-node deploy; move to a shared
+ *  store (Postgres / `pg-boss`) if the app ever runs horizontally. */
+
+export interface RateLimitRule {
+	/** Failures allowed inside the window before further attempts are blocked. */
+	max: number;
+	windowMs: number;
+}
+
+interface Entry {
+	count: number;
+	resetAt: number;
+}
+
+export class RateLimiter {
+	private entries = new Map<string, Entry>();
+
+	constructor(
+		private rule: RateLimitRule,
+		private now: () => number = Date.now
+	) {}
+
+	/** Seconds until `key` may try again, or 0 if it isn't currently blocked. */
+	retryAfter(key: string): number {
+		const e = this.live(key);
+		if (!e || e.count < this.rule.max) return 0;
+		return Math.max(1, Math.ceil((e.resetAt - this.now()) / 1000));
+	}
+
+	recordFailure(key: string): void {
+		const e = this.live(key);
+		if (e) e.count += 1;
+		else this.entries.set(key, { count: 1, resetAt: this.now() + this.rule.windowMs });
+		if (this.entries.size > 10_000) this.sweep();
+	}
+
+	/** Records one unit of consumption against `key`'s budget — same mechanics as
+	 *  `recordFailure`, just a name that reads correctly where every call counts
+	 *  (e.g. per-request API throttling), not only failed ones. */
+	consume(key: string): void {
+		this.recordFailure(key);
+	}
+
+	reset(key: string): void {
+		this.entries.delete(key);
+	}
+
+	private live(key: string): Entry | undefined {
+		const e = this.entries.get(key);
+		if (e && e.resetAt <= this.now()) {
+			this.entries.delete(key);
+			return undefined;
+		}
+		return e;
+	}
+
+	private sweep(): void {
+		const t = this.now();
+		for (const [k, e] of this.entries) if (e.resetAt <= t) this.entries.delete(k);
+	}
+}
+
+const MIN = 60_000;
+
+/** Per (email, ip): stops guessing one account's password from one place. */
+export const loginByAccount = new RateLimiter({ max: 5, windowMs: 15 * MIN });
+/** Per ip: stops spraying many accounts from one place. Generous, because behind a reverse
+ *  proxy without `ADDRESS_HEADER`/`XFF_DEPTH` set, every visitor shares the proxy's IP. */
+export const loginByIp = new RateLimiter({ max: 30, windowMs: 15 * MIN });
+/** Per ip, invite-accept: tokens are high-entropy, so this is just abuse damping. */
+export const inviteByIp = new RateLimiter({ max: 10, windowMs: 15 * MIN });
+/** Per (hotel, ip), guest checkout: only *failed* promo-code tries count, so a real guest with
+ *  one typo is never slowed but a script guessing codes is (RATES-002). Never reset on a
+ *  success — otherwise a known-good code could be used to clear the counter between guesses. */
+export const promoGuessByIp = new RateLimiter({ max: 8, windowMs: 15 * MIN });
+
+const accountKey = (ip: string, email: string) => `${ip}|${email.trim().toLowerCase()}`;
+
+/** Seconds the caller must wait before another login attempt, or 0. */
+export function loginRetryAfter(ip: string, email: string): number {
+	return Math.max(loginByAccount.retryAfter(accountKey(ip, email)), loginByIp.retryAfter(ip));
+}
+export function loginFailed(ip: string, email: string): void {
+	loginByAccount.recordFailure(accountKey(ip, email));
+	loginByIp.recordFailure(ip);
+}
+/** Clears the account counter only — the per-IP one keeps counting so a spray attack that
+ *  lands one real login can't reset itself. */
+export function loginSucceeded(ip: string, email: string): void {
+	loginByAccount.reset(accountKey(ip, email));
+}
+
+export function tooManyMessage(retryAfterSeconds: number): string {
+	const mins = Math.ceil(retryAfterSeconds / 60);
+	return `Too many attempts. Try again in ${mins} minute${mins === 1 ? '' : 's'}.`;
+}
+
+/** Per table QR code: a table seats a few people sending a handful of rounds, so this stops a
+ *  script flooding the Orders board with fake orders without ever getting in a real guest's way. */
+export const qrOrderByTable = new RateLimiter({ max: 12, windowMs: 10 * MIN });
+/** Per ip, across every table. */
+export const qrOrderByIp = new RateLimiter({ max: 25, windowMs: 10 * MIN });

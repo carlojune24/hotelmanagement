@@ -1,0 +1,153 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn-svelte/tailwind.css';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/urbanist';
+
+/*
+ * HR app — "gold & black on a soft wash". A staff/operate-mode world of its own (not the hotel's
+ * blue theme, not the guest Woven Ledger). Light only in v1 (dark mode deliberately skipped).
+ *
+ * Rule: black DOES (primary action, active nav); gold MARKS (selection, highlight, data).
+ * Gold is never text on a light ground; text on gold is always black.
+ */
+
+@theme {
+	--color-gold: var(--gold);
+	--color-gold-deep: var(--gold-deep);
+	--color-gold-soft: var(--gold-soft);
+	--color-ink: var(--ink);
+	--color-ink-muted: var(--ink-muted);
+	--color-ok: var(--ok);
+	--color-warning: var(--warning);
+	--font-sans: 'Inter Variable', sans-serif;
+	--font-display: 'Urbanist Variable', 'Inter Variable', sans-serif;
+
+	--color-sidebar-ring: var(--sidebar-ring);
+	--color-sidebar-border: var(--sidebar-border);
+	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+	--color-sidebar-accent: var(--sidebar-accent);
+	--color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+	--color-sidebar-primary: var(--sidebar-primary);
+	--color-sidebar-foreground: var(--sidebar-foreground);
+	--color-sidebar: var(--sidebar);
+	--color-chart-5: var(--chart-5);
+	--color-chart-4: var(--chart-4);
+	--color-chart-3: var(--chart-3);
+	--color-chart-2: var(--chart-2);
+	--color-chart-1: var(--chart-1);
+	--color-ring: var(--ring);
+	--color-input: var(--input);
+	--color-border: var(--border);
+	--color-destructive: var(--destructive);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-accent: var(--accent);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-muted: var(--muted);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-secondary: var(--secondary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-primary: var(--primary);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-popover: var(--popover);
+	--color-card-foreground: var(--card-foreground);
+	--color-card: var(--card);
+	--color-foreground: var(--foreground);
+	--color-background: var(--background);
+	--radius-sm: calc(var(--radius) * 0.6);
+	--radius-md: calc(var(--radius) * 0.8);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) * 1.4);
+	--radius-2xl: calc(var(--radius) * 1.8);
+	--radius-3xl: calc(var(--radius) * 2.2);
+	--radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+	/* Raw palette (oklch, tuned by eye from the design references). */
+	--wash-cool: oklch(0.925 0.006 255);
+	--wash-warm: oklch(0.975 0.045 95);
+	--ink: oklch(0.22 0.01 85);
+	--ink-muted: oklch(0.5 0.012 85);
+	--gold: oklch(0.85 0.15 90);
+	--gold-deep: oklch(0.74 0.14 82);
+	--gold-soft: oklch(0.955 0.07 92);
+	--line: oklch(0.86 0.012 90);
+	--ok: oklch(0.6 0.13 155);
+	--warning: oklch(0.65 0.16 70);
+	--danger: oklch(0.58 0.19 25);
+
+	/* shadcn semantic aliases. Surfaces stay >=85% opaque so text always has AA contrast. */
+	--background: oklch(0.975 0.012 95);
+	--foreground: var(--ink);
+	--card: oklch(0.997 0.006 95 / 0.88);
+	--card-foreground: var(--ink);
+	--popover: oklch(0.998 0.005 95);
+	--popover-foreground: var(--ink);
+	--primary: var(--ink);
+	--primary-foreground: oklch(0.985 0.005 95);
+	--secondary: var(--gold);
+	--secondary-foreground: var(--ink);
+	--muted: oklch(0.96 0.008 95);
+	--muted-foreground: var(--ink-muted);
+	--accent: var(--gold-soft);
+	--accent-foreground: var(--ink);
+	--destructive: var(--danger);
+	--border: var(--line);
+	--input: oklch(0.9 0.01 90);
+	--ring: var(--gold-deep);
+	--radius: 1rem;
+
+	--chart-1: var(--gold);
+	--chart-2: var(--ink);
+	--chart-3: oklch(0.68 0.01 85);
+	--chart-4: var(--gold-deep);
+	--chart-5: oklch(0.85 0.01 85);
+
+	--sidebar: transparent;
+	--sidebar-foreground: var(--ink);
+	--sidebar-primary: var(--ink);
+	--sidebar-primary-foreground: oklch(0.985 0.005 95);
+	--sidebar-accent: oklch(1 0 0 / 0.7);
+	--sidebar-accent-foreground: var(--ink);
+	--sidebar-border: var(--line);
+	--sidebar-ring: var(--gold-deep);
+}
+
+@layer base {
+	* {
+		@apply border-border outline-ring/50;
+	}
+	html {
+		@apply font-sans;
+	}
+	body {
+		@apply text-foreground;
+		/* The signature ground: cool grey top-left bleeding to pale warm cream bottom-right. */
+		background: linear-gradient(135deg, var(--wash-cool) 0%, var(--wash-warm) 100%) fixed;
+		min-height: 100dvh;
+	}
+	h1,
+	h2 {
+		font-family: var(--font-display);
+	}
+}
+
+/* Frosted panel: the one surface recipe for cards, table panels and dialogs. */
+@utility panel {
+	background: var(--card);
+	border-radius: var(--radius-3xl);
+	box-shadow:
+		0 1px 0 oklch(1 0 0 / 0.6) inset,
+		0 18px 40px -18px oklch(0.3 0.02 85 / 0.22);
+	backdrop-filter: blur(14px);
+}
+
+/* Diagonal hairline hatch for genuinely empty/off regions. Decorative: always paired with a label. */
+@utility hatch {
+	background-image: repeating-linear-gradient(
+		135deg,
+		transparent 0 5px,
+		oklch(0.6 0.01 85 / 0.35) 5px 6px
+	);
+}
