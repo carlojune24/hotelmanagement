@@ -224,7 +224,7 @@ Hotel gains: HR client (API key + base URL setting), `person_ref` columns, event
    - **Government coverage + remittance (2026-10-13):** per-employee flags for SSS / PhilHealth / Pag-IBIG
      coverage and withholding exemption, with a required reason and optional salary-base overrides (Main HR
      only; frozen onto each payslip line). Remittance schedules per agency per *pay month* from locked or
-     released batches (`/payroll/remittances`, print, CSV), with mark-as-remitted (snapshot + reference
+     released batches (`/remittances`, print, CSV), with mark-as-remitted (snapshot + reference
      no.). A remitted month's batches cannot be unlocked until it is reopened. No due dates are assumed —
      the company enters a "day N of the next month" per agency. Agency upload files (R-3, RF-1, MCRF,
      1601-C) and government-loan deductions are not built.

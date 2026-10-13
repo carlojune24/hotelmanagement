@@ -20,6 +20,8 @@ export const load: LayoutServerLoad = async ({ locals, url }) => {
 			people: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'employee:read'),
 			approvals: approver,
 			payroll: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
+			// Filed by whoever runs payroll, but a section of its own.
+			remittances: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			users: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'user:*')
 		}
 	};

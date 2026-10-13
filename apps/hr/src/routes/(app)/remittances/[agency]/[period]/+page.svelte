@@ -19,14 +19,14 @@
 	const isBir = $derived(data.agency === 'bir');
 	const hasEc = $derived(data.agency === 'sss');
 	const remitted = $derived(data.record?.status === 'remitted');
-	const base = $derived(`/payroll/remittances/${data.agency}/${data.period}`);
+	const base = $derived(`/remittances/${data.agency}/${data.period}`);
 </script>
 
 <svelte:head><title>{data.label} {data.period} · Remittances · HR</title></svelte:head>
 
 <div class="mx-auto max-w-5xl space-y-6">
 	<div>
-		<a href="/payroll/remittances?period={data.period}" class="text-sm text-ink-muted hover:underline">← Remittances</a>
+		<a href="/remittances?period={data.period}" class="text-sm text-ink-muted hover:underline">← Remittances</a>
 		<div class="flex flex-wrap items-center gap-3">
 			<h1 class="text-5xl font-light tracking-tight">{data.label}</h1>
 			{#if remitted}<Badge variant="secondary">Remitted</Badge>{:else}<Badge variant="outline">Open</Badge>{/if}

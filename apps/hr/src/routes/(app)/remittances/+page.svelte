@@ -18,11 +18,10 @@
 	const money = (c: number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(c / 100);
 </script>
 
-<svelte:head><title>Remittances · Payroll · HR</title></svelte:head>
+<svelte:head><title>Remittances · HR</title></svelte:head>
 
 <div class="mx-auto max-w-5xl space-y-6">
 	<div>
-		<a href="/payroll" class="text-sm text-ink-muted hover:underline">← Payroll</a>
 		<h1 class="text-5xl font-light tracking-tight">Remittances</h1>
 		<p class="mt-2 text-sm text-ink-muted">
 			What the company owes each agency for payslips paid in a month. Contributions use the statutory
@@ -51,7 +50,7 @@
 
 	<div class="grid gap-4 sm:grid-cols-2">
 		{#each data.overview.agencies as a (a.agency)}
-			<a href="/payroll/remittances/{a.agency}/{data.period}" class="panel block space-y-2 p-5 hover:shadow-md">
+			<a href="/remittances/{a.agency}/{data.period}" class="panel block space-y-2 p-5 hover:shadow-md">
 				<div class="flex items-center justify-between">
 					<h2 class="text-xl font-light">{a.label}</h2>
 					{#if a.status === 'remitted'}

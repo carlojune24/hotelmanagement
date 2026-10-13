@@ -4,6 +4,7 @@
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import InboxIcon from '@lucide/svelte/icons/inbox';
 	import WalletIcon from '@lucide/svelte/icons/wallet';
+	import LandmarkIcon from '@lucide/svelte/icons/landmark';
 	import ContactIcon from '@lucide/svelte/icons/contact';
 	import KeyIcon from '@lucide/svelte/icons/key-round';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
@@ -17,6 +18,7 @@
 			{ seg: 'establishments', label: 'Establishments', icon: BuildingIcon, show: data.nav.establishments },
 			{ seg: 'approvals', label: 'Approvals', icon: InboxIcon, show: data.nav.approvals },
 			{ seg: 'payroll', label: 'Payroll', icon: WalletIcon, show: data.nav.payroll },
+			{ seg: 'remittances', label: 'Remittances', icon: LandmarkIcon, show: data.nav.remittances },
 			{ seg: 'people', label: 'People', icon: ContactIcon, show: data.nav.people },
 			{ seg: 'users', label: 'Users', icon: UsersIcon, show: data.nav.users }
 		].filter((i) => i.show)
