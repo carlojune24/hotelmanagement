@@ -52,3 +52,17 @@ export interface LinePayItem {
 	label: string;
 	amountCentavos: number;
 }
+
+/**
+ * Payslip rows for one bucket: each pay item by name, then whatever the items do not explain under the
+ * bucket's own label, so the rows always add up to the stored total.
+ */
+export function itemisedRows(
+	items: Array<{ label: string; amountCentavos: number }>,
+	totalCentavos: number | undefined,
+	bucketLabel: string
+): Array<[string, number]> {
+	const rows = items.map((i) => [i.label, i.amountCentavos] as [string, number]);
+	const rest = (totalCentavos ?? 0) - rows.reduce((a, [, v]) => a + v, 0);
+	return rest > 0 ? [...rows, [bucketLabel, rest]] : rows;
+}

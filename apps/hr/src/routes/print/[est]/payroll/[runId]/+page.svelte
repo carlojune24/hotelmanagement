@@ -84,6 +84,11 @@
 					<td class="py-2 pr-2">
 						<span class="font-medium">{l.employeeName}</span>
 						<span class="block text-ink-muted">#{l.employeeNo} · {l.position}</span>
+						{#each l.payItems as it (it.id)}
+							<span class="block text-[10px] text-ink-muted tabular-nums">
+								{it.label} {it.kind === 'deduction' ? '−' : '+'}{money(it.amountCentavos)}
+							</span>
+						{/each}
 					</td>
 					<td class="text-right tabular-nums">{money(l.basic)}</td>
 					<td class="border-l text-right tabular-nums">{amt(l.overtime)}</td>

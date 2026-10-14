@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { cleanupTestEstablishments, createTestStaff, testOrgId } from './test-helpers';
-import { appliesToCutoff, bucketsOf } from '$lib/pay-items-core';
+import { appliesToCutoff, bucketsOf, itemisedRows } from '$lib/pay-items-core';
 
 describe('pay item rules', () => {
 	it('sorts items into the four payroll buckets', () => {
@@ -17,6 +17,24 @@ describe('pay item rules', () => {
 			cashAdvanceCentavos: 20_000,
 			otherDeductionsCentavos: 15_000
 		});
+	});
+
+	it('itemises a payslip bucket by name and keeps any unexplained remainder under the bucket label', () => {
+		const items = [
+			{ label: 'Sales incentive', amountCentavos: 100_000 },
+			{ label: 'Perfect attendance', amountCentavos: 50_000 }
+		];
+		expect(itemisedRows(items, 150_000, 'Other earnings')).toEqual([
+			['Sales incentive', 100_000],
+			['Perfect attendance', 50_000]
+		]);
+		expect(itemisedRows(items, 175_000, 'Other earnings')).toEqual([
+			['Sales incentive', 100_000],
+			['Perfect attendance', 50_000],
+			['Other earnings', 25_000]
+		]);
+		expect(itemisedRows([], 20_000, 'Cash advance')).toEqual([['Cash advance', 20_000]]);
+		expect(itemisedRows([], 0, 'Cash advance')).toEqual([]);
 	});
 
 	it('applies a single-cutoff item only to the cutoff holding its date, and a recurring one across its span', () => {

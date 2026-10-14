@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { itemisedRows } from '$lib/pay-items-core';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -8,14 +9,19 @@
 	const hrs = (m: number) => `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`;
 	const basisLabel = (b: string) => (b === 'monthly' ? 'per month' : b === 'daily' ? 'per day' : 'per hour');
 
+	const allowanceItems = $derived(data.payItems.filter((i) => i.kind === 'earning' && i.category === 'allowance'));
+	const otherEarningItems = $derived(data.payItems.filter((i) => i.kind === 'earning' && i.category !== 'allowance'));
+	const advanceItems = $derived(data.payItems.filter((i) => i.kind === 'deduction' && i.category === 'cash_advance'));
+	const otherDeductionItems = $derived(data.payItems.filter((i) => i.kind === 'deduction' && i.category !== 'cash_advance'));
+
 	const earningRows = $derived(
 		[
 			['Basic pay', data.earnings.basic],
 			['Overtime', data.earnings.overtime],
 			['Holiday / rest-day premium', data.earnings.holiday_premium],
 			['Night differential', data.earnings.night_diff],
-			['Allowances', data.earnings.allowances],
-			['Other earnings', data.earnings.other]
+			...itemisedRows(allowanceItems, data.earnings.allowances, 'Allowances'),
+			...itemisedRows(otherEarningItems, data.earnings.other, 'Other earnings')
 		].filter(([, v]) => (v as number) > 0) as Array<[string, number]>
 	);
 	const deductionRows = $derived(
@@ -25,11 +31,11 @@
 			['Pag-IBIG', data.deductions.pagibig_ee],
 			['Withholding tax', data.deductions.withholding_tax],
 			['Late / undertime', data.deductions.tardiness_undertime],
-			['Cash advance', data.deductions.cash_advance],
+			...itemisedRows(advanceItems, data.deductions.cash_advance, 'Cash advance'),
 			...(data.loans.length > 0
 				? data.loans.map((l) => [l.label, l.deducted] as [string, number])
 				: [['Loans', data.deductions.loans] as [string, number]]),
-			['Other deductions', data.deductions.other]
+			...itemisedRows(otherDeductionItems, data.deductions.other, 'Other deductions')
 		].filter(([, v]) => (v as number) > 0) as Array<[string, number]>
 	);
 	/** A loan the pay could not fully cover — shown so the shortfall is never silent. */
@@ -93,7 +99,7 @@
 			<h2 class="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">Earnings</h2>
 			<table class="w-full">
 				<tbody>
-					{#each earningRows as [label, amount] (label)}
+					{#each earningRows as [label, amount], i (i)}
 						<tr><td class="py-0.5">{label}</td><td class="py-0.5 text-right tabular-nums">{money(amount)}</td></tr>
 					{/each}
 					<tr class="border-t border-ink/30 font-medium">

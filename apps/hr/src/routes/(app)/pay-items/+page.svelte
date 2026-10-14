@@ -2,6 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { toast } from 'svelte-sonner';
 	import PlusIcon from '@lucide/svelte/icons/plus';
+	import PrinterIcon from '@lucide/svelte/icons/printer';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
@@ -109,7 +110,12 @@
 				between its dates, in the amount you enter per cutoff.
 			</p>
 		</div>
-		<Button variant="gold" onclick={openAdd}><PlusIcon /> Add pay item</Button>
+		<div class="flex gap-2">
+			<Button variant="outline" href="/print/pay-items?filter={filter}&q={encodeURIComponent(query)}" target="_blank" rel="noopener">
+				<PrinterIcon /> Print
+			</Button>
+			<Button variant="gold" onclick={openAdd}><PlusIcon /> Add pay item</Button>
+		</div>
 	</div>
 
 	<section class="panel space-y-5 p-5 md:p-6" aria-label="Pay items">

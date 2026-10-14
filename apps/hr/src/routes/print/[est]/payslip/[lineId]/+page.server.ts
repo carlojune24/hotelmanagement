@@ -73,6 +73,8 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		loans: ((l.detail as { loans?: Array<{ label: string; due: number; deducted: number }> } | null)?.loans ?? []).map(
 			(x) => ({ label: x.label, due: x.due, deducted: x.deducted })
 		),
+		/** Pay items on this line (name + amount), so the slip names each incentive and deduction. */
+		payItems: ((l.detail as { payItems?: Array<{ kind: string; category: string; label: string; amountCentavos: number }> } | null)?.payItems ?? []),
 		gross: l.grossCentavos,
 		net: l.netPayCentavos
 	};
