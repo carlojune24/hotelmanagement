@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { amt, money } from '$lib/components/payroll/money';
+	import { groupByCostCenter } from '$lib/cost-centers-core';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -13,6 +14,7 @@
 		Object.fromEntries(keys.map((k) => [k, data.lines.reduce((t, l) => t + l[k], 0)])) as Record<(typeof keys)[number], number>
 	);
 	const incentiveCols = $derived(showExtras ? 3 : 2);
+	const costRows = $derived(groupByCostCenter(data.lines));
 </script>
 
 <svelte:head>
@@ -128,6 +130,30 @@
 				<td></td>
 			</tr>
 		</tfoot>
+	</table>
+
+	<table class="mt-6 w-full max-w-xl border-collapse text-[11px] break-inside-avoid">
+		<caption class="pb-1 text-left text-[10px] font-semibold tracking-wide uppercase">Cost by cost center</caption>
+		<thead>
+			<tr class="border-b border-ink/30 text-right">
+				<th class="py-1 text-left font-medium">Cost center</th>
+				<th class="font-medium">People</th>
+				<th class="font-medium">Gross</th>
+				<th class="font-medium">Employer</th>
+				<th class="font-medium">Total</th>
+			</tr>
+		</thead>
+		<tbody>
+			{#each costRows as r (r.code ?? '')}
+				<tr class="border-b border-ink/10 text-right">
+					<td class="py-1 text-left">{r.code ? `${r.code} · ` : ''}{r.name}</td>
+					<td class="tabular-nums">{r.people}</td>
+					<td class="tabular-nums">{money(r.gross)}</td>
+					<td class="tabular-nums">{money(r.employer)}</td>
+					<td class="font-medium tabular-nums">{money(r.total)}</td>
+				</tr>
+			{/each}
+		</tbody>
 	</table>
 
 	<div class="mt-10 grid grid-cols-3 gap-10 break-inside-avoid">

@@ -1,5 +1,6 @@
 import { and, asc, eq, gte, isNull, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import { assertCostCenter } from './cost-centers';
 import {
 	disbursementMethod,
 	employeeStatus,
@@ -204,6 +205,7 @@ export async function createEmployee(establishmentId: string, input: EmployeeFor
 		.then((r) => r.at(0));
 	if (!est) throw new EmployeeError('Establishment not found.');
 	await assertEmployeeNoFree(est.organizationId, input.employeeNo);
+	await assertCostCenter(est.organizationId, input.costCenter);
 	await assertEnrollIdFree(establishmentId, input.biometricEnrollId);
 
 	return db.transaction(async (tx) => {
@@ -244,6 +246,7 @@ export async function updateEmployee(
 	const current = await getEmployee(establishmentId, id);
 	if (!current) return null;
 	await assertEmployeeNoFree(current.organizationId, input.employeeNo, id);
+	await assertCostCenter(current.organizationId, input.costCenter, current.costCenter);
 	await assertEnrollIdFree(establishmentId, input.biometricEnrollId, id);
 
 	return db.transaction(async (tx) => {

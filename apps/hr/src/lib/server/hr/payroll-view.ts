@@ -38,6 +38,8 @@ export async function runView(runId: string) {
 					premium: (earnings.holiday_premium ?? 0) + (earnings.night_diff ?? 0),
 					extras: (earnings.allowances ?? 0) + (earnings.other ?? 0),
 					gross: l.grossCentavos,
+					employer: Object.values((l.employerContributions ?? {}) as Record<string, number>).reduce((a, b) => a + b, 0),
+					costCenter: ((l.detail as { costCenter?: { code: string; name: string } } | null)?.costCenter ?? null),
 					sss: deductions.sss_ee ?? 0,
 					philhealth: deductions.philhealth_ee ?? 0,
 					pagibig: deductions.pagibig_ee ?? 0,

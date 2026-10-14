@@ -24,6 +24,7 @@ import {
 } from '$lib/server/db/schema/index';
 import { getHandoff } from './dtr-submissions';
 import { appliesToCutoff, bucketsOf, type LinePayItem } from '$lib/pay-items-core';
+import { costCenterNames } from './cost-centers';
 import { allocate, byPriority, closeSettledLoans, loansDueFor, reopenSettledLoans, type LoanDue } from './loans';
 import { parseNightDiff } from './night-diff';
 import { historiesFor, payTermsFor, type PayTerms } from './salary';
@@ -382,6 +383,7 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 		loansCentavos: 0
 	});
 	const loanDues = await loansDueFor(run, candidateIds);
+	const ccNames = await costCenterNames(est.organizationId);
 	const histories = await historiesFor(candidateIds);
 
 	const waiting: GenerateResult['waiting'] = [];
@@ -535,6 +537,9 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 					detail: {
 						...b.line.detail,
 						...coverageSnapshotOf(b.employee),
+						...(b.employee.costCenter
+							? { costCenter: { code: b.employee.costCenter, name: ccNames.get(b.employee.costCenter) ?? b.employee.costCenter } }
+							: {}),
 						...(b.pay.changes.length || b.pay.deferredBasisChange
 							? { rateChanges: b.pay.changes, deferredBasisChange: b.pay.deferredBasisChange }
 							: {}),

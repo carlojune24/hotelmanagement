@@ -5,7 +5,9 @@
 	import BatchActions from '$lib/components/payroll/batch-actions.svelte';
 	import BatchStatus from '$lib/components/payroll/batch-status.svelte';
 	import BatchTable from '$lib/components/payroll/batch-table.svelte';
+	import CostCenterTable from '$lib/components/payroll/cost-center-table.svelte';
 	import RatesGuide from '$lib/components/payroll/rates-guide.svelte';
+	import { groupByCostCenter } from '$lib/cost-centers-core';
 	import { createRunner } from '$lib/components/payroll/runner.svelte';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -17,6 +19,7 @@
 	let editing = $state<LineView | null>(null);
 	const runner = createRunner(() => (editing = null));
 	const ratesOk = $derived(data.run.ratesCheckedAt !== null);
+	const costRows = $derived(groupByCostCenter(data.batches.flatMap((b) => b.lines)));
 </script>
 
 <svelte:head><title>Payroll {data.run.cutoffStart} · HR</title></svelte:head>
@@ -92,6 +95,8 @@
 			{/if}
 		{/each}
 	</section>
+
+	<CostCenterTable rows={costRows} />
 </div>
 
 <AdjustDialog line={editing} busy={runner.busy} run={runner.run} onclose={() => (editing = null)} />

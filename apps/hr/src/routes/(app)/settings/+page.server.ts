@@ -12,6 +12,13 @@ import {
 import { leaveTypeFromForm } from '$lib/server/hr/leave-form';
 import { EstablishmentError, getOrganization } from '$lib/server/establishments';
 import { logoUrlFor, removeLogo, setLogo } from '$lib/server/brand';
+import {
+	CostCenterError,
+	costCenterSchema,
+	listCostCenters,
+	saveCostCenter,
+	setCostCenterActive
+} from '$lib/server/hr/cost-centers';
 import { UploadValidationError } from '$lib/server/uploads';
 import {
 	createEstablishmentType,
@@ -49,6 +56,7 @@ const estTypes = await listEstablishmentTypes(org.id);
 	return {
 		clearanceItems,
 		logoUrl: logoUrlFor(org.config),
+		costCenters: await listCostCenters(org.id),
 		clearanceDefaults: DEFAULT_CLEARANCE,
 		maxClearanceItems: MAX_CLEARANCE_ITEMS,
 		remittance: { employerIds: remittance.employerIds, dueDay: remittance.dueDay },
@@ -99,6 +107,51 @@ const dueDay = z.preprocess(
 const fd = async (request: Request) => Object.fromEntries(await request.formData());
 
 export const actions: Actions = {
+	saveCostCenter: async ({ request, locals }) => {
+		requireCap(locals.user, locals.access, 'payroll:*');
+		const parsed = costCenterSchema.safeParse(Object.fromEntries(await request.formData()));
+		if (!parsed.success) return fail(400, { error: parsed.error.issues[0]?.message ?? 'Check the cost center.' });
+		try {
+			const org = await getOrganization();
+			const r = await saveCostCenter(org.id, parsed.data);
+			await writeAudit({
+				actor: locals.user,
+				action: r.before ? 'cost_center.update' : 'cost_center.create',
+				entityType: 'cost_center',
+				entityId: r.after.id,
+				before: r.before ? { code: r.before.code, name: r.before.name } : undefined,
+				after: { code: r.after.code, name: r.after.name }
+			});
+			return { ok: r.before ? 'Cost center saved.' : 'Cost center added.' };
+		} catch (e) {
+			if (e instanceof CostCenterError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
+	toggleCostCenter: async ({ request, locals }) => {
+		requireCap(locals.user, locals.access, 'payroll:*');
+		const parsed = z
+			.object({ id: z.string().uuid(), active: z.enum(['true', 'false']) })
+			.safeParse(Object.fromEntries(await request.formData()));
+		if (!parsed.success) return fail(400, { error: 'That cost center could not be found.' });
+		try {
+			const org = await getOrganization();
+			const row = await setCostCenterActive(org.id, parsed.data.id, parsed.data.active === 'true');
+			await writeAudit({
+				actor: locals.user,
+				action: 'cost_center.update',
+				entityType: 'cost_center',
+				entityId: row.id,
+				after: { active: row.active }
+			});
+			return { ok: row.active ? 'Cost center activated.' : 'Cost center deactivated.' };
+		} catch (e) {
+			if (e instanceof CostCenterError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
 	uploadLogo: async ({ request, locals }) => {
 		requireCap(locals.user, locals.access, 'payroll:*');
 		const file = (await request.formData()).get('logo');

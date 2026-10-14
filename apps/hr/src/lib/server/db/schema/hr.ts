@@ -1110,6 +1110,26 @@ export const payrollLoanDeductions = pgTable(
 );
 
 /**
+ * The company's cost centers. An employee carries one by `code` (`employees.cost_center`); payroll freezes the
+ * code and name onto each line and reports cost by it. Deactivate rather than delete: history keeps the code.
+ */
+export const costCenters = pgTable(
+	'cost_centers',
+	{
+		id: pk(),
+		organizationId: uuid('organization_id')
+			.notNull()
+			.references(() => organizations.id, { onDelete: 'restrict' }),
+		code: text('code').notNull(),
+		name: text('name').notNull(),
+		active: boolean('active').notNull().default(true),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [uniqueIndex('cost_centers_org_code_idx').on(t.organizationId, t.code)]
+);
+
+/**
  * One-off or recurring earnings and deductions Main HR files for a person (incentives, allowances, cash
  * advances, uniform charges…). Payroll reads them when a batch is generated and whenever they change, and
  * snapshots them onto the line. A wrong item is voided, never deleted. `endDate` null = open-ended;

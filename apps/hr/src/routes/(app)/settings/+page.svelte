@@ -26,12 +26,13 @@ import PlusIcon from '@lucide/svelte/icons/plus';
 		{ key: 'loans', label: 'Loan types' },
 		{ key: 'remittances', label: 'Employer numbers' },
 		{ key: 'clearance', label: 'Clearance items' },
+		{ key: 'costcenters', label: 'Cost centers' },
 		{ key: 'logo', label: 'Company logo' }
 	] as const;
 	type Tab = (typeof TABS)[number]['key'];
 	// The tab lives in the address (?tab=) so a reload or a shared link lands on the same one.
 const tabParam = page.url.searchParams.get('tab');
-	let tab = $state<Tab>(tabParam === 'loans' || tabParam === 'leave' || tabParam === 'remittances' || tabParam === 'clearance' || tabParam === 'logo'
+	let tab = $state<Tab>(tabParam === 'loans' || tabParam === 'leave' || tabParam === 'remittances' || tabParam === 'clearance' || tabParam === 'logo' || tabParam === 'costcenters'
 			? tabParam
 			: 'establishments');
 	function pick(next: Tab) {
@@ -254,6 +255,50 @@ deletingLeave = null;
 				<Button type="submit" variant="outline" disabled={busy}>Save</Button>
 			</div>
 		</form>
+	</div>
+{:else if tab === 'costcenters'}
+	<div id="panel-costcenters" role="tabpanel" aria-labelledby="tab-costcenters" class="panel space-y-5 p-5 md:p-6" aria-label="Cost centers">
+		<div class="max-w-2xl">
+			<h2 class="text-2xl font-light">Cost centers</h2>
+			<p class="mt-1 text-sm text-ink-muted">
+				What a person's pay is charged to, one per employee. Pick one on the employee's form; payroll reports cost by
+				cost center as well as by establishment. A cost center in use is deactivated, not deleted. Renaming a
+				code updates the people who hold it; payslips already built keep the code they had.
+			</p>
+		</div>
+		<form method="POST" action="?/saveCostCenter" use:enhance={submit} class="flex flex-wrap items-end gap-3">
+			<div class="space-y-1.5">
+				<Label for="cc-code">Code</Label>
+				<Input id="cc-code" name="code" maxlength={30} required placeholder="FO-01" class="w-36" />
+			</div>
+			<div class="min-w-48 flex-1 space-y-1.5">
+				<Label for="cc-name">Name</Label>
+				<Input id="cc-name" name="name" maxlength={80} required placeholder="Front office" />
+			</div>
+			<Button type="submit" variant="gold" disabled={busy}><PlusIcon /> Add</Button>
+		</form>
+		{#if data.costCenters.length === 0}
+			<p class="rounded-lg border border-dashed border-ink/30 px-4 py-3 text-sm text-ink-muted">No cost centers yet.</p>
+		{:else}
+			<ul class="divide-y divide-dotted divide-ink/25">
+				{#each data.costCenters as cc (cc.id)}
+					<li class="flex flex-wrap items-end gap-3 py-3 {cc.active ? '' : 'opacity-60'}">
+						<form method="POST" action="?/saveCostCenter" use:enhance={submit} class="flex flex-1 flex-wrap items-end gap-3">
+							<input type="hidden" name="id" value={cc.id} />
+							<Input name="code" value={cc.code} maxlength={30} required aria-label="Code" class="w-36" />
+							<Input name="name" value={cc.name} maxlength={80} required aria-label="Name" class="min-w-48 flex-1" />
+							<span class="w-24 text-sm text-ink-muted tabular-nums">{cc.people} {cc.people === 1 ? 'person' : 'people'}</span>
+							<Button type="submit" variant="outline" size="sm" disabled={busy}>Save</Button>
+						</form>
+						<form method="POST" action="?/toggleCostCenter" use:enhance={submit}>
+							<input type="hidden" name="id" value={cc.id} />
+							<input type="hidden" name="active" value={cc.active ? 'false' : 'true'} />
+							<Button type="submit" variant="ghost" size="sm" disabled={busy}>{cc.active ? 'Deactivate' : 'Activate'}</Button>
+						</form>
+					</li>
+				{/each}
+			</ul>
+		{/if}
 	</div>
 {:else if tab === 'logo'}
 	<div id="panel-logo" role="tabpanel" aria-labelledby="tab-logo" class="panel space-y-5 p-5 md:p-6" aria-label="Company logo">

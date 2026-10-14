@@ -388,12 +388,17 @@
 					<Label for="{idPrefix}costCenter">Cost center</Label>
 					<div class="relative mt-1">
 						{@render fieldIcon(TagIcon)}
-						<Input
+						<select
 							id="{idPrefix}costCenter"
 							name="costCenter"
 							value={emp?.costCenter ?? ''}
-							class="pl-8"
-						/>
+							class="h-10 w-full rounded-full border border-transparent bg-white pr-4 pl-8 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						>
+							<option value="">None</option>
+							{#each data.costCenters.filter((x) => x.active || x.code === (emp?.costCenter ?? '')) as x (x.code)}
+								<option value={x.code}>{x.code} · {x.name}{x.active ? '' : ' (inactive)'}</option>
+							{/each}
+						</select>
 					</div>
 				</div>
 			</div>

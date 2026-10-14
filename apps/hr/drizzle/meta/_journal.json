@@ -155,6 +155,13 @@
       "when": 1791960282119,
       "tag": "0021_pay_items",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1791964275584,
+      "tag": "0022_cost_centers",
+      "breakpoints": true
     }
   ]
 }

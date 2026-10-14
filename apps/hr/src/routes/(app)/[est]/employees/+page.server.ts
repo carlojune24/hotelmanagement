@@ -15,6 +15,7 @@ import { getOrganization } from '$lib/server/establishments';
 import { SalaryError, adjustSalary, adjustSchema, listHistories, syncCurrentRates } from '$lib/server/hr/salary';
 import { businessDateFor } from '$lib/server/time';
 import { deleteUploadIfOwned, saveUpload, UploadValidationError } from '$lib/server/uploads';
+import { listCostCenters } from '$lib/server/hr/cost-centers';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -24,8 +25,14 @@ export const load: PageServerLoad = async ({ locals }) => {
 	// A raise dated for today or earlier becomes the employee's current rate here, so the list is right.
 	await syncCurrentRates((await getOrganization()).id);
 	const employees = await listEmployees(est.id);
+	const costCenters = (await listCostCenters((await getOrganization()).id)).map((x) => ({
+		code: x.code,
+		name: x.name,
+		active: x.active
+	}));
 	return {
 		employees,
+		costCenters,
 		history: await listHistories(employees.map((e) => e.id)),
 		today: businessDateFor('Asia/Manila'),
 		canWrite: locals.user!.isSystemAdmin || canAt(locals.access!, 'employee:*', est.id)
