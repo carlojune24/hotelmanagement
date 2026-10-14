@@ -21,12 +21,13 @@ import PlusIcon from '@lucide/svelte/icons/plus';
 	const TABS = [
 		{ key: 'establishments', label: 'Establishment types' },
 { key: 'leave', label: 'Leave types' },
-		{ key: 'loans', label: 'Loan types' }
+		{ key: 'loans', label: 'Loan types' },
+		{ key: 'remittances', label: 'Employer numbers' }
 	] as const;
 	type Tab = (typeof TABS)[number]['key'];
 	// The tab lives in the address (?tab=) so a reload or a shared link lands on the same one.
 const tabParam = page.url.searchParams.get('tab');
-	let tab = $state<Tab>(tabParam === 'loans' ? 'loans' : tabParam === 'leave' ? 'leave' : 'establishments');
+	let tab = $state<Tab>(tabParam === 'loans' || tabParam === 'leave' || tabParam === 'remittances' ? tabParam : 'establishments');
 	function pick(next: Tab) {
 		tab = next;
 		replaceState(`?tab=${next}`, {});
@@ -189,6 +190,57 @@ deletingLeave = null;
 			</Table.Body>
 		</Table.Root>
 </div>
+{:else if tab === 'remittances'}
+	<div id="panel-remittances" role="tabpanel" aria-labelledby="tab-remittances" class="panel space-y-5 p-5 md:p-6" aria-label="Employer numbers and deadlines">
+		<div class="max-w-2xl">
+			<h2 class="text-2xl font-light">Employer numbers and deadlines</h2>
+			<p class="mt-1 text-sm text-ink-muted">
+				Your employer numbers and the day each remittance is due. A deadline is "day N of the month after the pay
+				month". Leave blank to show no due date — none is assumed. Used on the Remittances page.
+			</p>
+		</div>
+		<form method="POST" action="?/saveRemittance" use:enhance={submit} class="grid gap-3 sm:grid-cols-2">
+				<div>
+					<Label for="sssNo">SSS employer no.</Label>
+					<Input id="sssNo" name="sssNo" value={data.remittance.employerIds.sss ?? ''} class="mt-1" />
+				</div>
+				<div>
+					<Label for="dueSss">SSS due day</Label>
+					<Input id="dueSss" name="dueSss" type="number" min="1" max="31" value={data.remittance.dueDay.sss ?? ''} class="mt-1" />
+				</div>
+				<div>
+					<Label for="philhealthNo">PhilHealth employer no.</Label>
+					<Input id="philhealthNo" name="philhealthNo" value={data.remittance.employerIds.philhealth ?? ''} class="mt-1" />
+				</div>
+				<div>
+					<Label for="duePhilhealth">PhilHealth due day</Label>
+					<Input id="duePhilhealth" name="duePhilhealth" type="number" min="1" max="31" value={data.remittance.dueDay.philhealth ?? ''} class="mt-1" />
+				</div>
+				<div>
+					<Label for="pagibigNo">Pag-IBIG employer no.</Label>
+					<Input id="pagibigNo" name="pagibigNo" value={data.remittance.employerIds.pagibig ?? ''} class="mt-1" />
+				</div>
+				<div>
+					<Label for="duePagibig">Pag-IBIG due day</Label>
+					<Input id="duePagibig" name="duePagibig" type="number" min="1" max="31" value={data.remittance.dueDay.pagibig ?? ''} class="mt-1" />
+				</div>
+				<div>
+					<Label for="dueSssLoan">SSS loans due day</Label>
+					<Input id="dueSssLoan" name="dueSssLoan" type="number" min="1" max="31" value={data.remittance.dueDay.sss_loan ?? ''} class="mt-1" />
+				</div>
+				<div>
+					<Label for="duePagibigLoan">Pag-IBIG loans due day</Label>
+					<Input id="duePagibigLoan" name="duePagibigLoan" type="number" min="1" max="31" value={data.remittance.dueDay.pagibig_loan ?? ''} class="mt-1" />
+				</div>
+				<div>
+					<Label for="dueBir">BIR due day</Label>
+					<Input id="dueBir" name="dueBir" type="number" min="1" max="31" value={data.remittance.dueDay.bir ?? ''} class="mt-1" />
+				</div>
+			<div class="sm:col-span-2">
+				<Button type="submit" variant="outline" disabled={busy}>Save</Button>
+			</div>
+		</form>
+	</div>
 {:else}
 <div id="panel-leave" role="tabpanel" aria-labelledby="tab-leave" class="panel space-y-5 p-5 md:p-6" aria-label="Leave types">
 <div class="flex flex-wrap items-start justify-between gap-3">

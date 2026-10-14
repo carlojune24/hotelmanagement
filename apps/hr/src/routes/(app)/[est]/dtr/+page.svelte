@@ -228,8 +228,33 @@ Return for correction
 	</div>
 </div>
 
+{#snippet monthNav()}
+<div class="rounded-lg border border-border bg-surface p-3">
+	<p class="text-center text-xs text-ink-muted">Year &amp; month</p>
+	<div class="mt-2 flex items-center justify-between">
+		<Button variant="ghost" size="icon" href={href({ month: stepMonth(-12) })} aria-label="Previous year">
+			<ChevronLeftIcon class="size-4" />
+		</Button>
+		<span class="text-lg font-semibold text-ink tabular-nums">{year}</span>
+		<Button variant="ghost" size="icon" href={href({ month: stepMonth(12) })} aria-label="Next year">
+			<ChevronRightIcon class="size-4" />
+		</Button>
+	</div>
+	<div class="flex items-center justify-between">
+		<Button variant="ghost" size="icon" href={href({ month: stepMonth(-1) })} aria-label="Previous month">
+			<ChevronLeftIcon class="size-4" />
+		</Button>
+		<span class="text-sm text-ink">{monthName}</span>
+		<Button variant="ghost" size="icon" href={href({ month: stepMonth(1) })} aria-label="Next month">
+			<ChevronRightIcon class="size-4" />
+		</Button>
+	</div>
+</div>
+{/snippet}
+
 <div class="mx-auto grid w-full max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[16rem_minmax(0,1fr)_18rem]">
 	{#if !data.selected}
+		<div class="mx-auto w-full max-w-xs lg:col-span-3">{@render monthNav()}</div>
 		<div class="rounded-xl border border-dashed border-border p-10 text-center lg:col-span-3">
 			<p class="text-sm font-medium text-ink">No employee has a Biometric ID yet</p>
 			<p class="mt-1 text-sm text-ink-muted">
@@ -254,27 +279,7 @@ Return for correction
 				{/if}
 			</div>
 
-			<div class="rounded-lg border border-border bg-surface p-3">
-				<p class="text-center text-xs text-ink-muted">Year &amp; month</p>
-				<div class="mt-2 flex items-center justify-between">
-					<Button variant="ghost" size="icon" href={href({ month: stepMonth(-12) })} aria-label="Previous year">
-						<ChevronLeftIcon class="size-4" />
-					</Button>
-					<span class="text-lg font-semibold text-ink tabular-nums">{year}</span>
-					<Button variant="ghost" size="icon" href={href({ month: stepMonth(12) })} aria-label="Next year">
-						<ChevronRightIcon class="size-4" />
-					</Button>
-				</div>
-				<div class="flex items-center justify-between">
-					<Button variant="ghost" size="icon" href={href({ month: stepMonth(-1) })} aria-label="Previous month">
-						<ChevronLeftIcon class="size-4" />
-					</Button>
-					<span class="text-sm text-ink">{monthName}</span>
-					<Button variant="ghost" size="icon" href={href({ month: stepMonth(1) })} aria-label="Next month">
-						<ChevronRightIcon class="size-4" />
-					</Button>
-				</div>
-			</div>
+			{@render monthNav()}
 
 			<div class="grid grid-cols-2 rounded-lg border border-border bg-surface p-0.5" role="group" aria-label="View">
 				{#each [['preview', 'Preview'], ['saved', 'Saved']] as const as [value, label] (value)}

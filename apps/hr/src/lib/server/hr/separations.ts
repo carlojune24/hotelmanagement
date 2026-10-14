@@ -14,6 +14,7 @@ import {
 } from '$lib/server/db/schema/index';
 import { businessDateFor } from '$lib/server/time';
 import { LoanError, addPayment, listLoanTypes, listLoans } from './loans';
+import { paidAlready } from './bonuses';
 import { setThirteenthMonthCovered, thirteenthMonthFor } from './thirteenth-month';
 
 export class SeparationError extends Error {}
@@ -292,6 +293,8 @@ export async function getSeparation(organizationId: string, id: string) {
 	const totals = totalsFor(sep.id, sep.employeeId, g);
 	const year = Number(sep.lastDay.slice(0, 4));
 	const thirteenth = await thirteenthMonthFor(sep.employeeId, year, sep.lastDay);
+	// A mid-year installment already issued comes off the final-pay figure.
+	const midYearPaid = (await paidAlready([sep.employeeId], year)).mid.get(sep.employeeId) ?? 0;
 	const thirteenthLine = g.items.find((i) => i.source === 'thirteenth_month' && !i.voidedAt) ?? null;
 	const loans = g.loans
 		.filter(isOpenLoan)
@@ -330,6 +333,7 @@ export async function getSeparation(organizationId: string, id: string) {
 			label: x.label,
 			amountCentavos: x.amountCentavos,
 			note: x.note,
+			source: x.source,
 			createdAt: x.createdAt,
 			voidedAt: x.voidedAt,
 			voidReason: x.voidReason
@@ -348,6 +352,8 @@ export async function getSeparation(organizationId: string, id: string) {
 		thirteenth: {
 			...thirteenth,
 			covered: emp.thirteenthMonthCovered,
+			midYearPaid,
+			due: Math.max(0, thirteenth.amount - midYearPaid),
 			addedAmount: thirteenthLine?.amountCentavos ?? null
 		},
 		steps,
@@ -531,14 +537,19 @@ export async function addThirteenthMonth(organizationId: string, id: string) {
 					: 'There is no basic pay on locked payslips for this year yet. Lock their payroll first.'
 		);
 	}
+	const midYearPaid = (await paidAlready([sep.employeeId], year)).mid.get(sep.employeeId) ?? 0;
+	const due = r.amount - midYearPaid;
+	if (due <= 0) throw new SeparationError('Their 13th month was already paid in full as a mid-year installment.');
 	const [row] = await db
 		.insert(separationItems)
 		.values({
 			separationId: id,
 			kind: 'credit',
 			label: `13th month pay ${year} (pro-rated)`,
-			amountCentavos: r.amount,
-			note: `Basic earned ${r.basicEarned / 100} less late/undertime ${r.lateDeductions / 100}, ÷ 12, from ${r.finalPayslips} final payslip${r.finalPayslips === 1 ? '' : 's'}`,
+			amountCentavos: due,
+			note:
+				`Basic earned ${r.basicEarned / 100} less late/undertime ${r.lateDeductions / 100}, ÷ 12 = ${r.amount / 100}, from ${r.finalPayslips} final payslip${r.finalPayslips === 1 ? '' : 's'}` +
+				(midYearPaid > 0 ? `; less ${midYearPaid / 100} already paid mid-year` : ''),
 			source: 'thirteenth_month',
 			sourceYear: year
 		})

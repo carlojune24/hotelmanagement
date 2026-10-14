@@ -55,7 +55,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 			throughDate: batch.throughDate,
 			total: batch.total
 		},
-		// Only people actually paid are on the register and get a slip.
-		lines: batch.lines.filter((l) => l.amount > 0)
+		// An issued register lists only people actually paid; a draft shows everyone so it matches the screen.
+		lines: batch.status === 'draft' ? batch.lines : batch.lines.filter((l) => l.amount > 0)
 	};
 };

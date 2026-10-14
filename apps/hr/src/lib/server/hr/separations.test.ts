@@ -174,7 +174,7 @@ describe.skipIf(!live)('13th month from payslips (live DB)', async () => {
 			.insert(payrollRuns)
 			.values({
 				organizationId: org,
-				cutoffStart: `${month}-01`,
+				cutoffStart: `${month}-${cutoffEnd.endsWith('-15') ? '01' : '16'}`,
 				cutoffEnd,
 				payDate: cutoffEnd,
 				frequency: 'semi_monthly',
@@ -238,8 +238,9 @@ describe.skipIf(!live)('13th month from payslips (live DB)', async () => {
 			draftPayslips: 1,
 			serviceDays: 120
 		});
-		// A cutoff after the last day is not counted.
-		expect((await T.thirteenthMonthFor(emp, 2026, '2026-03-20')).basicEarned).toBe(1_000_000);
+		// A cutoff that begins after the last day is not counted; the one the last day falls in is.
+		expect((await T.thirteenthMonthFor(emp, 2026, '2026-03-10')).basicEarned).toBe(1_000_000);
+		expect((await T.thirteenthMonthFor(emp, 2026, '2026-03-20')).basicEarned).toBe(2_000_000);
 	});
 
 	it('pays nothing to someone marked not entitled, or who served under a month', async () => {

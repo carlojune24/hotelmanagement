@@ -1,4 +1,5 @@
 <script lang="ts">
+	import LoansGuide from '$lib/components/loans/loans-guide.svelte';
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
@@ -91,12 +92,15 @@
 <svelte:head><title>Loans · HR</title></svelte:head>
 
 <div class="mx-auto max-w-5xl space-y-6">
-	<div>
-		<h1 class="text-5xl font-light tracking-tight">Loans</h1>
-		<p class="mt-2 max-w-2xl text-sm text-ink-muted">
-			SSS, Pag-IBIG and company loans taken out of pay. An active loan is deducted automatically when you
-			generate payroll — half in each cutoff — and shows on the SSS / Pag-IBIG loan remittance for the month.
-		</p>
+	<div class="flex flex-wrap items-end justify-between gap-3">
+		<div>
+			<h1 class="text-5xl font-light tracking-tight">Loans</h1>
+			<p class="mt-2 max-w-2xl text-sm text-ink-muted">
+				SSS, Pag-IBIG and company loans taken out of pay. An active loan is deducted automatically when you
+				generate payroll — half in each cutoff — and shows on the SSS / Pag-IBIG loan remittance for the month.
+			</p>
+		</div>
+		<LoansGuide />
 	</div>
 
 	<section class="panel space-y-5 p-5 md:p-6" aria-label="Loans">
@@ -139,8 +143,8 @@
 			</div>
 		{/if}
 
-		<div class="flex flex-wrap items-center gap-3">
-			<div class="relative min-w-52 flex-1">
+		<div class="flex items-center gap-3">
+			<div class="relative min-w-0 flex-1">
 				<SearchIcon class="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-ink-muted" />
 				<Input
 					type="search"
@@ -150,11 +154,11 @@
 					bind:value={query}
 				/>
 			</div>
-			<select class="{selectClass} w-auto" aria-label="Loan type" bind:value={kind}>
+			<select class="{selectClass} !w-44 shrink-0" aria-label="Loan type" bind:value={kind}>
 				<option value="all">All types</option>
 				{#each data.kinds as k (k.value)}<option value={k.value}>{k.label}</option>{/each}
 			</select>
-			<Button variant="gold" onclick={() => (creating = true)}><PlusIcon /> New loan</Button>
+			<Button variant="gold" class="shrink-0" onclick={() => (creating = true)}><PlusIcon /> New loan</Button>
 		</div>
 
 		<div class="flex flex-wrap gap-2" role="group" aria-label="Status">

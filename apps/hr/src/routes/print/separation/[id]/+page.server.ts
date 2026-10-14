@@ -39,7 +39,9 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		// Voided lines are history, not part of the statement.
 		items: v.items
 			.filter((i) => !i.voidedAt)
-			.map((i) => ({ id: i.id, kind: i.kind, kindLabel: ITEM_KIND_LABEL[i.kind], label: i.label, amount: i.amountCentavos, note: i.note })),
+			.map((i) => ({ id: i.id, kind: i.kind, kindLabel: ITEM_KIND_LABEL[i.kind], label: i.label, amount: i.amountCentavos, note: i.note, source: i.source })),
+		// The 13th month is computed in full, then any mid-year installment already issued comes off it.
+		thirteenth: { computed: v.thirteenth.amount, midYearPaid: v.thirteenth.midYearPaid },
 		applied: v.applied
 			.filter((a) => !a.voidedAt)
 			.map((a) => ({ id: a.id, label: a.loanLabel, referenceNo: a.referenceNo, paidOn: a.paidOn, amount: a.amountCentavos })),

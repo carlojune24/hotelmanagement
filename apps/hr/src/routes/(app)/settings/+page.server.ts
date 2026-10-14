@@ -26,6 +26,7 @@ import {
 	loanTypeSchema,
 	updateLoanType
 } from '$lib/server/hr/loans';
+import { getRemittanceSettings, saveRemittanceSettings } from '$lib/server/hr/remittance';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -34,7 +35,9 @@ export const load: PageServerLoad = async ({ locals }) => {
 	const types = await listLoanTypes(org.id);
 const estTypes = await listEstablishmentTypes(org.id);
 	const leaveTypeRows = await listLeaveTypesForOrg(org.id);
+	const remittance = await getRemittanceSettings(org.id);
 	return {
+		remittance: { employerIds: remittance.employerIds, dueDay: remittance.dueDay },
 leaveTypes: leaveTypeRows.map((t) => ({
 			id: t.id,
 			code: t.code,
@@ -74,9 +77,58 @@ leaveTypes: leaveTypeRows.map((t) => ({
 	};
 };
 
+const dueDay = z.preprocess(
+	(v) => (v === '' || v === null || v === undefined ? null : v),
+	z.coerce.number().int().min(1).max(31).nullable()
+);
+
 const fd = async (request: Request) => Object.fromEntries(await request.formData());
 
 export const actions: Actions = {
+	saveRemittance: async ({ request, locals }) => {
+		requireCap(locals.user, locals.access, 'payroll:*');
+		const parsed = z
+			.object({
+				sssNo: z.string().trim().max(40),
+				philhealthNo: z.string().trim().max(40),
+				pagibigNo: z.string().trim().max(40),
+				dueSss: dueDay,
+				duePhilhealth: dueDay,
+				duePagibig: dueDay,
+				dueBir: dueDay,
+				dueSssLoan: dueDay,
+				duePagibigLoan: dueDay
+			})
+			.safeParse(await fd(request));
+		if (!parsed.success) return fail(400, { error: 'Due days are 1–31 (or leave blank).' });
+		const p = parsed.data;
+		const org = await getOrganization();
+		const days = {
+			sss: p.dueSss,
+			philhealth: p.duePhilhealth,
+			pagibig: p.duePagibig,
+			bir: p.dueBir,
+			sss_loan: p.dueSssLoan,
+			pagibig_loan: p.duePagibigLoan
+		};
+		await saveRemittanceSettings(org.id, {
+			employerIds: {
+				sss: p.sssNo || undefined,
+				philhealth: p.philhealthNo || undefined,
+				pagibig: p.pagibigNo || undefined
+			},
+			dueDay: days
+		});
+		await writeAudit({
+			actor: locals.user,
+			action: 'remittance.settings',
+			entityType: 'organization',
+			entityId: org.id,
+			after: { dueDay: days }
+		});
+		return { ok: 'Saved.' };
+	},
+
 	saveLeaveType: async ({ request, locals }) => {
 		requireCap(locals.user, locals.access, 'leave:*');
 		try {

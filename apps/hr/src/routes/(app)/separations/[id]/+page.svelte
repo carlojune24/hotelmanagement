@@ -2,9 +2,11 @@
 	import { enhance } from '$app/forms';
 	import { toast } from 'svelte-sonner';
 	import CheckIcon from '@lucide/svelte/icons/check';
+	import PlusIcon from '@lucide/svelte/icons/plus';
 	import { money } from '$lib/components/payroll/money';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import type { ActionData, PageData } from './$types';
@@ -17,13 +19,17 @@
 		new Date(d).toLocaleDateString('en-PH', { day: '2-digit', month: 'short', year: 'numeric' });
 
 	let busy = $state(false);
+	let adding = $state(false);
 	const t = $derived(data.totals);
 	const cleared = $derived(data.sep.status === 'cleared');
 	const doneCount = $derived(Object.values(data.steps).filter(Boolean).length);
 
 	$effect(() => {
 		if (form && 'error' in form && form.error) toast.error(form.error);
-		else if (form && 'ok' in form && form.ok) toast.success(form.ok);
+		else if (form && 'ok' in form && form.ok) {
+			toast.success(form.ok);
+			adding = false;
+		}
 	});
 
 	/** Clears the inputs after a successful add; keeps them when the server refused. */
@@ -174,11 +180,17 @@
 						{data.thirteenth.draftPayslips === 1 ? 'it' : 'them'} first for the full figure.
 					</p>
 				{/if}
+				{#if data.thirteenth.midYearPaid > 0}
+					<p class="text-xs text-ink-muted tabular-nums">
+						Less {money(data.thirteenth.midYearPaid)} already paid as a mid-year installment, so
+						{money(data.thirteenth.due)} is due now.
+					</p>
+				{/if}
 				{#if data.thirteenth.addedAmount !== null}
 					<p>Added to the statement: <span class="font-medium tabular-nums">{money(data.thirteenth.addedAmount)}</span>.</p>
 				{:else if !cleared}
 					<form method="POST" action="?/thirteenth" use:enhance={submit}>
-						<Button type="submit" variant="gold" size="sm" disabled={busy}>Add {money(data.thirteenth.amount)} to final pay</Button>
+						<Button type="submit" variant="gold" size="sm" disabled={busy || data.thirteenth.due === 0}>Add {money(data.thirteenth.due)} to final pay</Button>
 					</form>
 				{/if}
 			{:else}
@@ -215,30 +227,13 @@
 		</div>
 
 		{#if !cleared}
-			<form method="POST" action="?/addItem" use:enhance={submit} class="grid grid-cols-2 gap-3 border-t border-dotted border-ink/20 pt-4 md:grid-cols-4">
-				<div class="space-y-1.5">
-					<Label for="kind">Type</Label>
-					<select id="kind" name="kind" class={selectClass}>
-						<option value="credit">Owed to the employee</option>
-						<option value="charge">Charged to the employee</option>
-					</select>
-				</div>
-				<div class="space-y-1.5 md:col-span-2">
-					<Label for="label">For</Label>
-					<Input id="label" name="label" maxlength={120} placeholder="e.g. Prorated 13th month, Unreturned uniform" required />
-				</div>
-				<div class="space-y-1.5">
-					<Label for="amount">Amount (₱)</Label>
-					<Input id="amount" name="amount" type="number" min="0.01" step="0.01" required />
-				</div>
-				<div class="col-span-2 space-y-1.5 md:col-span-3">
-					<Label for="note">Note <span class="text-ink-muted">(optional)</span></Label>
-					<Input id="note" name="note" maxlength={300} />
-				</div>
-				<div class="col-span-2 flex items-end md:col-span-1">
-					<Button type="submit" variant="outline" disabled={busy}>Add line</Button>
-				</div>
-			</form>
+			<div class="flex flex-wrap items-center gap-3 border-t border-dotted border-ink/20 pt-4">
+				<Button variant="outline" onclick={() => (adding = true)}><PlusIcon /> Add line</Button>
+				<p class="min-w-0 flex-1 text-xs text-ink-muted">
+					A line is one amount on the final-pay statement: something owed to them (e.g. prorated 13th month) adds to
+					it, something charged to them (e.g. unreturned uniform) is taken off it.
+				</p>
+			</div>
 		{/if}
 	</section>
 
@@ -464,3 +459,37 @@
 		{/if}
 	</section>
 </div>
+
+<Dialog.Root open={adding} onOpenChange={(o) => (adding = o)}>
+	<Dialog.Content class="sm:max-w-lg">
+		<Dialog.Header>
+			<Dialog.Title class="font-display text-2xl font-light">Add a line</Dialog.Title>
+			<Dialog.Description>Something owed to the employee, or charged against their final pay.</Dialog.Description>
+		</Dialog.Header>
+		<form method="POST" action="?/addItem" use:enhance={submit} class="space-y-3">
+			<div class="space-y-1.5">
+				<Label for="kind">Type</Label>
+				<select id="kind" name="kind" class={selectClass}>
+					<option value="credit">Owed to the employee</option>
+					<option value="charge">Charged to the employee</option>
+				</select>
+			</div>
+			<div class="space-y-1.5">
+				<Label for="label">For</Label>
+				<Input id="label" name="label" maxlength={120} placeholder="e.g. Prorated 13th month, Unreturned uniform" required />
+			</div>
+			<div class="space-y-1.5">
+				<Label for="amount">Amount (₱)</Label>
+				<Input id="amount" name="amount" type="number" min="0.01" step="0.01" required />
+			</div>
+			<div class="space-y-1.5">
+				<Label for="note">Note <span class="text-ink-muted">(optional)</span></Label>
+				<Input id="note" name="note" maxlength={300} />
+			</div>
+			<Dialog.Footer>
+				<Button type="button" variant="outline" onclick={() => (adding = false)}>Cancel</Button>
+				<Button type="submit" disabled={busy}>Add line</Button>
+			</Dialog.Footer>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>

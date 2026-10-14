@@ -120,7 +120,7 @@ async function currentStaff(establishmentId: string): Promise<Person[]> {
 
 type Batch = typeof bonusBatches.$inferSelect;
 
-async function paidAlready(employeeIds: string[], year: number) {
+export async function paidAlready(employeeIds: string[], year: number) {
 	const mid = new Map<string, number>();
 	const finalPay = new Map<string, number>();
 	if (employeeIds.length === 0) return { mid, finalPay };

@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { toast } from 'svelte-sonner';
-	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import PlusIcon from '@lucide/svelte/icons/plus';
+	import BonusGuide from '$lib/components/bonuses/bonus-guide.svelte';
 	import { money } from '$lib/components/payroll/money';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -16,12 +16,6 @@
 
 	const selectClass =
 		'h-10 w-full rounded-full border border-transparent bg-white px-4 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50';
-	const REASON: Record<string, string> = {
-		not_covered: 'Not entitled',
-		under_one_month: 'Under one month',
-		nothing_earned: 'No basic pay yet',
-		paid_in_final_pay: 'Paid in final pay'
-	};
 
 	let creating = $state(false);
 	let kind = $state('thirteenth_year_end');
@@ -58,6 +52,7 @@
 			</p>
 		</div>
 		<div class="flex items-center gap-2">
+			<BonusGuide />
 			<Button variant="outline" size="sm" href="?year={data.year - 1}">← {data.year - 1}</Button>
 			<span class="px-2 text-lg tabular-nums">{data.year}</span>
 			<Button variant="outline" size="sm" href="?year={data.year + 1}">{data.year + 1} →</Button>
@@ -77,143 +72,44 @@
 		</section>
 	{/if}
 
-	{#each data.batches as b (b.id)}
-		{@const thirteenth = b.kind !== 'other'}
-		<section class="panel p-5" aria-label="{b.establishment} · {b.label}">
-			<details class="group/batch" open>
-				<summary
-					class="flex cursor-pointer list-none flex-wrap items-start justify-between gap-3 [&::-webkit-details-marker]:hidden"
-				>
-					<div>
-						<h2 class="flex items-center gap-2 text-2xl font-light">
-							<ChevronDownIcon
-								class="size-5 shrink-0 -rotate-90 text-ink-muted transition-transform group-open/batch:rotate-0"
-								aria-hidden="true"
-							/>
-							{b.establishment}
-						</h2>
-						<p class="mt-1 flex flex-wrap items-center gap-2 text-sm text-ink-muted">
-							<span>{b.label}</span>
-							<Badge variant={b.status === 'issued' ? 'ok' : 'muted'}>
-								{b.status === 'issued' ? `Issued ${b.issuedOn ? dayLabel(b.issuedOn) : ''}` : 'Draft'}
-							</Badge>
-							<span class="tabular-nums">{b.paidCount} paid · {money(b.total)}</span>
-						</p>
-					</div>
-					<div class="flex flex-wrap gap-2">
-						{#if b.lines.length > 0}
-							<Button variant="outline" href="/print/{b.establishmentSlug}/bonuses/{b.id}" target="_blank" rel="noopener">
-								Print
-							</Button>
-						{/if}
-						{#if b.status === 'draft'}
-							{#if thirteenth}
-								<form method="POST" action="?/refresh" use:enhance={submit}>
-									<input type="hidden" name="batchId" value={b.id} />
-									<Button type="submit" variant="outline" disabled={busy}>Refresh</Button>
-								</form>
-							{/if}
-							<form method="POST" action="?/issue" use:enhance={submit}>
-								<input type="hidden" name="batchId" value={b.id} />
-								<Button type="submit" disabled={busy || b.total === 0}>Issue</Button>
-							</form>
-							<form method="POST" action="?/delete" use:enhance={submit}>
-								<input type="hidden" name="batchId" value={b.id} />
-								<Button type="submit" variant="ghost" disabled={busy}>Delete</Button>
-							</form>
-						{:else}
-							<form method="POST" action="?/reopen" use:enhance={submit}>
-								<input type="hidden" name="batchId" value={b.id} />
-								<Button type="submit" variant="outline" disabled={busy}>Reopen</Button>
-							</form>
-						{/if}
-					</div>
-				</summary>
-
-				<div class="mt-4 space-y-3">
-					{#if b.lines.length === 0}
-						<p class="text-sm text-ink-muted">
-							{thirteenth
-								? 'No locked payslips this year for this establishment yet. Lock its payroll, then refresh.'
-								: 'Nobody is assigned here right now.'}
-						</p>
-					{:else}
-						<div class="overflow-x-auto">
-							<Table.Root>
-								<Table.Header>
-									<Table.Row class="hover:bg-transparent">
-										<Table.Head>Employee</Table.Head>
-										{#if thirteenth}
-											<Table.Head class="text-right">Basic earned</Table.Head>
-											<Table.Head class="text-right">Late / undertime</Table.Head>
-											<Table.Head class="text-right">13th month (÷ 12)</Table.Head>
-											<Table.Head class="text-right">Already paid</Table.Head>
-										{/if}
-										<Table.Head class="text-right">{thirteenth ? 'Pay now' : 'Amount'}</Table.Head>
-									</Table.Row>
-								</Table.Header>
-								<Table.Body>
-									{#each b.lines as l (l.id)}
-										<Table.Row>
-											<Table.Cell class="align-top">
-												<p class="font-medium">{l.employeeName}</p>
-												<p class="text-xs text-ink-muted">#{l.employeeNo}{l.position ? ` · ${l.position}` : ''}{l.note ? ` · ${l.note}` : ''}</p>
-												{#if l.excludedReason}
-													<p class="text-xs font-medium text-ink-muted">{REASON[l.excludedReason] ?? l.excludedReason}</p>
-												{/if}
-												{#if l.overTaxExemption}
-													<p class="text-xs font-medium text-danger">Over the ₱90,000 tax exemption this year</p>
-												{/if}
-											</Table.Cell>
-											{#if thirteenth}
-												<Table.Cell class="text-right align-top tabular-nums">{money(l.basicEarned)}</Table.Cell>
-												<Table.Cell class="text-right align-top tabular-nums">{l.late > 0 ? money(l.late) : '–'}</Table.Cell>
-												<Table.Cell class="text-right align-top tabular-nums">{money(l.accrued)}</Table.Cell>
-												<Table.Cell class="text-right align-top tabular-nums">{l.alreadyPaid > 0 ? money(l.alreadyPaid) : '–'}</Table.Cell>
-												<Table.Cell class="text-right align-top font-medium tabular-nums">{money(l.amount)}</Table.Cell>
-											{:else}
-												<Table.Cell class="text-right align-top">
-													{#if b.status === 'draft'}
-														<form method="POST" action="?/amount" use:enhance={submit} class="flex justify-end gap-2">
-															<input type="hidden" name="lineId" value={l.id} />
-															<Input
-																name="amount"
-																type="number"
-																min="0"
-																step="0.01"
-																value={l.amount / 100}
-																aria-label="Amount for {l.employeeName}"
-																class="h-9 w-36 text-right"
-															/>
-															<Button type="submit" variant="ghost" size="sm" disabled={busy}>Save</Button>
-														</form>
-													{:else}
-														<span class="font-medium tabular-nums">{money(l.amount)}</span>
-													{/if}
-												</Table.Cell>
-											{/if}
-										</Table.Row>
-									{/each}
-								</Table.Body>
-								<Table.Footer class="border-t border-ink/30 bg-transparent">
-									<Table.Row class="hover:bg-transparent">
-										<Table.Cell class="font-medium">Total · {b.paidCount} paid</Table.Cell>
-										{#if thirteenth}
-											<Table.Cell class="text-right tabular-nums">{money(b.lines.reduce((t, l) => t + l.basicEarned, 0))}</Table.Cell>
-											<Table.Cell class="text-right tabular-nums">{money(b.lines.reduce((t, l) => t + l.late, 0))}</Table.Cell>
-											<Table.Cell class="text-right tabular-nums">{money(b.lines.reduce((t, l) => t + l.accrued, 0))}</Table.Cell>
-											<Table.Cell class="text-right tabular-nums">{money(b.lines.reduce((t, l) => t + l.alreadyPaid, 0))}</Table.Cell>
-										{/if}
-										<Table.Cell class="text-right font-medium tabular-nums">{money(b.total)}</Table.Cell>
-									</Table.Row>
-								</Table.Footer>
-							</Table.Root>
-						</div>
-					{/if}
-				</div>
-			</details>
+	{#if data.batches.length > 0}
+		<section class="panel p-5">
+			<div class="overflow-x-auto">
+				<Table.Root>
+					<Table.Header>
+						<Table.Row class="hover:bg-transparent">
+							<Table.Head>Establishment</Table.Head>
+							<Table.Head>Batch</Table.Head>
+							<Table.Head>Status</Table.Head>
+							<Table.Head class="text-right">People paid</Table.Head>
+							<Table.Head class="text-right">Total</Table.Head>
+							<Table.Head><span class="sr-only">Actions</span></Table.Head>
+						</Table.Row>
+					</Table.Header>
+					<Table.Body>
+						{#each data.batches as b (b.id)}
+							<Table.Row>
+								<Table.Cell class="font-medium">{b.establishment}</Table.Cell>
+								<Table.Cell>{b.label}</Table.Cell>
+								<Table.Cell>
+									<Badge variant={b.status === 'issued' ? 'ok' : 'muted'}>
+										{b.status === 'issued' ? `Issued ${b.issuedOn ? dayLabel(b.issuedOn) : ''}` : 'Draft'}
+									</Badge>
+								</Table.Cell>
+								<Table.Cell class="text-right tabular-nums">{b.paidCount}</Table.Cell>
+								<Table.Cell class="text-right tabular-nums">{money(b.total)}</Table.Cell>
+								<Table.Cell class="text-right">
+									<Button variant="gold" size="sm" href="/bonuses/{b.id}" aria-label="View {b.establishment} · {b.label}">
+										View
+									</Button>
+								</Table.Cell>
+							</Table.Row>
+						{/each}
+					</Table.Body>
+				</Table.Root>
+			</div>
 		</section>
-	{/each}
+	{/if}
 </div>
 
 <Dialog.Root open={creating} onOpenChange={(o) => (creating = o)}>

@@ -51,7 +51,7 @@ export interface ThirteenthResult {
 	finalPayslips: number;
 }
 
-/** Computes an employee's 13th month for `year`, counting final payslips whose cutoff ended on or before `through`. */
+/** Computes an employee's 13th month for `year`, counting final payslips whose cutoff began on or before `through`. */
 export async function thirteenthMonthFor(employeeId: string, year: number, through: string): Promise<ThirteenthResult> {
 	const emp = await db.select().from(employees).where(eq(employees.id, employeeId)).then((r) => r.at(0));
 	if (!emp) throw new Error('That person does not exist.');
@@ -74,7 +74,10 @@ export async function thirteenthMonthFor(employeeId: string, year: number, throu
 					eq(payrollRunLines.employeeId, employeeId),
 					inArray(payrollBatches.status, statuses),
 					gte(payrollRuns.cutoffEnd, yearStart),
-					lte(payrollRuns.cutoffEnd, upTo)
+					// A cutoff counts if it began on or before `through`: someone leaving mid-cutoff is paid for that
+					// cutoff up to their last day, so its payslip must be in. A cutoff ending next year is next year's.
+					lte(payrollRuns.cutoffStart, upTo),
+					lte(payrollRuns.cutoffEnd, yearEnd)
 				)
 			)
 			.then((r) => r[0]!);

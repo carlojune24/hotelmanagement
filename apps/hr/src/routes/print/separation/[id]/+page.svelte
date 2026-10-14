@@ -63,9 +63,18 @@
 	<table class="w-full">
 		<tbody>
 			{#each credits as i (i.id)}
+				{@const midYear = i.source === 'thirteenth_month' && data.thirteenth.midYearPaid > 0}
 				<tr class="border-b border-ink/10">
-					<td class="py-1.5">{i.label}{i.note ? ` — ${i.note}` : ''}</td>
-					<td class="text-right tabular-nums">{money(i.amount)}</td>
+					<td class="py-1.5">
+						{i.label}{i.note && !midYear ? ` — ${i.note}` : ''}
+						{#if midYear}
+							<span class="block text-xs text-ink-muted tabular-nums">
+								13th month {money(data.thirteenth.computed)}, less {money(data.thirteenth.midYearPaid)} already paid as a
+								mid-year installment.
+							</span>
+						{/if}
+					</td>
+					<td class="text-right align-top tabular-nums">{money(i.amount)}</td>
 				</tr>
 			{:else}
 				<tr><td class="py-1.5 text-ink-muted" colspan="2">None.</td></tr>
