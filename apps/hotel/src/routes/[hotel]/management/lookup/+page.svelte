@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
@@ -66,6 +67,9 @@
 						</div>
 						<p class="mt-0.5 text-sm text-ink-muted">{h.subtitle}</p>
 					</div>
+					{#if h.trailRef}
+						<Button size="sm" variant="outline" href="/{page.params.hotel}/management/trail/{h.trailRef}">Open full trail</Button>
+					{/if}
 					<Button size="sm" variant="outline" href={h.href}>Open</Button>
 				</li>
 			{/each}

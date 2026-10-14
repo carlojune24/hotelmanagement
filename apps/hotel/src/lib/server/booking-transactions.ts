@@ -11,9 +11,18 @@ import {
 	roomAssignments,
 	roomTypes,
 	rooms,
+	scPwdDiscounts,
 	securityDeposits
 } from './db/schema/index';
 import { loadOrderLedgers } from './folio';
+import {
+	NO_FILTERS,
+	matchesFilters,
+	summariseBookingPayment,
+	type BookingChannel,
+	type BookingPaymentState,
+	type TransactionFilters
+} from '$lib/booking-payment-status';
 
 export interface BookingTransactionRow {
 	orderId: string;
@@ -34,6 +43,14 @@ export interface BookingTransactionRow {
 	chargesCentavos: number;
 	paidCentavos: number;
 	balanceCentavos: number;
+	/** How the booking was made: `online` (website + PayMongo) or `walkin` (desk / staff). */
+	channel: BookingChannel;
+	/** Where the money stands now, e.g. `credit` when an SC/PWD discount came after payment. */
+	paymentState: BookingPaymentState;
+	/** "Paid in full online", "Downpayment 50%", "Credit owed", … */
+	paymentLabel: string;
+	/** "Senior Citizen" / "PWD" (joined) when an SC/PWD discount is applied to any room, else null. */
+	scPwdLabel: string | null;
 }
 
 function summariseStatus(statuses: string[]): BookingTransactionRow['status'] {
@@ -49,12 +66,14 @@ function summariseStatus(statuses: string[]): BookingTransactionRow['status'] {
  * age — so a booking from last week stays reachable. A room counts when its stay touches the
  * range (arrival on or before `to`, departure on or after `from`); an event when its date is in it.
  * Unpaid online checkouts are left out (they are holds, not bookings yet). `q` matches the guest's
- * name/email or the booking code.
+ * name/email or the booking code. `filters` narrows by how it was booked, how far it is paid and
+ * whether an SC/PWD discount applies.
  */
 export async function listBookingTransactions(
 	hotelId: string,
 	range: { from: string; to: string },
-	q?: string
+	q?: string,
+	filters: TransactionFilters = NO_FILTERS
 ): Promise<BookingTransactionRow[]> {
 	const [roomHits, hallHits] = await Promise.all([
 		db
@@ -90,7 +109,9 @@ export async function listBookingTransactions(
 				id: orders.id,
 				createdAt: orders.createdAt,
 				guestName: guests.fullName,
-				guestEmail: guests.email
+				guestEmail: guests.email,
+				session: orders.paymongoCheckoutSessionId,
+				totalCentavos: orders.totalCentavos
 			})
 			.from(orders)
 			.innerJoin(guests, eq(guests.id, orders.guestId))
@@ -121,6 +142,35 @@ export async function listBookingTransactions(
 			.where(inArray(hallBookings.orderId, orderIds)),
 		loadOrderLedgers(orderIds)
 	]);
+
+	// What was paid through PayMongo, and which rooms carry an SC/PWD discount — for the channel,
+	// payment and SC/PWD columns.
+	const [onlinePays, claims] = await Promise.all([
+		db
+			.select({ orderId: payments.orderId, amount: payments.amountCentavos })
+			.from(payments)
+			.where(
+				and(
+					inArray(payments.orderId, orderIds),
+					eq(payments.status, 'paid'),
+					isNull(payments.voidedAt),
+					ne(payments.purpose, 'refund'),
+					eq(payments.provider, 'paymongo')
+				)
+			),
+		db
+			.select({ orderId: bookings.orderId, type: scPwdDiscounts.claimantType })
+			.from(scPwdDiscounts)
+			.innerJoin(bookings, eq(bookings.id, scPwdDiscounts.bookingId))
+			.where(and(inArray(bookings.orderId, orderIds), isNull(scPwdDiscounts.reversedAt)))
+	]);
+	const onlinePaidBy = new Map<string, number>();
+	for (const p of onlinePays) onlinePaidBy.set(p.orderId, (onlinePaidBy.get(p.orderId) ?? 0) + p.amount);
+	const claimTypesBy = new Map<string, Set<string>>();
+	for (const c of claims) {
+		if (!claimTypesBy.has(c.orderId)) claimTypesBy.set(c.orderId, new Set());
+		claimTypesBy.get(c.orderId)!.add(c.type);
+	}
 
 	const nums = roomLines.length
 		? await db
@@ -159,7 +209,22 @@ export async function listBookingTransactions(
 		const starts = [...rl.map((l) => l.checkIn), ...hl.map((l) => l.eventDate)].sort();
 		const ends = [...rl.map((l) => l.checkOut), ...hl.map((l) => l.eventDate)].sort();
 		const ledger = ledgers.get(o.id);
-		out.push({
+		const onlinePaid = onlinePaidBy.get(o.id) ?? 0;
+		// Online = the guest checked out on the website (a PayMongo session) or has a PayMongo payment.
+		const channel: BookingChannel = o.session || onlinePaid > 0 ? 'online' : 'walkin';
+		const pay = summariseBookingPayment({
+			channel,
+			chargesCentavos: ledger?.chargesTotalCentavos ?? 0,
+			paidCentavos: ledger?.paidTotalCentavos ?? 0,
+			balanceCentavos: ledger?.balanceCentavos ?? 0,
+			onlinePaidCentavos: onlinePaid,
+			orderTotalCentavos: o.totalCentavos
+		});
+		const types = claimTypesBy.get(o.id);
+		const scPwdLabel = types
+			? [...types].map((t) => (t === 'pwd' ? 'PWD' : 'Senior Citizen')).sort().join(' + ')
+			: null;
+		const row: BookingTransactionRow = {
 			orderId: o.id,
 			createdAt: o.createdAt.toISOString(),
 			code,
@@ -175,8 +240,13 @@ export async function listBookingTransactions(
 			).length,
 			chargesCentavos: ledger?.chargesTotalCentavos ?? 0,
 			paidCentavos: ledger?.paidTotalCentavos ?? 0,
-			balanceCentavos: ledger?.balanceCentavos ?? 0
-		});
+			balanceCentavos: ledger?.balanceCentavos ?? 0,
+			channel,
+			paymentState: pay.state,
+			paymentLabel: pay.label,
+			scPwdLabel
+		};
+		if (matchesFilters(row, filters)) out.push(row);
 	}
 	// Newest booking first.
 	return out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
@@ -201,17 +271,14 @@ export interface BookingTransactionExportRow extends BookingTransactionRow {
 export async function listBookingTransactionsForExport(
 	hotelId: string,
 	range: { from: string; to: string },
-	q?: string
+	q?: string,
+	filters: TransactionFilters = NO_FILTERS
 ): Promise<BookingTransactionExportRow[]> {
-	const rows = await listBookingTransactions(hotelId, range, q);
+	const rows = await listBookingTransactions(hotelId, range, q, filters);
 	if (rows.length === 0) return [];
 	const ids = rows.map((r) => r.orderId);
 
-	const [orderRows, paymentRows, depositRows] = await Promise.all([
-		db
-			.select({ id: orders.id, session: orders.paymongoCheckoutSessionId })
-			.from(orders)
-			.where(and(eq(orders.hotelId, hotelId), inArray(orders.id, ids))),
+	const [paymentRows, depositRows] = await Promise.all([
 		db
 			.select({
 				orderId: payments.orderId,
@@ -244,7 +311,6 @@ export async function listBookingTransactionsForExport(
 			)
 	]);
 
-	const online = new Set(orderRows.filter((o) => !!o.session).map((o) => o.id));
 	const methodsBy = new Map<string, Set<string>>();
 	const refsBy = new Map<string, Set<string>>();
 	for (const p of paymentRows) {
@@ -261,7 +327,7 @@ export async function listBookingTransactionsForExport(
 
 	return rows.map((r) => ({
 		...r,
-		source: online.has(r.orderId) ? 'Online' : 'Walk-in / staff',
+		source: r.channel === 'online' ? 'Online' : 'Walk-in / staff',
 		methods: [...(methodsBy.get(r.orderId) ?? [])],
 		references: [...(refsBy.get(r.orderId) ?? [])],
 		depositCentavos: depositBy.get(r.orderId) ?? 0

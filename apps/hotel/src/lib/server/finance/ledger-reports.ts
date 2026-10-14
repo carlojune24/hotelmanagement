@@ -73,7 +73,7 @@ export async function incomeStatement(params: ReportParams): Promise<IncomeState
 			id: chartOfAccounts.id,
 			hotelId: chartOfAccounts.hotelId,
 			subtype: chartOfAccounts.subtype,
-			normalBalance: chartOfAccounts.normalBalance
+			type: chartOfAccounts.type
 		})
 		.from(chartOfAccounts)
 		.where(and(inArray(chartOfAccounts.hotelId, params.hotelIds), inArray(chartOfAccounts.type, ['income', 'expense'])));
@@ -84,7 +84,10 @@ export async function incomeStatement(params: ReportParams): Promise<IncomeState
 	for (const a of accounts) {
 		const s = byAccount.get(a.id);
 		if (!s) continue;
-		const net = a.normalBalance === 'credit' ? s.creditMinor - s.debitMinor : s.debitMinor - s.creditMinor;
+		// Signed by what the line does to profit, not by the account's own normal side: income adds (credit −
+		// debit) and expense costs (debit − credit). So a contra-revenue account such as 4090 Refunds &
+		// Allowances, which is debit-normal, REDUCES revenue instead of being added to it.
+		const net = a.type === 'income' ? s.creditMinor - s.debitMinor : s.debitMinor - s.creditMinor;
 		if (net === 0) continue;
 
 		let row = bySubtype.get(a.subtype);

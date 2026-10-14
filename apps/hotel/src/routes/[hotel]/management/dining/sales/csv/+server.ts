@@ -1,51 +1,35 @@
+import { and, eq } from 'drizzle-orm';
+import { db } from '$lib/server/db/index';
+import { diningItems } from '$lib/server/db/schema/index';
 import { toCsv } from '$lib/server/finance/calc';
 import { requireCap } from '$lib/server/auth/rbac';
 import { diningSalesReport } from '$lib/server/dining-orders';
+import { buildSalesDoc, docToCsv } from '$lib/dining-report-doc';
 import { localParts } from '$lib/dining-slots';
 import { resolveRange } from '$lib/dining-sales-range';
 import type { RequestHandler } from './$types';
 
-const php = (c: number) => (c / 100).toFixed(2);
-
-/** The Sales tab as a CSV: summary, then each breakdown under its own heading. */
+/** The Sales tab as a CSV, drawn from the same document model as the printed sheet. */
 export const GET: RequestHandler = async ({ locals, url }) => {
 	requireCap(locals.user, locals.role, 'dining:read');
 	const hotelId = locals.hotel!.id;
 	const today = localParts(new Date(), locals.hotel!.timezone).date;
 	const { from, to } = resolveRange(url, today);
-	const venue = url.searchParams.get('venue');
-	const r = await diningSalesReport(hotelId, from, to, venue && /^[0-9a-f-]{36}$/i.test(venue) ? venue : null);
+	const venueParam = url.searchParams.get('venue');
+	const venue =
+		venueParam && /^[0-9a-f-]{36}$/i.test(venueParam)
+			? await db
+					.select({ id: diningItems.id, title: diningItems.title })
+					.from(diningItems)
+					.where(and(eq(diningItems.id, venueParam), eq(diningItems.hotelId, hotelId)))
+					.limit(1)
+					.then((r) => r.at(0) ?? null)
+			: null;
+	const r = await diningSalesReport(hotelId, from, to, venue?.id ?? null);
 
-	const csv = toCsv(
-		['Dining sales', `${from} to ${to}`],
-		[
-			['Orders paid', r.orders],
-			['Sales (VAT included)', php(r.grossCentavos)],
-			['VAT included', php(r.vatCentavos)],
-			['', ''],
-			['By day', ''],
-			['Date', 'Orders', 'Sales'],
-			...r.byDay.map((d) => [d.date, d.orders, php(d.grossCentavos)]),
-			['', ''],
-			['By venue', ''],
-			['Venue', 'Orders', 'Sales'],
-			...r.byVenue.map((v) => [v.venue, v.orders, php(v.grossCentavos)]),
-			['', ''],
-			['By station', ''],
-			['Station', 'Quantity', 'Sales'],
-			...r.byStation.map((st) => [st.station, st.quantity, php(st.grossCentavos)]),
-			['', ''],
-			['By dish', ''],
-			['Dish', 'Quantity', 'Sales'],
-			...r.byItem.map((i) => [i.name, i.quantity, php(i.grossCentavos)]),
-			['', ''],
-			['By payment method', ''],
-			['Method', 'Orders', 'Sales'],
-			...r.byMethod.map((m) => [m.method, m.orders, php(m.grossCentavos)])
-		]
-	);
-
-	return new Response(csv, {
+	const { headers, rows } = docToCsv(buildSalesDoc(r, { venueLabel: venue?.title ?? 'All venues' }));
+	// A byte-order mark so Excel reads the peso text and dashes as UTF-8.
+	return new Response('﻿' + toCsv(headers, rows), {
 		headers: {
 			'content-type': 'text/csv; charset=utf-8',
 			'content-disposition': `attachment; filename="dining-sales-${from}-to-${to}.csv"`,

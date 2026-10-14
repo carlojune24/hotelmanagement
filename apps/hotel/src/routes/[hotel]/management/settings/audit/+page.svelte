@@ -6,87 +6,52 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Select from '$lib/components/ui/select/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
-	import SearchIcon from '@lucide/svelte/icons/search';
+	import AuditDetail from '$lib/components/staff/audit-detail.svelte';
 	import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import PrinterIcon from '@lucide/svelte/icons/printer';
+	import DownloadIcon from '@lucide/svelte/icons/download';
+	import { actionLabel, actorOf, ACTOR_KIND_LABEL } from '$lib/audit-labels';
+	import { formatTrailTime } from '$lib/dining-trail-doc';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 	const base = $derived(`/${page.params.hotel}/management`);
 
-	let search = $state('');
 	let expanded = $state<Set<string>>(new Set());
+	const when = (v: string | Date) => formatTrailTime(new Date(v).toISOString(), data.timezone);
 
-	const fmtDateTime = (v: string | Date) =>
-		new Date(v).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' });
-
-	// The events an owner actually asks about — "who booked this, who checked them out" —
-	// get a plain-language label. Everything else falls back to a humanized version of its
-	// raw action string, which still reads fine (e.g. "finance.void_expense" → "Void expense").
-	const ACTION_LABELS: Record<string, string> = {
-		'booking.walk_in': 'Booked a walk-in room',
-		'hall_booking.walk_in': 'Booked a walk-in function hall',
-		'payment.paymongo_confirmed': 'Guest paid online (PayMongo)',
-		'booking.check_in': 'Checked in',
-		'booking.id_photo_captured': 'Captured guest ID photo',
-		'booking.check_out': 'Checked out',
-		'booking.cancel': 'Cancelled a room booking',
-		'hall_booking.cancel': 'Cancelled a hall booking',
-		'booking.no_show': 'Marked as no-show',
-		'booking.modify_stay': 'Modified stay dates',
-		'booking.reinstate': 'Reinstated a booking',
-		'hall_booking.reinstate': 'Reinstated a hall booking',
-		'booking.order_expired': 'Order expired — hold released',
-		'order.manual_confirm': 'Manually confirmed an order',
-		'hall_booking.complete': 'Marked an event completed',
-		'folio.record_payment': 'Recorded a payment',
-		'folio.refund_payment': 'Refunded a payment',
-		'folio.void_payment': 'Voided a payment',
-		'folio.add_item_charge': 'Added a charge to a folio',
-		'folio.add_extension_fee': 'Added an extension fee',
-		'folio.void_charge': 'Voided a folio charge',
-		'finance.open_shift': 'Opened a cashier shift',
-		'finance.close_shift': 'Closed a cashier shift',
-		'finance.shift_event': 'Recorded a drawer event',
-		'finance.shift_chargeback': 'Charged a shift shortage back to a cashier',
-		'finance.shift_chargeback_collected': 'Recovered a charged-back shortage',
-		'finance.shift_chargeback_written_off': 'Wrote off a shift shortage',
-		'finance.manual_cash_movement': 'Entered a manual cash movement',
-		'finance.void_cash_movement': 'Voided a cash movement',
-		'finance.day_close': 'Closed the business day',
-		'finance.day_reopen': 'Reopened the business day',
-		'finance.open_receivable': 'Opened a city-ledger receivable',
-		'finance.settle_receivable': 'Collected a receivable',
-		'finance.write_off_receivable': 'Wrote off a receivable',
-		'finance.reopen_receivable': 'Reopened a receivable',
-		'guest_message.cancellation_request': 'Guest requested a cancellation',
-		'guest_message.decline_cancellation_request': "Declined a guest's cancellation request",
-		'review.approve': 'Approved a guest review',
-		'review.reject': 'Rejected a guest review',
-		'hotel.invite_member': 'Invited a staff member',
-		'hotel.remove_member': 'Removed a staff member',
-		'hotel.change_role': "Changed a staff member's role"
-	};
-	function actionLabel(action: string): string {
-		if (ACTION_LABELS[action]) return ACTION_LABELS[action];
-		const part = action.includes('.') ? action.slice(action.indexOf('.') + 1) : action;
-		const words = part.replace(/_/g, ' ');
-		return words.charAt(0).toUpperCase() + words.slice(1);
-	}
-
-	function entityHref(entityType: string, entityId: string | null): string | null {
-		if (!entityId) return null;
-		if (entityType === 'booking') return `${base}/reservations/room/${entityId}`;
-		if (entityType === 'hall_booking') return `${base}/reservations/hall/${entityId}`;
-		if (entityType === 'cashier_shift') return `${base}/finance/shifts/${entityId}`;
-		return null;
-	}
-
-	function entityTypeFilterChanged(value: string) {
+	// Filters live in the URL so a filtered view can be shared, printed or exported as it is.
+	const FILTER_KEYS = ['from', 'to', 'action', 'actor', 'entityType', 'q'] as const;
+	function go(patch: Record<string, string | null>, resetPage = true) {
 		const url = new URL(page.url);
-		if (value === 'all') url.searchParams.delete('entityType');
-		else url.searchParams.set('entityType', value);
+		for (const [k, v] of Object.entries(patch)) {
+			if (v) url.searchParams.set(k, v);
+			else url.searchParams.delete(k);
+		}
+		if (resetPage) url.searchParams.delete('page');
 		goto(url.pathname + url.search, { keepFocus: true, noScroll: true });
+	}
+	const exportQuery = $derived(
+		(() => {
+			const p = new URLSearchParams();
+			for (const k of FILTER_KEYS) {
+				const v = page.url.searchParams.get(k);
+				if (v) p.set(k, v);
+			}
+			return p.toString();
+		})()
+	);
+	const filtered = $derived(FILTER_KEYS.some((k) => !!page.url.searchParams.get(k)));
+
+	function submitSearch(e: SubmitEvent) {
+		e.preventDefault();
+		const f = new FormData(e.currentTarget as HTMLFormElement);
+		go({
+			q: String(f.get('q') ?? '').trim() || null,
+			from: String(f.get('from') ?? '') || null,
+			to: String(f.get('to') ?? '') || null
+		});
 	}
 
 	function toggle(id: string) {
@@ -96,26 +61,48 @@
 		expanded = next;
 	}
 
-	const filtered = $derived(
-		data.entries.filter((e) => {
-			if (!search.trim()) return true;
-			const q = search.trim().toLowerCase();
-			const hay = `${e.actorLabel ?? ''} ${actionLabel(e.action)} ${e.action} ${e.entityType} ${e.entityId ?? ''}`.toLowerCase();
-			return hay.includes(q);
-		})
+	const actorValue = $derived(data.filter.actor ?? 'all');
+	const actorText = $derived(
+		actorValue === 'all'
+			? 'Anyone'
+			: actorValue.startsWith('kind:')
+				? ACTOR_KIND_LABEL[actorValue.slice(5) as keyof typeof ACTOR_KIND_LABEL]
+				: (data.actors.find((a) => a.id === actorValue)?.label ?? 'Anyone')
 	);
+	const kindClass = (kind: string) =>
+		kind === 'staff'
+			? 'border-border bg-surface-2 text-ink'
+			: kind === 'guest'
+				? 'border-amber-300/70 bg-amber-50 text-amber-900'
+				: kind === 'system'
+					? 'border-sky-300/70 bg-sky-50 text-sky-900'
+					: 'border-dashed border-border bg-transparent text-ink-muted';
+	const kindText = (kind: string) => (kind === 'unknown' ? 'Not recorded' : ACTOR_KIND_LABEL[kind as keyof typeof ACTOR_KIND_LABEL]);
+	const pageHref = (n: number) => {
+		const url = new URL(page.url);
+		url.searchParams.set('page', String(n));
+		return url.pathname + url.search;
+	};
 </script>
 
 <div class="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
-	<div class="mb-6 flex items-center justify-between">
+	<div class="mb-6 flex flex-wrap items-center justify-between gap-3">
 		<div>
 			<h1 class="text-xl font-semibold tracking-tight text-ink">Audit log</h1>
 			<p class="text-sm text-ink-muted">
 				Every tracked mutation in this hotel — who booked, checked in/out, cancelled, took a
-				payment, or changed a setting, and when. Most recent {data.entries.length} entries.
+				payment, or changed a setting, and when. {data.total.toLocaleString()} {data.total === 1 ? 'entry' : 'entries'}{filtered ? ' match these filters' : ''}.
 			</p>
 		</div>
-		<Button variant="outline" href="{base}/dashboard">← Dashboard</Button>
+		<div class="flex items-center gap-2">
+			<Button href="/{page.params.hotel}/print/audit?{exportQuery}" target="_blank" rel="noopener" variant="outline" size="sm">
+				<PrinterIcon class="size-4" /> Print
+			</Button>
+			<Button href="{base}/settings/audit/csv?{exportQuery}" variant="outline" size="sm" download>
+				<DownloadIcon class="size-4" /> CSV
+			</Button>
+			<Button variant="outline" size="sm" href="{base}/dashboard">← Dashboard</Button>
+		</div>
 	</div>
 
 	<!-- Got a booking code, DN-/TB- code, OR number or payment reference? That has its own search. -->
@@ -125,14 +112,52 @@
 		<Button type="submit" size="sm" variant="outline">Find</Button>
 	</form>
 
-	<div class="mb-4 flex flex-wrap items-center gap-3">
-		<div class="relative min-w-48 flex-1">
-			<SearchIcon class="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-muted" />
-			<Input placeholder="Search actor, action, or entity…" bind:value={search} class="pl-8" />
+	<form class="mb-3 flex flex-wrap items-end gap-3" onsubmit={submitSearch} aria-label="Filter the audit log">
+		<div class="flex flex-col gap-1">
+			<label class="text-xs text-ink-muted" for="aFrom">From</label>
+			<Input id="aFrom" name="from" type="date" value={data.filter.from ?? ''} class="h-9 w-40" />
 		</div>
-		<Select.Root type="single" value={data.entityType} onValueChange={entityTypeFilterChanged}>
-			<Select.Trigger class="w-48 shrink-0">
-				{data.entityType === 'all' ? 'All entity types' : data.entityType.replace(/_/g, ' ')}
+		<div class="flex flex-col gap-1">
+			<label class="text-xs text-ink-muted" for="aTo">To</label>
+			<Input id="aTo" name="to" type="date" value={data.filter.to ?? ''} class="h-9 w-40" />
+		</div>
+		<div class="flex min-w-48 flex-1 flex-col gap-1">
+			<label class="text-xs text-ink-muted" for="aQ">Tracking number, id, actor or action</label>
+			<Input id="aQ" name="q" value={data.filter.q ?? ''} placeholder="DN-YBCV, TB-…, a name…" class="h-9" autocomplete="off" />
+		</div>
+		<Button type="submit" size="sm">Apply</Button>
+		{#if filtered}
+			<Button type="button" size="sm" variant="ghost" onclick={() => goto(page.url.pathname)}>Clear</Button>
+		{/if}
+	</form>
+
+	<div class="mb-4 flex flex-wrap items-center gap-3">
+		<Select.Root type="single" value={actorValue} onValueChange={(v) => go({ actor: v === 'all' ? null : v })}>
+			<Select.Trigger class="w-48 shrink-0" aria-label="Who">{actorText}</Select.Trigger>
+			<Select.Content>
+				<Select.Item value="all" label="Anyone" />
+				<Select.Item value="kind:staff" label="Any staff" />
+				<Select.Item value="kind:guest" label="Guests" />
+				<Select.Item value="kind:system" label="System" />
+				{#each data.actors as a (a.id)}
+					<Select.Item value={a.id} label={a.label} />
+				{/each}
+			</Select.Content>
+		</Select.Root>
+		<Select.Root type="single" value={data.filter.action ?? 'all'} onValueChange={(v) => go({ action: v === 'all' ? null : v })}>
+			<Select.Trigger class="w-64 shrink-0" aria-label="Action">
+				{data.filter.action ? actionLabel(data.filter.action) : 'All actions'}
+			</Select.Trigger>
+			<Select.Content>
+				<Select.Item value="all" label="All actions" />
+				{#each data.actions as a (a)}
+					<Select.Item value={a} label={actionLabel(a)} />
+				{/each}
+			</Select.Content>
+		</Select.Root>
+		<Select.Root type="single" value={data.filter.entityType ?? 'all'} onValueChange={(v) => go({ entityType: v === 'all' ? null : v })}>
+			<Select.Trigger class="w-48 shrink-0" aria-label="Entity type">
+				{data.filter.entityType ? data.filter.entityType.replace(/_/g, ' ') : 'All entity types'}
 			</Select.Trigger>
 			<Select.Content>
 				<Select.Item value="all" label="All entity types" />
@@ -144,11 +169,11 @@
 	</div>
 
 	<div class="overflow-hidden rounded-xl border border-border">
-		{#if filtered.length === 0}
+		{#if data.entries.length === 0}
 			<div class="flex flex-col items-center gap-2 p-10 text-center">
 				<ShieldCheckIcon class="size-6 text-ink-muted" />
 				<p class="text-sm text-ink-muted">
-					{data.entries.length === 0 ? 'Nothing recorded yet.' : 'No entries match these filters.'}
+					{filtered ? 'No entries match these filters.' : 'Nothing recorded yet.'}
 				</p>
 			</div>
 		{:else}
@@ -163,12 +188,12 @@
 					</Table.Row>
 				</Table.Header>
 				<Table.Body>
-					{#each filtered as e (e.id)}
-						{@const href = entityHref(e.entityType, e.entityId)}
-						{@const hasDetail = e.before != null || e.after != null}
+					{#each data.entries as e (e.id)}
+						{@const actor = actorOf(e)}
+						{@const hasDetail = e.before != null || e.after != null || !!e.ipAddress || !!e.userAgent}
 						<Table.Row>
-							<Table.Cell class="align-top text-xs whitespace-nowrap text-ink-muted">
-								{fmtDateTime(e.createdAt)}
+							<Table.Cell class="align-top text-xs whitespace-nowrap text-ink-muted tabular-nums">
+								{when(e.createdAt)}
 							</Table.Cell>
 							<Table.Cell class="align-top">
 								{#if e.actorLabel}
@@ -176,9 +201,8 @@
 									<div class="text-xs break-all text-ink-muted">
 										{e.actorLabel.match(/<(.+)>/)?.[1] ?? ''}
 									</div>
-								{:else}
-									<Badge variant="outline" class="border-border bg-surface-2 text-ink-muted">System</Badge>
 								{/if}
+								<Badge variant="outline" class="mt-0.5 text-[11px] {kindClass(actor.kind)}">{kindText(actor.kind)}</Badge>
 							</Table.Cell>
 							<Table.Cell class="align-top">
 								<div class="text-ink">{actionLabel(e.action)}</div>
@@ -186,15 +210,16 @@
 							</Table.Cell>
 							<Table.Cell class="align-top text-xs text-ink-muted">
 								<span class="capitalize">{e.entityType.replace(/_/g, ' ')}</span>
-								{#if href}
-									<a {href} class="ml-1 underline underline-offset-2 hover:text-ink">open →</a>
-								{:else if e.entityId}
+								{#if e.refCode}<span class="ml-1 font-mono text-ink">{e.refCode}</span>{/if}
+								{#if e.href}
+									<a href={e.href} class="ml-1 underline underline-offset-2 hover:text-ink">open →</a>
+								{:else if e.entityId && !e.refCode}
 									<span class="ml-1 font-mono">{e.entityId.slice(0, 8)}</span>
 								{/if}
 							</Table.Cell>
 							<Table.Cell class="align-top text-right">
 								{#if hasDetail}
-									<Button variant="ghost" size="sm" onclick={() => toggle(e.id)}>
+									<Button variant="ghost" size="sm" onclick={() => toggle(e.id)} aria-expanded={expanded.has(e.id)} aria-label="Show details">
 										<ChevronDownIcon
 											class="size-4 transition-transform {expanded.has(e.id) ? 'rotate-180' : ''}"
 										/>
@@ -205,24 +230,7 @@
 						{#if hasDetail && expanded.has(e.id)}
 							<Table.Row>
 								<Table.Cell colspan={5} class="bg-surface-2">
-									<div class="grid gap-3 py-1 sm:grid-cols-2">
-										{#if e.before != null}
-											<div>
-												<div class="mb-1 text-xs font-semibold tracking-wide text-ink-muted uppercase">
-													Before
-												</div>
-												<pre class="overflow-x-auto rounded-md border border-border bg-surface p-2 text-xs text-ink">{JSON.stringify(e.before, null, 2)}</pre>
-											</div>
-										{/if}
-										{#if e.after != null}
-											<div>
-												<div class="mb-1 text-xs font-semibold tracking-wide text-ink-muted uppercase">
-													After
-												</div>
-												<pre class="overflow-x-auto rounded-md border border-border bg-surface p-2 text-xs text-ink">{JSON.stringify(e.after, null, 2)}</pre>
-											</div>
-										{/if}
-									</div>
+									<AuditDetail ip={e.ipAddress} userAgent={e.userAgent} before={e.before} after={e.after} />
 								</Table.Cell>
 							</Table.Row>
 						{/if}
@@ -231,4 +239,14 @@
 			</Table.Root>
 		{/if}
 	</div>
+
+	{#if data.pages > 1}
+		<nav class="mt-4 flex items-center justify-between text-sm" aria-label="Pages">
+			<span class="text-ink-muted">Page {data.page} of {data.pages}</span>
+			<div class="flex gap-2">
+				<Button variant="outline" size="sm" href={pageHref(data.page - 1)} disabled={data.page <= 1}>← Newer</Button>
+				<Button variant="outline" size="sm" href={pageHref(data.page + 1)} disabled={data.page >= data.pages}>Older →</Button>
+			</div>
+		</nav>
+	{/if}
 </div>

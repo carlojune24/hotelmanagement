@@ -37,6 +37,8 @@ import {
 	type FolioTarget
 } from '$lib/server/folio';
 import { summariseRefund } from '$lib/refund-status';
+import { getActiveScPwdClaimsForBookings } from '$lib/server/sc-pwd-discount';
+import { CHANNEL_LABEL, summariseBookingPayment, type BookingChannel } from '$lib/booking-payment-status';
 import type { Actions, PageServerLoad } from './$types';
 
 const PAYMENT_METHODS = ['cash', 'card', 'gcash', 'maya', 'bank_transfer', 'cheque'] as const;
@@ -110,6 +112,8 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 
 	const lineIds = [...roomRows.map((r) => r.id), ...hallRows.map((h) => h.id)];
 	const roomLineIds = roomRows.map((r) => r.id);
+	// An active SC/PWD claim per room: explains the folio line and any credit it left behind.
+	const claimByLine = await getActiveScPwdClaimsForBookings(roomLineIds);
 
 	// The booking's city-ledger ACCOUNT(s) and the per-room entries on them.
 	const accounts = await db
@@ -228,6 +232,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 	}
 
 	const chargeView = (lineId: string, total: number, stayLabel: string) => {
+		const claim = claimByLine.get(lineId);
 		const rows = chargesByLine.get(lineId);
 		if (!rows || rows.length === 0) {
 			return [
@@ -238,7 +243,8 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 					totalCentavos: total,
 					isBase: true,
 					voided: false,
-					voidReason: null as string | null
+					voidReason: null as string | null,
+					scPwd: false
 				}
 			];
 		}
@@ -249,7 +255,9 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			totalCentavos: c.totalCentavos,
 			isBase: c.isBaseCharge,
 			voided: !!c.voidedAt,
-			voidReason: c.voidReason
+			voidReason: c.voidReason,
+			/** The negative line the SC/PWD claim posted — the page explains it under the line. */
+			scPwd: !!claim && c.id === claim.folioChargeId
 		}));
 	};
 
@@ -271,6 +279,29 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			roomRows.map(async (r) => [r.id, await loadFolioPromo(hotel.id, r.id)] as const)
 		)
 	);
+
+	/** The claim on a room, in the numbers the page shows, and whether it came after the guest had paid. */
+	const firstPaidAt = paymentRows
+		.filter((p) => p.status === 'paid' && !p.voidedAt && p.purpose !== 'refund' && p.amountCentavos > 0 && p.paidAt)
+		.map((p) => p.paidAt!.getTime())
+		.sort((a, b) => a - b)[0];
+	const scPwdView = (lineId: string) => {
+		const c = claimByLine.get(lineId);
+		if (!c) return null;
+		return {
+			type: c.claimantType === 'pwd' ? 'PWD' : 'Senior Citizen',
+			claimantName: c.claimantName,
+			idNumber: c.idNumber,
+			discountBps: c.discountBps,
+			baseCentavos: c.baseAmountCentavos,
+			vatRemovedCentavos: c.vatRemovedCentavos,
+			discountCentavos: c.discountCentavos,
+			totalReductionCentavos: c.vatRemovedCentavos + c.discountCentavos,
+			appliedAt: c.appliedAt.toISOString(),
+			/** True when the guest had already paid something before this discount was applied. */
+			appliedAfterPayment: firstPaidAt != null && firstPaidAt < c.appliedAt.getTime()
+		};
+	};
 
 	const buildLine = (
 		base: { id: string; status: string; checkIn?: string; checkOut?: string },
@@ -294,6 +325,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			detail,
 			status: base.status,
 			promo: promoByLine.get(base.id) ?? null,
+			scPwd: scPwdView(base.id),
 			chargesCentavos: l?.chargesCentavos ?? 0,
 			charges: chargeView(base.id, l?.chargesCentavos ?? 0, stay),
 			depositAppliedCentavos: depositApplied,
@@ -407,6 +439,48 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 	const cityLedgerTotal = lines.reduce((sum, l) => sum + l.cityLedgerMovedCentavos, 0);
 	const carrier = lines.find((l) => l.kind === 'room' && LIVE.has(l.status)) ?? lines[0] ?? null;
 
+	// How it was booked and how far it is paid — the same words as the list.
+	const onlinePaid = paymentRows
+		.filter((p) => p.status === 'paid' && !p.voidedAt && p.purpose !== 'refund' && p.provider === 'paymongo')
+		.reduce((s, p) => s + p.amountCentavos, 0);
+	const channel: BookingChannel = order.paymongoCheckoutSessionId || onlinePaid > 0 ? 'online' : 'walkin';
+	const paySummary = summariseBookingPayment({
+		channel,
+		chargesCentavos: ledger.chargesTotalCentavos,
+		paidCentavos: ledger.paidTotalCentavos,
+		balanceCentavos: ledger.balanceCentavos,
+		onlinePaidCentavos: onlinePaid,
+		orderTotalCentavos: order.totalCentavos
+	});
+	const scPwdLines = lines.filter((l) => l.scPwd);
+
+	/** One plain sentence per payment: why this money came in (or went back). */
+	const firstOnlineAt = paymentRows
+		.filter((p) => p.status === 'paid' && !p.voidedAt && p.provider === 'paymongo' && p.purpose !== 'refund')
+		.map((p) => (p.paidAt ?? p.createdAt).getTime())
+		.sort((a, b) => a - b)[0];
+	const reasonOf = (p: (typeof paymentRows)[number]): string | null => {
+		if (p.status !== 'paid') return null;
+		const lineId = p.folioId ? lineOfFolio.get(p.folioId) : undefined;
+		const claim = lineId ? claimByLine.get(lineId) : undefined;
+		if (p.purpose === 'refund') {
+			return claim ? 'Credit returned: the SC/PWD discount was applied after the guest paid' : null;
+		}
+		if (p.method === 'security_deposit' || p.method === 'house_use') return null;
+		const at = (p.paidAt ?? p.createdAt).getTime();
+		const afterClaim = claim && claim.appliedAt.getTime() <= at ? ', after the SC/PWD discount' : '';
+		if (p.provider === 'paymongo') {
+			if (p.purpose === 'deposit') {
+				const pct = order.totalCentavos > 0 ? Math.round((p.amountCentavos / order.totalCentavos) * 100) : 0;
+				return `Online downpayment: ${pct}% of the booking total`;
+			}
+			return 'Online payment in full';
+		}
+		if (p.purpose === 'deposit') return `Partial payment at the desk${afterClaim}`;
+		if (firstOnlineAt != null && at > firstOnlineAt) return `Balance paid at the desk, after the online downpayment${afterClaim}`;
+		return `Paid at the desk${afterClaim}`;
+	};
+
 	return {
 		order: {
 			id: order.id,
@@ -414,6 +488,17 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			status: order.status,
 			totalCentavos: order.totalCentavos,
 			amountDueNowCentavos: order.amountDueNowCentavos,
+			channel,
+			channelLabel: CHANNEL_LABEL[channel],
+			paymentState: paySummary.state,
+			paymentLabel: paySummary.label,
+			scPwdLabel: scPwdLines.length
+				? [...new Set(scPwdLines.map((l) => l.scPwd!.type))].sort().join(' + ')
+				: null,
+			/** The credit owed after an SC/PWD discount that came once the guest had paid. */
+			scPwdCreditCentavos: scPwdLines
+				.filter((l) => l.scPwd!.appliedAfterPayment && l.balanceCentavos < 0)
+				.reduce((s, l) => s - l.balanceCentavos, 0),
 			/** The promo code redeemed on this booking, summed across its rooms — null if none. */
 			promo: orderPromo
 		},
@@ -456,6 +541,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			voidedAt: p.voidedAt ? p.voidedAt.toISOString() : null,
 			voidReason: p.voidReason,
 			lineTitle: p.folioId ? (titleOf.get(lineOfFolio.get(p.folioId) ?? '') ?? null) : null,
+			reason: reasonOf(p),
 			// The explicit per-room split of this payment, when it has one.
 			allocations: allocsByPayment.get(p.id) ?? []
 		})),

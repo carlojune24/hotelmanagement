@@ -13,6 +13,7 @@ import {
 } from '$lib/server/tenant';
 import { startJobRunner } from '$lib/server/jobs/boss';
 import { writeErrorLog } from '$lib/server/error-log';
+import { runWithRequestContext } from '$lib/server/request-context';
 
 // Fire-and-forget at process boot — never blocks the server from serving
 // requests, and a startup failure (e.g. DB not reachable yet) is logged, not
@@ -117,7 +118,23 @@ export const handle: Handle = async ({ event, resolve }) => {
 		if (user) event.locals.role = await getMembershipRole(user.id, hotel.id);
 	}
 
-	return resolve(event);
+	// Everything below runs inside the request context, so `writeAudit` can record where the
+	// request came from without each call site passing it down.
+	let ip: string | null = null;
+	try {
+		ip = event.getClientAddress();
+	} catch {
+		// no client address available (prerender, some proxies) — leave it unrecorded
+	}
+	return runWithRequestContext(
+		{
+			ip,
+			userAgent: event.request.headers.get('user-agent'),
+			path: event.url.pathname,
+			hasSession: !!event.locals.user
+		},
+		() => resolve(event)
+	);
 };
 
 /** Unexpected failures only — a deliberate `error(4xx, …)` never reaches here. Mints a short

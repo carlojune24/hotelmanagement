@@ -8,6 +8,7 @@
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
+	import { movementReason } from '$lib/movement-reason';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import { RANGE_PRESETS, matchPreset, resolveRange } from '$lib/finance-range';
 	import type { ActionData, PageData } from './$types';
@@ -350,6 +351,7 @@
 					<Table.Head>Date</Table.Head>
 					<Table.Head>Account</Table.Head>
 					<Table.Head>Category</Table.Head>
+					<Table.Head>Reason</Table.Head>
 					<Table.Head>Details</Table.Head>
 					<Table.Head class="text-right">In</Table.Head>
 					<Table.Head class="text-right">Out</Table.Head>
@@ -368,8 +370,15 @@
 						<Table.Cell class="whitespace-nowrap text-ink-muted">{m.businessDate}</Table.Cell>
 						<Table.Cell class="text-ink">{m.accountName}</Table.Cell>
 						<Table.Cell class="text-ink-muted">{catLabel(m.category)}</Table.Cell>
-						<Table.Cell class="max-w-[16rem] truncate text-ink-muted">
+						<Table.Cell class="whitespace-nowrap">
+							{#if movementReason(m)}
+								{@const r = movementReason(m)!}
+								<Badge variant="outline" class={r.tone === 'out' ? 'border-transparent bg-danger/15 text-danger' : 'border-transparent bg-ok/15 text-ok'}>{r.label}</Badge>
+							{/if}
+						</Table.Cell>
+						<Table.Cell class="max-w-[18rem] truncate text-ink-muted" title={m.memo ?? ''}>
 							{m.counterpartyName ? `${m.counterpartyName} — ` : ''}{m.memo ?? ''}
+							{#if m.orderId}<a href="/{page.params.hotel}/management/transactions/{m.orderId}" class="ml-1 text-xs underline underline-offset-2 hover:text-ink">booking</a>{/if}
 							{#if m.voidedAt}<span class="text-danger"> (voided)</span>{/if}
 						</Table.Cell>
 						<Table.Cell class="text-right tabular-nums text-ok">{m.direction === 'in' ? peso(m.amountCentavos) : ''}</Table.Cell>
@@ -385,13 +394,13 @@
 						</Table.Cell>
 					</Table.Row>
 				{:else}
-					<Table.Row><Table.Cell colspan={7} class="py-6 text-center text-ink-muted">No movements match.</Table.Cell></Table.Row>
+					<Table.Row><Table.Cell colspan={8} class="py-6 text-center text-ink-muted">No movements match.</Table.Cell></Table.Row>
 				{/each}
 			</Table.Body>
 			{#if data.movements.length > 0}
 				<Table.Footer>
 					<Table.Row>
-						<Table.Cell colspan={4} class="text-ink">Total</Table.Cell>
+						<Table.Cell colspan={5} class="text-ink">Total</Table.Cell>
 						<Table.Cell class="text-right tabular-nums text-ok">{peso(movementTotals.in)}</Table.Cell>
 						<Table.Cell class="text-right tabular-nums text-danger">{peso(movementTotals.out)}</Table.Cell>
 						<Table.Cell></Table.Cell>

@@ -3,9 +3,11 @@
 	import { page } from '$app/state';
 	import { enhance } from '$app/forms';
 	import { toast } from 'svelte-sonner';
+	import { hallOvertimeAmount, hallOvertimeHours } from '$lib/hall-overtime';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import LogInIcon from '@lucide/svelte/icons/log-in';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Sheet from '$lib/components/ui/sheet/index.js';
 	import * as Accordion from '$lib/components/ui/accordion/index.js';
@@ -113,6 +115,9 @@
 		form && 'hallBookingDetail' in form ? form.hallBookingDetail : undefined
 	);
 	const formHallFolio = $derived(form && 'hallFolio' in form ? form.hallFolio : undefined);
+	const formHallPendingDamage = $derived(
+		form && 'hallPendingDamage' in form ? form.hallPendingDamage : undefined
+	);
 	const formHallWalkInError = $derived(
 		form && 'hallWalkInError' in form ? form.hallWalkInError : undefined
 	);
@@ -201,6 +206,14 @@
 	let hallPayOpen = $state(false);
 	let hallRefundOpen = $state(false);
 	let checkoutCityLedger = $state(false);
+	// Checking out a guest the hotel still owes money to: ask first, and prefer refunding it now.
+	let checkoutRefundOpen = $state(false);
+	let checkoutRefundAck = $state(false);
+	/** The credit (centavos) owed back on this booking's room, or 0. Only known once its folio is loaded. */
+	const creditOwedFor = (bookingId: string) =>
+		formRoomDetail && formFolio && formRoomDetail.booking.id === bookingId
+			? Math.max(0, -formFolio.balanceCentavos)
+			: 0;
 	let depositOverrideConfirming = $state(false);
 	let shiftFloat = $state('');
 	let shiftDrawer = $state('');
@@ -209,6 +222,49 @@
 	$effect(() => {
 		if (formHallBookingDetail) hallDetailDialogOpen = true;
 	});
+
+	// Hall check-out: the dialog previews the overtime for the moment it was opened. The server
+	// works the real figure out again from its own clock when the button is pressed.
+	type HallCheckoutTarget = {
+		hallBookingId: string;
+		title: string;
+		scheduledEndIso: string;
+		extraHourFeeCentavos: number;
+		vatRateBps: number;
+	};
+	let hallCheckout = $state<HallCheckoutTarget | null>(null);
+	let hallCheckoutAt = $state(0);
+	let hallCheckoutOpen = $state(false);
+	function openHallCheckout(target: HallCheckoutTarget) {
+		hallCheckout = target;
+		hallCheckoutAt = Date.now();
+		hallCheckoutOpen = true;
+	}
+	const hallCheckoutOvertime = $derived(
+		hallCheckout
+			? hallOvertimeAmount(
+					hallOvertimeHours(Date.parse(hallCheckout.scheduledEndIso), hallCheckoutAt),
+					hallCheckout.extraHourFeeCentavos,
+					hallCheckout.vatRateBps
+				)
+			: null
+	);
+	const hallTime = (iso: string) =>
+		new Date(iso).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit', timeZone: data.timezone });
+	/** What still blocks Close on a checked-out event, in words. */
+	function hallCloseBlockers(close: NonNullable<(typeof data.hallGrid)[number]['events'][number]['close']>) {
+		const out: string[] = [];
+		if (close.housekeeping === 'dirty') out.push('Housekeeping has not cleaned the hall yet');
+		if (close.housekeeping === 'in_progress') out.push('Housekeeping is still cleaning the hall');
+		if (close.pendingDamageCount > 0) {
+			out.push(
+				`${close.pendingDamageCount} damage report${close.pendingDamageCount === 1 ? '' : 's'} to charge or dismiss (open Full details)`
+			);
+		}
+		if (close.balanceCentavos > 0) out.push(`${peso(close.balanceCentavos)} still owed on the bill`);
+		return out;
+	}
+	const hallStatusLabel = (status: string) => (status === 'completed' ? 'Closed' : humanize(status));
 
 	// --- Room-type detail dialog (click a room's name to view its full spec/gallery) ---
 	let roomTypeDetailOpen = $state(false);
@@ -1077,6 +1133,8 @@
 	function statusPillClassGeneric(status: string): string {
 		if (status === 'confirmed' || status === 'completed')
 			return 'border-transparent bg-ok/15 text-ok';
+		if (status === 'checked_in') return 'border-transparent bg-brand/15 text-brand';
+		if (status === 'checked_out') return 'border-transparent bg-warning/15 text-warning';
 		if (status === 'cancelled') return 'border-transparent bg-danger/15 text-danger';
 		return 'border-border bg-surface-2 text-ink-muted';
 	}
@@ -1557,33 +1615,63 @@
 								{:else}
 									<div class="divide-y divide-border rounded-md border border-border">
 										{#each hall.events as e (e.hallBookingId)}
-											<div class="flex items-center justify-between gap-3 px-3 py-2.5">
-												<div>
-													<div class="text-sm font-medium text-ink">
-														{e.guestName} · {e.eventType}
+											{@const blockers = e.close ? hallCloseBlockers(e.close) : []}
+											<div class="px-3 py-2.5">
+												<div class="flex items-center justify-between gap-3">
+													<div>
+														<div class="text-sm font-medium text-ink">
+															{e.guestName} · {e.eventType}
+														</div>
+														<div class="text-xs text-ink-muted">
+															{#if e.eventDate !== data.businessDate}<span class="font-medium text-warning">{e.eventDate} · </span>{/if}{e.startTime.slice(0, 5)}–{e.endTime.slice(0, 5)} · {e.guestCount} guests
+															· {channelLabel(e.channel)} · {peso(e.totalCentavos)}
+														</div>
 													</div>
-													<div class="text-xs text-ink-muted">
-														{e.startTime.slice(0, 5)}–{e.endTime.slice(0, 5)} · {e.guestCount} guests
-														· {channelLabel(e.channel)} · {peso(e.totalCentavos)}
-													</div>
-												</div>
-												<div class="flex items-center gap-2">
-													<Badge variant="outline" class={statusPillClassGeneric(e.status)}>
-														{humanize(e.status)}
-													</Badge>
-													{#if e.status === 'confirmed'}
-														<form method="POST" action="?/completeHall" use:enhance>
-															<input type="hidden" name="hallBookingId" value={e.hallBookingId} />
-															<Button type="submit" size="sm" variant="outline"
-																>Mark completed</Button
+													<div class="flex items-center gap-2">
+														<Badge variant="outline" class={statusPillClassGeneric(e.status)}>
+															{hallStatusLabel(e.status)}
+														</Badge>
+														{#if e.status === 'confirmed'}
+															<form method="POST" action="?/checkInHall" use:enhance>
+																<input type="hidden" name="hallBookingId" value={e.hallBookingId} />
+																<Button type="submit" size="sm">Check in</Button>
+															</form>
+														{:else if e.status === 'checked_in'}
+															<Button
+																size="sm"
+																onclick={() =>
+																	openHallCheckout({
+																		hallBookingId: e.hallBookingId,
+																		title: `${hall.hallName}: ${e.guestName}`,
+																		scheduledEndIso: e.scheduledEndIso,
+																		extraHourFeeCentavos: hall.extraHourFeeCentavos,
+																		vatRateBps: hall.vatRateBps
+																	})}>Check out</Button
 															>
+														{:else if e.status === 'checked_out'}
+															<form method="POST" action="?/completeHall" use:enhance>
+																<input type="hidden" name="hallBookingId" value={e.hallBookingId} />
+																<Button type="submit" size="sm" disabled={blockers.length > 0}>Close</Button>
+															</form>
+														{/if}
+														<form method="POST" action="?/hallDetail" use:enhance>
+															<input type="hidden" name="hallBookingId" value={e.hallBookingId} />
+															<Button type="submit" size="sm" variant="outline">Full details</Button>
 														</form>
-													{/if}
-													<form method="POST" action="?/hallDetail" use:enhance>
-														<input type="hidden" name="hallBookingId" value={e.hallBookingId} />
-														<Button type="submit" size="sm" variant="outline">Full details</Button>
-													</form>
+													</div>
 												</div>
+												{#if e.status === 'checked_out'}
+													<div class="mt-2 rounded-md bg-surface-2 px-3 py-2 text-xs">
+														{#if blockers.length > 0}
+															<p class="mb-1 font-semibold text-ink">Before you can close</p>
+															<ul class="list-disc space-y-0.5 pl-4 text-ink-muted">
+																{#each blockers as b (b)}<li>{b}</li>{/each}
+															</ul>
+														{:else}
+															<p class="text-ok">Housekeeping has cleaned the hall and the bill is settled. Ready to close.</p>
+														{/if}
+													</div>
+												{/if}
 											</div>
 										{/each}
 									</div>
@@ -2029,9 +2117,15 @@
 								<form method="POST" action="?/checkOut" use:enhance class="flex-1">
 									<input type="hidden" name="bookingId" value={o.bookingId} />
 									<Button
-										type="submit"
+										type={creditOwedFor(o.bookingId) > 0 ? 'button' : 'submit'}
 										variant="outline"
 										class="w-full gap-1.5"
+										onclick={creditOwedFor(o.bookingId) > 0
+											? () => {
+													checkoutRefundAck = false;
+													checkoutRefundOpen = true;
+												}
+											: undefined}
 										disabled={!roomDetailReady ||
 											roomDeposit?.status === 'held' ||
 											(formFolio?.balanceCentavos ?? 0) > 0}
@@ -2050,6 +2144,91 @@
 								Guest details
 							</Button>
 						</div>
+
+						<!-- Asked when someone checks out (early or on time) while the hotel owes the guest money. -->
+						<Dialog.Root bind:open={checkoutRefundOpen}>
+							<Dialog.Content class="max-h-[90vh] overflow-y-auto">
+								{#if creditOwedFor(o.bookingId) > 0}
+									<Dialog.Header>
+										<Dialog.Title>Refund the guest before checking out</Dialog.Title>
+										<Dialog.Description>
+											There will be a refund to the guest amounting to
+											<strong class="text-ink">{peso(creditOwedFor(o.bookingId))}</strong>. Please refund
+											the credit we owe to the guest.
+										</Dialog.Description>
+									</Dialog.Header>
+									<div class="rounded-md bg-surface-2 px-3 py-2 text-xs text-ink-muted">
+										<div class="font-medium text-ink">{o.guestName} · Room {selectedRoom.roomNumber}</div>
+										{#if formScPwdClaim}
+											The Senior Citizen / PWD discount was applied after the guest paid, so they now owe
+											less than they paid.
+										{:else}
+											The guest has paid more than their folio now comes to.
+										{/if}
+									</div>
+									<PaymentFields
+										action="?/refundPayment"
+										kind="room"
+										id={o.bookingId}
+										balanceCentavos={creditOwedFor(o.bookingId)}
+										cashier={data.cashier}
+										mode="refund"
+										defaultReason={formScPwdClaim ? 'SC/PWD discount applied after payment' : ''}
+									/>
+									<div class="space-y-2 border-t border-border pt-3">
+										<p class="text-xs text-ink-muted">
+											Not refunding now? You can still check the guest out; the credit stays on the
+											booking and must be refunded later.
+										</p>
+										<label class="flex items-start gap-2 text-xs text-ink">
+											<input type="checkbox" bind:checked={checkoutRefundAck} class="mt-0.5 size-4" />
+											<span>
+												I understand the guest is still owed
+												<strong>{peso(creditOwedFor(o.bookingId))}</strong>.
+											</span>
+										</label>
+										<form
+											method="POST"
+											action="?/checkOut"
+											use:enhance={() => async ({ update }) => {
+												await update();
+												checkoutRefundOpen = false;
+											}}
+										>
+											<input type="hidden" name="bookingId" value={o.bookingId} />
+											<Button type="submit" variant="outline" class="w-full" disabled={!checkoutRefundAck}>
+												Check out without refunding
+											</Button>
+										</form>
+									</div>
+								{:else}
+									<Dialog.Header>
+										<Dialog.Title>Credit refunded</Dialog.Title>
+										<Dialog.Description>
+											The guest has been refunded. Check {o.guestName} out of Room {selectedRoom.roomNumber} now?
+										</Dialog.Description>
+									</Dialog.Header>
+									<form
+										method="POST"
+										action="?/checkOut"
+										use:enhance={() => async ({ update }) => {
+											await update();
+											checkoutRefundOpen = false;
+										}}
+									>
+										<input type="hidden" name="bookingId" value={o.bookingId} />
+										<Dialog.Footer>
+											<Button type="button" variant="outline" onclick={() => (checkoutRefundOpen = false)}>
+												Not yet
+											</Button>
+											<Button type="submit" class="gap-1.5">
+												<DoorOpenIcon class="size-4" /> Check out
+											</Button>
+										</Dialog.Footer>
+									</form>
+								{/if}
+							</Dialog.Content>
+						</Dialog.Root>
 
 						<!-- Fetches automatically whenever a new occupied room is selected — see the
 						     $effect above. Never shown to the staff; it just keeps `formRoomDetail`/
@@ -2699,33 +2878,36 @@
 						</div>
 						<div class="mb-4 divide-y divide-border rounded-lg border border-border">
 							{#each selectedRoom.expectedArrivals as a (a.bookingId)}
-								<div class="flex items-center justify-between px-3 py-2.5">
-									<div>
-										<div class="text-sm font-medium text-ink">{a.guestName}</div>
-										<div class="text-xs text-ink-muted">
-											{channelLabel(a.channel)}
-											{#if a.balanceCentavos > 0}
-												<span class="font-medium text-danger">· Room balance {peso(a.balanceCentavos)}</span>
-											{/if}
-											<span class="mx-1 text-ink-muted/40">·</span>
-											<a
-												href="{staffBase}/reservations/room/{a.bookingId}?from=front-desk&roomId={selectedRoomId}"
-												class="underline-offset-2 hover:text-ink hover:underline"
-											>
-												Check in
-											</a>
-											<span class="mx-1 text-ink-muted/40">·</span>
-											<a
-												href="{staffBase}/reservations/room/{a.bookingId}?action=cancel&from=front-desk&roomId={selectedRoomId}"
-												class="underline-offset-2 hover:text-danger hover:underline"
-											>
-												Cancel
-											</a>
+								<div class="space-y-2.5 px-3 py-3">
+									<div class="flex items-start justify-between gap-2">
+										<div class="min-w-0">
+											<div class="text-sm font-semibold text-ink">{a.guestName}</div>
+											<div class="text-xs text-ink-muted">
+												{channelLabel(a.channel)}
+												{#if a.balanceCentavos > 0}
+													<span class="font-medium text-danger">· Room balance {peso(a.balanceCentavos)}</span>
+												{/if}
+											</div>
 										</div>
+										<Badge variant="outline" class="shrink-0 border-transparent bg-ok/15 text-ok">
+											from {data.checkInTime.slice(0, 5)}
+										</Badge>
 									</div>
-									<Badge variant="outline" class="border-transparent bg-ok/15 text-ok">
-										from {data.checkInTime.slice(0, 5)}
-									</Badge>
+									<div class="flex gap-2">
+										<Button
+											href="{staffBase}/reservations/room/{a.bookingId}?from=front-desk&roomId={selectedRoomId}"
+											class="h-10 flex-1 text-sm font-semibold"
+										>
+											<LogInIcon class="size-4" aria-hidden="true" /> Check in
+										</Button>
+										<Button
+											variant="outline"
+											href="{staffBase}/reservations/room/{a.bookingId}?action=cancel&from=front-desk&roomId={selectedRoomId}"
+											class="h-10 border-danger/50 px-4 text-sm font-semibold text-danger hover:bg-danger/10 hover:text-danger"
+										>
+											<XIcon class="size-4" aria-hidden="true" /> Cancel
+										</Button>
+									</div>
 								</div>
 							{/each}
 						</div>
@@ -2796,33 +2978,36 @@
 						{:else}
 							<div class="divide-y divide-border">
 								{#each data.arrivals as a (a.bookingId)}
-									<div class="flex items-center justify-between py-2.5">
-										<div>
-											<div class="text-sm font-medium text-ink">{a.guestName}</div>
-											<div class="text-xs text-ink-muted">
-												{a.roomTypeName} · {channelLabel(a.channel)}
-												{#if a.balanceCentavos > 0}
-													<span class="font-medium text-danger">· Room balance {peso(a.balanceCentavos)}</span>
-												{/if}
-												<span class="mx-1 text-ink-muted/40">·</span>
-												<a
-													href="{staffBase}/reservations/room/{a.bookingId}?from=front-desk"
-													class="underline-offset-2 hover:text-ink hover:underline"
-												>
-													Check in
-												</a>
-												<span class="mx-1 text-ink-muted/40">·</span>
-												<a
-													href="{staffBase}/reservations/room/{a.bookingId}?action=cancel&from=front-desk"
-													class="underline-offset-2 hover:text-danger hover:underline"
-												>
-													Cancel
-												</a>
+									<div class="space-y-2.5 py-3">
+										<div class="flex items-start justify-between gap-2">
+											<div class="min-w-0">
+												<div class="text-sm font-semibold text-ink">{a.guestName}</div>
+												<div class="text-xs text-ink-muted">
+													{a.roomTypeName} · {channelLabel(a.channel)}
+													{#if a.balanceCentavos > 0}
+														<span class="font-medium text-danger">· Room balance {peso(a.balanceCentavos)}</span>
+													{/if}
+												</div>
 											</div>
+											<Badge variant="outline" class="shrink-0 border-transparent bg-ok/15 text-ok">
+												from {data.checkInTime.slice(0, 5)}
+											</Badge>
 										</div>
-										<Badge variant="outline" class="border-transparent bg-ok/15 text-ok">
-											from {data.checkInTime.slice(0, 5)}
-										</Badge>
+										<div class="flex gap-2">
+											<Button
+												href="{staffBase}/reservations/room/{a.bookingId}?from=front-desk"
+												class="h-10 flex-1 text-sm font-semibold"
+											>
+												<LogInIcon class="size-4" aria-hidden="true" /> Check in
+											</Button>
+											<Button
+												variant="outline"
+												href="{staffBase}/reservations/room/{a.bookingId}?action=cancel&from=front-desk"
+												class="h-10 border-danger/50 px-4 text-sm font-semibold text-danger hover:bg-danger/10 hover:text-danger"
+											>
+												<XIcon class="size-4" aria-hidden="true" /> Cancel
+											</Button>
+										</div>
 									</div>
 								{/each}
 							</div>
@@ -3230,6 +3415,34 @@
 					</div>
 				</div>
 
+				{#if formHallPendingDamage && formHallPendingDamage.length > 0}
+					<div class="space-y-3 rounded-lg border border-danger/40 p-4">
+						<h3 class="text-sm font-semibold text-ink">Damage reported by Housekeeping</h3>
+						<p class="text-xs text-ink-muted">
+							Charge it to this event's bill, or dismiss it. The event cannot be closed while one is waiting.
+						</p>
+						{#each formHallPendingDamage as r (r.id)}
+							<div class="rounded-md border border-border p-3">
+								<p class="text-sm text-ink">{r.description}</p>
+								<a href={r.photoUrl} target="_blank" rel="noopener" class="text-xs text-ink-muted underline underline-offset-2">View photo</a>
+								<div class="mt-2 flex flex-wrap items-center gap-2">
+									<form method="POST" action="?/resolveHallDamage" use:enhance class="flex items-center gap-2">
+										<input type="hidden" name="damageReportId" value={r.id} />
+										<input type="hidden" name="hallBookingId" value={formHallBookingDetail.hallBooking.id} />
+										<Input name="amount" type="number" step="0.01" min="0.01" required placeholder="Amount ₱" class="w-32" />
+										<Button type="submit" size="sm">Charge damage</Button>
+									</form>
+									<form method="POST" action="?/dismissHallDamage" use:enhance>
+										<input type="hidden" name="damageReportId" value={r.id} />
+										<input type="hidden" name="hallBookingId" value={formHallBookingDetail.hallBooking.id} />
+										<Button type="submit" size="sm" variant="outline">Dismiss</Button>
+									</form>
+								</div>
+							</div>
+						{/each}
+					</div>
+				{/if}
+
 				<div class="rounded-lg border border-border p-4">
 					<div class="mb-2 flex items-center justify-between">
 						<h3 class="text-sm font-semibold text-ink">Folio</h3>
@@ -3425,6 +3638,72 @@
 					{/if}
 				</div>
 			</div>
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={hallCheckoutOpen}>
+	<Dialog.Content class="sm:max-w-md">
+		{#if hallCheckout && hallCheckoutOvertime}
+			<Dialog.Header>
+				<Dialog.Title>Check out: {hallCheckout.title}</Dialog.Title>
+				<Dialog.Description>
+					The event was booked to end at {hallTime(hallCheckout.scheduledEndIso)}. It is now {hallTime(new Date(hallCheckoutAt).toISOString())}.
+				</Dialog.Description>
+			</Dialog.Header>
+			{#if hallCheckoutOvertime.hours > 0}
+				<div class="rounded-lg border border-border p-4 text-sm">
+					<div class="flex justify-between">
+						<span class="text-ink-muted">Overtime</span>
+						<span class="text-ink"
+							>{hallCheckoutOvertime.hours} hour{hallCheckoutOvertime.hours === 1 ? '' : 's'} × {peso(hallCheckout.extraHourFeeCentavos)}</span
+						>
+					</div>
+					<div class="mt-1 flex justify-between">
+						<span class="text-ink-muted">Subtotal</span>
+						<span class="tabular-nums text-ink">{peso(hallCheckoutOvertime.subtotalCentavos)}</span>
+					</div>
+					{#if hallCheckoutOvertime.vatCentavos > 0}
+						<div class="mt-1 flex justify-between">
+							<span class="text-ink-muted">VAT</span>
+							<span class="tabular-nums text-ink">{peso(hallCheckoutOvertime.vatCentavos)}</span>
+						</div>
+					{/if}
+					<div class="mt-2 flex justify-between border-t border-border pt-2 font-semibold">
+						<span class="text-ink">Added to the bill</span>
+						<span class="tabular-nums text-ink">{peso(hallCheckoutOvertime.totalCentavos)}</span>
+					</div>
+					<p class="mt-2 text-xs text-ink-muted">
+						Each started hour past the end time is charged at the hall's extra-hour rate; there is no grace period. The bill must be paid before the event can be closed.
+					</p>
+					{#if hallCheckout.extraHourFeeCentavos <= 0}
+						<p class="mt-2 text-xs text-warning">This hall has no extra-hour rate set, so nothing will be charged. Set it in Settings → Function halls.</p>
+					{/if}
+				</div>
+			{:else}
+				<p class="rounded-lg border border-border p-4 text-sm text-ink-muted">
+					The event ended on time. There is no overtime to charge.
+				</p>
+			{/if}
+			<p class="text-xs text-ink-muted">
+				Checking out flags the hall for housekeeping. It can be closed once it has been cleaned.
+			</p>
+			<Dialog.Footer>
+				<Button variant="outline" onclick={() => (hallCheckoutOpen = false)}>Not yet</Button>
+				<form
+					method="POST"
+					action="?/checkOutHall"
+					use:enhance={() => async ({ update }) => {
+						hallCheckoutOpen = false;
+						await update();
+					}}
+				>
+					<input type="hidden" name="hallBookingId" value={hallCheckout.hallBookingId} />
+					<Button type="submit">
+						{hallCheckoutOvertime.hours > 0 ? `Check out and charge ${peso(hallCheckoutOvertime.totalCentavos)}` : 'Check out'}
+					</Button>
+				</form>
+			</Dialog.Footer>
 		{/if}
 	</Dialog.Content>
 </Dialog.Root>

@@ -30,6 +30,11 @@
 	const v = $derived(form?.values);
 	const anyFree = $derived(data.slots?.some((s) => s.available) ?? false);
 	let submitting = $state(false);
+	// Just the table unless the guest asks to order ahead.
+	let preorder = $state<'0' | '1'>('0');
+	$effect(() => {
+		preorder = v?.preorder === '1' && data.orderAhead ? '1' : '0';
+	});
 </script>
 
 <svelte:head>
@@ -197,6 +202,28 @@
 								<p class="mt-1 text-xs text-[var(--ledger-ink-muted)]">We send your reservation code here.</p>
 							</div>
 						</div>
+						{#if data.orderAhead}
+							<fieldset>
+								<legend class="ledger-label w-full border-b border-[var(--ledger-rule)] pb-2">Your meal</legend>
+								<div class="mt-4 space-y-2" role="radiogroup" aria-label="Your meal">
+									<label class="order-pay-option">
+										<input type="radio" name="preorder" value="0" checked={preorder === '0'} onchange={() => (preorder = '0')} />
+										<span>
+											<span class="storefront-menu-name block">Just reserve the table</span>
+											<span class="storefront-menu-desc block">Order from the menu when you arrive.</span>
+										</span>
+									</label>
+									<label class="order-pay-option">
+										<input type="radio" name="preorder" value="1" checked={preorder === '1'} onchange={() => (preorder = '1')} />
+										<span>
+											<span class="storefront-menu-name block">Reserve and pre-order</span>
+											<span class="storefront-menu-desc block">Choose your dishes next, so they are ready for your table. Needs about {data.orderAhead.prepMinutes} minutes' notice.</span>
+										</span>
+									</label>
+								</div>
+							</fieldset>
+						{/if}
+
 						<div>
 							<Label for="rvRemarks" class="ledger-label">Anything we should know (optional)</Label>
 							<Textarea id="rvRemarks" name="remarks" rows={2} maxlength={500} placeholder="Allergies, a celebration, a high chair…" value={v?.remarks ?? ''} class="ledger-field mt-1" />
@@ -209,7 +236,7 @@
 
 					<div class="flex flex-wrap items-center gap-4">
 						<button type="submit" class="ledger-btn-primary min-h-12 w-full sm:w-auto" disabled={submitting}>
-							{submitting ? 'Reserving…' : 'Reserve my table'}
+							{submitting ? 'Reserving…' : preorder === '1' ? 'Reserve and choose dishes' : 'Reserve my table'}
 						</button>
 						<p class="flex items-center gap-1.5 text-xs text-[var(--ledger-ink-muted)]">
 							<ClockIcon class="size-3.5" aria-hidden="true" /> No payment needed. Please arrive on time.

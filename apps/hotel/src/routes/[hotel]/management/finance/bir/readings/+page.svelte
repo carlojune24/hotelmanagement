@@ -17,9 +17,11 @@
 
 	const x = $derived(data.xReading);
 	const xTiles = $derived<[string, number][]>([
-		['Gross sales', x.grossSalesCentavos],
+		['Gross sales (received)', x.grossSalesCentavos],
+		['Less: refunds', x.refundAmountCentavos],
+		['Net sales (kept)', x.netSalesCentavos],
 		['VAT', x.vatCentavos],
-		['Net sales', x.netSalesCentavos],
+		['VAT-exempt sales', x.vatExemptSalesCentavos],
 		['Projected grand total', x.newGrandTotalCentavos]
 	]);
 
@@ -112,7 +114,7 @@
 		</form>
 	</div>
 
-	<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+	<div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
 		{#each xTiles as [label, n] (label)}
 			<div class="rounded-lg border border-border p-3">
 				<div class="text-xs text-ink-muted">{label}</div>
@@ -120,6 +122,12 @@
 			</div>
 		{/each}
 	</div>
+	{#if x.scPwdDiscountCentavos || x.scPwdVatRemovedCentavos || x.scPwdCreditOwedCentavos}
+		<p class="mt-2 text-xs text-ink-muted">
+			SC/PWD, for information: discount given today {peso(x.scPwdDiscountCentavos)}, VAT removed {peso(x.scPwdVatRemovedCentavos)},
+			credit owed and not yet refunded {peso(x.scPwdCreditOwedCentavos)}. Net sales is what was received less refunds, so these are not taken off again.
+		</p>
+	{/if}
 	<p class="mt-2 text-xs text-ink-muted">
 		{x.businessDate} · Invoices {x.invoiceCount} · ORs {x.orCount} · Voids {x.voidCount} · Refunds
 		{x.refundCount}. Interim only — no counter is reset.

@@ -17,6 +17,7 @@
 		balanceCentavos,
 		cashier,
 		mode = 'payment',
+		defaultReason = '',
 		onDone
 	}: {
 		action: string;
@@ -26,6 +27,8 @@
 		balanceCentavos: number;
 		cashier: Cashier;
 		mode?: 'payment' | 'refund';
+		/** Refund mode: text the Reason box starts with (staff can change it). */
+		defaultReason?: string;
 		onDone?: () => void;
 	} = $props();
 
@@ -232,7 +235,7 @@
 	{#if mode === 'refund'}
 		<div>
 			<Label class="text-xs">Reason</Label>
-			<Input name="reason" maxlength={300} class="mt-1" placeholder="Why the money is going back" />
+			<Input name="reason" maxlength={300} value={defaultReason} class="mt-1" placeholder="Why the money is going back" />
 		</div>
 	{/if}
 

@@ -208,7 +208,7 @@
 							<Table.Cell>
 								<div class="font-medium text-ink">{r.guestName}</div>
 								<div class="text-xs text-ink-muted">
-									<span class="font-mono">{r.code}</span>{r.guestPhone ? ` · ${r.guestPhone}` : ''}{data.venues.length > 1 ? ` · ${r.venueTitle}` : ''}
+									<span class="font-mono">{r.code}</span> <a href="/{page.params.hotel}/management/trail/{r.code}" class="underline-offset-2 hover:text-ink hover:underline">Trail</a>{r.guestPhone ? ` · ${r.guestPhone}` : ''}{data.venues.length > 1 ? ` · ${r.venueTitle}` : ''}
 								</div>
 								{#if r.bookingCode}
 									<div class="mt-0.5 flex items-center gap-1 text-xs text-ink-muted">

@@ -21,6 +21,10 @@ const row = (over: Partial<BookingTransactionExportRow> = {}): BookingTransactio
 	methods: ['paymongo'],
 	references: ['pay_abc'],
 	depositCentavos: 0,
+	channel: 'online',
+	paymentState: 'balance',
+	paymentLabel: 'Balance due',
+	scPwdLabel: null,
 	...over
 });
 
@@ -44,13 +48,13 @@ describe('bookingTransactionsCsv', () => {
 		expect(csv.charCodeAt(0)).toBe(0xfeff);
 		const lines = linesOf(csv);
 		expect(lines[0]).toBe(
-			'Booking code,Booked on,Guest,Email,Rooms / events,Check-in,Check-out,Status,Source,Payment method,Reference no.,Charges,Paid,Balance,Security deposit'
+			'Booking code,Booked on,Guest,Email,Rooms / events,Check-in,Check-out,Status,Source,Payment method,Reference no.,Charges,Paid,Balance,Security deposit,Payment,SC/PWD'
 		);
 		expect(lines[1]).toBe(
-			'11111111,2031-05-20,Ana Reyes,ana@example.com,Room 101,2031-06-01,2031-06-03,Confirmed,Online,paymongo,pay_abc,5000.00,2500.00,2500.00,'
+			'11111111,2031-05-20,Ana Reyes,ana@example.com,Room 101,2031-06-01,2031-06-03,Confirmed,Online,paymongo,pay_abc,5000.00,2500.00,2500.00,,Balance due,'
 		);
 		expect(lines).toHaveLength(4);
-		expect(lines[3]).toBe('Total,,2 bookings,,,,,,,,,6000.00,3500.00,2500.00,0.00');
+		expect(lines[3]).toBe('Total,,2 bookings,,,,,,,,,6000.00,3500.00,2500.00,0.00,,');
 	});
 
 	it('quotes commas and quotes, and defuses formulas typed as a guest name or reference', () => {
@@ -72,6 +76,6 @@ describe('bookingTransactionsCsv', () => {
 	it('is just a header and a zero totals row when there is nothing in the range', () => {
 		const lines = linesOf(bookingTransactionsCsv([]));
 		expect(lines).toHaveLength(2);
-		expect(lines[1]).toBe('Total,,0 bookings,,,,,,,,,0.00,0.00,0.00,0.00');
+		expect(lines[1]).toBe('Total,,0 bookings,,,,,,,,,0.00,0.00,0.00,0.00,,');
 	});
 });

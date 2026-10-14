@@ -288,6 +288,15 @@ export async function startDiningCheckout(args: {
 	for (const p of pending) {
 		if (p.paymongoCheckoutSessionId) await client.expireCheckoutSession(p.paymongoCheckoutSessionId).catch(() => {});
 		await db.update(diningPayments).set({ status: 'expired' }).where(eq(diningPayments.id, p.id));
+		await writeAudit({
+			hotelId: args.hotelId,
+			actor: null,
+			action: 'dining_order.checkout_expired',
+			entityType: 'dining_order',
+			entityId: order.id,
+			refCode: order.code,
+			after: { orderId: order.id, paymentId: p.id, sessionId: p.paymongoCheckoutSessionId, reason: 'superseded by a new checkout link' }
+		});
 	}
 
 	const lineItems = items.map((i) => {
@@ -312,27 +321,53 @@ export async function startDiningCheckout(args: {
 	const sum = lineItems.reduce((s, l) => s + l.amount, 0);
 	if (sum !== order.totalCentavos) throw new OrderError('This order could not be priced for payment. Please contact the restaurant.');
 
-	const session = await client.createCheckoutSession({
-		billing: { name: order.guestName ?? 'Guest', email: order.guestEmail ?? undefined, phone: order.guestPhone ?? undefined },
-		send_email_receipt: false,
-		show_description: true,
-		show_line_items: true,
-		line_items: lineItems,
-		payment_method_types: ['gcash', 'card', 'paymaya', 'qrph'],
-		description: `${args.hotelName}: order ${order.code}`,
-		success_url: args.successUrl,
-		cancel_url: args.cancelUrl,
-		metadata: { kind: 'dining', diningOrderId: order.id }
-	});
+	let session: Awaited<ReturnType<typeof client.createCheckoutSession>>;
+	try {
+		session = await client.createCheckoutSession({
+			billing: { name: order.guestName ?? 'Guest', email: order.guestEmail ?? undefined, phone: order.guestPhone ?? undefined },
+			send_email_receipt: false,
+			show_description: true,
+			show_line_items: true,
+			line_items: lineItems,
+			payment_method_types: ['gcash', 'card', 'paymaya', 'qrph'],
+			description: `${args.hotelName}: order ${order.code}`,
+			success_url: args.successUrl,
+			cancel_url: args.cancelUrl,
+			metadata: { kind: 'dining', diningOrderId: order.id }
+		});
+	} catch (e) {
+		await writeAudit({
+			hotelId: args.hotelId,
+			actor: null,
+			action: 'dining_order.checkout_failed',
+			entityType: 'dining_order',
+			entityId: order.id,
+			refCode: order.code,
+			after: { orderId: order.id, amountCentavos: order.totalCentavos, error: (e instanceof Error ? e.message : String(e)).slice(0, 300) }
+		}).catch(() => {});
+		throw e;
+	}
 
-	await db.insert(diningPayments).values({
+	const [paymentRow] = await db
+		.insert(diningPayments)
+		.values({
+			hotelId: args.hotelId,
+			orderId: order.id,
+			kind: 'payment',
+			status: 'pending',
+			provider: 'paymongo',
+			amountCentavos: order.totalCentavos,
+			paymongoCheckoutSessionId: session.id
+		})
+		.returning({ id: diningPayments.id });
+	await writeAudit({
 		hotelId: args.hotelId,
-		orderId: order.id,
-		kind: 'payment',
-		status: 'pending',
-		provider: 'paymongo',
-		amountCentavos: order.totalCentavos,
-		paymongoCheckoutSessionId: session.id
+		actor: null,
+		action: 'dining_order.checkout_started',
+		entityType: 'dining_order',
+		entityId: order.id,
+		refCode: order.code,
+		after: { orderId: order.id, paymentId: paymentRow?.id ?? null, sessionId: session.id, amountCentavos: order.totalCentavos }
 	});
 	return { checkoutUrl: session.attributes.checkout_url };
 }
@@ -359,12 +394,12 @@ export async function confirmDiningPayment(args: {
 }): Promise<{ handled: boolean; confirmed: boolean; needsRefund: boolean; hotelId: string | null }> {
 	const result = await db.transaction(async (tx) => {
 		const [dup] = await tx.select({ id: diningPayments.id }).from(diningPayments).where(eq(diningPayments.paymongoEventId, args.eventId)).limit(1);
-		if (dup) return { handled: false, confirmed: false, needsRefund: false, hotelId: null as string | null, paymentRowId: null as string | null };
+		if (dup) return { handled: false, confirmed: false, needsRefund: false, hotelId: null as string | null, paymentRowId: null as string | null, code: null as string | null };
 
 		const [order] = await tx.select().from(diningOrders).where(eq(diningOrders.id, args.orderId)).for('update');
 		if (!order) {
 			console.error('paymongo webhook: dining order not found', args.orderId);
-			return { handled: false, confirmed: false, needsRefund: false, hotelId: null, paymentRowId: null };
+			return { handled: false, confirmed: false, needsRefund: false, hotelId: null, paymentRowId: null, code: null };
 		}
 
 		// Reuse this checkout's pending row, or add one (e.g. a payment on a session we expired).
@@ -436,7 +471,7 @@ export async function confirmDiningPayment(args: {
 					.where(eq(diningOrders.id, order.id));
 			}
 			console.error('paymongo webhook: dining payment needs a refund', order.id, paymentRowId, order.status);
-			return { handled: true, confirmed: false, needsRefund: true, hotelId: order.hotelId, paymentRowId };
+			return { handled: true, confirmed: false, needsRefund: true, hotelId: order.hotelId, paymentRowId, code: order.code };
 		}
 
 		if (args.amountCentavos !== order.totalCentavos) {
@@ -467,7 +502,7 @@ export async function confirmDiningPayment(args: {
 				.limit(1);
 			if (res?.status === 'seated') await attachPreOrdersToCheck(tx, order.hotelId, res, { onOccupied: 'skip' });
 		}
-		return { handled: true, confirmed: true, needsRefund: false, hotelId: order.hotelId, paymentRowId };
+		return { handled: true, confirmed: true, needsRefund: false, hotelId: order.hotelId, paymentRowId, code: order.code };
 	});
 
 	if (!result.handled || !result.hotelId) return { handled: result.handled, confirmed: false, needsRefund: false, hotelId: result.hotelId };
@@ -475,10 +510,12 @@ export async function confirmDiningPayment(args: {
 	await writeAudit({
 		hotelId: result.hotelId,
 		actor: null,
+		actorKind: 'system',
 		action: 'dining_order.paymongo_paid',
 		entityType: 'dining_order',
 		entityId: args.orderId,
-		after: { paymentId: result.paymentRowId, amountCentavos: args.amountCentavos, eventId: args.eventId, confirmed: result.confirmed, needsRefund: result.needsRefund }
+		refCode: result.code,
+		after: { orderId: args.orderId, paymentId: result.paymentRowId, amountCentavos: args.amountCentavos, eventId: args.eventId, confirmed: result.confirmed, needsRefund: result.needsRefund }
 	});
 
 	if (result.confirmed) {
@@ -499,19 +536,32 @@ export async function confirmDiningPayment(args: {
 export async function recordDiningPaymentFailure(args: { eventId: string; orderId: string; sessionId: string | null; paymentId: string | null; amountCentavos: number; payload: unknown }) {
 	const [dup] = await db.select({ id: diningPayments.id }).from(diningPayments).where(eq(diningPayments.paymongoEventId, args.eventId)).limit(1);
 	if (dup) return;
-	const [order] = await db.select({ hotelId: diningOrders.hotelId }).from(diningOrders).where(eq(diningOrders.id, args.orderId)).limit(1);
+	const [order] = await db.select({ hotelId: diningOrders.hotelId, code: diningOrders.code }).from(diningOrders).where(eq(diningOrders.id, args.orderId)).limit(1);
 	if (!order) return;
-	await db.insert(diningPayments).values({
+	const [row] = await db
+		.insert(diningPayments)
+		.values({
+			hotelId: order.hotelId,
+			orderId: args.orderId,
+			kind: 'payment',
+			status: 'failed',
+			provider: 'paymongo',
+			amountCentavos: args.amountCentavos,
+			paymongoCheckoutSessionId: args.sessionId,
+			paymongoPaymentId: args.paymentId,
+			paymongoEventId: args.eventId,
+			rawPayload: args.payload as object
+		})
+		.returning({ id: diningPayments.id });
+	await writeAudit({
 		hotelId: order.hotelId,
-		orderId: args.orderId,
-		kind: 'payment',
-		status: 'failed',
-		provider: 'paymongo',
-		amountCentavos: args.amountCentavos,
-		paymongoCheckoutSessionId: args.sessionId,
-		paymongoPaymentId: args.paymentId,
-		paymongoEventId: args.eventId,
-		rawPayload: args.payload as object
+		actor: null,
+		actorKind: 'system',
+		action: 'dining_order.payment_failed',
+		entityType: 'dining_order',
+		entityId: args.orderId,
+		refCode: order.code,
+		after: { orderId: args.orderId, paymentId: row?.id ?? null, amountCentavos: args.amountCentavos, eventId: args.eventId }
 	});
 }
 
@@ -537,6 +587,18 @@ export async function expirePendingDiningOrders(opts: { hotelId?: string; olderT
 				.from(diningPayments)
 				.where(and(eq(diningPayments.orderId, o.id), eq(diningPayments.kind, 'payment'), eq(diningPayments.status, 'pending')));
 			if (pending.length) await tx.update(diningPayments).set({ status: 'expired' }).where(inArray(diningPayments.id, pending.map((p) => p.id)));
+			await writeAudit({
+				tx,
+				hotelId: o.hotelId,
+				actor: null,
+				actorKind: 'system',
+				action: 'dining_order.expired',
+				entityType: 'dining_order',
+				entityId: o.id,
+				refCode: locked.code,
+				before: { status: 'pending_payment' },
+				after: { orderId: o.id, status: 'cancelled', reason: 'Online payment was not completed in time.', expiredPaymentIds: pending.map((p) => p.id) }
+			});
 			return pending.map((p) => p.session).filter((x): x is string => !!x);
 		});
 		if (sessions === null) continue;
@@ -692,13 +754,24 @@ export async function cancelDiningOrderAsGuest(hotelId: string, code: string, to
 			.from(diningPayments)
 			.where(and(eq(diningPayments.orderId, order.id), eq(diningPayments.kind, 'payment'), eq(diningPayments.status, 'pending')));
 		if (pending.length) await tx.update(diningPayments).set({ status: 'expired' }).where(inArray(diningPayments.id, pending.map((p) => p.id)));
+		await writeAudit({
+			tx,
+			hotelId,
+			actor: null,
+			actorKind: 'guest',
+			action: 'dining_order.guest_cancel',
+			entityType: 'dining_order',
+			entityId: found.id,
+			refCode: order.code,
+			before: { status: order.status },
+			after: { orderId: found.id, status: 'cancelled', reason: 'Cancelled by the guest.', expiredPaymentIds: pending.map((p) => p.id) }
+		});
 		return pending.map((p) => p.session).filter((x): x is string => !!x);
 	});
 	if (sessions.length) {
 		const client = await getPaymongoClient(hotelId).catch(() => null);
 		for (const s of sessions) await client?.expireCheckoutSession(s).catch(() => {});
 	}
-	await writeAudit({ hotelId, actor: null, action: 'dining_order.guest_cancel', entityType: 'dining_order', entityId: found.id });
 }
 
 /** A guest asks the restaurant to cancel an order they already paid for. Staff answer it. */
@@ -712,8 +785,18 @@ export async function requestDiningCancellation(hotelId: string, code: string, t
 	await db.transaction(async (tx) => {
 		await tx.update(diningOrders).set({ cancelRequestedAt: new Date(), cancelRequestNote: text || null, updatedAt: new Date() }).where(eq(diningOrders.id, found.id));
 		await tx.insert(diningOrderMessages).values({ hotelId, orderId: found.id, direction: 'guest', body: `Cancellation requested${text ? `: ${text}` : '.'}` });
+		await writeAudit({
+			tx,
+			hotelId,
+			actor: null,
+			actorKind: 'guest',
+			action: 'dining_order.cancel_requested',
+			entityType: 'dining_order',
+			entityId: found.id,
+			refCode: found.code,
+			after: { orderId: found.id, note: text, reason: text || null }
+		});
 	});
-	await writeAudit({ hotelId, actor: null, action: 'dining_order.cancel_requested', entityType: 'dining_order', entityId: found.id, after: { note: text } });
 }
 
 /** Staff answer a cancellation request: decline it, or approve it (the order is cancelled and a refund is then due). */
@@ -739,8 +822,17 @@ export async function respondToDiningCancellation(args: { hotelId: string; order
 			authorUserId: args.actor?.id ?? null,
 			body: note || (args.approve ? 'Your order has been cancelled. We will arrange your refund.' : 'We are unable to cancel this order as it is already being prepared.')
 		});
+		await writeAudit({
+			tx,
+			hotelId: args.hotelId,
+			actor: args.actor,
+			action: args.approve ? 'dining_order.cancel_approved' : 'dining_order.cancel_declined',
+			entityType: 'dining_order',
+			entityId: args.orderId,
+			refCode: order.code,
+			after: { orderId: order.id, message: note || null }
+		});
 	});
-	await writeAudit({ hotelId: args.hotelId, actor: args.actor, action: args.approve ? 'dining_order.cancel_approved' : 'dining_order.cancel_declined', entityType: 'dining_order', entityId: args.orderId });
 }
 
 export async function postGuestMessage(hotelId: string, code: string, token: string, body: string): Promise<void> {
@@ -754,16 +846,41 @@ export async function postGuestMessage(hotelId: string, code: string, token: str
 		.from(diningOrderMessages)
 		.where(and(eq(diningOrderMessages.orderId, order.id), eq(diningOrderMessages.direction, 'guest'), sql`${diningOrderMessages.createdAt} > now() - interval '1 hour'`));
 	if (Number(n) >= 10) throw new OrderError('That is a lot of messages in a short time. Please wait a little.');
-	await db.insert(diningOrderMessages).values({ hotelId, orderId: order.id, direction: 'guest', body: text });
+	await db.transaction(async (tx) => {
+		await tx.insert(diningOrderMessages).values({ hotelId, orderId: order.id, direction: 'guest', body: text });
+		await writeAudit({
+			tx,
+			hotelId,
+			actor: null,
+			actorKind: 'guest',
+			action: 'dining_order.message',
+			entityType: 'dining_order',
+			entityId: order.id,
+			refCode: order.code,
+			after: { orderId: order.id, direction: 'guest', preview: text.slice(0, 200) }
+		});
+	});
 }
 
 export async function postStaffMessage(args: { hotelId: string; orderId: string; body: string; actor: Actor }): Promise<void> {
 	const text = args.body.trim();
 	if (!text) throw new OrderError('Type a message first.');
 	if (text.length > 1000) throw new OrderError('Please keep messages under 1,000 characters.');
-	const [order] = await db.select({ id: diningOrders.id }).from(diningOrders).where(and(eq(diningOrders.id, args.orderId), eq(diningOrders.hotelId, args.hotelId))).limit(1);
+	const [order] = await db.select({ id: diningOrders.id, code: diningOrders.code }).from(diningOrders).where(and(eq(diningOrders.id, args.orderId), eq(diningOrders.hotelId, args.hotelId))).limit(1);
 	if (!order) throw new OrderError('That order could not be found.');
-	await db.insert(diningOrderMessages).values({ hotelId: args.hotelId, orderId: order.id, direction: 'staff', body: text, authorUserId: args.actor?.id ?? null });
+	await db.transaction(async (tx) => {
+		await tx.insert(diningOrderMessages).values({ hotelId: args.hotelId, orderId: order.id, direction: 'staff', body: text, authorUserId: args.actor?.id ?? null });
+		await writeAudit({
+			tx,
+			hotelId: args.hotelId,
+			actor: args.actor,
+			action: 'dining_order.message',
+			entityType: 'dining_order',
+			entityId: order.id,
+			refCode: order.code,
+			after: { orderId: order.id, direction: 'staff', preview: text.slice(0, 200) }
+		});
+	});
 }
 
 export async function listOrderMessages(hotelId: string, orderId: string) {
@@ -882,16 +999,25 @@ export async function recordDiningRefund(args: {
 			authorUserId: args.actor?.id ?? null,
 			body: `We have sent your refund of ${peso(args.amountCentavos)} via ${METHOD_LABEL[args.method]}${args.referenceNo?.trim() ? ` (reference ${args.referenceNo.trim()})` : ''}.`
 		});
+		await writeAudit({
+			tx,
+			hotelId: args.hotelId,
+			actor: args.actor,
+			action: 'dining_order.refund',
+			entityType: 'dining_order',
+			entityId: order.id,
+			refCode: order.code,
+			after: {
+				orderId: order.id,
+				refundId: row!.id,
+				cashMovementId: movementId,
+				amountCentavos: args.amountCentavos,
+				method: args.method,
+				referenceNo: args.referenceNo ?? null,
+				fullyRefunded: full
+			}
+		});
 		return { full, refundId: row!.id };
-	});
-
-	await writeAudit({
-		hotelId: args.hotelId,
-		actor: args.actor,
-		action: 'dining_order.refund',
-		entityType: 'dining_order',
-		entityId: order.id,
-		after: { refundId: result.refundId, amountCentavos: args.amountCentavos, method: args.method, referenceNo: args.referenceNo ?? null }
 	});
 	return { refundedCentavos: alreadyRefunded + args.amountCentavos, fullyRefunded: result.full };
 }

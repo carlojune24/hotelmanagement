@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { db } from '../db/index';
 import {
 	cashAccounts,
@@ -8,6 +8,7 @@ import {
 	orders,
 	paymentAllocations,
 	payments,
+	scPwdDiscounts,
 	type Payment
 } from '../db/schema/index';
 import { writeAudit } from '../audit';
@@ -28,6 +29,40 @@ import { getDefaultOpenShift } from './shifts';
 import { getBirSettings, issueOfficialReceipt } from './documents';
 
 export type PaymentMethod = Payment['method'];
+
+/** True when any of these room bookings carries an active SC/PWD claim. */
+async function hasActiveScPwdClaim(bookingIds: string[]): Promise<boolean> {
+	if (bookingIds.length === 0) return false;
+	const [row] = await db
+		.select({ id: scPwdDiscounts.id })
+		.from(scPwdDiscounts)
+		.where(and(inArray(scPwdDiscounts.bookingId, bookingIds), isNull(scPwdDiscounts.reversedAt)))
+		.limit(1);
+	return !!row;
+}
+
+/**
+ * A short, plain reason for a desk payment, written into the cash movement's memo so Finance can
+ * read WHY the money came in: a partial payment, the balance after an online downpayment, or paid
+ * at the desk; and whether it was after an SC/PWD discount. Wording only: never changes an amount.
+ */
+async function deskPaymentNote(orderId: string, bookingIds: string[], purpose: PaymentPurpose): Promise<string> {
+	const [online] = await db
+		.select({ id: payments.id })
+		.from(payments)
+		.where(
+			and(
+				eq(payments.orderId, orderId),
+				eq(payments.provider, 'paymongo'),
+				eq(payments.status, 'paid'),
+				isNull(payments.voidedAt),
+				ne(payments.purpose, 'refund')
+			)
+		)
+		.limit(1);
+	const base = purpose === 'deposit' ? 'partial payment' : online ? 'balance after the online downpayment' : 'paid at the desk';
+	return (await hasActiveScPwdClaim(bookingIds)) ? `${base}, after the SC/PWD discount` : base;
+}
 
 /**
  * How much of a payment taken against ONE folio settles restaurant charges on it. Dining is booked
@@ -204,6 +239,7 @@ export async function recordPayment(input: RecordPaymentInput): Promise<RecordPa
 				: 'room_revenue';
 
 	const guestName = await guestNameForOrder(orderId);
+	const note = await deskPaymentNote(orderId, input.target.kind === 'room' ? [input.target.bookingId] : [], purpose);
 
 	const paymentId = await db.transaction(async (tx: Tx) => {
 		const folioId = await ensureFolio(tx, input.hotelId, input.target);
@@ -246,7 +282,7 @@ export async function recordPayment(input: RecordPaymentInput): Promise<RecordPa
 				sourceId: row!.id,
 				paymentId: row!.id,
 				shiftId,
-				memo: `${labelForMethod(input.method)} — ${input.target.kind} folio`,
+				memo: `${labelForMethod(input.method)} — ${input.target.kind} folio · ${note}`,
 				actor: input.actor
 			},
 			category,
@@ -360,6 +396,11 @@ export async function recordOrderPayment(
 	const allHalls = parts.every((a) => a.target.kind === 'hall');
 	const category = purpose === 'deposit' ? 'deposit' : allHalls ? 'hall_revenue' : 'room_revenue';
 	const guestName = await guestNameForOrder(input.orderId);
+	const note = await deskPaymentNote(
+		input.orderId,
+		parts.flatMap((a) => (a.target.kind === 'room' ? [a.target.bookingId] : [])),
+		purpose
+	);
 
 	const paymentId = await db.transaction(async (tx: Tx) => {
 		const folioIds: string[] = [];
@@ -419,7 +460,7 @@ export async function recordOrderPayment(
 				sourceId: row!.id,
 				paymentId: row!.id,
 				shiftId,
-				memo: `${labelForMethod(input.method)} — booking payment across ${parts.length} room${parts.length === 1 ? '' : 's'}`,
+				memo: `${labelForMethod(input.method)} — booking payment across ${parts.length} room${parts.length === 1 ? '' : 's'} · ${note}`,
 				actor: input.actor
 			},
 			category,
@@ -574,6 +615,10 @@ export async function refundPayment(input: RefundInput): Promise<{ paymentId: st
 
 	const orderId = await getOrderIdForTarget(input.target);
 	if (!orderId) throw new FinanceError('Booking not found.');
+	// A refund on a room that carries an SC/PWD claim is the discount's credit going back to the guest:
+	// say so in the memo so Finance can tell it apart from any other refund.
+	const scPwdCredit = input.target.kind === 'room' && (await hasActiveScPwdClaim([input.target.bookingId]));
+	const refundGuest = await guestNameForOrder(orderId);
 
 	const paymentId = await db.transaction(async (tx: Tx) => {
 		const folioId = await ensureFolio(tx, input.hotelId, input.target);
@@ -604,11 +649,14 @@ export async function refundPayment(input: RefundInput): Promise<{ paymentId: st
 				cashAccountId: cashAccountId!,
 				amountCentavos: input.amountCentavos,
 				counterpartyType: 'guest',
+				counterpartyName: refundGuest,
 				sourceType: 'payment',
 				sourceId: row!.id,
 				paymentId: row!.id,
 				shiftId,
-				memo: input.reason?.trim() || 'Folio refund',
+				memo: scPwdCredit
+					? `SC/PWD discount credit — ${input.reason?.trim() || 'discount applied after payment'}`
+					: input.reason?.trim() || 'Folio refund',
 				actor: input.actor
 			},
 			tx

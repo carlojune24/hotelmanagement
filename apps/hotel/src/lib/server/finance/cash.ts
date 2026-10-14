@@ -5,7 +5,10 @@ import {
 	cashAccounts,
 	cashMovements,
 	dayCloses,
+	diningOrders,
+	diningPayments,
 	financeSettings,
+	payments,
 	type CashMovement
 } from '../db/schema/index';
 import { writeAudit } from '../audit';
@@ -201,15 +204,38 @@ export async function voidCashMovement(
 				tx
 			);
 		}
-	});
 
-	await writeAudit({
-		hotelId,
-		actor,
-		action: 'finance.void_cash_movement',
-		entityType: 'cash_movement',
-		entityId: movementId,
-		after: { reason: reason || null }
+		// A dining movement carries its order's tracking number so the order's trail finds it.
+		let refCode: string | null = null;
+		if (m.sourceType === 'dining_order' && m.sourceId) {
+			const [o] = await tx.select({ code: diningOrders.code }).from(diningOrders).where(eq(diningOrders.id, m.sourceId)).limit(1);
+			refCode = o?.code ?? null;
+		} else if ((m.sourceType === 'dining_payment' || m.sourceType === 'dining_refund') && m.sourceId) {
+			const [o] = await tx
+				.select({ code: diningOrders.code })
+				.from(diningPayments)
+				.innerJoin(diningOrders, eq(diningOrders.id, diningPayments.orderId))
+				.where(eq(diningPayments.id, m.sourceId))
+				.limit(1);
+			refCode = o?.code ?? null;
+		}
+		await writeAudit({
+			tx,
+			hotelId,
+			actor,
+			action: 'finance.void_cash_movement',
+			entityType: 'cash_movement',
+			entityId: movementId,
+			refCode,
+			after: {
+				reason: reason || null,
+				amountCentavos: m.amountCentavos,
+				direction: m.direction,
+				category: m.category,
+				sourceType: m.sourceType,
+				sourceId: m.sourceId
+			}
+		});
 	});
 }
 
@@ -221,6 +247,8 @@ export interface TransferInput {
 	amountCentavos: number;
 	/** `bank_deposit` when moving drawer/petty cash into a bank; otherwise a plain internal transfer. */
 	isBankDeposit?: boolean;
+	/** Tags both legs so a report can tell whose money moved (e.g. `dining_payout`); defaults to `transfer`. */
+	sourceType?: string;
 	memo?: string | null;
 	actor?: SessionUser | null;
 }
@@ -266,7 +294,7 @@ export async function transferBetweenAccounts(
 				category: input.isBankDeposit ? 'bank_deposit' : 'transfer_out',
 				cashAccountId: input.fromAccountId,
 				amountCentavos: input.amountCentavos,
-				sourceType: 'transfer',
+				sourceType: input.sourceType ?? 'transfer',
 				transferGroupId,
 				memo,
 				actor: input.actor
@@ -281,7 +309,7 @@ export async function transferBetweenAccounts(
 				category: input.isBankDeposit ? 'bank_deposit' : 'transfer_in',
 				cashAccountId: input.toAccountId,
 				amountCentavos: input.amountCentavos,
-				sourceType: 'transfer',
+				sourceType: input.sourceType ?? 'transfer',
 				transferGroupId,
 				memo:
 					input.memo?.trim() ||
@@ -445,10 +473,15 @@ export async function listMovements(hotelId: string, filters: MovementFilters = 
 			sourceId: cashMovements.sourceId,
 			memo: cashMovements.memo,
 			voidedAt: cashMovements.voidedAt,
-			voidReason: cashMovements.voidReason
+			voidReason: cashMovements.voidReason,
+			// The payment behind it (when there is one): why the money moved, and which booking to open.
+			paymentPurpose: payments.purpose,
+			paymentProvider: payments.provider,
+			orderId: payments.orderId
 		})
 		.from(cashMovements)
 		.innerJoin(cashAccounts, eq(cashAccounts.id, cashMovements.cashAccountId))
+		.leftJoin(payments, eq(payments.id, cashMovements.paymentId))
 		.where(and(...conds))
 		.orderBy(desc(cashMovements.occurredAt))
 		.limit(filters.limit ?? 500);

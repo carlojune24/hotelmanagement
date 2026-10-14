@@ -76,11 +76,24 @@
 					<tr><td>Sales (non-VAT)</td><td class="rs-num rs-mono">{peso(r.vatExemptSalesCentavos)}</td></tr>
 				{/if}
 				<tr class="rs-strong"><td>Gross sales</td><td class="rs-num rs-mono">{peso(r.grossSalesCentavos)}</td></tr>
-				<tr><td>Less: SC / PWD discount</td><td class="rs-num rs-mono">{peso(r.scPwdDiscountCentavos)}</td></tr>
-				<tr><td>Less: other discount</td><td class="rs-num rs-mono">{peso(r.otherDiscountCentavos)}</td></tr>
-				<tr class="rs-strong"><td>Net sales</td><td class="rs-num rs-mono">{peso(r.netSalesCentavos)}</td></tr>
-				<tr><td>Voids / cancellations ({r.voidCount})</td><td class="rs-num rs-mono">{peso(r.voidAmountCentavos)}</td></tr>
-				<tr><td>Refunds ({r.refundCount})</td><td class="rs-num rs-mono">{peso(r.refundAmountCentavos)}</td></tr>
+				{#if r.netMethod === 2}
+					<!-- Money kept: received less refunds. The SC/PWD lines below explain, and are not taken off again. -->
+					<tr><td>Less: refunds ({r.refundCount})</td><td class="rs-num rs-mono">{peso(r.refundAmountCentavos)}</td></tr>
+					<tr class="rs-strong"><td>Net sales</td><td class="rs-num rs-mono">{peso(r.netSalesCentavos)}</td></tr>
+					<tr><td>Voids / cancellations ({r.voidCount})</td><td class="rs-num rs-mono">{peso(r.voidAmountCentavos)}</td></tr>
+					{#if r.scPwdDiscountCentavos || r.scPwdVatRemovedCentavos || r.scPwdCreditOwedCentavos}
+						<tr class="rs-sub"><td colspan="2">SC / PWD, for information (already reflected above, not deducted again)</td></tr>
+						<tr><td>&nbsp;&nbsp;20% discount given today</td><td class="rs-num rs-mono">{peso(r.scPwdDiscountCentavos)}</td></tr>
+						<tr><td>&nbsp;&nbsp;VAT removed today</td><td class="rs-num rs-mono">{peso(r.scPwdVatRemovedCentavos)}</td></tr>
+						<tr><td>&nbsp;&nbsp;Credit owed, not yet refunded</td><td class="rs-num rs-mono">{peso(r.scPwdCreditOwedCentavos)}</td></tr>
+					{/if}
+				{:else}
+					<tr><td>Less: SC / PWD discount</td><td class="rs-num rs-mono">{peso(r.scPwdDiscountCentavos)}</td></tr>
+					<tr><td>Less: other discount</td><td class="rs-num rs-mono">{peso(r.otherDiscountCentavos)}</td></tr>
+					<tr class="rs-strong"><td>Net sales</td><td class="rs-num rs-mono">{peso(r.netSalesCentavos)}</td></tr>
+					<tr><td>Voids / cancellations ({r.voidCount})</td><td class="rs-num rs-mono">{peso(r.voidAmountCentavos)}</td></tr>
+					<tr><td>Refunds ({r.refundCount})</td><td class="rs-num rs-mono">{peso(r.refundAmountCentavos)}</td></tr>
+				{/if}
 			</tbody>
 		</table>
 
