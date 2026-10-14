@@ -10,6 +10,7 @@
 	import UserRoundXIcon from '@lucide/svelte/icons/user-round-x';
 	import GiftIcon from '@lucide/svelte/icons/gift';
 	import CirclePlusIcon from '@lucide/svelte/icons/circle-plus';
+	import ChartColumnIcon from '@lucide/svelte/icons/chart-column';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
 	import LayoutDashboardIcon from '@lucide/svelte/icons/layout-dashboard';
@@ -59,6 +60,7 @@ overtime: TimerIcon,
 			{ seg: 'loans', label: 'Loans', icon: HandCoinsIcon, show: data.nav.loans },
 			{ seg: 'bonuses', label: 'Bonuses', icon: GiftIcon, show: data.nav.bonuses },
 			{ seg: 'pay-items', label: 'Pay items', icon: CirclePlusIcon, show: data.nav.payItems },
+			{ seg: 'reports', label: 'Reports', icon: ChartColumnIcon, show: data.nav.reports },
 			{ seg: 'separations', label: 'Separations', icon: UserRoundXIcon, show: data.nav.separations },
 			{ seg: 'announcements', label: 'Announcements', icon: MegaphoneIcon, show: data.nav.announcements },
 			{ seg: 'remittances', label: 'Remittances', icon: LandmarkIcon, show: data.nav.remittances },
