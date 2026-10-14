@@ -24,6 +24,7 @@ import {
 import { getHandoff } from './dtr-submissions';
 import { allocate, byPriority, closeSettledLoans, loansDueFor, reopenSettledLoans, type LoanDue } from './loans';
 import { parseNightDiff } from './night-diff';
+import { historiesFor, payTermsFor, type PayTerms } from './salary';
 import { AGENCY_LABEL, remittedAgenciesForBatch } from './remittance';
 
 export class PayrollError extends Error {}
@@ -370,6 +371,7 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 		loansCentavos: 0
 	});
 	const loanDues = await loansDueFor(run, candidateIds);
+	const histories = await historiesFor(candidateIds);
 
 	const waiting: GenerateResult['waiting'] = [];
 	const noDtr: string[] = [];
@@ -388,6 +390,7 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 		cost: Record<string, number>;
 		minutes: { regular: number; ot: number; night: number };
 		loans: Array<LoanDue & { deducted: number }>;
+		pay: PayTerms;
 	};
 	const built: Built[] = [];
 
@@ -434,11 +437,18 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 			}));
 
 		const nd = parseNightDiff(estById.get(home)?.config);
+		// The rate in force over this cutoff, split by day if it changed inside it.
+		const pay = payTermsFor(histories.get(emp.id) ?? [], run.cutoffStart, run.cutoffEnd, {
+			effectiveFrom: emp.hiredOn,
+			payBasis: emp.payBasis,
+			baseRateCentavos: emp.baseRateCentavos
+		});
 		const lineInput = {
 			personRef: emp.personRef,
 			costCenter: emp.costCenter,
-			payBasis: emp.payBasis as 'monthly' | 'daily' | 'hourly',
-			baseRateCentavos: emp.baseRateCentavos,
+			payBasis: pay.payBasis,
+			baseRateCentavos: pay.baseRateCentavos,
+			...(pay.segments ? { rateSegments: pay.segments } : {}),
 			frequency: run.frequency as 'semi_monthly' | 'monthly',
 			dayFactor: run.dayFactor,
 			nightDiffRate: nd.ratePct / 100,
@@ -473,6 +483,7 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 			employee: emp,
 			line: computed,
 			cost,
+			pay,
 			loans: dues.map((d, i) => ({ ...d, deducted: taken[i] ?? 0 })),
 			minutes: {
 				regular: mineEntries.reduce((s, e) => s + Math.max(0, e.e.workedMinutes - e.e.otMinutes - e.e.unapprovedOtMinutes), 0),
@@ -496,8 +507,8 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 					employeeName: `${b.employee.lastName}, ${b.employee.firstName}${b.employee.middleName ? ` ${b.employee.middleName.charAt(0)}.` : ''}`,
 					position: assignments.find((a) => a.employeeId === b.employee.id && a.establishmentId === est.id)?.position ?? '',
 					department: assignments.find((a) => a.employeeId === b.employee.id && a.establishmentId === est.id)?.department ?? null,
-					payBasis: b.employee.payBasis,
-					baseRateCentavos: b.employee.baseRateCentavos,
+					payBasis: b.pay.payBasis,
+					baseRateCentavos: b.pay.baseRateCentavos,
 					govIds: b.employee.govIds,
 					daysWorked: b.line.line.days_worked,
 					minutesRegular: b.minutes.regular,
@@ -513,6 +524,9 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 					detail: {
 						...b.line.detail,
 						...coverageSnapshotOf(b.employee),
+						...(b.pay.changes.length || b.pay.deferredBasisChange
+							? { rateChanges: b.pay.changes, deferredBasisChange: b.pay.deferredBasisChange }
+							: {}),
 						...(b.loans.length
 							? {
 									loans: b.loans.map((l) => ({

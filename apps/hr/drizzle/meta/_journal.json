@@ -141,6 +141,13 @@
       "when": 1791906603511,
       "tag": "0019_bonuses",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791908027117,
+      "tag": "0020_salary_history",
+      "breakpoints": true
     }
   ]
 }

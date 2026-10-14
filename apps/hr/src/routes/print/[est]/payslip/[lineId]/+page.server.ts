@@ -62,6 +62,9 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 			tin: maskId(gov.tin)
 		},
 		basis: { payBasis: l.payBasis, rate: l.baseRateCentavos },
+		/** A rate that changed inside this cutoff: pay was split by day around the date. */
+		rateChanges: ((l.detail as { rateChanges?: Array<{ date: string; fromCentavos: number; toCentavos: number }> } | null)?.rateChanges ?? []),
+		deferredBasisChange: (l.detail as { deferredBasisChange?: string | null } | null)?.deferredBasisChange ?? null,
 		time: { days: l.daysWorked, regularMinutes: l.minutesRegular, otMinutes: l.minutesOvertime, nightMinutes: l.minutesNightDiff },
 		earnings: l.earnings as Record<string, number>,
 		deductions: l.deductions as Record<string, number>,

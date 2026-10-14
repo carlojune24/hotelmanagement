@@ -70,6 +70,16 @@
 		<p><span class="text-ink-muted">Position</span> {data.employee.position}</p>
 		<p><span class="text-ink-muted">Department</span> {data.employee.department ?? '—'}</p>
 		<p><span class="text-ink-muted">Rate</span> {money(data.basis.rate)} {basisLabel(data.basis.payBasis)}</p>
+		{#each data.rateChanges as c (c.date)}
+			<p class="col-span-2 text-xs text-ink-muted">
+				Rate changed on {c.date}: {money(c.fromCentavos)} → {money(c.toCentavos)}. Basic pay for this period is split by day.
+			</p>
+		{/each}
+		{#if data.deferredBasisChange}
+			<p class="col-span-2 text-xs text-ink-muted">
+				A change of pay basis effective {data.deferredBasisChange} starts with the next period.
+			</p>
+		{/if}
 		<p>
 			<span class="text-ink-muted">Time</span>
 			{data.time.days} day{data.time.days === 1 ? '' : 's'} · {hrs(data.time.regularMinutes)}

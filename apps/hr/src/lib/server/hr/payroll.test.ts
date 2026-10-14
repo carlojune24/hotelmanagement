@@ -19,11 +19,12 @@ async function hasEnvFile(): Promise<boolean> {
 
 describe.skipIf(!hasDb)('payroll (live DB)', async () => {
 	const { db } = await import('$lib/server/db/index');
-	const { dtrEntries, dtrSubmissions, establishments, organizations, payrollRuns, schedules } =
+	const { dtrEntries, dtrSubmissions, employees, establishments, organizations, payrollRuns, salaryHistory, schedules } =
 		await import('$lib/server/db/schema/index');
 	const { mintRef } = await import('$lib/server/ids');
 	const { eq } = await import('drizzle-orm');
 	const P = await import('./payroll');
+	const SAL = await import('./salary');
 
 	const tag = `paytest-${Math.random().toString(36).slice(2, 10)}`;
 	let org = '';
@@ -151,6 +152,33 @@ describe.skipIf(!hasDb)('payroll (live DB)', async () => {
 		// Bo has no DTR at all: reported, not silently paid or zeroed.
 		expect(r.noDtr).toEqual(['Test, Bo']);
 		expect(lines.some((l) => l.employeeId === bo)).toBe(false);
+	});
+
+	it('splits a cutoff by day when the salary changes inside it, and says so on the line', async () => {
+		// ₱10,000 → ₱20,000 a month from Mar 9: 8 days of the 15-day cutoff at the old rate, 7 at the new.
+		const { entry } = await SAL.adjustSalary(
+			org,
+			{ employeeId: ana, payBasis: 'monthly', rate: 20_000, effectiveFrom: '2026-03-09', remarks: 'Promoted' },
+			null
+		);
+		try {
+			await P.generateBatch(batchA);
+			const line = (await P.listBatchLines(batchA)).find((l) => l.employeeId === ana)!;
+			const dailyOld = Math.round((1_000_000 * 12) / 313);
+			const half = Math.round((1_000_000 * 8 + 2_000_000 * 7) / 15 / 2);
+			expect((line.earnings as { basic: number }).basic).toBe(half - dailyOld); // the Mar 6 absence is at the old rate
+			expect(line.baseRateCentavos).toBe(2_000_000); // the rate on the last day
+			expect((line.detail as { rateChanges: unknown[] }).rateChanges).toEqual([
+				{ date: '2026-03-09', fromCentavos: 1_000_000, toCentavos: 2_000_000 }
+			]);
+		} finally {
+			// Put the test person back on ₱10,000 so the tests after this one see what they expect.
+			await db.delete(salaryHistory).where(eq(salaryHistory.id, entry.id));
+			await db.update(employees).set({ baseRateCentavos: 1_000_000 }).where(eq(employees.id, ana));
+			await P.generateBatch(batchA);
+		}
+		const back = (await P.listBatchLines(batchA)).find((l) => l.employeeId === ana)!;
+		expect((back.earnings as { basic: number }).basic).toBe(500_000 - Math.round((1_000_000 * 12) / 313));
 	});
 
 	it('holds a multi-site person until every establishment they worked at has been received', async () => {

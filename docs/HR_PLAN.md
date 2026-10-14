@@ -274,6 +274,13 @@ Hotel gains: HR client (API key + base URL setting), `person_ref` columns, event
      reopen is blocked once a later batch depends on it; the year-end cannot be issued while a mid-year draft
      exists. Prints per establishment: register (A4 landscape, signatures) and slips. Benefits over the ₱90,000
      tax exemption are flagged, not withheld. Paid outside payroll.
+   - **Salary history (migration `0020`):** every pay rate is a dated row with remarks (who, when, old → new). Employees
+     page → Edit → **Adjust salary**; the edit form no longer changes the rate. Payroll prices each cutoff from the
+     history and **splits it by day** when the rate changes inside it (`rateSegments` in `@mm/hr-core`): monthly pay
+     is weighted by calendar days, absences/late are valued at that day's rate, daily/hourly pay and OT/premiums use
+     that day's rate; contributions use the rate on the cutoff's last day. A change of *pay basis* inside a cutoff
+     starts with the next cutoff. Locked payslips never change; the payslip print states the split. Future-dated
+     raises are kept and take effect on their date.
    - **PLANNED — editable statutory rates (added 2026-10-13, not started).** Today the rates are hard-coded in
      `packages/hr-core/src/statutory/*` and the run page's "Rates in force" text is a separate hand-copy
      (`RATES_IN_FORCE` in `payroll.ts`), so a rate change is a code release and the two can drift. Plan:

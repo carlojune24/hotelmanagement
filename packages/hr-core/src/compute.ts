@@ -77,12 +77,25 @@ export interface StatutoryBaseOverrides {
 	pagibigCentavos?: number | null;
 }
 
+/**
+ * The rate in force over a stretch of the cutoff (inclusive dates, in order, covering it). A rate that
+ * changes inside the cutoff is split by day: each day is paid at the rate of its own segment.
+ */
+export interface RateSegment {
+	start: string;
+	end: string;
+	/** Per the pay basis unit, which does not change inside a cutoff. */
+	baseRateCentavos: number;
+}
+
 export interface ComputePayrollLineInput {
 	personRef: string;
 	costCenter: string | null;
 	payBasis: PayBasis;
-	/** Per the pay basis unit: a month, a day or an hour. */
+	/** Per the pay basis unit: a month, a day or an hour. The rate on the cutoff's last day when `rateSegments` is given. */
 	baseRateCentavos: number;
+	/** Present only when the rate changes inside the cutoff. */
+	rateSegments?: RateSegment[];
 	frequency: 'semi_monthly' | 'monthly';
 	/** Working days a year used to turn a monthly rate into a daily one: 261, 313 or 365. */
 	dayFactor: number;
@@ -124,16 +137,30 @@ export function computePayrollLine(input: ComputePayrollLineInput): ComputedPayr
 	const adj = input.adjustments ?? NO_ADJUSTMENTS;
 	const periodsPerMonth = input.frequency === 'semi_monthly' ? 2 : 1;
 
-	const monthly = monthlyEquivalent(input.payBasis, input.baseRateCentavos, input.dayFactor);
-	const daily =
+	const segs = input.rateSegments && input.rateSegments.length > 1 ? input.rateSegments : null;
+	const lastRate = segs ? segs[segs.length - 1]!.baseRateCentavos : input.baseRateCentavos;
+	const rateAt = (date: string) => {
+		if (!segs) return input.baseRateCentavos;
+		const hit = segs.find((sg) => date >= sg.start && date <= sg.end);
+		return (hit ?? (date < segs[0]!.start ? segs[0]! : segs[segs.length - 1]!)).baseRateCentavos;
+	};
+	const dailyOf = (rate: number) =>
 		input.payBasis === 'monthly'
-			? r((input.baseRateCentavos * 12) / input.dayFactor)
+			? r((rate * 12) / input.dayFactor)
 			: input.payBasis === 'daily'
-				? input.baseRateCentavos
-				: input.baseRateCentavos * 8;
-	const hourly = input.payBasis === 'hourly' ? input.baseRateCentavos : r(daily / 8);
+				? rate
+				: rate * 8;
+	const hourlyOf = (rate: number) => (input.payBasis === 'hourly' ? rate : r(dailyOf(rate) / 8));
+
+	// Statutory contributions follow the rate in force on the cutoff's last day.
+	const monthly = monthlyEquivalent(input.payBasis, lastRate, input.dayFactor);
+	const daily = dailyOf(lastRate);
+	const hourly = hourlyOf(lastRate);
 
 	let regularMinutes = 0; // paid at the straight rate
+	let straightPay = 0; // daily/hourly basis: regular minutes at each day's own rate
+	let absentPay = 0; // monthly basis: absences at each day's own daily rate
+	let latePay = 0;
 	let otPay = 0;
 	let premiumPay = 0;
 	let nightPay = 0;
@@ -141,39 +168,52 @@ export function computePayrollLine(input: ComputePayrollLineInput): ComputedPayr
 	let otMinutesTotal = 0;
 	let nightMinutesTotal = 0;
 	let absentDays = 0;
-	let lateMinutes = 0;
 
 	for (const d of input.days) {
+		const dayRate = rateAt(d.date);
+		const dayDaily = dailyOf(dayRate);
+		const dayHourly = hourlyOf(dayRate);
 		const regular = Math.max(0, d.workedMinutes - d.otMinutes - d.unapprovedOtMinutes);
 		regularMinutes += regular;
+		if (input.payBasis === 'daily') straightPay += (regular / 480) * dayDaily;
+		else if (input.payBasis === 'hourly') straightPay += (regular / 60) * dayHourly;
 		if (d.workedMinutes > 0) daysWorked += 1;
-		if (d.scheduledWorkday && d.workedMinutes === 0) absentDays += 1;
-		lateMinutes += d.tardinessMinutes + d.undertimeMinutes;
+		if (d.scheduledWorkday && d.workedMinutes === 0) {
+			absentDays += 1;
+			absentPay += dayDaily;
+		}
+		latePay += ((d.tardinessMinutes + d.undertimeMinutes) / 60) * dayHourly;
 
 		otMinutesTotal += d.otMinutes;
-		otPay += r((d.otMinutes / 60) * hourly * OVERTIME_MULTIPLIER[d.dayKind]);
+		otPay += r((d.otMinutes / 60) * dayHourly * OVERTIME_MULTIPLIER[d.dayKind]);
 
 		// The premium is the excess over straight pay, on hours actually worked (not on credit).
 		if (d.punched && d.dayKind !== 'ordinary') {
 			const worked = Math.max(0, regular - d.creditMinutes);
-			premiumPay += r((Math.min(worked, 480) / 60) * hourly * (WORKED_MULTIPLIER[d.dayKind] - 1));
+			premiumPay += r((Math.min(worked, 480) / 60) * dayHourly * (WORKED_MULTIPLIER[d.dayKind] - 1));
 		}
 
 		nightMinutesTotal += d.nightDiffMinutes;
-		nightPay += r((d.nightDiffMinutes / 60) * hourly * input.nightDiffRate * WORKED_MULTIPLIER[d.dayKind]);
+		nightPay += r((d.nightDiffMinutes / 60) * dayHourly * input.nightDiffRate * WORKED_MULTIPLIER[d.dayKind]);
 	}
 
 	// ---- basic
 	let basic: number;
 	let tardinessUndertime = 0;
 	if (input.payBasis === 'monthly') {
-		const period = r(input.baseRateCentavos / periodsPerMonth);
-		basic = Math.max(0, period - absentDays * daily);
-		tardinessUndertime = r((lateMinutes / 60) * hourly);
-	} else if (input.payBasis === 'daily') {
-		basic = r((regularMinutes / 480) * daily);
+		// A rate that changes inside the cutoff pays each calendar day of the period at its own rate.
+		let period = r(input.baseRateCentavos / periodsPerMonth);
+		if (segs) {
+			const dayCount = (a: string, b: string) =>
+				Math.max(1, Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000) + 1);
+			const total = segs.reduce((t, sg) => t + dayCount(sg.start, sg.end), 0);
+			const weighted = segs.reduce((t, sg) => t + sg.baseRateCentavos * dayCount(sg.start, sg.end), 0);
+			period = r(weighted / total / periodsPerMonth);
+		}
+		basic = Math.max(0, period - absentPay);
+		tardinessUndertime = r(latePay);
 	} else {
-		basic = r((regularMinutes / 60) * hourly);
+		basic = r(straightPay);
 	}
 
 	const earnings = {

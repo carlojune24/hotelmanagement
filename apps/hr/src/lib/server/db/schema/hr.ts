@@ -873,6 +873,33 @@ export const employeeLoanPayments = pgTable(
 );
 
 /**
+ * Every pay rate a person has had, dated. The employee row's rate is only the one in force today;
+ * payroll prices each cutoff from this history, splitting by day when a rate changes inside it.
+ * Rows are never edited — a raise is a new row with remarks.
+ */
+export const salaryHistory = pgTable(
+	'salary_history',
+	{
+		id: pk(),
+		employeeId: uuid('employee_id')
+			.notNull()
+			.references(() => employees.id, { onDelete: 'restrict' }),
+		effectiveFrom: date('effective_from', { mode: 'string' }).notNull(),
+		/** @mm/hr-core's `payBasis`. */
+		payBasis: text('pay_basis').notNull(),
+		/** Per the pay basis unit — integer centavos. */
+		baseRateCentavos: bigint('base_rate_centavos', { mode: 'number' }).notNull(),
+		/** What it replaced; null for the starting salary. */
+		previousPayBasis: text('previous_pay_basis'),
+		previousRateCentavos: bigint('previous_rate_centavos', { mode: 'number' }),
+		remarks: text('remarks').notNull(),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt()
+	},
+	(t) => [uniqueIndex('salary_history_employee_date_idx').on(t.employeeId, t.effectiveFrom)]
+);
+
+/**
  * A bonus run for one establishment: the 13th month (mid-year installment or year-end balance) or any
  * other bonus (Christmas, productivity…). Lines are snapshots; an issued batch never recomputes.
  * Paid in cash outside payroll, so it never touches a payslip or a remittance schedule.
