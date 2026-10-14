@@ -85,8 +85,15 @@ export const diningItems = pgTable(
 		orderClose: text('order_close'),
 		/** Minimum minutes between ordering and pickup. */
 		prepMinutes: integer('prep_minutes').notNull().default(20),
+		/** How many calendar days ahead a guest may order online: 0 = today only (a later day is a phone
+		 *  call), up to 6. Defaults to 6, which is the full week the order page has always offered. */
+		orderAheadDays: integer('order_ahead_days').notNull().default(6),
 		/** Where and how to collect, shown on the guest's tracking page and email. */
 		pickupNote: text('pickup_note'),
+		/** The venue delivers online orders. Off until the venue is set up for it. */
+		deliveryEnabled: boolean('delivery_enabled').notNull().default(false),
+		/** Flat fee added to a delivered online order, VAT-inclusive like the menu. */
+		deliveryFeeCentavos: integer('delivery_fee_centavos').notNull().default(0),
 		createdAt: createdAt(),
 		updatedAt: updatedAt(),
 		deletedAt: deletedAt()
@@ -102,8 +109,10 @@ export type DiningItem = typeof diningItems.$inferSelect;
 export type NewDiningItem = typeof diningItems.$inferInsert;
 
 /**
- * A prep/production station — "Kitchen", "Bar", "Pastry". Hotel-wide (not per venue) so
- * reports can compare stations across venues. Deleting one leaves its dishes unassigned.
+ * A prep/production station — "Hot Section", "Bar", "Pastry": where a dish is made, and one
+ * lane on the kitchen board. Hotel-wide (not per venue) so reports can compare stations across
+ * venues. Every dish belongs to exactly one, so a station that still has dishes cannot be
+ * deleted until they are moved (`deleteStationMovingDishes`).
  */
 export const diningStations = pgTable(
 	'dining_stations',
@@ -146,9 +155,10 @@ export const diningMenuCategories = pgTable(
 /**
  * One sellable dish/drink on a venue's menu. Money is integer centavos. `isAvailable` is
  * the quick "sold out today" switch staff flip during service; `isActive` hides an item
- * from the menu entirely. `stationId` optionally routes the dish to a prep station (kitchen,
- * bar…) — the kitchen board ignores it today, but sales reports can already group by it and
- * splitting the board per station later needs no data migration.
+ * from the menu entirely. `stationId` is the prep station that makes the dish (required); the
+ * kitchen board splits an order into one card per station and sales reports group by it. It is
+ * a plain (NO ACTION) FK on purpose: deleting a station first moves its dishes, and RESTRICT
+ * would break hotel-delete cascades.
  */
 export const diningMenuItems = pgTable(
 	'dining_menu_items',
@@ -163,7 +173,9 @@ export const diningMenuItems = pgTable(
 		categoryId: uuid('category_id').references(() => diningMenuCategories.id, {
 			onDelete: 'set null'
 		}),
-		stationId: uuid('station_id').references(() => diningStations.id, { onDelete: 'set null' }),
+		stationId: uuid('station_id')
+			.notNull()
+			.references(() => diningStations.id),
 		name: text('name').notNull(),
 		description: text('description'),
 		/** Served from the local uploads store (`/uploads/<hotelId>/<file>`). */
@@ -475,6 +487,18 @@ export const diningOrders = pgTable(
 		remarks: text('remarks'),
 		/** When a takeaway guest will collect. Null for dine-in. */
 		pickupAt: timestamp('pickup_at', { withTimezone: true }),
+		/** How an online takeaway order reaches the guest: `pickup` at the venue (the default and what
+		 *  every earlier order is) or `delivery` to `deliveryAddress`. `orderType` stays `takeaway`. */
+		fulfilment: text('fulfilment').notNull().default('pickup'),
+		/** The delivery fee charged on this order, already inside `totalCentavos` (and its VAT inside
+		 *  `vatCentavos`). Zero for pickup, dine-in and every order placed before delivery existed. */
+		deliveryFeeCentavos: integer('delivery_fee_centavos').notNull().default(0),
+		deliveryAddress: text('delivery_address'),
+		/** Who is bringing a delivery order, set when staff send it out. The status stays `ready` until it
+		 *  is marked served (delivered); `outForDeliveryAt` is what tells the two apart. */
+		riderName: text('rider_name'),
+		riderPhone: text('rider_phone'),
+		outForDeliveryAt: timestamp('out_for_delivery_at', { withTimezone: true }),
 		/** How an online order is being paid: 'online' (PayMongo) or 'venue' (at pickup). */
 		payMode: text('pay_mode'),
 		/** A guest asked to cancel an order they had already paid for; staff answer it. */

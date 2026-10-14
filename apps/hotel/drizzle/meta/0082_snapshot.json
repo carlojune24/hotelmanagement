@@ -1,5 +1,5 @@
 {
-  "id": "42cb5ded-5ad6-4c1b-8ace-b17b5b615409",
+  "id": "281b5806-5e85-44e1-b3c4-b75af8a30509",
   "prevId": "e4c6df7b-d82a-4f5f-affc-78c0ab4498e3",
   "version": "7",
   "dialect": "postgresql",
@@ -3566,7 +3566,7 @@
           "name": "station_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "name": {
           "name": "name",
@@ -3729,7 +3729,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
@@ -16599,12 +16599,6 @@
         "break_end": {
           "name": "break_end",
           "type": "time",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "night_diff_window": {
-          "name": "night_diff_window",
-          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },

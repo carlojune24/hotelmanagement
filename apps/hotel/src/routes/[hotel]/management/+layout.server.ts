@@ -1,5 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import { requireHotelRole, roleCan } from '$lib/server/auth/rbac';
+import { NO_BADGES, listDiningBadges } from '$lib/server/dining-badges';
 import { countUnreadGuestMessages } from '$lib/server/guest-messages';
 import { countUpcomingReservations } from '$lib/server/reservations';
 import type { LayoutServerLoad } from './$types';
@@ -14,7 +15,8 @@ export const load: LayoutServerLoad = async ({ locals, url, route, params, depen
 			hotel: locals.hotel,
 			role: locals.role,
 			unreadMessageCount: 0,
-			upcomingReservationCount: 0
+			upcomingReservationCount: 0,
+			badges: NO_BADGES
 		};
 	}
 
@@ -40,11 +42,22 @@ export const load: LayoutServerLoad = async ({ locals, url, route, params, depen
 		? await countUpcomingReservations(locals.hotel!.id)
 		: 0;
 
+	// The number bubbles on the Dining and Kitchen tabs and sidebar items: work waiting that staff
+	// would otherwise only find by opening each tab. Counted only for roles that may see that work.
+	depends('app:staff-badges');
+	const can = (cap: string) =>
+		locals.user!.isPlatformAdmin || (locals.role ? roleCan(locals.role.capabilities, cap) : false);
+	const badges = await listDiningBadges(locals.hotel!.id, {
+		dining: can('dining:read'),
+		kitchen: can('kitchen:read')
+	});
+
 	return {
 		user: locals.user,
 		hotel: locals.hotel,
 		role: locals.role,
 		unreadMessageCount,
-		upcomingReservationCount
+		upcomingReservationCount,
+		badges
 	};
 };

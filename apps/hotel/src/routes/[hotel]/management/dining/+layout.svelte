@@ -5,7 +5,7 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import BellIcon from '@lucide/svelte/icons/bell';
 	import BellOffIcon from '@lucide/svelte/icons/bell-off';
-	import { describeAlert, newAlerts, seenFrom, type SeenAlerts } from '$lib/service-alerts';
+	import { describeAlert, newAlerts, overdueAlerts, seenFrom, type SeenAlerts } from '$lib/service-alerts';
 	import { playTone, readSoundPref, soundReady, stopSound, unlockOnFirstTouch, writeSoundPref } from '$lib/staff-sound';
 	import type { LayoutData } from './$types';
 
@@ -15,13 +15,15 @@
 
 	const tabs = $derived(
 		[
-			{ seg: 'floor', label: 'Floor', show: true },
-			{ seg: 'orders', label: 'Orders', show: true, badge: data.awaitingAcceptance, ready: data.alerts.ready.length },
-			{ seg: 'reservations', label: 'Reservations', show: true },
-			{ seg: 'menu', label: 'Menu', show: true },
-			{ seg: 'addons', label: 'Add-ons', show: true },
-			{ seg: 'sales', label: 'Sales', show: true },
-			{ seg: 'settings', label: 'Venues & page', show: data.canEditSettings }
+			{ seg: 'floor', label: 'Floor', show: true, badge: data.badges.floor, hint: 'asking for the bill', ready: 0 },
+			// QR orders waiting for a waiter plus online orders the kitchen has not picked up yet.
+			{ seg: 'orders', label: 'Orders', show: true, badge: data.badges.orders, hint: 'waiting for you', ready: data.alerts.ready.length },
+			{ seg: 'messages', label: 'Messages', show: true, badge: data.unreadMessages, hint: 'unread', ready: 0 },
+			{ seg: 'reservations', label: 'Reservations', show: true, badge: data.badges.reservations, hint: 'pending or arriving soon', ready: 0 },
+			{ seg: 'menu', label: 'Menu', show: true, badge: 0, hint: '', ready: 0 },
+			{ seg: 'addons', label: 'Add-ons', show: true, badge: 0, hint: '', ready: 0 },
+			{ seg: 'sales', label: 'Sales', show: true, badge: 0, hint: '', ready: 0 },
+			{ seg: 'settings', label: 'Venues & page', show: data.canEditSettings, badge: 0, hint: '', ready: 0 }
 		].filter((t) => t.show)
 	);
 
@@ -45,9 +47,14 @@
 	$effect(() => {
 		// Keep polling in a background tab too (browsers slow it down but don't stop it), so a
 		// waiter on another window still hears the bell; catch up the moment the tab is shown.
-		const poll = setInterval(() => invalidate('app:dining-alerts'), 12_000);
+		// The tab number bubbles ride the same beat (they live in the staff layout's load).
+		const refresh = () => {
+			invalidate('app:dining-alerts');
+			invalidate('app:staff-badges');
+		};
+		const poll = setInterval(refresh, 12_000);
 		const onShow = () => {
-			if (!document.hidden) invalidate('app:dining-alerts');
+			if (!document.hidden) refresh();
 		};
 		document.addEventListener('visibilitychange', onShow);
 		return () => {
@@ -70,10 +77,12 @@
 			);
 		}
 		if (fresh.qrWaiting.length > 0) {
+			const online = fresh.qrWaiting.every((o) => o.source === 'online');
+			const noun = online ? 'online orders' : 'orders';
 			toast.info(
 				fresh.qrWaiting.length === 1
-					? `Table order waiting for you: ${describeAlert(fresh.qrWaiting[0]!)}`
-					: `${fresh.qrWaiting.length} table orders waiting for you`,
+					? `${fresh.qrWaiting[0]!.source === 'online' ? 'Online order' : 'Table order'} waiting for you: ${describeAlert(fresh.qrWaiting[0]!)}`
+					: `${fresh.qrWaiting.length} ${noun} waiting for you`,
 				{ duration: 15_000, action: { label: 'Accept', onClick: () => goto(`${base}/orders`) } }
 			);
 		}
@@ -85,6 +94,23 @@
 		invalidate('app:dining-floor');
 	});
 
+	// Nobody answered: keep ringing once a minute while an order has been waiting over 5 minutes. It is never
+	// accepted or declined on its own; a person has to.
+	$effect(() => {
+		const t = setInterval(() => {
+			const late = overdueAlerts(data.alerts.qrWaiting, Date.now());
+			if (late.length === 0) return;
+			toast.warning(
+				late.length === 1
+					? `Still waiting for you: ${describeAlert(late[0]!)}`
+					: `${late.length} orders have been waiting over 5 minutes`,
+				{ duration: 15_000, action: { label: 'Accept', onClick: () => goto(`${base}/orders`) } }
+			);
+			if (sound) blocked = !playTone('ticket');
+		}, 60_000);
+		return () => clearInterval(t);
+	});
+
 	function toggleSound() {
 		sound = !sound;
 		writeSoundPref('dining-alert-sound', sound);
@@ -94,7 +120,7 @@
 	}
 </script>
 
-<div class="border-b border-border bg-surface">
+<div class="border-b border-border bg-surface print:hidden">
 	<div class="mx-auto w-full max-w-7xl px-4 pt-6 sm:px-6">
 		<div class="flex items-center gap-3">
 			<h1 class="text-xl font-semibold tracking-tight text-ink">Dining</h1>
@@ -127,7 +153,7 @@
 						<span class="ml-1.5 rounded-full border border-brand/40 bg-brand/15 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-brand" aria-label="{tab.ready} ready to serve">{tab.ready} ready</span>
 					{/if}
 					{#if tab.badge}
-						<span class="ml-1.5 rounded-full bg-brand px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-brand-ink" aria-label="{tab.badge} waiting for you">{tab.badge}</span>
+						<span class="ml-1.5 rounded-full bg-brand px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-brand-ink" aria-label="{tab.badge} {tab.hint}">{tab.badge}</span>
 					{/if}
 				</a>
 			{/each}

@@ -19,12 +19,11 @@
 	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import WalletIcon from '@lucide/svelte/icons/wallet';
-	import UsersIcon from '@lucide/svelte/icons/users';
-	import ChartColumnIcon from '@lucide/svelte/icons/chart-column';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	import ShieldIcon from '@lucide/svelte/icons/shield';
 	import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
+	import SearchIcon from '@lucide/svelte/icons/search';
 	import BuildingIcon from '@lucide/svelte/icons/building-2';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MoonIcon from '@lucide/svelte/icons/moon';
@@ -68,6 +67,9 @@
 		return isAdmin || (role ? roleCan(role.capabilities, cap) : false);
 	}
 
+	// One number for the Dining item: everything the Dining tabs would flag, added up.
+	const diningBadge = $derived(data.badges.orders + data.badges.reservations + data.badges.floor);
+
 	const kitchenOnly = $derived(!isAdmin && !!role && isKitchenOnly(role.capabilities));
 	const diningOnly = $derived(!isAdmin && !!role && isDiningOnly(role.capabilities));
 
@@ -98,6 +100,14 @@
 				icon: ReceiptIcon,
 				show: can('booking:read')
 			},
+			{
+				seg: 'lookup',
+				label: 'Find by number',
+				icon: SearchIcon,
+				// Not offered to a dining-only account: it is about bookings and finance numbers, and it
+				// sat right above Dining in their menu as if it belonged there.
+				show: can('booking:read') || can('finance:read')
+			},
 			{ seg: 'emails', label: 'Emails', icon: MailIcon, show: can('booking:read') },
 			{ seg: 'messages', label: 'Messages', icon: MessageSquareIcon, show: can('booking:read') },
 			{
@@ -106,13 +116,12 @@
 				icon: SparklesIcon,
 				show: can('housekeeping:read')
 			},
-			// The manager's sidebar leaves Dining out (front desk and dining accounts keep it).
-			{ seg: 'dining', label: 'Dining', icon: UtensilsIcon, show: can('dining:read') && !can('hotel:admin') },
-			// Only a cook's account lists the Kitchen; the manager's and front desk's sidebars leave it out.
-			{ seg: 'kitchen', label: 'Kitchen', icon: ChefHatIcon, show: kitchenOnly },
+			{ seg: 'dining', label: 'Dining', icon: UtensilsIcon, show: can('dining:read') },
+			// A cook's account, or anyone who runs the Kitchen (`kitchen:manage` — the manager, a
+			// platform admin). Front desk only has a read-only view of it, so it stays off their sidebar.
+			{ seg: 'kitchen', label: 'Kitchen', icon: ChefHatIcon, show: kitchenOnly || can('kitchen:manage') },
 			{ seg: 'reviews', label: 'Reviews', icon: StarIcon, show: can('review:read') },
 			{ seg: 'finance', label: 'Finance', icon: WalletIcon, show: can('finance:read') },
-			{ seg: 'reports', label: 'Reports', icon: ChartColumnIcon, show: can('reports:read') },
 			{
 				seg: 'settings/audit',
 				label: 'Audit log',
@@ -142,7 +151,10 @@
 	// Messages page itself — so a new cancellation request is noticed without
 	// staff having to think to check, or stumble into it inside a booking.
 	$effect(() => {
-		const interval = setInterval(() => invalidate('app:guest-messages'), 30_000);
+		const interval = setInterval(() => {
+			invalidate('app:guest-messages');
+			invalidate('app:staff-badges');
+		}, 30_000);
 		return () => clearInterval(interval);
 	});
 </script>
@@ -202,6 +214,24 @@
 												title="Upcoming reservations"
 											>
 												{data.upcomingReservationCount}
+											</Badge>
+										{/if}
+										{#if item.seg === 'dining' && diningBadge > 0}
+											<Badge
+												variant="outline"
+												class="ml-auto border-transparent bg-brand/15 px-1.5 text-brand"
+												title="Dining: orders, reservations and tables waiting"
+											>
+												{diningBadge}
+											</Badge>
+										{/if}
+										{#if item.seg === 'kitchen' && data.badges.kitchen > 0}
+											<Badge
+												variant="outline"
+												class="ml-auto border-transparent bg-brand/15 px-1.5 text-brand"
+												title="Kitchen tickets to start"
+											>
+												{data.badges.kitchen}
 											</Badge>
 										{/if}
 									</a>

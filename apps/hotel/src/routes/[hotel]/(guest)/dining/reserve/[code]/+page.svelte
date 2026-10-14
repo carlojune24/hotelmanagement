@@ -161,6 +161,37 @@
 			</div>
 		</div>
 
+		{#if data.preOrders.length > 0}
+			<section class="mt-6" aria-labelledby="preorder-h">
+				<h2 id="preorder-h" class="ledger-label border-b border-[var(--ledger-rule)] pb-2">Your pre-order</h2>
+				<ul class="divide-y divide-[var(--ledger-rule)]">
+					{#each data.preOrders as p (p.code)}
+						<li class="py-3">
+							<div class="flex flex-wrap items-baseline justify-between gap-2">
+								<span class="ledger-data text-sm">{p.code}</span>
+								<span class="ledger-data text-sm">₱{(p.totalCentavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+							</div>
+							<p class="text-sm text-[var(--ledger-ink-muted)]">{p.items.map((i) => `${i.quantity}× ${i.name}`).join(', ')}</p>
+							<p class="mt-1 text-sm">
+								{#if p.refundDue}
+									Cancelled. You paid for this, so the restaurant will send your refund.
+								{:else if p.status === 'cancelled'}
+									Cancelled. Nothing is due.
+								{:else if p.status === 'pending_payment'}
+									Waiting for payment. Open it to pay and secure your order.
+								{:else if p.paymentStatus === 'paid'}
+									Paid. The kitchen prepares it for your table time.
+								{:else}
+									Placed. Pay at the restaurant.
+								{/if}
+								<a class="underline underline-offset-2" href="/{page.params.hotel}/dining/order/{p.code}?t={p.accessToken}">View order</a>
+							</p>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
+
 		<div class="no-print mt-6 flex flex-wrap items-center gap-x-5 gap-y-2">
 			{#if r.status !== 'cancelled' && r.status !== 'no_show'}
 				<a href={calendarUrl} class="ledger-btn-ghost inline-flex min-h-11 items-center gap-1.5 text-sm">
@@ -172,7 +203,7 @@
 			</button>
 			{#if data.canPreOrder}
 				<a href="/{page.params.hotel}/dining/order?venue={r.venueId}&reservation={r.code}&t={data.token}" class="ledger-btn-ghost inline-flex min-h-11 items-center gap-1.5 text-sm">
-					Pre-order your meal
+					{data.preOrders.some((p) => p.status !== 'cancelled') ? 'Add another order' : 'Pre-order your meal'}
 				</a>
 			{/if}
 			{#if data.canCancel}

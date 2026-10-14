@@ -7,6 +7,7 @@
 	import * as Table from '$lib/components/ui/table/index.js';
 	import * as Select from '$lib/components/ui/select/index.js';
 	import DownloadIcon from '@lucide/svelte/icons/download';
+	import PrinterIcon from '@lucide/svelte/icons/printer';
 	import ChartNoAxesColumnIcon from '@lucide/svelte/icons/chart-no-axes-column';
 	import type { PageData } from './$types';
 
@@ -79,6 +80,9 @@
 					</Select.Content>
 				</Select.Root>
 			{/if}
+			<Button variant="outline" size="sm" class="print:hidden" onclick={() => window.print()}>
+				<PrinterIcon class="size-4" /> Print
+			</Button>
 			<Button href="{base}/sales/csv?{query({ from: data.from, to: data.to })}" variant="outline" size="sm" download>
 				<DownloadIcon class="size-4" /> CSV
 			</Button>

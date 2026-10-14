@@ -99,6 +99,12 @@
 				</div>
 			</div>
 		{/if}
+		{#if cart.securityDepositCentavos > 0}
+			<!-- A memo, not part of the total or the amount due now. -->
+			<p class="mt-2 text-xs text-[var(--ledger-ink-muted)]">
+				Refundable security deposit {peso(cart.securityDepositCentavos)}, collected at check-in. Not part of the total above.
+			</p>
+		{/if}
 		{#if page.route.id === '/[hotel]/(guest)/rooms'}
 			<!-- Guest Info and Review each already have their own primary action ("Continue to
 			     review", "Pay ₱X") — a second Continue here would be redundant/confusing. -->

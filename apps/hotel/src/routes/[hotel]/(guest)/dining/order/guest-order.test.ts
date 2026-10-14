@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { stationIdFor } from '$lib/server/test-station';
 import { eq, inArray } from 'drizzle-orm';
 
 /**
@@ -118,8 +119,8 @@ describe.skipIf(!hasDb)('guest dining order pages (live DB)', async () => {
 			.insert(s.diningMenuItems)
 			.values([
 				{ hotelId: hotelA.id, diningItemId: venue, name: 'Adobo', priceCentavos: 25_000, stationId: st!.id },
-				{ hotelId: hotelA.id, diningItemId: venue, name: 'Soda', priceCentavos: 8_000, taxable: false },
-				{ hotelId: hotelA.id, diningItemId: venue, name: 'Hidden', priceCentavos: 1_000, isActive: false }
+				{ hotelId: hotelA.id, stationId: await stationIdFor(hotelA.id), diningItemId: venue, name: 'Soda', priceCentavos: 8_000, taxable: false },
+				{ hotelId: hotelA.id, stationId: await stationIdFor(hotelA.id), diningItemId: venue, name: 'Hidden', priceCentavos: 1_000, isActive: false }
 			])
 			.returning();
 		[adobo, soda] = [items[0]!.id, items[1]!.id];
@@ -127,7 +128,7 @@ describe.skipIf(!hasDb)('guest dining order pages (live DB)', async () => {
 		const [r] = await db.insert(s.diningAddons).values({ hotelId: hotelA.id, groupId: g!.id, name: 'Rice', priceCentavos: 0 }).returning();
 		rice = r!.id;
 		await db.insert(s.diningMenuItemAddonGroups).values({ menuItemId: adobo, addonGroupId: g!.id });
-		await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, diningItemId: venue2, name: 'Beer', priceCentavos: 12_000 });
+		await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, stationId: await stationIdFor(hotelA.id), diningItemId: venue2, name: 'Beer', priceCentavos: 12_000 });
 	});
 
 	afterAll(async () => {
@@ -223,7 +224,7 @@ describe.skipIf(!hasDb)('guest dining order pages (live DB)', async () => {
 		expect(mocks.client.createCheckoutSession).not.toHaveBeenCalled();
 		const code = res.redirect.match(/DN-[A-Z0-9]{4}/)![0];
 		const [row] = await db.select().from(s.diningOrders).where(eq(s.diningOrders.code, code));
-		expect(row).toMatchObject({ status: 'new', payMode: 'venue', paymentStatus: 'unpaid' });
+		expect(row).toMatchObject({ status: 'pending_acceptance', payMode: 'venue', paymentStatus: 'unpaid' });
 	});
 
 	it('keeps the order and lets the guest retry when PayMongo cannot be reached', async () => {
@@ -300,5 +301,41 @@ describe.skipIf(!hasDb)('guest dining order pages (live DB)', async () => {
 		expect((await run(() => trackPage.actions.message!(trackEvent(hotelA, o.code, o.accessToken, { body: '   ' })) as any)).status).toBe(400);
 		expect((await run(() => trackPage.actions.message!(trackEvent(hotelA, o.code, crypto.randomUUID(), { body: 'hi' })) as any)).status).toBe(400);
 		expect((await run(() => trackPage.actions.message!(trackEvent(hotelB, o.code, o.accessToken, { body: 'hi' })) as any)).status).toBe(400);
+	});
+	it('offers delivery only where the venue delivers, and shows the fee the venue set', async () => {
+		expect((await loadOrder(hotelA, `?venue=${venue}`)).cfg).toMatchObject({ deliveryEnabled: false, deliveryFeeCentavos: 0 });
+		await setVenue(venue, { deliveryEnabled: true, deliveryFeeCentavos: 7_500 });
+		expect((await loadOrder(hotelA, `?venue=${venue}`)).cfg).toMatchObject({ deliveryEnabled: true, deliveryFeeCentavos: 7_500 });
+		await setVenue(venue, { deliveryEnabled: false, deliveryFeeCentavos: 0 });
+	});
+
+	it('places a delivery order: the fee is added server-side, and the guest sees it and the address', async () => {
+		await setVenue(venue, { deliveryEnabled: true, deliveryFeeCentavos: 7_500 });
+		try {
+			const place = (payload: unknown) => run(() => orderPage.actions.place!(placeEvent(hotelA, payload)) as any);
+
+			// no address, then a real one; a fee the page claims is ignored
+			const noAddress = await place(body({ fulfilment: 'delivery' }));
+			expect(noAddress).toMatchObject({ status: 409 });
+			expect(noAddress.data.error).toMatch(/full address/i);
+
+			const placed = await place(body({ fulfilment: 'delivery', deliveryAddress: 'Unit 4, Palm St, Davao City', deliveryFeeCentavos: 1, payMode: 'venue' }));
+			expect(placed.status).toBe(303);
+			const url = new URL(placed.redirect, 'http://x');
+			const m = [url.pathname.split('/').pop()!, url.searchParams.get('t')!] as const;
+			const [row] = await db.select().from(s.diningOrders).where(eq(s.diningOrders.code, m[0]));
+			expect(row).toMatchObject({ fulfilment: 'delivery', deliveryFeeCentavos: 7_500, deliveryAddress: 'Unit 4, Palm St, Davao City', totalCentavos: 25_000 + 7_500, orderType: 'takeaway' });
+
+			const seen = (await track(hotelA, m[0], m[1])).order;
+			expect(seen).toMatchObject({ fulfilment: 'delivery', deliveryFeeCentavos: 7_500, deliveryAddress: 'Unit 4, Palm St, Davao City', totalCentavos: 32_500 });
+
+			// the same payload at a venue that does not deliver is refused, and pickup still works
+			await setVenue(venue, { deliveryEnabled: false });
+			const off = await place(body({ fulfilment: 'delivery', deliveryAddress: 'Unit 4, Palm St, Davao City' }));
+			expect(off.data.error).toMatch(/does not deliver/i);
+			expect((await place(body())).status).toBe(303);
+		} finally {
+			await setVenue(venue, { deliveryEnabled: false, deliveryFeeCentavos: 0 });
+		}
 	});
 });

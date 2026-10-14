@@ -173,3 +173,30 @@ describe('renderBookingConfirmation — promo code', () => {
 		}
 	});
 });
+
+describe('renderBookingConfirmation — security deposit', () => {
+	it('tells the guest the refundable deposit is collected at check-in, in html and text', () => {
+		const r = renderBookingConfirmation(base({ securityDepositCentavos: 2000_00 }));
+		expect(r.html).toContain('refundable security deposit');
+		expect(r.html).toContain('₱2,000.00');
+		expect(r.html).toContain('not charged online');
+		expect(r.text).toContain('A refundable security deposit of ₱2,000.00 is collected at check-in');
+	});
+
+	it('never changes a total: the same order reads identically apart from the note', () => {
+		const without = renderBookingConfirmation(base());
+		const withDeposit = renderBookingConfirmation(base({ securityDepositCentavos: 2000_00 }));
+		expect(withDeposit.text).toContain('TOTAL PAID  ₱1,008.00');
+		// Apart from the one note, every line of the plain-text email is the same.
+		const note = (l: string) => l.startsWith('A refundable security deposit');
+		expect(withDeposit.text.split(/\r?\n/).filter((l) => !note(l))).toEqual(without.text.split(/\r?\n/));
+		expect(without.html).not.toContain('security deposit');
+	});
+
+	it('is unchanged when there is no deposit (absent, null-ish or zero)', () => {
+		const plain = renderBookingConfirmation(base());
+		for (const securityDepositCentavos of [undefined, 0]) {
+			expect(renderBookingConfirmation(base({ securityDepositCentavos }))).toEqual(plain);
+		}
+	});
+});

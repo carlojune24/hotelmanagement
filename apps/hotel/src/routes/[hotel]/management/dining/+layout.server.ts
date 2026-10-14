@@ -1,6 +1,7 @@
 import { roleCan } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
 import { listServiceAlerts } from '$lib/server/dining-orders';
+import { countUnreadDiningMessages } from '$lib/server/dining-messages';
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = async ({ locals, depends }) => {
@@ -11,12 +12,17 @@ export const load: LayoutServerLoad = async ({ locals, depends }) => {
 	requireCap(locals.user, locals.role, 'dining:read');
 	const can = (cap: string) =>
 		!!locals.user?.isPlatformAdmin || (!!locals.role && roleCan(locals.role.capabilities, cap));
-	const alerts = await listServiceAlerts(locals.hotel!.id);
+	const [alerts, unreadMessages] = await Promise.all([
+		listServiceAlerts(locals.hotel!.id),
+		countUnreadDiningMessages(locals.hotel!.id)
+	]);
 	return {
 		canManageMenu: can('dining:manage') || can('hotel:admin'),
 		canEditSettings: can('hotel:admin'),
 		/** Table-QR orders waiting for a waiter, shown as a badge on the Orders tab. */
 		awaitingAcceptance: alerts.qrWaiting.length,
+		/** Guest messages nobody has opened yet, shown as a badge on the Messages tab. */
+		unreadMessages,
 		/** Food the kitchen has finished and nobody has served yet, and QR orders to accept. */
 		alerts
 	};

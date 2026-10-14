@@ -1,5 +1,10 @@
 import { error, fail } from '@sveltejs/kit';
-import { ReservationError, getReservationForGuest, setReservationStatus } from '$lib/server/dining-reservations';
+import {
+	ReservationError,
+	getReservationForGuest,
+	listPreOrdersForReservation,
+	setReservationStatus
+} from '$lib/server/dining-reservations';
 import { loadOnlineOrderingConfig } from '$lib/server/dining-online';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -17,8 +22,12 @@ export const load: PageServerLoad = async ({ locals, params, url, depends }) => 
 		(reservation.status === 'confirmed' || reservation.status === 'pending') &&
 		reservation.startsAt.getTime() > Date.now() + ordering.prepMinutes * 60_000;
 
+	// What this booking has already ordered, so a guest who paid is not invited to order again.
+	const preOrders = await listPreOrdersForReservation(locals.hotel!.id, reservation.id);
+
 	return {
 		canPreOrder,
+		preOrders,
 		reservation: {
 			...reservation,
 			startsAt: reservation.startsAt.toISOString(),

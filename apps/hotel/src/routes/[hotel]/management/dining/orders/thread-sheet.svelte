@@ -54,11 +54,13 @@
 		}
 	}
 
-	// Keyed on the sheet opening or the order changing, never on the order object itself:
-	// `load()` invalidates the board, which hands back a fresh `order` object and would
-	// otherwise re-run this, clear a half-typed reply and fetch again in a loop.
+	// Keyed on the thread's id, through a `$derived`. `load()` invalidates the board, which hands back a
+	// fresh `order` object every time; an effect that read `order` directly re-ran on that new object even
+	// though the id was the same, fetched again, invalidated again, and so on forever. A derived string only
+	// notifies when its value changes, so the effect runs once per opened conversation.
+	const threadId = $derived(open ? (order?.id ?? null) : null);
 	$effect(() => {
-		const id = open ? (order?.id ?? null) : null;
+		const id = threadId;
 		if (!id) return;
 		untrack(() => {
 			draft = '';

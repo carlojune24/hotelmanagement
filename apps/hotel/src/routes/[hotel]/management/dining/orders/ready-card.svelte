@@ -16,6 +16,7 @@
 		canWrite,
 		busy = false,
 		onserve,
+		ondispatch,
 		onpay,
 		ondetails
 	}: {
@@ -25,6 +26,8 @@
 		/** True while this order's "served" request is in flight. */
 		busy?: boolean;
 		onserve: (order: Order) => void;
+		/** Send a delivery order out: asks for the rider. */
+		ondispatch: (order: Order) => void;
 		onpay: (order: Order) => void;
 		ondetails: (order: Order) => void;
 	} = $props();
@@ -61,6 +64,13 @@
 		{/each}
 	</ul>
 	{#if order.remarks}<p class="mt-2 line-clamp-2 text-xs text-ink-muted italic">“{order.remarks}”</p>{/if}
+	{#if order.fulfilment === 'delivery'}
+		<p class="mt-2 text-xs text-ink">
+			<span class="rounded border border-border px-1 font-semibold">Delivery</span>
+			{order.deliveryAddress}
+			{#if order.outForDeliveryAt}<span class="text-ink-muted"> · out with {order.riderName}{order.riderPhone ? ` (${order.riderPhone})` : ''}</span>{/if}
+		</p>
+	{/if}
 
 	<div class="mt-auto flex items-center justify-between gap-2 pt-4">
 		<span class="text-lg font-semibold tabular-nums text-ink">{peso(order.totalCentavos)}</span>
@@ -69,7 +79,11 @@
 
 	<div class="mt-3 flex items-center gap-2">
 		{#if canWrite}
-			<Button class="h-11 flex-1" disabled={busy} onclick={() => onserve(order)}>{busy ? 'Marking…' : 'Mark served'}</Button>
+			{#if order.fulfilment === 'delivery' && !order.outForDeliveryAt}
+				<Button class="h-11 flex-1" onclick={() => ondispatch(order)}>Send out for delivery</Button>
+			{:else}
+				<Button class="h-11 flex-1" disabled={busy} onclick={() => onserve(order)}>{busy ? 'Marking…' : order.fulfilment === 'delivery' ? 'Mark delivered' : 'Mark served'}</Button>
+			{/if}
 			{#if unpaid}
 				<Button variant="outline" class="h-11" onclick={() => onpay(order)}>Take payment</Button>
 			{/if}

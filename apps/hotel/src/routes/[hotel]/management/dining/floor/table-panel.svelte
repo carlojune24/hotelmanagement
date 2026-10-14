@@ -35,6 +35,8 @@
 		view,
 		check,
 		others,
+		freeTables,
+		joinTargets,
 		base,
 		venueId,
 		canWrite,
@@ -42,7 +44,8 @@
 		nowMs,
 		fmtTime,
 		onsettle,
-		onclear
+		onclear,
+		onjoin
 	}: {
 		open: boolean;
 		table: PanelTable | null;
@@ -50,6 +53,10 @@
 		check: Check | null;
 		/** Other tables, for moving a reservation. */
 		others: { id: string; name: string; seats: number }[];
+		/** Empty tables the guests on this table can move to. */
+		freeTables: { id: string; name: string; seats: number }[];
+		/** Tables with a tab already open, which this table's guests can join. */
+		joinTargets: Check[];
 		base: string;
 		venueId: string;
 		canWrite: boolean;
@@ -58,6 +65,7 @@
 		fmtTime: (iso: string) => string;
 		onsettle: (check: Check) => void;
 		onclear: (check: Check) => void;
+		onjoin: (from: Check, into: Check) => void;
 	} = $props();
 
 	const peso = (c: number) =>
@@ -77,12 +85,19 @@
 	const billHref = $derived(check ? `${base.split('/management')[0]}/print/bill/check/${check.id}?auto=1` : '#');
 	const newOrderHref = $derived(table ? `${base}/orders?newOrder=1&venue=${venueId}&table=${table.id}` : '#');
 	let moveTo = $state('');
+	let seatTo = $state('');
+	let joinTo = $state('');
 	// A choice made on one table must not carry over to the next one opened.
 	$effect(() => {
 		void table?.id;
 		moveTo = '';
+		seatTo = '';
+		joinTo = '';
 	});
+	const joinTarget = $derived(joinTargets.find((c) => c.id === joinTo) ?? null);
+	const joinLabel = $derived(joinTarget ? `Table ${joinTarget.tableName}` : 'Join table…');
 	const moveLabel = $derived(others.find((o) => o.id === moveTo)?.name ?? 'Move to…');
+	const seatLabel = $derived(freeTables.find((o) => o.id === seatTo)?.name ?? 'Move to…');
 
 	const STATUS_TONE: Record<string, string> = { ready: 'font-semibold text-ink', served: 'text-ink-muted', cancelled: 'text-ink-muted line-through' };
 </script>
@@ -171,6 +186,43 @@
 							<span class="text-sm text-ink-muted">Still to pay</span>
 							<span class="text-xl font-semibold tabular-nums text-ink">{peso(check.unpaidCentavos)}</span>
 						</div>
+						{#if canWrite && freeTables.length > 0}
+							<!-- Guests changing tables: the whole tab, orders and bill, goes with them. -->
+							<form method="POST" action="?/moveGuests" use:enhance class="mt-4 space-y-1.5 border-t border-border pt-3">
+								<input type="hidden" name="checkId" value={check.id} />
+								<p class="text-xs text-ink-muted">Guests changing tables? Their orders and bill move with them.</p>
+								<div class="flex items-center gap-1.5">
+									<Select.Root type="single" name="tableId" bind:value={seatTo}>
+										<Select.Trigger class="h-9 flex-1 text-sm" aria-label="Move these guests and their orders to another table">{seatLabel}</Select.Trigger>
+										<Select.Content>
+											{#each freeTables as free (free.id)}
+												<Select.Item value={free.id} label="{free.name} ({free.seats})" />
+											{/each}
+										</Select.Content>
+									</Select.Root>
+									<Button type="submit" size="sm" variant="outline" class="h-9" disabled={!seatTo}>Move table</Button>
+								</div>
+							</form>
+						{/if}
+						{#if canWrite && joinTargets.length > 0}
+							<!-- Joining friends who already have a tab: this table's orders fold into theirs. -->
+							<div class="mt-4 space-y-1.5 border-t border-border pt-3">
+								<p class="text-xs text-ink-muted">Joining friends at another table? Their bills combine into one.</p>
+								<div class="flex items-center gap-1.5">
+									<Select.Root type="single" bind:value={joinTo}>
+										<Select.Trigger class="h-9 flex-1 text-sm" aria-label="Join this table's orders to another table's bill">{joinLabel}</Select.Trigger>
+										<Select.Content>
+											{#each joinTargets as t (t.id)}
+												<Select.Item value={t.id} label="Table {t.tableName} · {t.orders.length} {t.orders.length === 1 ? 'order' : 'orders'} · {peso(t.unpaidCentavos)}" />
+											{/each}
+										</Select.Content>
+									</Select.Root>
+									<Button type="button" size="sm" variant="outline" class="h-9" disabled={!joinTarget} onclick={() => joinTarget && onjoin(check, joinTarget)}>
+										Join tables
+									</Button>
+								</div>
+							</div>
+						{/if}
 					</section>
 				{/if}
 

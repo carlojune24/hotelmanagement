@@ -52,9 +52,13 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			orderOpen: cfg.orderOpen!,
 			orderClose: cfg.orderClose!,
 			prepMinutes: cfg.prepMinutes,
+			orderAheadDays: cfg.orderAheadDays,
 			pickupNote: cfg.pickupNote,
 			canPayOnline: cfg.canPayOnline,
-			canPayAtVenue: cfg.canPayAtVenue
+			canPayAtVenue: cfg.canPayAtVenue,
+			// What the guest is shown; the server re-reads both when the order is placed.
+			deliveryEnabled: cfg.deliveryEnabled,
+			deliveryFeeCentavos: cfg.deliveryFeeCentavos
 		},
 		timezone,
 		nowIso: new Date().toISOString(),
@@ -101,6 +105,8 @@ const placeSchema = z.object({
 	guestEmail: z.union([z.literal(''), z.string().trim().email('That email address looks off.')]).optional(),
 	remarks: z.string().trim().max(500).optional(),
 	payMode: z.enum(['online', 'venue']),
+	fulfilment: z.enum(['pickup', 'delivery']).optional(),
+	deliveryAddress: z.string().trim().max(300).optional(),
 	lines: z.array(lineSchema).min(1, 'Add at least one item to your order.').max(40),
 	website: z.string().max(200).optional()
 });
@@ -137,6 +143,8 @@ export const actions: Actions = {
 				guestEmail: d.guestEmail || null,
 				remarks: d.remarks || null,
 				payMode: d.payMode,
+				fulfilment: d.fulfilment,
+				deliveryAddress: d.deliveryAddress || null,
 				lines: d.lines
 			});
 		} catch (e) {
@@ -145,7 +153,9 @@ export const actions: Actions = {
 		}
 
 		const track = `/${params.hotel}/dining/order/${placed.code}?t=${placed.accessToken}`;
-		if (placed.status === 'new') redirect(303, track); // pay at the restaurant: already in the kitchen
+		// Paying at the restaurant: nothing to pay now. The order waits for Dining to accept it (or, for a
+		// reservation pre-order, is already placed), and the order page shows where it stands.
+		if (placed.status !== 'pending_payment') redirect(303, track);
 
 		try {
 			const { checkoutUrl } = await startDiningCheckout({

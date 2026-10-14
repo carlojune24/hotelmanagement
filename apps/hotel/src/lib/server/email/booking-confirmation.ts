@@ -56,6 +56,9 @@ export interface BookingConfirmationData {
 	/** Set only for a downpayment order that still owes a balance (see `getOrderPaymentSummary`).
 	 *  Absent/null = paid in full, and the email reads exactly as it always has. */
 	payment?: { paidCentavos: number; dueAtHotelCentavos: number } | null;
+	/** Refundable security deposit across the booking's rooms, collected at check-in. Shown as a
+	 *  note only; never part of any total here. Absent/0 = none, and the email reads as before. */
+	securityDepositCentavos?: number;
 	/** Absolute URL of the guest's confirmation page (carries the order token). */
 	manageUrl: string;
 	/** Absolute URL of `/manage/[orderId]` — request a cancellation or ask
@@ -294,6 +297,7 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 			Check-in from ${esc(fmtTime(hotel.checkInTime))}, check-out by ${esc(fmtTime(hotel.checkOutTime))}.<br />
 			${addressBits ? `${esc(addressBits)}<br />` : ''}
 			Bring a valid ID and your confirmation code <span style="font-family:${FONT_DATA};font-weight:700;color:${INK};">${esc(data.confirmationCode)}</span>.
+			${data.securityDepositCentavos && data.securityDepositCentavos > 0 ? `<br />A refundable security deposit of <strong>${esc(money(data.securityDepositCentavos, currency))}</strong> is collected at check-in and returned at check-out, less any damage. It is not charged online.` : ''}
 		</div>
 	</td></tr>
 
@@ -367,6 +371,11 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 	tLines.push(`Before you arrive: check-in from ${fmtTime(hotel.checkInTime)}, check-out by ${fmtTime(hotel.checkOutTime)}.`);
 	if (addressBits) tLines.push(addressBits);
 	tLines.push(`Bring a valid ID and your confirmation code ${data.confirmationCode}.`);
+	if (data.securityDepositCentavos && data.securityDepositCentavos > 0) {
+		tLines.push(
+			`A refundable security deposit of ${money(data.securityDepositCentavos, currency)} is collected at check-in and returned at check-out, less any damage. It is not charged online.`
+		);
+	}
 	tLines.push('');
 	tLines.push(`${[hotel.name, hotel.city].filter(Boolean).join(' - ')}`);
 	tLines.push('Booked directly with ' + hotel.name + '. The price you saw is the price you paid.');

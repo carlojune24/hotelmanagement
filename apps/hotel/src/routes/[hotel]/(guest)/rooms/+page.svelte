@@ -55,7 +55,8 @@
 			occupancy: data.adults + data.children,
 			roomCount: count,
 			price,
-			downpaymentBps: plan.cancellation?.downpaymentBps ?? null
+			downpaymentBps: plan.cancellation?.downpaymentBps ?? null,
+			securityDepositCentavos: plan.securityDepositCentavos
 		});
 	}
 
@@ -294,6 +295,11 @@
 									{#if plan.cancellation?.downpaymentBps}
 										<p class="ledger-data mt-1 text-xs text-[var(--ledger-ink-muted)]">
 											{plan.cancellation.downpaymentBps / 100}% due at booking · balance at the hotel
+										</p>
+									{/if}
+									{#if plan.securityDepositCentavos}
+										<p class="ledger-data mt-1 text-xs text-[var(--ledger-ink-muted)]">
+											Refundable security deposit {peso(plan.securityDepositCentavos)} per room · collected at check-in, not charged online
 										</p>
 									{/if}
 									{#if roomType.extraBedsNeeded > 0}

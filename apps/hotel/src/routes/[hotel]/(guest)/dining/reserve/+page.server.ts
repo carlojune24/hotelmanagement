@@ -9,6 +9,7 @@ import {
 	getSlotsForDate,
 	loadBookableVenue
 } from '$lib/server/dining-reservations';
+import { loadOnlineOrderingConfig } from '$lib/server/dining-online';
 import { sendDiningReservationConfirmation } from '$lib/server/email/send-dining-reservation';
 import { localParts } from '$lib/dining-slots';
 import type { Actions, PageServerLoad } from './$types';
@@ -116,7 +117,16 @@ export const actions: Actions = {
 				source: 'online'
 			});
 			if (d.guestEmail) void sendDiningReservationConfirmation(r.id);
-			redirect(303, `/${params.hotel}/dining/reserve/${r.code}?t=${r.accessToken}`);
+			const ticket = `/${params.hotel}/dining/reserve/${r.code}?t=${r.accessToken}`;
+			// Reserve with an order: when the venue takes online orders and the table is far enough
+			// ahead for the kitchen, go straight on to choosing dishes (and paying) for this table.
+			// The booking already stands; the guest can step back to the ticket from that page.
+			const ordering = await loadOnlineOrderingConfig(hotelId, d.venue);
+			const canPreOrder = !!ordering?.enabled && r.startsAt.getTime() > Date.now() + ordering.prepMinutes * 60_000;
+			if (canPreOrder) {
+				redirect(303, `/${params.hotel}/dining/order?venue=${d.venue}&reservation=${r.code}&t=${r.accessToken}`);
+			}
+			redirect(303, ticket);
 		} catch (e) {
 			if (e instanceof ReservationError) return fail(409, { error: e.message, values: keep });
 			throw e;

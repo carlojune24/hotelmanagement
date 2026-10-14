@@ -1,6 +1,6 @@
 {
-  "id": "9e4e7c8d-3f4d-466d-bc62-ff663d73723e",
-  "prevId": "77f7b50c-e383-4dab-9076-8f2cd97f7441",
+  "id": "7441375f-4ed1-48d1-9f35-cc704bc44782",
+  "prevId": "e3ad2d71-2763-4e57-825f-902cdfd166b4",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -35,12 +35,6 @@
         },
         "role": {
           "name": "role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "person_ref": {
-          "name": "person_ref",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -743,12 +737,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "person_ref": {
-          "name": "person_ref",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -775,28 +763,6 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "memberships_hotel_person_idx": {
-          "name": "memberships_hotel_person_idx",
-          "columns": [
-            {
-              "expression": "hotel_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "person_ref",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "person_ref is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -3340,6 +3306,20 @@
           "primaryKey": false,
           "notNull": false
         },
+        "delivery_enabled": {
+          "name": "delivery_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "delivery_fee_centavos": {
+          "name": "delivery_fee_centavos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3600,7 +3580,7 @@
           "name": "station_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "name": {
           "name": "name",
@@ -3763,7 +3743,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
@@ -4326,6 +4306,26 @@
         "pickup_at": {
           "name": "pickup_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fulfilment": {
+          "name": "fulfilment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pickup'"
+        },
+        "delivery_fee_centavos": {
+          "name": "delivery_fee_centavos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "delivery_address": {
+          "name": "delivery_address",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -7483,6 +7483,167 @@
           "value": "(\"housekeeping_damage_reports\".\"room_id\" is not null) <> (\"housekeeping_damage_reports\".\"function_hall_id\" is not null)"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.housekeeping_inspections": {
+      "name": "housekeeping_inspections",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "hotel_id": {
+          "name": "hotel_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "room_id": {
+          "name": "room_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "booking_id": {
+          "name": "booking_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "result": {
+          "name": "result",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'no_damage'"
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "inspected_by_user_id": {
+          "name": "inspected_by_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "inspected_at": {
+          "name": "inspected_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "housekeeping_inspections_room_idx": {
+          "name": "housekeeping_inspections_room_idx",
+          "columns": [
+            {
+              "expression": "hotel_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "room_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "housekeeping_inspections_booking_idx": {
+          "name": "housekeeping_inspections_booking_idx",
+          "columns": [
+            {
+              "expression": "booking_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "housekeeping_inspections_hotel_id_hotels_id_fk": {
+          "name": "housekeeping_inspections_hotel_id_hotels_id_fk",
+          "tableFrom": "housekeeping_inspections",
+          "tableTo": "hotels",
+          "columnsFrom": [
+            "hotel_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "housekeeping_inspections_room_id_rooms_id_fk": {
+          "name": "housekeeping_inspections_room_id_rooms_id_fk",
+          "tableFrom": "housekeeping_inspections",
+          "tableTo": "rooms",
+          "columnsFrom": [
+            "room_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "housekeeping_inspections_booking_id_bookings_id_fk": {
+          "name": "housekeeping_inspections_booking_id_bookings_id_fk",
+          "tableFrom": "housekeeping_inspections",
+          "tableTo": "bookings",
+          "columnsFrom": [
+            "booking_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "housekeeping_inspections_inspected_by_user_id_users_id_fk": {
+          "name": "housekeeping_inspections_inspected_by_user_id_users_id_fk",
+          "tableFrom": "housekeeping_inspections",
+          "tableTo": "users",
+          "columnsFrom": [
+            "inspected_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.housekeeping_status": {
@@ -15019,13 +15180,6 @@
           "notNull": true,
           "default": 0
         },
-        "unapproved_ot_minutes": {
-          "name": "unapproved_ot_minutes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -16006,209 +16160,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.overtime_requests": {
-      "name": "overtime_requests",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "hotel_id": {
-          "name": "hotel_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "employee_id": {
-          "name": "employee_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "date": {
-          "name": "date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "start_time": {
-          "name": "start_time",
-          "type": "time",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "end_time": {
-          "name": "end_time",
-          "type": "time",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "minutes": {
-          "name": "minutes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'approved'"
-        },
-        "filed_by_user_id": {
-          "name": "filed_by_user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cancelled_by_user_id": {
-          "name": "cancelled_by_user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cancelled_at": {
-          "name": "cancelled_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cancel_note": {
-          "name": "cancel_note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "overtime_requests_hotel_date_idx": {
-          "name": "overtime_requests_hotel_date_idx",
-          "columns": [
-            {
-              "expression": "hotel_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "date",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "overtime_requests_employee_date_idx": {
-          "name": "overtime_requests_employee_date_idx",
-          "columns": [
-            {
-              "expression": "employee_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "date",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "overtime_requests_hotel_id_hotels_id_fk": {
-          "name": "overtime_requests_hotel_id_hotels_id_fk",
-          "tableFrom": "overtime_requests",
-          "tableTo": "hotels",
-          "columnsFrom": [
-            "hotel_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "overtime_requests_employee_id_employees_id_fk": {
-          "name": "overtime_requests_employee_id_employees_id_fk",
-          "tableFrom": "overtime_requests",
-          "tableTo": "employees",
-          "columnsFrom": [
-            "employee_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "overtime_requests_filed_by_user_id_users_id_fk": {
-          "name": "overtime_requests_filed_by_user_id_users_id_fk",
-          "tableFrom": "overtime_requests",
-          "tableTo": "users",
-          "columnsFrom": [
-            "filed_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "overtime_requests_cancelled_by_user_id_users_id_fk": {
-          "name": "overtime_requests_cancelled_by_user_id_users_id_fk",
-          "tableFrom": "overtime_requests",
-          "tableTo": "users",
-          "columnsFrom": [
-            "cancelled_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.payroll_run_lines": {
       "name": "payroll_run_lines",
       "schema": "",
@@ -16846,12 +16797,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "night_diff_window": {
-          "name": "night_diff_window",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
         "tag": {
           "name": "tag",
           "type": "text",
@@ -17073,108 +17018,6 @@
           "tableTo": "users",
           "columnsFrom": [
             "updated_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.hr_connections": {
-      "name": "hr_connections",
-      "schema": "",
-      "columns": {
-        "hotel_id": {
-          "name": "hotel_id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "base_url": {
-          "name": "base_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "api_key_enc": {
-          "name": "api_key_enc",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "api_key_hint": {
-          "name": "api_key_hint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "establishment_name": {
-          "name": "establishment_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_sync_at": {
-          "name": "last_sync_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "connected_by_user_id": {
-          "name": "connected_by_user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "hr_connections_hotel_id_hotels_id_fk": {
-          "name": "hr_connections_hotel_id_hotels_id_fk",
-          "tableFrom": "hr_connections",
-          "tableTo": "hotels",
-          "columnsFrom": [
-            "hotel_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "hr_connections_connected_by_user_id_users_id_fk": {
-          "name": "hr_connections_connected_by_user_id_users_id_fk",
-          "tableFrom": "hr_connections",
-          "tableTo": "users",
-          "columnsFrom": [
-            "connected_by_user_id"
           ],
           "columnsTo": [
             "id"

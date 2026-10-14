@@ -73,6 +73,8 @@
 	const at = $derived(planAhead ? zonedToUtc(data.date, time, tz) : new Date(nowMs));
 	const turnMs = $derived((data.venue?.turnMinutes ?? 90) * 60_000);
 
+	const peso = (c: number) =>
+		`₱${(c / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 	const fmtTime = (iso: string) =>
 		new Intl.DateTimeFormat('en-PH', { hour: 'numeric', minute: '2-digit', timeZone: tz }).format(new Date(iso));
 	const dateLabel = $derived(
@@ -132,6 +134,17 @@
 		return t ? { id: t.id, name: t.name, seats: t.seats, areaName: areaName(t.areaId) } : null;
 	});
 	const selectedCheck = $derived(selectedId ? (data.checks.find((c) => c.tableId === selectedId) ?? null) : null);
+	/** Empty tables guests can move to: live view only, nothing open, booked or waiting on them. */
+	const freeTables = $derived(
+		planAhead
+			? []
+			: data.tables
+					.filter((t) => t.id !== selectedId && views[t.id]?.stage === 'free' && views[t.id]?.qrWaiting === 0)
+					.map((t) => ({ id: t.id, name: t.name, seats: t.seats }))
+	);
+
+	/** Tables with a tab already open: a guest who has ordered can join friends there. Live view only. */
+	const joinTargets = $derived(planAhead || !selectedCheck ? [] : data.checks.filter((c) => c.tableId !== selectedId));
 
 	// ---- navigation (venue / date / area) ----------------------------------------------------
 	function go(next: { venue?: string; date?: string; area?: string }) {
@@ -168,6 +181,12 @@
 	let settleFor = $state<Check | null>(null);
 	let clearFor = $state<Check | null>(null);
 	let clearReason = $state('');
+	/** Joining one tab into another, awaiting the staff member's confirmation. */
+	let joinFor = $state<{ from: Check; into: Check } | null>(null);
+	function openJoin(from: Check, into: Check) {
+		panelOpen = false;
+		joinFor = { from, into };
+	}
 	function openSettle(check: Check) {
 		panelOpen = false;
 		settleFor = check;
@@ -186,6 +205,11 @@
 		if (f?.ok) {
 			toast.success(f.ok);
 			untrack(() => {
+				// Guests changed tables: the panel follows them to the new one.
+				if ('movedTo' in f && typeof f.movedTo === 'string') selectedId = f.movedTo;
+					// Joined tabs: the panel was closed behind the confirmation, so bring it back on the new table.
+					if (joinFor) panelOpen = true;
+					joinFor = null;
 				sheet.open = false;
 				clearFor = null;
 				clearReason = '';
@@ -402,6 +426,8 @@
 	view={selectedId ? (views[selectedId] ?? null) : null}
 	check={selectedCheck}
 	others={data.tables.filter((t) => t.id !== selectedId).map((t) => ({ id: t.id, name: t.name, seats: t.seats }))}
+	{freeTables}
+	{joinTargets}
 	{base}
 	venueId={data.venue?.id ?? ''}
 	canWrite={data.canWrite}
@@ -410,6 +436,7 @@
 	{fmtTime}
 	onsettle={openSettle}
 	onclear={openClear}
+	onjoin={openJoin}
 />
 
 <!-- Add / edit table -->
@@ -532,6 +559,43 @@
 </Dialog.Root>
 
 <SettleDialog bind:open={settleOpen} check={settleFor} shiftOpen={data.shiftOpen} slug={page.params.hotel ?? ''} inHouse={data.inHouse} />
+
+<!-- Join one table's tab into another's -->
+<Dialog.Root open={joinFor !== null} onOpenChange={(o) => { if (!o) joinFor = null; }}>
+	<Dialog.Content class="sm:max-w-sm">
+		{#if joinFor}
+			<Dialog.Header>
+				<Dialog.Title>Join table {joinFor.from.tableName} into {joinFor.into.tableName}?</Dialog.Title>
+				<Dialog.Description>
+					Table {joinFor.from.tableName}'s orders move onto table {joinFor.into.tableName}'s bill, and the two are paid together.
+					Table {joinFor.from.tableName} becomes free. This can't be undone.
+				</Dialog.Description>
+			</Dialog.Header>
+			<dl class="space-y-1 rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm">
+				<div class="flex justify-between gap-3">
+					<dt class="text-ink-muted">Table {joinFor.from.tableName} still to pay</dt>
+					<dd class="tabular-nums text-ink">{peso(joinFor.from.unpaidCentavos)}</dd>
+				</div>
+				<div class="flex justify-between gap-3">
+					<dt class="text-ink-muted">Table {joinFor.into.tableName} still to pay</dt>
+					<dd class="tabular-nums text-ink">{peso(joinFor.into.unpaidCentavos)}</dd>
+				</div>
+				<div class="flex justify-between gap-3 border-t border-border pt-1 font-semibold">
+					<dt class="text-ink">Together</dt>
+					<dd class="tabular-nums text-ink">{peso(joinFor.from.unpaidCentavos + joinFor.into.unpaidCentavos)}</dd>
+				</div>
+			</dl>
+			<form method="POST" action="?/joinTables" use:enhance class="space-y-4">
+				<input type="hidden" name="checkId" value={joinFor.from.id} />
+				<input type="hidden" name="intoCheckId" value={joinFor.into.id} />
+				<Dialog.Footer>
+					<Button type="button" variant="outline" onclick={() => { joinFor = null; panelOpen = true; }}>Keep separate</Button>
+					<Button type="submit">Join tables</Button>
+				</Dialog.Footer>
+			</form>
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>
 
 <!-- Force clear -->
 <Dialog.Root open={clearFor !== null} onOpenChange={(o) => { if (!o) clearFor = null; }}>

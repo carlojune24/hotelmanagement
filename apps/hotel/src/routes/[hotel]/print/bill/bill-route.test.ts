@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { stationIdFor } from '$lib/server/test-station';
 import { eq, inArray } from 'drizzle-orm';
 
 /** The printed guest bill: who may open it, what it adds up to, and that printing it issues nothing
@@ -49,8 +50,8 @@ describe.skipIf(!hasDb)('dining guest bill (live DB)', async () => {
 		await seedFinanceDefaults(db, hotelA.id);
 		const [v] = await db.insert(s.diningItems).values({ hotelId: hotelA.id, title: 'Cafe' }).returning();
 		const [table] = await db.insert(s.diningTables).values({ hotelId: hotelA.id, diningItemId: v!.id, name: 'T4', seats: 4 }).returning();
-		const [soda] = await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, diningItemId: v!.id, name: 'Soda', priceCentavos: 8_000 }).returning();
-		const [adobo] = await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, diningItemId: v!.id, name: 'Adobo', priceCentavos: 15_000 }).returning();
+		const [soda] = await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, stationId: await stationIdFor(hotelA.id), diningItemId: v!.id, name: 'Soda', priceCentavos: 8_000 }).returning();
+		const [adobo] = await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, stationId: await stationIdFor(hotelA.id), diningItemId: v!.id, name: 'Adobo', priceCentavos: 15_000 }).returning();
 
 		const first = await o.createDiningOrder({ hotelId: hotelA.id, venueId: v!.id, orderType: 'dine_in', tableId: table!.id, source: 'staff', lines: [{ menuItemId: soda!.id, quantity: 2 }] });
 		const second = await o.createDiningOrder({ hotelId: hotelA.id, venueId: v!.id, orderType: 'dine_in', tableId: table!.id, source: 'staff', lines: [{ menuItemId: adobo!.id, quantity: 1 }] });

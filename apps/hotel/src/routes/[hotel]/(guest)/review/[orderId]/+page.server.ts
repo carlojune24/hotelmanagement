@@ -65,6 +65,7 @@ async function loadOrderLines(orderId: string) {
 }
 
 import { getOrderPromo } from '$lib/server/promo-codes';
+import { orderSecurityDepositCentavos } from '$lib/server/security-deposit-lookup';
 
 export const load: PageServerLoad = async ({ locals, params, url }) => {
 	const hotelId = locals.hotel!.id;
@@ -79,6 +80,8 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 	const [guest] = await db.select().from(guests).where(eq(guests.id, order.guestId));
 	const { roomLines, hallLines } = await loadOrderLines(order.id);
 	const promo = await getOrderPromo(order.id);
+	// A memo for the guest: refundable, collected at check-in, never part of what is charged here.
+	const securityDepositCentavos = await orderSecurityDepositCentavos(hotelId, order.id);
 
 	return {
 		order: {
@@ -93,6 +96,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 			dueNowCentavos: order.amountDueNowCentavos ?? order.totalCentavos
 		},
 		promo,
+		securityDepositCentavos,
 		guest: { fullName: guest!.fullName, email: guest!.email },
 		roomLines,
 		hallLines,

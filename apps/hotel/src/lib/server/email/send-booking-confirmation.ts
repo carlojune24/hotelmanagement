@@ -18,6 +18,7 @@ import { DEFAULT_ACCENT_COLOR, DEFAULT_PAPER_COLOR, parseBranding } from '../bra
 import { renderBookingConfirmation, type BookingConfirmationData } from './booking-confirmation';
 import { renderPdf } from '../pdf/render';
 import { getOrderPromo } from '../promo-codes';
+import { orderSecurityDepositCentavos } from '../security-deposit-lookup';
 import { alreadySent, sendMail, type MailAttachment, type SendMailResult } from './send';
 
 /**
@@ -107,6 +108,7 @@ export async function sendBookingConfirmation(
 			totalCentavos: order.totalCentavos,
 			payment: await getOrderPaymentSummary(order),
 			promo: await getOrderPromo(order.id),
+			securityDepositCentavos: await orderSecurityDepositCentavos(order.hotelId, order.id),
 			manageUrl,
 			manageBookingUrl
 		};

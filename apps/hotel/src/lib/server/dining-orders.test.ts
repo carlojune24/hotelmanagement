@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { stationIdFor } from '$lib/server/test-station';
 import { and, eq, inArray } from 'drizzle-orm';
 
 /**
@@ -72,10 +73,10 @@ describe.skipIf(!hasDb)('dining orders and finance (live DB)', async () => {
 			.insert(s.diningMenuItems)
 			.values([
 				{ hotelId: hotelA, diningItemId: venueA, name: 'Adobo', priceCentavos: 25_000, stationId: kitchenId },
-				{ hotelId: hotelA, diningItemId: venueA, name: 'Soda', priceCentavos: 8_000, taxable: false },
-				{ hotelId: hotelA, diningItemId: venueA, name: 'Sold out dish', priceCentavos: 10_000, isAvailable: false },
-				{ hotelId: hotelA, diningItemId: venueA, name: 'Hidden dish', priceCentavos: 10_000, isActive: false },
-				{ hotelId: hotelB, diningItemId: venueB, name: 'Other hotel dish', priceCentavos: 10_000 }
+				{ hotelId: hotelA, stationId: await stationIdFor(hotelA, 'Bar'), diningItemId: venueA, name: 'Soda', priceCentavos: 8_000, taxable: false },
+				{ hotelId: hotelA, stationId: await stationIdFor(hotelA), diningItemId: venueA, name: 'Sold out dish', priceCentavos: 10_000, isAvailable: false },
+				{ hotelId: hotelA, stationId: await stationIdFor(hotelA), diningItemId: venueA, name: 'Hidden dish', priceCentavos: 10_000, isActive: false },
+				{ hotelId: hotelB, stationId: await stationIdFor(hotelB), diningItemId: venueB, name: 'Other hotel dish', priceCentavos: 10_000 }
 			])
 			.returning();
 		[adobo, soda, soldOut, hidden, otherHotelDish] = items.map((i) => i.id) as [string, string, string, string, string];
@@ -376,7 +377,7 @@ describe.skipIf(!hasDb)('dining orders and finance (live DB)', async () => {
 		const hotelC = await mkHotel('c');
 		await seedFinanceDefaults(db, hotelC);
 		const [vc] = await db.insert(s.diningItems).values({ hotelId: hotelC, title: 'Third cafe' }).returning();
-		const [dish] = await db.insert(s.diningMenuItems).values({ hotelId: hotelC, diningItemId: vc!.id, name: 'Tea', priceCentavos: 5_000 }).returning();
+		const [dish] = await db.insert(s.diningMenuItems).values({ hotelId: hotelC, stationId: await stationIdFor(hotelC), diningItemId: vc!.id, name: 'Tea', priceCentavos: 5_000 }).returning();
 		const noSeries = await o.createDiningOrder({ hotelId: hotelC, venueId: vc!.id, orderType: 'takeaway', lines: [{ menuItemId: dish!.id, quantity: 1 }] });
 		const r = await o.payDiningOrder({ hotelId: hotelC, orderId: noSeries.id, method: 'card', documents: 'or' });
 		expect(r.documents).toHaveLength(0);
@@ -456,7 +457,7 @@ describe.skipIf(!hasDb)('dining orders and finance (live DB)', async () => {
 		const adoboRow = report.byItem.find((i) => i.name === 'Adobo');
 		expect(adoboRow).toMatchObject({ quantity: 3, grossCentavos: 25_000 + 53_000 });
 		expect(report.byStation.find((st) => st.station === 'Kitchen')?.grossCentavos).toBe(78_000);
-		expect(report.byStation.find((st) => st.station === 'No station')).toBeTruthy(); // sodas have no station
+		expect(report.byStation.find((st) => st.station === 'Bar')).toBeTruthy(); // sodas are made at the Bar
 		// station totals add up to the sales total
 		expect(report.byStation.reduce((sum, st) => sum + st.grossCentavos, 0)).toBe(report.grossCentavos);
 

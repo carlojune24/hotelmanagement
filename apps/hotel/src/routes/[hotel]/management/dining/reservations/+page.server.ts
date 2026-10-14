@@ -5,6 +5,7 @@ import { db } from '$lib/server/db/index';
 import {
 	bookings,
 	diningItems,
+	diningOrders,
 	diningReservations,
 	diningReservationTables,
 	diningTables
@@ -127,8 +128,26 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 				.where(inArray(diningReservationTables.reservationId, rows.map((r) => r.id)))
 		: [];
 
-	const allTables = await db
-		.select({ id: diningTables.id, venueId: diningTables.diningItemId, name: diningTables.name, seats: diningTables.seats })
+	// Pre-orders placed against these reservations: what was ordered ahead, and whether it is paid.
+	const preOrderRows = rows.length
+		? await db
+				.select({
+					reservationId: diningOrders.reservationId,
+					status: diningOrders.status,
+					paymentStatus: diningOrders.paymentStatus,
+					total: diningOrders.totalCentavos
+				})
+				.from(diningOrders)
+				.where(
+					and(
+						eq(diningOrders.hotelId, hotelId),
+						eq(diningOrders.orderType, 'pre_order'),
+						inArray(diningOrders.reservationId, rows.map((r) => r.id))
+					)
+				)
+		: [];
+
+	const allTables = await db		.select({ id: diningTables.id, venueId: diningTables.diningItemId, name: diningTables.name, seats: diningTables.seats })
 		.from(diningTables)
 		.where(and(eq(diningTables.hotelId, hotelId), eq(diningTables.isActive, true)))
 		.orderBy(asc(diningTables.name));
@@ -159,7 +178,16 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			source: r.source,
 			venueTitle: r.venueTitle,
 			bookingCode: r.bookingOrderId ? r.bookingOrderId.slice(0, 8).toUpperCase() : null,
-			tables: links.filter((l) => l.reservationId === r.id).map((l) => l.name)
+			tables: links.filter((l) => l.reservationId === r.id).map((l) => l.name),
+			preOrder: (() => {
+				const mine = preOrderRows.filter((o) => o.reservationId === r.id && o.status !== 'cancelled');
+				if (mine.length === 0) return null;
+				return {
+					count: mine.length,
+					totalCentavos: mine.reduce((s, o) => s + o.total, 0),
+					paid: mine.every((o) => o.paymentStatus === 'paid' || o.paymentStatus === 'room_charged')
+				};
+			})()
 		}))
 	};
 };

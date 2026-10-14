@@ -61,6 +61,23 @@ describe('a kitchen-only account', () => {
 	});
 });
 
+describe('the hotel manager', () => {
+	const manager = asRole(ROLE_CAPS.hotel_admin);
+
+	it('has full control of the Kitchen: start/finish dishes and set up stations', async () => {
+		const { load } = await import('./kitchen/+layout.server');
+		const out = (await load({ locals: manager } as never)) as { canManage: boolean; canWrite: boolean };
+		expect(out).toEqual({ canManage: true, canWrite: true });
+	});
+
+	it('holds every Dining and Kitchen capability', async () => {
+		const { roleCan } = await import('$lib/authz');
+		for (const cap of ['dining:read', 'dining:write', 'dining:manage', 'kitchen:read', 'kitchen:write', 'kitchen:manage', 'hotel:admin']) {
+			expect(roleCan(ROLE_CAPS.hotel_admin, cap)).toBe(true);
+		}
+	});
+});
+
 describe('a dining-only account', () => {
 	const waiter = asRole(ROLE_CAPS.dining);
 

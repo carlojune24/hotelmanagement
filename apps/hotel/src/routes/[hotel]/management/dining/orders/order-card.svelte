@@ -91,7 +91,7 @@
 				{#if order.source === 'online'}<span class="inline-flex items-center gap-0.5 font-sans text-[11px] font-medium text-ink-muted"><GlobeIcon class="size-3" aria-hidden="true" /> Online</span>{/if}
 			</p>
 			<p class="truncate text-xs text-ink-muted">
-				{order.tableLabel ? `Table ${order.tableLabel}` : ORDER_TYPE_LABEL[order.orderType]}{order.tableLabel && order.orderType === 'takeaway' ? ' · Takeaway' : ''}{order.guestName ? ` · ${order.guestName}` : ''}
+				{order.tableLabel ? `Table ${order.tableLabel}` : order.fulfilment === 'delivery' ? 'Delivery' : ORDER_TYPE_LABEL[order.orderType]}{order.tableLabel && order.orderType === 'takeaway' ? ' · Takeaway' : ''}{order.guestName ? ` · ${order.guestName}` : ''}
 			</p>
 		</div>
 		<span
@@ -105,7 +105,20 @@
 
 	{#if pickup}
 		<p class="mt-1.5 text-xs text-ink">
-			{order.orderType === 'pre_order' ? 'At the table' : 'Pickup'} <span class="font-medium tabular-nums">{pickup}</span>
+			{order.orderType === 'pre_order' ? 'At the table' : order.fulfilment === 'delivery' ? 'Deliver' : 'Pickup'} <span class="font-medium tabular-nums">{pickup}</span>
+		</p>
+	{/if}
+	{#if order.held}
+		<p class="mt-1 text-xs text-ink">
+			<span class="rounded border border-border px-1 font-semibold">Scheduled</span>
+			<span class="text-ink-muted">Held for the table time. It reaches the kitchen shortly before, or when the party is seated.</span>
+		</p>
+	{/if}
+	{#if order.fulfilment === 'delivery' && order.deliveryAddress}
+		<p class="mt-1 text-xs text-ink">
+			<span class="rounded border border-border px-1 font-semibold">Delivery</span>
+			{order.deliveryAddress}
+			{#if order.deliveryFeeCentavos > 0}<span class="text-ink-muted"> · fee ₱{(order.deliveryFeeCentavos / 100).toFixed(2)}</span>{/if}
 		</p>
 	{/if}
 

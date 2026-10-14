@@ -25,6 +25,8 @@ import {
 	forceClearCheck,
 	getOpenCheckForTable,
 	listOpenChecks,
+	mergeCheckIntoCheck,
+	moveCheckToTable,
 	requestBill,
 } from '$lib/server/dining-checks';
 import { closeTableAction, settleTableAction } from '$lib/server/dining-check-actions';
@@ -586,6 +588,54 @@ export const actions: Actions = {
 
 	/** Frees a table whose orders are all served and paid. */
 	closeTable: closeTableAction,
+
+	/** Guests change tables: their whole tab moves to a free table. */
+	moveGuests: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'dining:write');
+		const parsed = z
+			.object({ checkId: recordId(), tableId: recordId() })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: 'Pick a table to move to.' });
+		try {
+			const r = await moveCheckToTable({
+				hotelId: event.locals.hotel!.id,
+				checkId: parsed.data.checkId,
+				toTableId: parsed.data.tableId,
+				actor: event.locals.user
+			});
+			return {
+				ok: `Moved ${r.fromName} to ${r.toName} (${r.orderCount} ${r.orderCount === 1 ? 'order' : 'orders'}).`,
+				movedTo: parsed.data.tableId
+			};
+		} catch (e) {
+			if (businessError(e)) return fail(400, { error: (e as Error).message });
+			throw e;
+		}
+	},
+
+	/** A guest who has ordered joins friends at a table that already has a tab: the tabs combine. */
+	joinTables: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'dining:write');
+		const parsed = z
+			.object({ checkId: recordId(), intoCheckId: recordId() })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: 'Pick the table to join.' });
+		try {
+			const r = await mergeCheckIntoCheck({
+				hotelId: event.locals.hotel!.id,
+				fromCheckId: parsed.data.checkId,
+				intoCheckId: parsed.data.intoCheckId,
+				actor: event.locals.user
+			});
+			return {
+				ok: `Joined ${r.fromName} into ${r.toName} (${r.orderCount} ${r.orderCount === 1 ? 'order' : 'orders'}).`,
+				movedTo: r.intoTableId
+			};
+		} catch (e) {
+			if (businessError(e)) return fail(400, { error: (e as Error).message });
+			throw e;
+		}
+	},
 
 	/** A manager clears a table that cannot be settled normally. */
 	forceClear: async (event) => {

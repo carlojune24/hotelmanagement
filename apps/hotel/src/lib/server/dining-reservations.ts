@@ -1,16 +1,21 @@
-import { and, asc, eq, gt, inArray, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { randomInt } from 'node:crypto';
 import { db } from './db/index';
 import {
 	diningItems,
+	diningOrderItems,
+	diningOrders,
+	diningPayments,
 	diningReservations,
 	diningReservationTables,
+	diningTableChecks,
 	diningTables,
 	type DiningReservation,
 	type DiningReservationStatus,
 	type DiningTable
 } from './db/schema/index';
 import { writeAudit } from './audit';
+import { ensureOpenCheck } from './dining-orders';
 import {
 	HOLDING_STATUSES,
 	availableSlots,
@@ -308,6 +313,119 @@ export async function createReservation(
 	});
 }
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Pre-orders on a reservation that are still live: not cancelled, and not yet on a check. */
+const LIVE_PRE_ORDER = ['pending_payment', 'new', 'accepted', 'preparing', 'ready', 'served'] as const;
+
+/**
+ * The party has sat down: put their pre-orders on the table's check, so they show on the Floor
+ * panel, count towards the bill and are settled with it. Does nothing when there are none, so a
+ * reservation without a pre-order is seated exactly as before. A pre-order still waiting for its
+ * online payment is left alone; `confirmDiningPayment` attaches it if that payment lands later.
+ *
+ * The table must not already carry someone else's bill: `ensureOpenCheck` would otherwise reuse
+ * it and the pre-order would be charged to the previous party. `onOccupied: 'throw'` (seating)
+ * refuses with a message staff can act on; `'skip'` (a payment webhook, which must never fail)
+ * leaves the order unattached for staff to place.
+ */
+export async function attachPreOrdersToCheck(
+	tx: Tx,
+	hotelId: string,
+	res: { id: string; diningItemId: string },
+	opts: { onOccupied: 'throw' | 'skip' } = { onOccupied: 'throw' }
+): Promise<{ attached: number; cancelled: number }> {
+	const orders = await tx
+		.select({ id: diningOrders.id })
+		.from(diningOrders)
+		.where(
+			and(
+				eq(diningOrders.hotelId, hotelId),
+				eq(diningOrders.reservationId, res.id),
+				eq(diningOrders.orderType, 'pre_order'),
+				isNull(diningOrders.checkId),
+				inArray(diningOrders.status, LIVE_PRE_ORDER.filter((s) => s !== 'pending_payment'))
+			)
+		);
+	if (orders.length === 0) return { attached: 0, cancelled: 0 };
+
+	// The table the party was given (the first, by name, when it spans several).
+	const [table] = await tx
+		.select({ id: diningTables.id, name: diningTables.name })
+		.from(diningReservationTables)
+		.innerJoin(diningTables, eq(diningTables.id, diningReservationTables.tableId))
+		.where(eq(diningReservationTables.reservationId, res.id))
+		.orderBy(asc(diningTables.name))
+		.limit(1);
+	if (!table) return { attached: 0, cancelled: 0 };
+
+	const [busy] = await tx
+		.select({ id: diningTableChecks.id, reservationId: diningTableChecks.reservationId })
+		.from(diningTableChecks)
+		.where(and(eq(diningTableChecks.tableId, table.id), eq(diningTableChecks.status, 'open')))
+		.limit(1);
+	if (busy && busy.reservationId !== res.id) {
+		if (opts.onOccupied === 'skip') return { attached: 0, cancelled: 0 };
+		throw new ReservationError(
+			`Table ${table.name} still has an open bill. Settle or move it first, so this party's pre-order goes on their own bill.`
+		);
+	}
+
+	const checkId = await ensureOpenCheck(tx, { hotelId, venueId: res.diningItemId, tableId: table.id });
+	const moved = await tx
+		.update(diningOrders)
+		.set({ checkId, tableId: table.id, tableLabel: table.name, updatedAt: new Date() })
+		.where(inArray(diningOrders.id, orders.map((o) => o.id)))
+		.returning({ id: diningOrders.id });
+	return { attached: moved.length, cancelled: 0 };
+}
+
+/**
+ * The booking is off (cancelled, or the guests did not come). Pre-orders the kitchen has not begun
+ * are cancelled with the reason. One that was already paid keeps its `paid` state, which is what
+ * puts it on the Orders tab's "refund due" list; no money moves by itself. Anything the kitchen has
+ * started is left for staff to decide.
+ */
+async function releasePreOrders(
+	tx: Tx,
+	hotelId: string,
+	reservationId: string,
+	to: 'cancelled' | 'no_show'
+): Promise<{ attached: number; cancelled: number }> {
+	const now = new Date();
+	const cancelled = await tx
+		.update(diningOrders)
+		.set({
+			status: 'cancelled',
+			cancelledAt: now,
+			cancelReason: to === 'cancelled' ? 'The table reservation was cancelled.' : 'The guests did not arrive.',
+			updatedAt: now
+		})
+		.where(
+			and(
+				eq(diningOrders.hotelId, hotelId),
+				eq(diningOrders.reservationId, reservationId),
+				eq(diningOrders.orderType, 'pre_order'),
+				inArray(diningOrders.status, ['pending_payment', 'new', 'accepted'])
+			)
+		)
+		.returning({ id: diningOrders.id });
+	if (cancelled.length) {
+		// A checkout the guest never finished must not stay payable.
+		await tx
+			.update(diningPayments)
+			.set({ status: 'expired' })
+			.where(
+				and(
+					inArray(diningPayments.orderId, cancelled.map((o) => o.id)),
+					eq(diningPayments.kind, 'payment'),
+					eq(diningPayments.status, 'pending')
+				)
+			);
+	}
+	return { attached: 0, cancelled: cancelled.length };
+}
+
 /** Move a reservation to a new status if the transition is allowed. */
 export async function setReservationStatus(args: {
 	hotelId: string;
@@ -334,6 +452,15 @@ export async function setReservationStatus(args: {
 			})
 			.where(eq(diningReservations.id, row.id))
 			.returning();
+
+		// A pre-order made for this table follows the reservation: it joins the table's bill the moment
+		// the party sits down, and is released if the booking is cancelled or the guests never come.
+		let preOrders: { attached: number; cancelled: number } | null = null;
+		if (args.to === 'seated') preOrders = await attachPreOrdersToCheck(tx, args.hotelId, row);
+		if (args.to === 'cancelled' || args.to === 'no_show') {
+			preOrders = await releasePreOrders(tx, args.hotelId, row.id, args.to);
+		}
+
 		await writeAudit({
 			hotelId: args.hotelId,
 			actor: args.actor ?? null,
@@ -341,7 +468,7 @@ export async function setReservationStatus(args: {
 			entityType: 'dining_reservation',
 			entityId: row.id,
 			before: { status: row.status },
-			after: { status: args.to }
+			after: preOrders && (preOrders.attached || preOrders.cancelled) ? { status: args.to, preOrders } : { status: args.to }
 		});
 		return updated!;
 	});
@@ -393,6 +520,54 @@ export async function reassignReservationTables(args: {
 			after: { tableIds }
 		});
 	});
+}
+
+/** A reservation's pre-orders as the guest may see them on their ticket (never other guests'). */
+export interface GuestPreOrderView {
+	code: string;
+	accessToken: string;
+	status: string;
+	paymentStatus: string;
+	totalCentavos: number;
+	items: { name: string; quantity: number }[];
+	/** Cancelled after being paid: the venue still owes the guest a refund. */
+	refundDue: boolean;
+}
+
+export async function listPreOrdersForReservation(hotelId: string, reservationId: string): Promise<GuestPreOrderView[]> {
+	const orders = await db
+		.select({
+			id: diningOrders.id,
+			code: diningOrders.code,
+			accessToken: diningOrders.accessToken,
+			status: diningOrders.status,
+			paymentStatus: diningOrders.paymentStatus,
+			total: diningOrders.totalCentavos
+		})
+		.from(diningOrders)
+		.where(
+			and(
+				eq(diningOrders.hotelId, hotelId),
+				eq(diningOrders.reservationId, reservationId),
+				eq(diningOrders.orderType, 'pre_order')
+			)
+		)
+		.orderBy(asc(diningOrders.createdAt));
+	if (orders.length === 0) return [];
+	const items = await db
+		.select({ orderId: diningOrderItems.orderId, name: diningOrderItems.name, quantity: diningOrderItems.quantity })
+		.from(diningOrderItems)
+		.where(inArray(diningOrderItems.orderId, orders.map((o) => o.id)))
+		.orderBy(asc(diningOrderItems.sortOrder));
+	return orders.map((o) => ({
+		code: o.code,
+		accessToken: o.accessToken,
+		status: o.status,
+		paymentStatus: o.paymentStatus,
+		totalCentavos: o.total,
+		items: items.filter((i) => i.orderId === o.id).map((i) => ({ name: i.name, quantity: i.quantity })),
+		refundDue: o.status === 'cancelled' && o.paymentStatus === 'paid'
+	}));
 }
 
 export interface GuestReservationView {

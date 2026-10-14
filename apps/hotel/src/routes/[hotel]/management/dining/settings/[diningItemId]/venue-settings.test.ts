@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { stationIdFor } from '$lib/server/test-station';
 import { eq, inArray } from 'drizzle-orm';
 
 /**
@@ -69,7 +70,7 @@ describe.skipIf(!hasDb)('venue settings actions (live DB)', async () => {
 		venue = v!.id;
 		emptyVenue = e!.id;
 		otherHotelVenue = b!.id;
-		await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, diningItemId: venue, name: 'Adobo', priceCentavos: 25_000 });
+		await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, stationId: await stationIdFor(hotelA.id), diningItemId: venue, name: 'Adobo', priceCentavos: 25_000 });
 		await db.insert(s.diningTables).values({ hotelId: hotelA.id, diningItemId: venue, name: 'T1', seats: 4 });
 	});
 

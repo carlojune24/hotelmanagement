@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { stationIdFor } from '$lib/server/test-station';
 import { randomUUID } from 'node:crypto';
 import { and, eq, inArray } from 'drizzle-orm';
 
@@ -94,7 +95,7 @@ describe.skipIf(!hasDb)('charge dining to a room (live DB)', async () => {
 	/** A dining order for exactly `priceCentavos`, VAT-inclusive. */
 	async function diningOrder(hotel: any, priceCentavos: number, taxable = true) {
 		const venueId = hotel === hotelA ? venueA : venueB;
-		const [dish] = await db.insert(s.diningMenuItems).values({ hotelId: hotel.id, diningItemId: venueId, name: `Dish ${++dishSeq}`, priceCentavos, taxable }).returning();
+		const [dish] = await db.insert(s.diningMenuItems).values({ hotelId: hotel.id, stationId: await stationIdFor(hotel.id), diningItemId: venueId, name: `Dish ${++dishSeq}`, priceCentavos, taxable }).returning();
 		return o.createDiningOrder({ hotelId: hotel.id, venueId, orderType: 'dine_in', lines: [{ menuItemId: dish!.id, quantity: 1 }] });
 	}
 	const orderRow = async (id: string) => (await db.select().from(s.diningOrders).where(eq(s.diningOrders.id, id)))[0]!;
@@ -175,7 +176,7 @@ describe.skipIf(!hasDb)('charge dining to a room (live DB)', async () => {
 	it('keeps a name already on the order, and shows the charge on the checkout invoice with its VAT', async () => {
 		const stay = await mkStay(hotelA, { guestName: 'Invoice Ivy', roomNumber: 'C-2' });
 		await payBase(hotelA, stay);
-		const [dish] = await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, diningItemId: venueA, name: 'Named dish', priceCentavos: 11_200 }).returning();
+		const [dish] = await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, stationId: await stationIdFor(hotelA.id), diningItemId: venueA, name: 'Named dish', priceCentavos: 11_200 }).returning();
 		const named = await o.createDiningOrder({ hotelId: hotelA.id, venueId: venueA, orderType: 'dine_in', guestName: 'Visitor Vic', lines: [{ menuItemId: dish!.id, quantity: 1 }] });
 		await charge(hotelA, named.id, stay.bookingId);
 		expect((await orderRow(named.id)).guestName).toBe('Visitor Vic');
@@ -209,7 +210,7 @@ describe.skipIf(!hasDb)('charge dining to a room (live DB)', async () => {
 		await o.cancelDiningOrder({ hotelId: hotelA.id, orderId: cancelled.id, reason: 'x' });
 		await expect(charge(hotelA, cancelled.id, stay.bookingId)).rejects.toThrow(/cancelled/);
 
-		const [dish] = await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, diningItemId: venueA, name: 'Online dish', priceCentavos: 5_000 }).returning();
+		const [dish] = await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, stationId: await stationIdFor(hotelA.id), diningItemId: venueA, name: 'Online dish', priceCentavos: 5_000 }).returning();
 		const waiting = await o.createDiningOrder({ hotelId: hotelA.id, venueId: venueA, orderType: 'takeaway', source: 'online', payMode: 'online', initialStatus: 'pending_payment', lines: [{ menuItemId: dish!.id, quantity: 1 }] });
 		await expect(charge(hotelA, waiting.id, stay.bookingId)).rejects.toThrow(/waiting for the guest to pay online/);
 

@@ -1,5 +1,6 @@
 import { businessDateFor } from './shared';
 import {
+	REPORT_SCOPES,
 	arAgingReport,
 	cashPositionReport,
 	cashflowReport,
@@ -7,7 +8,8 @@ import {
 	expenseReport,
 	paymentMethodBreakdown,
 	revenueBySourceReport,
-	toCsv
+	toCsv,
+	type ReportScope
 } from './reports';
 import { quickSalesReport } from './standalone-sales';
 
@@ -24,10 +26,15 @@ export const REPORTS = [
 
 export type ReportSlug = (typeof REPORTS)[number]['slug'];
 
+/** The reports that can be narrowed to Hotel or Dining. The others are not split by business line. */
+export const SCOPED_REPORTS: readonly string[] = ['daily-sales', 'cashflow', 'revenue-by-source', 'payment-methods'];
+
 const peso = (c: number) => (c / 100).toFixed(2);
 
 export interface RunReportResult {
 	name: string;
+	/** The business line this run covers; `all` for a report that is not split. */
+	scope: ReportScope;
 	kind: 'day' | 'range' | 'asOf';
 	columns: string[];
 	rows: (string | number)[][];
@@ -38,10 +45,15 @@ export interface RunReportResult {
 export async function runReport(
 	hotelId: string,
 	slug: string,
-	opts: { timezone: string; date?: string; from?: string; to?: string }
+	opts: { timezone: string; date?: string; from?: string; to?: string; scope?: ReportScope }
 ): Promise<RunReportResult | null> {
 	const meta = REPORTS.find((r) => r.slug === slug);
 	if (!meta) return null;
+	// Only the reports that can be split honour a scope; asking for one on the rest is ignored.
+	const scope: ReportScope = SCOPED_REPORTS.includes(slug) ? (opts.scope ?? 'all') : 'all';
+	const scopeName = REPORT_SCOPES.find((s) => s.key === scope)!.label;
+	const scopedName = (n: string) => (scope === 'all' ? n : `${n} — ${scopeName}`);
+	const scopeSummary = (): [string, string][] => (scope === 'all' ? [] : [['Scope', scopeName]]);
 	const today = businessDateFor(opts.timezone);
 	const date = opts.date || today;
 	const from = opts.from || `${today.slice(0, 7)}-01`;
@@ -54,6 +66,7 @@ export async function runReport(
 				new Intl.DateTimeFormat('en-PH', { timeZone: opts.timezone, hour: 'numeric', minute: '2-digit' }).format(d);
 			return {
 				name: meta.name,
+				scope,
 				kind: 'range',
 				columns: ['Date', 'Time', 'Items', 'Method', 'Amount'],
 				rows: r.rows.map((x) => [x.businessDate, fmtTime(x.createdAt), x.itemsSummary, x.method, peso(x.totalCentavos)]),
@@ -66,9 +79,10 @@ export async function runReport(
 			};
 		}
 		case 'daily-sales': {
-			const r = await dailySalesReport(hotelId, date);
+			const r = await dailySalesReport(hotelId, date, scope);
 			return {
-				name: meta.name,
+				name: scopedName(meta.name),
+				scope,
 				kind: 'day',
 				columns: ['Line', 'Amount'],
 				rows: [
@@ -85,8 +99,10 @@ export async function runReport(
 				],
 				summary: [
 					['Date', date],
+					...scopeSummary(),
 					['Gross revenue', peso(r.grossRevenueCentavos)],
-					['Net cash', peso(r.netCashCentavos)]
+					// A scope's net is its takings less its refunds; expenses are not split by business line.
+					[scope === 'all' ? 'Net cash' : 'Net of refunds', peso(r.netCashCentavos)]
 				]
 			};
 		}
@@ -94,6 +110,7 @@ export async function runReport(
 			const rows = await cashPositionReport(hotelId, from, to);
 			return {
 				name: meta.name,
+				scope,
 				kind: 'range',
 				columns: ['Account', 'Opening', 'In', 'Out', 'Closing'],
 				rows: rows.map((a) => [
@@ -111,9 +128,10 @@ export async function runReport(
 			};
 		}
 		case 'cashflow': {
-			const r = await cashflowReport(hotelId, from, to);
+			const r = await cashflowReport(hotelId, from, to, scope);
 			return {
-				name: meta.name,
+				name: scopedName(meta.name),
+				scope,
 				kind: 'range',
 				columns: ['Direction', 'Category', 'Count', 'Amount'],
 				rows: r.rows.map((x) => [
@@ -125,6 +143,7 @@ export async function runReport(
 				summary: [
 					['From', from],
 					['To', to],
+					...scopeSummary(),
 					['Total in', peso(r.totalInCentavos)],
 					['Total out', peso(r.totalOutCentavos)],
 					['Net', peso(r.totalInCentavos - r.totalOutCentavos)]
@@ -132,15 +151,17 @@ export async function runReport(
 			};
 		}
 		case 'revenue-by-source': {
-			const r = await revenueBySourceReport(hotelId, from, to);
+			const r = await revenueBySourceReport(hotelId, from, to, scope);
 			return {
-				name: meta.name,
+				name: scopedName(meta.name),
+				scope,
 				kind: 'range',
 				columns: ['Source', 'Amount'],
 				rows: r.rows.map((x) => [labelSource(x.source), peso(x.amountCentavos)]),
 				summary: [
 					['From', from],
 					['To', to],
+					...scopeSummary(),
 					['Total', peso(r.totalCentavos)]
 				]
 			};
@@ -149,6 +170,7 @@ export async function runReport(
 			const r = await expenseReport(hotelId, from, to);
 			return {
 				name: meta.name,
+				scope,
 				kind: 'range',
 				columns: ['Group', 'Category', 'Count', 'Gross', 'Input VAT'],
 				rows: r.rows.map((x) => [
@@ -167,15 +189,17 @@ export async function runReport(
 			};
 		}
 		case 'payment-methods': {
-			const r = await paymentMethodBreakdown(hotelId, from, to);
+			const r = await paymentMethodBreakdown(hotelId, from, to, scope);
 			return {
-				name: meta.name,
+				name: scopedName(meta.name),
+				scope,
 				kind: 'range',
 				columns: ['Method', 'Count', 'Amount'],
 				rows: r.rows.map((x) => [x.method, x.count, peso(x.amountCentavos)]),
 				summary: [
 					['From', from],
 					['To', to],
+					...scopeSummary(),
 					['Total', peso(r.totalCentavos)]
 				]
 			};
@@ -184,6 +208,7 @@ export async function runReport(
 			const r = await arAgingReport(hotelId, to);
 			return {
 				name: meta.name,
+				scope,
 				kind: 'asOf',
 				columns: ['Bucket', 'Accounts', 'Amount'],
 				rows: r.buckets.map((b) => [b.label, b.count, peso(b.amountCentavos)]),

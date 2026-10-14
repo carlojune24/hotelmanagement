@@ -30,7 +30,7 @@ export interface GuestBill extends BillTotals {
 }
 
 /** Orders with their lines and add-on names, oldest first. */
-async function loadOrders(hotelId: string, where: ReturnType<typeof eq>): Promise<(BillOrderInput & { guestName: string | null; orderType: string; tableLabel: string | null; venueId: string })[]> {
+async function loadOrders(hotelId: string, where: ReturnType<typeof eq>): Promise<(BillOrderInput & { guestName: string | null; orderType: string; tableLabel: string | null; venueId: string; deliveryAddress: string | null })[]> {
 	const orders = await db
 		.select()
 		.from(diningOrders)
@@ -57,6 +57,8 @@ async function loadOrders(hotelId: string, where: ReturnType<typeof eq>): Promis
 		paymentStatus: o.paymentStatus,
 		totalCentavos: o.totalCentavos,
 		vatCentavos: o.vatCentavos,
+		deliveryFeeCentavos: o.deliveryFeeCentavos,
+		deliveryAddress: o.deliveryAddress,
 		guestName: o.guestName,
 		orderType: o.orderType,
 		tableLabel: o.tableLabel,
@@ -134,7 +136,7 @@ export async function getBillForOrder(hotelId: string, orderId: string): Promise
 		...buildBill(orders),
 		...base,
 		venue,
-		where: o.tableLabel ? `Table ${o.tableLabel}` : o.orderType === 'takeaway' ? 'Takeaway' : o.orderType === 'pre_order' ? 'Pre-order' : 'Dine-in',
+		where: o.tableLabel ? `Table ${o.tableLabel}` : o.orderType === 'takeaway' ? (o.deliveryAddress ? 'Delivery' : 'Takeaway') : o.orderType === 'pre_order' ? 'Pre-order' : 'Dine-in',
 		guestName: o.guestName,
 		printedAtIso: new Date().toISOString()
 	};

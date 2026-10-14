@@ -374,6 +374,12 @@
 	const selectedHousekeeping = $derived(
 		selectedRoom ? (housekeepingByRoom.get(selectedRoom.roomId) ?? null) : null
 	);
+	/** Housekeeping's latest "no damages" sign-off per room. Shown next to the deposit as information;
+	 *  it never enables or blocks Settle deposit. */
+	const inspectionByRoom = $derived(new Map(data.inspections.map((i) => [i.roomId, i])));
+	const selectedInspection = $derived(
+		selectedRoom ? (inspectionByRoom.get(selectedRoom.roomId) ?? null) : null
+	);
 	/** Mirrors the server-side gate in `settleSecurityDeposit` exactly — kept in the client
 	 *  only to disable the button proactively; the real enforcement is server-side. */
 	const depositGateBlocked = $derived(
@@ -2427,6 +2433,17 @@
 										<p class="text-sm text-ink">
 											Held: {peso(roomDeposit.amountCentavos)}
 										</p>
+										{#if selectedInspection && selectedInspection.bookingId === o.bookingId}
+											<p class="mt-1 text-xs text-ok">
+												Housekeeping signed off: no damages{#if selectedInspection.inspectedByName}
+													by {selectedInspection.inspectedByName}{/if}
+												· {new Date(selectedInspection.inspectedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+											</p>
+										{:else if !selectedHousekeeping || selectedHousekeeping.pendingDamageReports.length === 0}
+											<p class="mt-1 text-xs text-ink-muted">
+												Housekeeping hasn't signed off on this room yet (no "No damages" recorded).
+											</p>
+										{/if}
 										<form
 											method="POST"
 											action="?/addDamageCharge"

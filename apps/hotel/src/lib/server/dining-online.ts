@@ -20,6 +20,8 @@ import { resolvePaymentAccount } from './finance/payments';
 import { getBirSettings, issueDiningDocument } from './finance/documents';
 import { getPaymongoClient, isOnlinePaymentEnabled } from './paymongo/client';
 import { createDiningOrder, OrderError, type OrderLineInput } from './dining-orders';
+import { heldForReservation } from './dining-hold';
+import { attachPreOrdersToCheck } from './dining-reservations';
 import { sendDiningOrderEmail } from './email/send-dining-order';
 import { listSlots, localParts } from '../dining-slots';
 
@@ -54,9 +56,14 @@ export interface OnlineOrderingConfig {
 	orderOpen: string | null;
 	orderClose: string | null;
 	prepMinutes: number;
+	/** 0 = today only; the order page offers today plus this many days. */
+	orderAheadDays: number;
 	pickupNote: string | null;
 	canPayOnline: boolean;
 	canPayAtVenue: boolean;
+	/** The venue delivers online orders, for `deliveryFeeCentavos` on top. */
+	deliveryEnabled: boolean;
+	deliveryFeeCentavos: number;
 }
 
 export async function loadOnlineOrderingConfig(hotelId: string, venueId: string): Promise<OnlineOrderingConfig | null> {
@@ -75,16 +82,29 @@ export async function loadOnlineOrderingConfig(hotelId: string, venueId: string)
 		orderOpen: v.orderOpen,
 		orderClose: v.orderClose,
 		prepMinutes: v.prepMinutes,
+		orderAheadDays: v.orderAheadDays,
 		pickupNote: v.pickupNote,
 		canPayOnline,
-		canPayAtVenue
+		canPayAtVenue,
+		deliveryEnabled: v.deliveryEnabled,
+		deliveryFeeCentavos: v.deliveryFeeCentavos
 	};
 }
 
 /** Pickup times a guest can choose on `date`: every 15 minutes inside the ordering hours, at least
  *  the prep time from now, within the next week. */
-export function pickupSlots(cfg: Pick<OnlineOrderingConfig, 'orderOpen' | 'orderClose' | 'prepMinutes'>, date: string, tz: string, now: Date) {
+export function pickupSlots(
+	cfg: Pick<OnlineOrderingConfig, 'orderOpen' | 'orderClose' | 'prepMinutes'> & { orderAheadDays?: number },
+	date: string,
+	tz: string,
+	now: Date
+) {
 	if (!cfg.orderOpen || !cfg.orderClose) return [];
+	// Calendar days, in the hotel's own timezone: 0 means today only, whatever the time is now.
+	const ahead = Math.max(0, Math.min(6, cfg.orderAheadDays ?? 6));
+	const lastDay = new Date(`${localParts(now, tz).date}T00:00:00Z`);
+	lastDay.setUTCDate(lastDay.getUTCDate() + ahead);
+	if (date > lastDay.toISOString().slice(0, 10)) return [];
 	return listSlots(
 		{ seatingOpen: cfg.orderOpen, lastSeating: cfg.orderClose, slotMinutes: 15, turnMinutes: 15, minNoticeMinutes: cfg.prepMinutes, advanceDays: 7, maxPartySize: 1 },
 		date,
@@ -112,6 +132,9 @@ export interface PlaceOnlineOrderInput {
 	guestEmail?: string | null;
 	remarks?: string | null;
 	payMode: 'online' | 'venue';
+	/** Takeaway only: collect it (default) or have it delivered. The fee is the venue's own setting. */
+	fulfilment?: 'pickup' | 'delivery';
+	deliveryAddress?: string | null;
 	lines: OrderLineInput[];
 	now?: Date;
 }
@@ -120,15 +143,34 @@ export interface PlaceOnlineOrderInput {
  * Places a guest's online order. Takeaway needs a valid pickup time; a pre-order attaches to the
  * guest's own reservation (proved by its ticket token) and is served at their table time. Paying
  * online starts the order as `pending_payment`, invisible to the kitchen until PayMongo confirms;
- * paying at the restaurant is only allowed where the venue permits it and goes straight to the kitchen.
+ * paying at the restaurant is only allowed where the venue permits it. Either way a takeaway or delivery
+ * order then waits as `pending_acceptance` until Dining accepts it (see `acceptOrder`) and only then
+ * reaches the kitchen. A pre-order for a table reservation skips that step: the reservation is what staff
+ * already confirm, and it is held until its prep time.
  */
 export async function placeOnlineOrder(
 	input: PlaceOnlineOrderInput
-): Promise<{ id: string; code: string; accessToken: string; status: 'pending_payment' | 'new'; totalCentavos: number }> {
+): Promise<{
+	id: string;
+	code: string;
+	accessToken: string;
+	status: 'pending_payment' | 'pending_acceptance' | 'new';
+	totalCentavos: number;
+}> {
 	const cfg = await loadOnlineOrderingConfig(input.hotelId, input.venueId);
 	if (!cfg || !cfg.enabled) throw new OrderError('Online ordering is not available for this venue right now.');
 	if (input.payMode === 'online' && !cfg.canPayOnline) throw new OrderError('Online payment is not available. Please choose to pay at the restaurant.');
 	if (input.payMode === 'venue' && !cfg.canPayAtVenue) throw new OrderError('This venue takes online orders with online payment only.');
+
+	// Delivery is only for a takeaway order, only where the venue offers it, and needs an address.
+	// A guest never names the fee: it is read from the venue here.
+	const delivering = input.orderType === 'takeaway' && input.fulfilment === 'delivery';
+	const deliveryAddress = input.deliveryAddress?.trim() ?? '';
+	if (delivering) {
+		if (!cfg.deliveryEnabled) throw new OrderError('This venue does not deliver. Please choose pickup.');
+		if (deliveryAddress.length < 8) throw new OrderError('Please enter the full address to deliver to.');
+		if (deliveryAddress.length > 300) throw new OrderError('That address is too long.');
+	}
 
 	const name = input.guestName.trim();
 	const phone = input.guestPhone.trim();
@@ -175,12 +217,14 @@ export async function placeOnlineOrder(
 				eq(diningOrders.source, 'online'),
 				eq(diningOrders.guestPhone, phone),
 				eq(diningOrders.paymentStatus, 'unpaid'),
-				inArray(diningOrders.status, ['pending_payment', 'new', 'accepted', 'preparing'])
+				inArray(diningOrders.status, ['pending_payment', 'pending_acceptance', 'new', 'accepted', 'preparing'])
 			)
 		);
 	if (Number(n) >= 3) throw new OrderError('You already have several open orders. Please wait for them to be ready or contact us.');
 
-	const status = input.payMode === 'online' ? 'pending_payment' : 'new';
+	// Dining accepts a takeaway/delivery order before the kitchen sees it; a reservation pre-order is automatic.
+	const afterPayment = input.orderType === 'pre_order' ? 'new' : 'pending_acceptance';
+	const status = input.payMode === 'online' ? 'pending_payment' : afterPayment;
 	const created = await createDiningOrder({
 		hotelId: input.hotelId,
 		venueId: input.venueId,
@@ -194,11 +238,14 @@ export async function placeOnlineOrder(
 		source: 'online',
 		pickupAt,
 		payMode: input.payMode,
+		fulfilment: delivering ? 'delivery' : 'pickup',
+		deliveryAddress: delivering ? deliveryAddress : null,
+		deliveryFeeCentavos: delivering ? cfg.deliveryFeeCentavos : 0,
 		initialStatus: status
 	});
 
-	// Paying at the restaurant: the order is already in the kitchen, so confirm it now.
-	if (status === 'new' && input.guestEmail) void sendDiningOrderEmail(created.id, 'confirmation');
+	// Paying at the restaurant: the order is placed, so confirm we have it now.
+	if (status !== 'pending_payment' && input.guestEmail) void sendDiningOrderEmail(created.id, 'confirmation');
 	return { ...created, status };
 }
 
@@ -253,6 +300,15 @@ export async function startDiningCheckout(args: {
 			quantity: 1
 		};
 	});
+	if (order.deliveryFeeCentavos > 0) {
+		lineItems.push({
+			currency: 'PHP',
+			amount: order.deliveryFeeCentavos,
+			name: 'Delivery fee',
+			description: 'VAT included',
+			quantity: 1
+		});
+	}
 	const sum = lineItems.reduce((s, l) => s + l.amount, 0);
 	if (sum !== order.totalCentavos) throw new OrderError('This order could not be priced for payment. Please contact the restaurant.');
 
@@ -389,7 +445,8 @@ export async function confirmDiningPayment(args: {
 		await tx
 			.update(diningOrders)
 			.set({
-				status: 'new',
+				// Takeaway/delivery waits for Dining to accept; a reservation pre-order goes on as before.
+				status: order.orderType === 'pre_order' ? 'new' : 'pending_acceptance',
 				paymentStatus: 'paid',
 				paymentMethod: 'paymongo',
 				businessDate,
@@ -399,6 +456,17 @@ export async function confirmDiningPayment(args: {
 				updatedAt: new Date()
 			})
 			.where(eq(diningOrders.id, order.id));
+
+		// A pre-order paid after its party was already seated joins that table's bill now; otherwise it
+		// would sit with no table. If the table carries someone else's bill it is left for staff to place.
+		if (order.orderType === 'pre_order' && order.reservationId) {
+			const [res] = await tx
+				.select({ id: diningReservations.id, diningItemId: diningReservations.diningItemId, status: diningReservations.status })
+				.from(diningReservations)
+				.where(eq(diningReservations.id, order.reservationId))
+				.limit(1);
+			if (res?.status === 'seated') await attachPreOrdersToCheck(tx, order.hotelId, res, { onOccupied: 'skip' });
+		}
 		return { handled: true, confirmed: true, needsRefund: false, hotelId: order.hotelId, paymentRowId };
 	});
 
@@ -507,6 +575,14 @@ export interface GuestOrderView {
 	remarks: string | null;
 	totalCentavos: number;
 	vatCentavos: number;
+	/** 'delivery' when it is being brought to `deliveryAddress`; the fee is already in `totalCentavos`. */
+	fulfilment: 'pickup' | 'delivery';
+	deliveryFeeCentavos: number;
+	deliveryAddress: string | null;
+	/** Set once staff have sent the delivery out with a rider. */
+	riderName: string | null;
+	riderPhone: string | null;
+	outForDeliveryAt: string | null;
 	pickupAt: string | null;
 	pickupLocal: { date: string; time: string } | null;
 	createdAt: string;
@@ -517,6 +593,10 @@ export interface GuestOrderView {
 	canRequestCancel: boolean;
 	needsPayment: boolean;
 	pickupNote: string | null;
+	/** A pre-order not yet released to the kitchen: it is paid/placed but will be started later. */
+	held: boolean;
+	/** When it will be started (hotel-local), unless the party is seated sooner. Null when not held. */
+	releaseLocal: { date: string; time: string } | null;
 	items: { id: string; name: string; quantity: number; remarks: string | null; addons: string[]; lineTotalCentavos: number }[];
 	messages: { id: string; direction: string; body: string; createdAt: string }[];
 	refund: { amountCentavos: number; method: string | null; referenceNo: string | null; at: string } | null;
@@ -527,7 +607,13 @@ export interface GuestOrderView {
 export async function getOrderForGuest(hotelId: string, timezone: string, code: string, token: string): Promise<GuestOrderView | null> {
 	const order = await loadGuestOrder(hotelId, code, token);
 	if (!order) return null;
-	const [venue] = await db.select({ title: diningItems.title, pickupNote: diningItems.pickupNote }).from(diningItems).where(eq(diningItems.id, order.diningItemId)).limit(1);
+	const [venue] = await db.select({ title: diningItems.title, pickupNote: diningItems.pickupNote, prepMinutes: diningItems.prepMinutes }).from(diningItems).where(eq(diningItems.id, order.diningItemId)).limit(1);
+	const [heldRow] = await db.select({ id: diningOrders.id }).from(diningOrders).where(and(eq(diningOrders.id, order.id), heldForReservation)).limit(1);
+	let releaseLocal: { date: string; time: string } | null = null;
+	if (heldRow && order.reservationId) {
+		const [r] = await db.select({ startsAt: diningReservations.startsAt }).from(diningReservations).where(eq(diningReservations.id, order.reservationId)).limit(1);
+		if (r) releaseLocal = localParts(new Date(r.startsAt.getTime() - (venue?.prepMinutes ?? 20) * 60_000), timezone);
+	}
 	const items = await db.select().from(diningOrderItems).where(eq(diningOrderItems.orderId, order.id)).orderBy(asc(diningOrderItems.sortOrder));
 	const addons = items.length ? await db.select().from(diningOrderItemAddons).where(inArray(diningOrderItemAddons.orderItemId, items.map((i) => i.id))) : [];
 	const messages = await db.select().from(diningOrderMessages).where(eq(diningOrderMessages.orderId, order.id)).orderBy(asc(diningOrderMessages.createdAt));
@@ -544,7 +630,7 @@ export async function getOrderForGuest(hotelId: string, timezone: string, code: 
 		.limit(1);
 
 	const paid = order.paymentStatus === 'paid';
-	const early = order.status === 'pending_payment' || order.status === 'new';
+	const early = order.status === 'pending_payment' || order.status === 'pending_acceptance' || order.status === 'new';
 	return {
 		id: order.id,
 		code: order.code,
@@ -557,6 +643,12 @@ export async function getOrderForGuest(hotelId: string, timezone: string, code: 
 		remarks: order.remarks,
 		totalCentavos: order.totalCentavos,
 		vatCentavos: order.vatCentavos,
+		fulfilment: order.fulfilment === 'delivery' ? 'delivery' : 'pickup',
+		deliveryFeeCentavos: order.deliveryFeeCentavos,
+		deliveryAddress: order.deliveryAddress,
+		riderName: order.riderName,
+		riderPhone: order.riderPhone,
+		outForDeliveryAt: order.outForDeliveryAt?.toISOString() ?? null,
 		pickupAt: order.pickupAt?.toISOString() ?? null,
 		pickupLocal: order.pickupAt ? localParts(order.pickupAt, timezone) : null,
 		createdAt: order.createdAt.toISOString(),
@@ -566,9 +658,11 @@ export async function getOrderForGuest(hotelId: string, timezone: string, code: 
 		// Unpaid and not started: the guest may cancel it themselves.
 		canCancel: !paid && early,
 		// Paid: ask the restaurant, until the food is ready.
-		canRequestCancel: paid && ['new', 'accepted', 'preparing'].includes(order.status) && !order.cancelRequestedAt,
+		canRequestCancel: paid && ['pending_acceptance', 'new', 'accepted', 'preparing'].includes(order.status) && !order.cancelRequestedAt,
 		needsPayment: order.status === 'pending_payment' && order.payMode === 'online',
 		pickupNote: venue?.pickupNote ?? null,
+		held: !!heldRow,
+		releaseLocal,
 		items: items.map((i) => ({
 			id: i.id,
 			name: i.name,
@@ -591,7 +685,7 @@ export async function cancelDiningOrderAsGuest(hotelId: string, code: string, to
 		const [order] = await tx.select().from(diningOrders).where(eq(diningOrders.id, found.id)).for('update');
 		if (!order) throw new OrderError('We could not find that order.');
 		if (order.paymentStatus !== 'unpaid') throw new OrderError('This order is paid. Please send a cancellation request instead.');
-		if (order.status !== 'pending_payment' && order.status !== 'new') throw new OrderError('The kitchen has already started this order. Please contact the restaurant.');
+		if (order.status !== 'pending_payment' && order.status !== 'pending_acceptance' && order.status !== 'new') throw new OrderError('The kitchen has already started this order. Please contact the restaurant.');
 		await tx.update(diningOrders).set({ status: 'cancelled', cancelledAt: new Date(), cancelReason: 'Cancelled by the guest.', updatedAt: new Date() }).where(eq(diningOrders.id, order.id));
 		const pending = await tx
 			.select({ id: diningPayments.id, session: diningPayments.paymongoCheckoutSessionId })
@@ -612,7 +706,7 @@ export async function requestDiningCancellation(hotelId: string, code: string, t
 	const found = await loadGuestOrder(hotelId, code, token);
 	if (!found) throw new OrderError('We could not find that order.');
 	if (found.paymentStatus !== 'paid') throw new OrderError('This order has not been paid, so you can cancel it directly.');
-	if (!['new', 'accepted', 'preparing'].includes(found.status)) throw new OrderError('This order is already ready or finished. Please contact the restaurant.');
+	if (!['pending_acceptance', 'new', 'accepted', 'preparing'].includes(found.status)) throw new OrderError('This order is already ready or finished. Please contact the restaurant.');
 	if (found.cancelRequestedAt) throw new OrderError('You have already asked to cancel this order. The restaurant will reply here.');
 	const text = note.trim().slice(0, 500);
 	await db.transaction(async (tx) => {
@@ -630,7 +724,7 @@ export async function respondToDiningCancellation(args: { hotelId: string; order
 		if (!order.cancelRequestedAt) throw new OrderError('There is no cancellation request on this order.');
 		const note = args.message?.trim().slice(0, 500);
 		if (args.approve) {
-			if (!['new', 'accepted', 'preparing'].includes(order.status)) throw new OrderError(`A ${order.status} order can't be cancelled.`);
+			if (!['pending_acceptance', 'new', 'accepted', 'preparing'].includes(order.status)) throw new OrderError(`A ${order.status} order can't be cancelled.`);
 			await tx
 				.update(diningOrders)
 				.set({ status: 'cancelled', cancelledAt: new Date(), cancelReason: 'Cancelled at the guest\'s request.', cancelRequestedAt: null, updatedAt: new Date() })

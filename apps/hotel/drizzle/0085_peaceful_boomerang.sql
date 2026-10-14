@@ -1,0 +1,1 @@
+ALTER TABLE "dining_items" ADD COLUMN "order_ahead_days" integer DEFAULT 6 NOT NULL;
