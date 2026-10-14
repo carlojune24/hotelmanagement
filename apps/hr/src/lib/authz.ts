@@ -40,6 +40,34 @@ export const ROLE_LABEL: Record<Role, string> = {
 	hr_clerk: 'HR clerk'
 };
 
+/** One line each, shown on Users so whoever assigns a role knows what it is. */
+export const ROLE_SUMMARY: Record<Role, string> = {
+	main_hr: 'Runs HR for the whole company: registers and assigns people, decides approvals, receives DTRs, runs payroll, loans and remittances.',
+	owner_readonly: 'Can look at everything across the company, but cannot change, approve or run anything.',
+	business_manager:
+		'Runs one establishment day to day: roster, DTR, leave and overtime filings. Can read released payslips of their own people. Cannot approve.',
+	hr_clerk:
+		'Does the same day-to-day work as a manager for their establishment, but cannot see payslips or any pay. Cannot approve.'
+};
+
+/**
+ * What the roles can do, worked out from `ROLE_CAPS` so this table can never disagree with what the
+ * app actually enforces. `cap` is a representative capability for the row.
+ */
+export const ABILITY_ROWS: Array<{ label: string; cap: string }> = [
+	{ label: 'See the establishment and its employees', cap: 'employee:read' },
+	{ label: 'Build and submit the roster', cap: 'schedule:write' },
+	{ label: 'Import biometrics, edit and send the DTR', cap: 'dtr:write' },
+	{ label: 'File leave and overtime (Main HR approves)', cap: 'leave:file' },
+	{ label: 'Propose memos (Main HR approves)', cap: 'memo:propose' },
+	{ label: 'Read released payslips', cap: 'payslip:read' },
+	{ label: 'Approve or reject filings', cap: 'approval:decide' },
+	{ label: 'Register employees and assign them', cap: 'employee:write' },
+	{ label: 'Run payroll, loans and remittances', cap: 'payroll:write' }
+];
+
+export const can = (role: Role, cap: string) => roleCan(ROLE_CAPS[role], cap);
+
 export function roleCan(capabilities: string[], cap: string): boolean {
 	if (capabilities.includes('*') || capabilities.includes(cap)) return true;
 	const [domain, action] = cap.split(':');

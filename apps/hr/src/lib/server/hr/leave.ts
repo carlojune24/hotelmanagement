@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import {
 	employees,
+	establishments,
 	leaveAdjustments,
 	leaveRequests,
 	leaveTypes
@@ -66,18 +67,28 @@ const asValues = (p: LeavePolicy | LeaveTypeInput) => ({
 	active: p.active
 });
 
-/** Adds any default leave the establishment does not have yet; never touches ones it has edited. */
-export async function seedLeaveDefaults(establishmentId: string) {
+/** The company a establishment belongs to — leave types are the company's, not the establishment's. */
+async function orgOf(establishmentId: string): Promise<string> {
+	const [row] = await db
+		.select({ organizationId: establishments.organizationId })
+		.from(establishments)
+		.where(eq(establishments.id, establishmentId));
+	if (!row) throw new LeaveError('That establishment does not exist.');
+	return row.organizationId;
+}
+
+/** Adds any default leave the company does not have yet; never touches ones it has edited. */
+export async function seedLeaveDefaultsForOrg(organizationId: string) {
 	const existing = await db
 		.select({ code: leaveTypes.code })
 		.from(leaveTypes)
-		.where(eq(leaveTypes.establishmentId, establishmentId));
+		.where(eq(leaveTypes.organizationId, organizationId));
 	const have = new Set(existing.map((e) => e.code));
 	const missing = LEAVE_DEFAULTS.filter((d) => !have.has(d.code));
 	if (missing.length === 0) return 0;
 	await db.insert(leaveTypes).values(
 		missing.map((d) => ({
-			establishmentId,
+			organizationId,
 			...asValues(d),
 			statutory: d.statutory,
 			sortOrder: LEAVE_DEFAULTS.indexOf(d)
@@ -87,68 +98,83 @@ export async function seedLeaveDefaults(establishmentId: string) {
 }
 
 /** Puts the statutory leaves back to the law's defaults (company leaves are left alone). */
-export async function restoreStatutoryDefaults(establishmentId: string) {
-	await seedLeaveDefaults(establishmentId);
+export async function restoreStatutoryDefaultsForOrg(organizationId: string) {
+	await seedLeaveDefaultsForOrg(organizationId);
 	for (const d of LEAVE_DEFAULTS.filter((x) => x.statutory)) {
 		await db
 			.update(leaveTypes)
 			.set({ ...asValues(d), updatedAt: new Date() })
-			.where(and(eq(leaveTypes.establishmentId, establishmentId), eq(leaveTypes.code, d.code)));
+			.where(and(eq(leaveTypes.organizationId, organizationId), eq(leaveTypes.code, d.code)));
 	}
 }
 
-export async function listLeaveTypes(establishmentId: string): Promise<LeaveTypeRow[]> {
-	await seedLeaveDefaults(establishmentId);
+export async function listLeaveTypesForOrg(organizationId: string): Promise<LeaveTypeRow[]> {
+	await seedLeaveDefaultsForOrg(organizationId);
 	return db
 		.select()
 		.from(leaveTypes)
-		.where(eq(leaveTypes.establishmentId, establishmentId))
+		.where(eq(leaveTypes.organizationId, organizationId))
 		.orderBy(asc(leaveTypes.sortOrder), asc(leaveTypes.name));
 }
 
-export async function getLeaveType(establishmentId: string, id: string) {
+export async function getLeaveTypeForOrg(organizationId: string, id: string) {
 	const [row] = await db
 		.select()
 		.from(leaveTypes)
-		.where(and(eq(leaveTypes.establishmentId, establishmentId), eq(leaveTypes.id, id)));
+		.where(and(eq(leaveTypes.organizationId, organizationId), eq(leaveTypes.id, id)));
 	return row ?? null;
 }
 
 /** Creates (no `id`) or amends a leave type. Returns the row before and after, for the audit trail. */
-export async function saveLeaveType(establishmentId: string, input: LeaveTypeInput, id?: string) {
+export async function saveLeaveTypeForOrg(organizationId: string, input: LeaveTypeInput, id?: string) {
 	const [dupe] = await db
 		.select({ id: leaveTypes.id })
 		.from(leaveTypes)
-		.where(and(eq(leaveTypes.establishmentId, establishmentId), eq(leaveTypes.code, input.code)));
+		.where(and(eq(leaveTypes.organizationId, organizationId), eq(leaveTypes.code, input.code)));
 	if (dupe && dupe.id !== id) throw new LeaveError(`There is already a leave with the code ${input.code}.`);
 
 	if (!id) {
 		const [after] = await db
 			.insert(leaveTypes)
-			.values({ establishmentId, ...asValues(input), sortOrder: 100 })
+			.values({ organizationId, ...asValues(input), sortOrder: 100 })
 			.returning();
 		return { before: null, after: after! };
 	}
-	const before = await getLeaveType(establishmentId, id);
+	const before = await getLeaveTypeForOrg(organizationId, id);
 	if (!before) throw new LeaveError('That leave no longer exists.');
 	const [after] = await db
 		.update(leaveTypes)
 		.set({ ...asValues(input), updatedAt: new Date() })
-		.where(and(eq(leaveTypes.establishmentId, establishmentId), eq(leaveTypes.id, id)))
+		.where(and(eq(leaveTypes.organizationId, organizationId), eq(leaveTypes.id, id)))
 		.returning();
 	return { before, after: after! };
 }
 
-export async function deleteLeaveType(establishmentId: string, id: string) {
+export async function deleteLeaveTypeForOrg(organizationId: string, id: string) {
 	const [used] = await db
 		.select({ n: sql<number>`count(*)::int` })
 		.from(leaveRequests)
-		.where(and(eq(leaveRequests.establishmentId, establishmentId), eq(leaveRequests.leaveTypeId, id)));
+		.where(eq(leaveRequests.leaveTypeId, id));
 	if ((used?.n ?? 0) > 0) {
 		throw new LeaveError('This leave has requests on file, so it can’t be deleted. Switch it off instead.');
 	}
-	await db.delete(leaveTypes).where(and(eq(leaveTypes.establishmentId, establishmentId), eq(leaveTypes.id, id)));
+	await db.delete(leaveTypes).where(and(eq(leaveTypes.organizationId, organizationId), eq(leaveTypes.id, id)));
 }
+
+// The same operations, addressed by establishment (the company is looked up): what the filing flow,
+// the roster and the DTR use.
+export const seedLeaveDefaults = async (establishmentId: string) =>
+	seedLeaveDefaultsForOrg(await orgOf(establishmentId));
+export const restoreStatutoryDefaults = async (establishmentId: string) =>
+	restoreStatutoryDefaultsForOrg(await orgOf(establishmentId));
+export const listLeaveTypes = async (establishmentId: string) =>
+	listLeaveTypesForOrg(await orgOf(establishmentId));
+export const getLeaveType = async (establishmentId: string, id: string) =>
+	getLeaveTypeForOrg(await orgOf(establishmentId), id);
+export const saveLeaveType = async (establishmentId: string, input: LeaveTypeInput, id?: string) =>
+	saveLeaveTypeForOrg(await orgOf(establishmentId), input, id);
+export const deleteLeaveType = async (establishmentId: string, id: string) =>
+	deleteLeaveTypeForOrg(await orgOf(establishmentId), id);
 
 // ---------------------------------------------------------------------------
 // Requests

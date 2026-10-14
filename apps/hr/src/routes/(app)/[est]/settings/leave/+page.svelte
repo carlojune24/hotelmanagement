@@ -6,57 +6,33 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
-	import { Textarea } from '$lib/components/ui/textarea/index.js';
-	import * as Table from '$lib/components/ui/table/index.js';
+import * as Table from '$lib/components/ui/table/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
-	import { CALENDAR_KINDS, CALENDAR_KIND_LABEL, EMPLOYMENT_TYPES, EMPLOYMENT_TYPE_LABEL } from '$lib/leave';
+import { CALENDAR_KINDS, CALENDAR_KIND_LABEL } from '$lib/leave';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
-	const base = $derived(`/${page.params.est}/management`);
+const base = $derived(`/${page.params.est}`);
 
 	type LeaveType = PageData['types'][number];
 	type Day = PageData['calendar'][number];
 
 	let tab = $state<'types' | 'calendar'>('types');
-	let editingType = $state<LeaveType | 'new' | null>(null);
-	let editingDay = $state<Day | 'new' | null>(null);
-	let deletingType = $state<LeaveType | null>(null);
+let editingDay = $state<Day | 'new' | null>(null);
 
 	$effect(() => {
 		if (form?.error) toast.error(form.error);
 		else if (form?.ok) {
 			toast.success(form.ok);
-			editingType = null;
-			editingDay = null;
-			deletingType = null;
-		}
+editingDay = null;
+}
 	});
 
-	const blankType: LeaveType = {
-		id: '',
-		code: '',
-		name: '',
-		description: '',
-		statutory: false,
-		paid: true,
-		daysPerYear: 0,
-		dayCount: 'working',
-		minServiceMonths: 0,
-		employmentTypes: [],
-		sexRestriction: null,
-		halfDayAllowed: false,
-		carryOverDays: 0,
-		cashConvertible: false,
-		requiresDocument: false,
-		active: true
-	};
-	const typeDraft = $derived(editingType === 'new' || editingType === null ? blankType : editingType);
 	const dayDraft = $derived(
 		editingDay && editingDay !== 'new'
 			? editingDay
@@ -85,9 +61,13 @@
 		<div>
 			<h1 class="text-xl font-semibold tracking-tight text-ink">Leave &amp; holidays</h1>
 			<p class="text-sm text-ink-muted">
-				The rules leave is filed under, and the holidays and memorandums that cover everyone's schedule.
-				Changing a rule affects new requests only; leave already approved keeps what it was filed with.
-			</p>
+The rules leave is filed under, and the holidays and memorandums that cover everyone's schedule.
+{#if data.canEdit}
+Changing a rule affects new requests only; leave already approved keeps what it was filed with.
+{:else}
+<strong class="font-medium text-ink">View only</strong> — Main HR sets these for your establishment.
+{/if}
+</p>
 		</div>
 		<Button variant="outline" href="{base}/settings">← Settings</Button>
 	</div>
@@ -100,15 +80,12 @@
 	{#if tab === 'types'}
 		<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
 			<p class="text-sm text-ink-muted">
-				Statutory leaves follow Philippine law as commonly summarised. Check them with DOLE or your
-				counsel before relying on them.
+Leave types are set once by Main HR for the whole company and used by every establishment.
+Statutory leaves follow Philippine law as commonly summarised.
 			</p>
-			<div class="flex gap-2">
-				<form method="POST" action="?/restoreDefaults" use:enhance class="contents">
-					<Button type="submit" variant="outline" size="sm">Restore legal defaults</Button>
-				</form>
-				<Button size="sm" onclick={() => (editingType = 'new')}><PlusIcon class="size-4" /> Add leave</Button>
-			</div>
+{#if data.canEditTypes}
+<Button variant="outline" size="sm" href="/settings?tab=leave">Change leave types in Settings</Button>
+{/if}
 		</div>
 		<div class="overflow-x-auto rounded-lg border border-border bg-surface">
 			<Table.Root>
@@ -117,8 +94,7 @@
 						<Table.Head>Leave</Table.Head>
 						<Table.Head>Rule</Table.Head>
 						<Table.Head>Pay</Table.Head>
-						<Table.Head>On</Table.Head>
-						<Table.Head class="w-24"></Table.Head>
+<Table.Head>On</Table.Head>
 					</Table.Row>
 				</Table.Header>
 				<Table.Body>
@@ -132,16 +108,7 @@
 							<Table.Cell class="text-sm">{rule(t)}</Table.Cell>
 							<Table.Cell>{t.paid ? 'Paid' : 'Unpaid'}</Table.Cell>
 							<Table.Cell>{t.active ? 'Yes' : 'Off'}</Table.Cell>
-							<Table.Cell class="text-right whitespace-nowrap">
-								<Button variant="ghost" size="icon" class="size-8" aria-label="Edit {t.name}" onclick={() => (editingType = t)}>
-									<PencilIcon class="size-4" />
-								</Button>
-								{#if !t.statutory}
-									<Button variant="ghost" size="icon" class="size-8" aria-label="Delete {t.name}" onclick={() => (deletingType = t)}>
-										<Trash2Icon class="size-4" />
-									</Button>
-								{/if}
-							</Table.Cell>
+
 						</Table.Row>
 					{/each}
 				</Table.Body>
@@ -161,7 +128,9 @@
 				<Button variant="outline" size="icon" href="?year={data.year + 1}" aria-label="Next year">
 					<ChevronRightIcon class="size-4" />
 				</Button>
-				<Button size="sm" onclick={() => (editingDay = 'new')}><PlusIcon class="size-4" /> Add day</Button>
+{#if data.canEdit}
+<Button size="sm" onclick={() => (editingDay = 'new')}><PlusIcon class="size-4" /> Add day</Button>
+{/if}
 			</div>
 		</div>
 		<div class="overflow-x-auto rounded-lg border border-border bg-surface">
@@ -171,8 +140,8 @@
 						<Table.Head>Date</Table.Head>
 						<Table.Head>Name</Table.Head>
 						<Table.Head>Kind</Table.Head>
-						<Table.Head>Credited</Table.Head>
-						<Table.Head class="w-24"></Table.Head>
+<Table.Head>Credited</Table.Head>
+{#if data.canEdit}<Table.Head class="w-24"></Table.Head>{/if}
 					</Table.Row>
 				</Table.Header>
 				<Table.Body>
@@ -184,21 +153,23 @@
 							<Table.Cell>
 								{c.creditMinutes === null ? 'Full day' : `${c.creditMinutes / 60} h`}{c.waiveLateness ? ' · late/under waived' : ''}
 							</Table.Cell>
-							<Table.Cell class="text-right whitespace-nowrap">
-								<Button variant="ghost" size="icon" class="size-8" aria-label="Edit {c.name}" onclick={() => (editingDay = c)}>
-									<PencilIcon class="size-4" />
-								</Button>
-								<form method="POST" action="?/deleteDay" use:enhance class="inline">
-									<input type="hidden" name="id" value={c.id} />
-									<Button type="submit" variant="ghost" size="icon" class="size-8" aria-label="Delete {c.name}">
-										<Trash2Icon class="size-4" />
-									</Button>
-								</form>
-							</Table.Cell>
+{#if data.canEdit}
+<Table.Cell class="text-right whitespace-nowrap">
+<Button variant="ghost" size="icon" class="size-8" aria-label="Edit {c.name}" onclick={() => (editingDay = c)}>
+<PencilIcon class="size-4" />
+</Button>
+<form method="POST" action="?/deleteDay" use:enhance class="inline">
+<input type="hidden" name="id" value={c.id} />
+<Button type="submit" variant="ghost" size="icon" class="size-8" aria-label="Delete {c.name}">
+<Trash2Icon class="size-4" />
+</Button>
+</form>
+</Table.Cell>
+{/if}
 						</Table.Row>
 					{:else}
 						<Table.Row>
-							<Table.Cell colspan={5} class="py-10 text-center text-sm text-ink-muted">
+<Table.Cell colspan={data.canEdit ? 5 : 4} class="py-10 text-center text-sm text-ink-muted">
 								No holidays or memorandums entered for {data.year}.
 							</Table.Cell>
 						</Table.Row>
@@ -208,112 +179,6 @@
 		</div>
 	{/if}
 </div>
-
-<Dialog.Root open={editingType !== null} onOpenChange={(o) => !o && (editingType = null)}>
-	<Dialog.Content class="flex max-h-[90vh] flex-col sm:max-w-2xl">
-		<Dialog.Header>
-			<Dialog.Title>{editingType === 'new' ? 'Add leave' : `Edit ${typeDraft.name}`}</Dialog.Title>
-			{#if typeDraft.description}
-				<Dialog.Description>{typeDraft.description}</Dialog.Description>
-			{/if}
-		</Dialog.Header>
-		{#key editingType === 'new' ? 'new' : typeDraft.id}
-			<form method="POST" action="?/saveType" use:enhance class="flex min-h-0 flex-1 flex-col gap-3">
-				<input type="hidden" name="id" value={typeDraft.id} />
-				<div class="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-					<div class="grid gap-3 sm:grid-cols-[8rem_1fr]">
-						<div>
-							<Label for="ltCode">Code</Label>
-							<Input id="ltCode" name="code" value={typeDraft.code} class="mt-1 font-mono uppercase" required maxlength={8} />
-						</div>
-						<div>
-							<Label for="ltName">Name</Label>
-							<Input id="ltName" name="name" value={typeDraft.name} class="mt-1" required />
-						</div>
-					</div>
-					<div>
-						<Label for="ltDesc">Notes</Label>
-						<Textarea id="ltDesc" name="description" value={typeDraft.description} rows={2} class="mt-1" />
-					</div>
-					<div class="grid gap-3 sm:grid-cols-3">
-						<div>
-							<Label for="ltDays">Days per year</Label>
-							<Input id="ltDays" name="daysPerYear" type="number" min="0" step="0.5" value={typeDraft.daysPerYear} class="mt-1" />
-							<p class="mt-1 text-xs text-ink-muted">0 = no fixed allowance</p>
-						</div>
-						<div>
-							<Label for="ltCount">Days counted as</Label>
-							<select id="ltCount" name="dayCount" class="mt-1 h-9 w-full rounded-md border border-input bg-background px-3 text-sm">
-								<option value="working" selected={typeDraft.dayCount === 'working'}>Working days</option>
-								<option value="calendar" selected={typeDraft.dayCount === 'calendar'}>Calendar days</option>
-							</select>
-						</div>
-						<div>
-							<Label for="ltTenure">Months of service</Label>
-							<Input id="ltTenure" name="minServiceMonths" type="number" min="0" value={typeDraft.minServiceMonths} class="mt-1" />
-						</div>
-					</div>
-					<div class="grid gap-3 sm:grid-cols-2">
-						<div>
-							<Label for="ltSex">Open to</Label>
-							<select id="ltSex" name="sexRestriction" class="mt-1 h-9 w-full rounded-md border border-input bg-background px-3 text-sm">
-								<option value="" selected={!typeDraft.sexRestriction}>Everyone</option>
-								<option value="female" selected={typeDraft.sexRestriction === 'female'}>Female employees</option>
-								<option value="male" selected={typeDraft.sexRestriction === 'male'}>Male employees</option>
-							</select>
-						</div>
-						<div>
-							<Label for="ltCarry">Carry over to next year (days)</Label>
-							<Input id="ltCarry" name="carryOverDays" type="number" min="0" step="0.5" value={typeDraft.carryOverDays} class="mt-1" />
-						</div>
-					</div>
-					<fieldset>
-						<legend class="text-sm font-medium text-ink">Employment types allowed</legend>
-						<p class="text-xs text-ink-muted">Leave all unticked for everyone.</p>
-						<div class="mt-1.5 flex flex-wrap gap-x-4 gap-y-1.5">
-							{#each EMPLOYMENT_TYPES as e (e)}
-								<label class="flex items-center gap-1.5 text-sm">
-									<input type="checkbox" name="employmentTypes" value={e} checked={typeDraft.employmentTypes.includes(e)} class="size-4" />
-									{EMPLOYMENT_TYPE_LABEL[e]}
-								</label>
-							{/each}
-						</div>
-					</fieldset>
-					<div class="grid gap-2 sm:grid-cols-2">
-						{#each [['paid', 'Paid leave', typeDraft.paid], ['halfDayAllowed', 'Can be taken as a half day', typeDraft.halfDayAllowed], ['cashConvertible', 'Unused days convertible to cash', typeDraft.cashConvertible], ['requiresDocument', 'Needs a supporting document', typeDraft.requiresDocument], ['active', 'In use (employees can file it)', typeDraft.active]] as const as [name, label, on] (name)}
-							<label class="flex items-center gap-2 text-sm">
-								<input type="checkbox" {name} checked={on} class="size-4" />
-								{label}
-							</label>
-						{/each}
-					</div>
-				</div>
-				<Dialog.Footer>
-					<Button type="button" variant="outline" onclick={() => (editingType = null)}>Cancel</Button>
-					<Button type="submit">{editingType === 'new' ? 'Add leave' : 'Save changes'}</Button>
-				</Dialog.Footer>
-			</form>
-		{/key}
-	</Dialog.Content>
-</Dialog.Root>
-
-<Dialog.Root open={deletingType !== null} onOpenChange={(o) => !o && (deletingType = null)}>
-	<Dialog.Content class="sm:max-w-md">
-		<Dialog.Header>
-			<Dialog.Title>Delete {deletingType?.name}?</Dialog.Title>
-			<Dialog.Description>
-				A leave with requests on file can't be deleted; switch it off instead.
-			</Dialog.Description>
-		</Dialog.Header>
-		<form method="POST" action="?/deleteType" use:enhance>
-			<input type="hidden" name="id" value={deletingType?.id ?? ''} />
-			<Dialog.Footer>
-				<Button type="button" variant="outline" onclick={() => (deletingType = null)}>Keep</Button>
-				<Button type="submit" variant="destructive">Delete</Button>
-			</Dialog.Footer>
-		</form>
-	</Dialog.Content>
-</Dialog.Root>
 
 <Dialog.Root open={editingDay !== null} onOpenChange={(o) => !o && (editingDay = null)}>
 	<Dialog.Content class="sm:max-w-md">

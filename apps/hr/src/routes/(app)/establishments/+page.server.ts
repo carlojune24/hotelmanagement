@@ -7,9 +7,11 @@ import {
 	EstablishmentError,
 	createEstablishment,
 	establishmentSchema,
+	getOrganization,
 	listEstablishments,
 	updateEstablishment
 } from '$lib/server/establishments';
+import { listEstablishmentTypes } from '$lib/server/establishment-types';
 import { orgRefField } from '$lib/establishment-schema';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -19,12 +21,18 @@ export const load: PageServerLoad = async ({ locals }) => {
 	const orgWide = user!.isSystemAdmin || canAt(access!, 'establishment:read');
 	// A manager sees only the establishments they hold a role at; org-wide roles see all.
 	const rows = await listEstablishments(orgWide ? undefined : Object.keys(access!.establishments));
+	const org = await getOrganization();
+	const types = await listEstablishmentTypes(org.id);
+	const typeById = new Map(types.map((t) => [t.id, t]));
 	return {
+		types: types.map((t) => ({ id: t.id, name: t.name, linksToHotelApp: t.linksToHotelApp, active: t.active })),
 		establishments: rows.map((e) => ({
 			id: e.id,
 			slug: e.slug,
 			name: e.name,
 			kind: e.kind as 'hotel' | 'business',
+			typeId: e.typeId,
+			typeName: (e.typeId && typeById.get(e.typeId)?.name) || (e.kind === 'hotel' ? 'Hotel' : 'Other'),
 			timezone: e.timezone,
 			legalName: e.legalName ?? '',
 			addressLine: e.addressLine ?? '',
@@ -55,7 +63,7 @@ export const actions: Actions = {
 				action: 'establishment.create',
 				entityType: 'establishment',
 				entityId: row.id,
-				after: { name: row.name, kind: row.kind, orgRef: row.orgRef }
+				after: { name: row.name, kind: row.kind, typeId: row.typeId, orgRef: row.orgRef }
 			});
 		} catch (e) {
 			if (e instanceof EstablishmentError) {
@@ -78,6 +86,7 @@ export const actions: Actions = {
 				addressLine: establishmentSchema.shape.addressLine,
 				city: establishmentSchema.shape.city,
 				orgRef: orgRefField,
+				typeId: z.preprocess((v) => (v === '' ? undefined : v), z.string().uuid().optional()),
 				status: z.enum(['active', 'archived'])
 			})
 			.safeParse(values);

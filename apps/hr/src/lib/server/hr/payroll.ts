@@ -16,12 +16,15 @@ import {
 	establishments,
 	organizations,
 	payrollBatches,
+	payrollLoanDeductions,
 	payrollRunLines,
 	payrollRuns,
 	schedules
 } from '$lib/server/db/schema/index';
 import { getHandoff } from './dtr-submissions';
+import { allocate, byPriority, closeSettledLoans, loansDueFor, reopenSettledLoans, type LoanDue } from './loans';
 import { parseNightDiff } from './night-diff';
+import { historiesFor, payTermsFor, type PayTerms } from './salary';
 import { AGENCY_LABEL, remittedAgenciesForBatch } from './remittance';
 
 export class PayrollError extends Error {}
@@ -362,6 +365,13 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 	const estById = new Map(estRows.map((e) => [e.id, e]));
 	const holidayAt = new Map(holidays.map((h) => [`${h.establishmentId}|${h.date}`, h.kind]));
 	const keptAdjustments = new Map(existing.map((l) => [l.employeeId, l.adjustments]));
+	// Loans come from the ledger, never from a kept hand-typed figure.
+	const adjustmentsFor = (employeeId: string): PayrollAdjustments => ({
+		...adjustmentsOf(keptAdjustments.get(employeeId)),
+		loansCentavos: 0
+	});
+	const loanDues = await loansDueFor(run, candidateIds);
+	const histories = await historiesFor(candidateIds);
 
 	const waiting: GenerateResult['waiting'] = [];
 	const noDtr: string[] = [];
@@ -374,7 +384,14 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 		return received.get(estId)!;
 	};
 
-	type Built = { employee: (typeof people)[number]; line: ReturnType<typeof computePayrollLine>; cost: Record<string, number>; minutes: { regular: number; ot: number; night: number } };
+	type Built = {
+		employee: (typeof people)[number];
+		line: ReturnType<typeof computePayrollLine>;
+		cost: Record<string, number>;
+		minutes: { regular: number; ot: number; night: number };
+		loans: Array<LoanDue & { deducted: number }>;
+		pay: PayTerms;
+	};
 	const built: Built[] = [];
 
 	for (const emp of people) {
@@ -420,18 +437,33 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 			}));
 
 		const nd = parseNightDiff(estById.get(home)?.config);
-		const computed = computePayrollLine({
+		// The rate in force over this cutoff, split by day if it changed inside it.
+		const pay = payTermsFor(histories.get(emp.id) ?? [], run.cutoffStart, run.cutoffEnd, {
+			effectiveFrom: emp.hiredOn,
+			payBasis: emp.payBasis,
+			baseRateCentavos: emp.baseRateCentavos
+		});
+		const lineInput = {
 			personRef: emp.personRef,
 			costCenter: emp.costCenter,
-			payBasis: emp.payBasis as 'monthly' | 'daily' | 'hourly',
-			baseRateCentavos: emp.baseRateCentavos,
+			payBasis: pay.payBasis,
+			baseRateCentavos: pay.baseRateCentavos,
+			...(pay.segments ? { rateSegments: pay.segments } : {}),
 			frequency: run.frequency as 'semi_monthly' | 'monthly',
 			dayFactor: run.dayFactor,
 			nightDiffRate: nd.ratePct / 100,
 			days,
-			adjustments: adjustmentsOf(keptAdjustments.get(emp.id)),
+			adjustments: adjustmentsFor(emp.id),
 			...coverageInputOf(emp)
-		});
+		};
+		// Price the pay without loans first, then take each loan from what is left — net never goes below zero.
+		let computed = computePayrollLine(lineInput);
+		const dues = loanDues.get(emp.id) ?? [];
+		const taken = allocate(dues.map((d) => d.due), computed.line.net_pay);
+		const loanTotal = taken.reduce((a, b) => a + b, 0);
+		if (loanTotal > 0) {
+			computed = computePayrollLine({ ...lineInput, adjustments: { ...lineInput.adjustments, loansCentavos: loanTotal } });
+		}
 
 		// Cost by establishment: gross split by time worked at each, remainder to the home.
 		const total = [...minutesAt.values()].reduce((a, b) => a + b, 0);
@@ -451,6 +483,8 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 			employee: emp,
 			line: computed,
 			cost,
+			pay,
+			loans: dues.map((d, i) => ({ ...d, deducted: taken[i] ?? 0 })),
 			minutes: {
 				regular: mineEntries.reduce((s, e) => s + Math.max(0, e.e.workedMinutes - e.e.otMinutes - e.e.unapprovedOtMinutes), 0),
 				ot: mineEntries.reduce((s, e) => s + e.e.otMinutes, 0),
@@ -462,7 +496,7 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 	await db.transaction(async (tx) => {
 		await tx.delete(payrollRunLines).where(eq(payrollRunLines.batchId, batchId));
 		if (built.length > 0) {
-			await tx.insert(payrollRunLines).values(
+			const inserted = await tx.insert(payrollRunLines).values(
 				built.map((b) => ({
 					runId: run.id,
 					batchId,
@@ -473,8 +507,8 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 					employeeName: `${b.employee.lastName}, ${b.employee.firstName}${b.employee.middleName ? ` ${b.employee.middleName.charAt(0)}.` : ''}`,
 					position: assignments.find((a) => a.employeeId === b.employee.id && a.establishmentId === est.id)?.position ?? '',
 					department: assignments.find((a) => a.employeeId === b.employee.id && a.establishmentId === est.id)?.department ?? null,
-					payBasis: b.employee.payBasis,
-					baseRateCentavos: b.employee.baseRateCentavos,
+					payBasis: b.pay.payBasis,
+					baseRateCentavos: b.pay.baseRateCentavos,
 					govIds: b.employee.govIds,
 					daysWorked: b.line.line.days_worked,
 					minutesRegular: b.minutes.regular,
@@ -486,11 +520,41 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 					employerContributions: b.line.line.employer_contributions,
 					netPayCentavos: b.line.line.net_pay,
 					thirteenthMonthAccrualCentavos: b.line.line.thirteenth_month_accrual,
-					adjustments: adjustmentsOf(keptAdjustments.get(b.employee.id)),
-					detail: { ...b.line.detail, ...coverageSnapshotOf(b.employee) },
+					adjustments: adjustmentsFor(b.employee.id),
+					detail: {
+						...b.line.detail,
+						...coverageSnapshotOf(b.employee),
+						...(b.pay.changes.length || b.pay.deferredBasisChange
+							? { rateChanges: b.pay.changes, deferredBasisChange: b.pay.deferredBasisChange }
+							: {}),
+						...(b.loans.length
+							? {
+									loans: b.loans.map((l) => ({
+										loanId: l.loanId,
+										kind: l.kind,
+										label: l.label,
+										due: l.due,
+										deducted: l.deducted
+									}))
+								}
+							: {})
+					},
 					costByEstablishment: b.cost
 				}))
+			).returning({ id: payrollRunLines.id, employeeId: payrollRunLines.employeeId });
+			const lineOf = new Map(inserted.map((l) => [l.employeeId, l.id]));
+			const deductionRows = built.flatMap((b) =>
+				b.loans.map((l) => ({
+					loanId: l.loanId,
+					lineId: lineOf.get(b.employee.id)!,
+					kind: l.kind,
+					agency: l.agency,
+					referenceNo: l.referenceNo,
+					dueCentavos: l.due,
+					deductedCentavos: l.deducted
+				}))
 			);
+			if (deductionRows.length) await tx.insert(payrollLoanDeductions).values(deductionRows);
 		}
 		await tx.update(payrollBatches).set({ generatedAt: new Date(), updatedAt: new Date() }).where(eq(payrollBatches.id, batchId));
 	});
@@ -507,7 +571,6 @@ export const adjustmentSchema = z.object({
 	allowances: z.coerce.number().min(0).max(10_000_000).default(0),
 	otherEarnings: z.coerce.number().min(0).max(10_000_000).default(0),
 	cashAdvance: z.coerce.number().min(0).max(10_000_000).default(0),
-	loans: z.coerce.number().min(0).max(10_000_000).default(0),
 	otherDeductions: z.coerce.number().min(0).max(10_000_000).default(0),
 	/** Blank = use the computed tax. */
 	withholdingOverride: z.preprocess(
@@ -534,7 +597,7 @@ export async function adjustLine(input: z.infer<typeof adjustmentSchema>) {
 		allowancesCentavos: centavos(input.allowances),
 		otherEarningsCentavos: centavos(input.otherEarnings),
 		cashAdvanceCentavos: centavos(input.cashAdvance),
-		loansCentavos: centavos(input.loans),
+		loansCentavos: 0,
 		otherDeductionsCentavos: centavos(input.otherDeductions),
 		withholdingOverrideCentavos: input.withholdingOverride === null ? null : centavos(input.withholdingOverride)
 	};
@@ -555,27 +618,46 @@ export async function adjustLine(input: z.infer<typeof adjustmentSchema>) {
 		adjustments.withholdingOverrideCentavos !== null
 			? adjustments.withholdingOverrideCentavos
 			: computeWithholdingTax(taxable, row.run.frequency as 'semi_monthly' | 'monthly');
-	const deductions = {
+	// Loans are fixed by the ledger at generate time, but a changed gross or deduction can leave less pay to
+	// take them from — re-fill them from what is left, in the same order.
+	const loanRows = (await db.select().from(payrollLoanDeductions).where(eq(payrollLoanDeductions.lineId, l.id))).sort(byPriority);
+	const others = {
 		...stored,
 		withholding_tax: withholding,
 		cash_advance: adjustments.cashAdvanceCentavos,
-		loans: adjustments.loansCentavos,
 		other: adjustments.otherDeductionsCentavos
 	};
+	const withoutLoans = gross - Object.entries(others).filter(([k]) => k !== 'loans').reduce((a, [, v]) => a + v, 0);
+	const taken = allocate(loanRows.map((r) => r.dueCentavos), withoutLoans);
+	const deductions = { ...others, loans: taken.reduce((a, b) => a + b, 0) };
 	const net = gross - Object.values(deductions).reduce((a, b) => a + b, 0);
 
-	await db
-		.update(payrollRunLines)
-		.set({
-			earnings,
-			grossCentavos: gross,
-			deductions,
-			netPayCentavos: net,
-			adjustments,
-			detail: { ...detail, taxableCentavos: taxable },
-			updatedAt: new Date()
-		})
-		.where(eq(payrollRunLines.id, l.id));
+	const loanDetail = (detail as { loans?: Array<{ loanId: string; kind: string; label: string; due: number; deducted: number }> }).loans;
+	const takenByLoan = new Map(loanRows.map((r, i) => [r.loanId, taken[i] ?? 0]));
+	await db.transaction(async (tx) => {
+		await tx
+			.update(payrollRunLines)
+			.set({
+				earnings,
+				grossCentavos: gross,
+				deductions,
+				netPayCentavos: net,
+				adjustments,
+				detail: {
+					...detail,
+					taxableCentavos: taxable,
+					...(loanDetail ? { loans: loanDetail.map((d) => ({ ...d, deducted: takenByLoan.get(d.loanId) ?? 0 })) } : {})
+				},
+				updatedAt: new Date()
+			})
+			.where(eq(payrollRunLines.id, l.id));
+		for (const [i, r] of loanRows.entries()) {
+			await tx
+				.update(payrollLoanDeductions)
+				.set({ deductedCentavos: taken[i] ?? 0 })
+				.where(eq(payrollLoanDeductions.id, r.id));
+		}
+	});
 	return { net, gross };
 }
 
@@ -600,6 +682,7 @@ export async function lockBatch(batchId: string, userId: string | null) {
 		.update(payrollBatches)
 		.set({ status: 'locked', lockedByUserId: userId, lockedAt: new Date(), updatedAt: new Date() })
 		.where(eq(payrollBatches.id, batchId));
+	await closeSettledLoans(batchId);
 	return row.batch;
 }
 
@@ -616,6 +699,7 @@ export async function unlockBatch(batchId: string) {
 		.where(and(eq(payrollBatches.id, batchId), eq(payrollBatches.status, 'locked')))
 		.returning();
 	if (!row) throw new PayrollError('Only a locked, unreleased batch can be unlocked.');
+	await reopenSettledLoans(batchId);
 	return row;
 }
 

@@ -18,7 +18,7 @@ const schema = z.object({
 });
 
 export const load: PageServerLoad = async ({ locals, url }) => {
-	if (locals.user) redirect(302, safeNext(url.searchParams.get('next'), '/establishments'));
+	if (locals.user) redirect(302, safeNext(url.searchParams.get('next'), '/'));
 	return { next: url.searchParams.get('next') ?? '' };
 };
 
@@ -43,6 +43,6 @@ export const actions: Actions = {
 		const token = generateSessionToken();
 		const session = await createSession(token, user.id);
 		setSessionCookie(event, token, session.expiresAt);
-		redirect(302, safeNext(next, '/establishments'));
+		redirect(302, safeNext(next, '/'));
 	}
 };

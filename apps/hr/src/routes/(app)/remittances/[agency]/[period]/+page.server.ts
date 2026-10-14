@@ -2,10 +2,12 @@ import { error, fail } from '@sveltejs/kit';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { getOrganization } from '$lib/server/establishments';
+import { skippedLoansFor } from '$lib/server/hr/loans';
 import { db } from '$lib/server/db/index';
 import { establishments } from '$lib/server/db/schema/index';
 import {
 	AGENCY_LABEL,
+	employerNoFor,
 	RemittanceError,
 	agencySchema,
 	getSchedule,
@@ -32,10 +34,13 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		db.select({ id: establishments.id, name: establishments.name }).from(establishments)
 	]);
 	const names = new Map(ests.map((e) => [e.id, e.name]));
+	const skipped =
+		agency === 'sss_loan' || agency === 'pagibig_loan' ? await skippedLoansFor(org.id, agency, period) : [];
 	return {
 		agency,
 		label: AGENCY_LABEL[agency],
 		period,
+		skipped,
 		schedule: s.schedule,
 		byEstablishment: Object.entries(s.schedule.byEstablishment).map(([id, t]) => ({
 			name: names.get(id) ?? 'Unknown',
@@ -44,7 +49,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		record: s.record,
 		dueDate: s.dueDate,
 		draftBatches: s.draftBatches,
-		employerNo: agency === 'bir' ? s.settings.employer.tin : s.settings.employerIds[agency]
+		employerNo: employerNoFor(agency, s.settings)
 	};
 };
 

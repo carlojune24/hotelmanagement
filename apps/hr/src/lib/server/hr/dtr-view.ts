@@ -32,6 +32,10 @@ export type DtrTotals = {
 	undertimeMinutes: number;
 	absentDays: number;
 	workedDays: number;
+	/** Days with a working shift on the roster — the only days an absence can be counted against. */
+	scheduledDays: number;
+	/** Days with no roster entry at all (a rest day is an entry). */
+	unscheduledDays: number;
 };
 
 /** One day's times in a neutral shape, whether it came from a preview or a saved row. */
@@ -195,7 +199,9 @@ export function buildDtrDays(opts: {
 			lateMinutes: days.reduce((n, d) => n + d.lateMinutes, 0),
 			undertimeMinutes: days.reduce((n, d) => n + d.undertimeMinutes, 0),
 			absentDays: days.filter((d) => d.kind === 'absent').length,
-			workedDays: days.filter((d) => d.kind === 'work').length
+			workedDays: days.filter((d) => d.kind === 'work').length,
+			scheduledDays: [...sched.values()].filter((s) => !s.isRestDay && s.startTime).length,
+			unscheduledDays: days.filter((d) => !sched.has(d.date)).length
 		}
 	};
 }

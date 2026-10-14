@@ -4,81 +4,25 @@ import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import {
 	PayrollError,
-	RATES_IN_FORCE,
 	acknowledgeRates,
 	adjustLine,
 	adjustmentSchema,
 	generateBatch,
-	getRun,
-	listBatchLines,
 	lockBatch,
 	releaseBatch,
 	unlockBatch
 } from '$lib/server/hr/payroll';
+import { runView } from '$lib/server/hr/payroll-view';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, params }) => {
 	requireCap(locals.user, locals.access, 'payroll:*');
-	let data;
 	try {
-		data = await getRun(params.runId);
+		return await runView(params.runId);
 	} catch (e) {
 		if (e instanceof PayrollError) error(404, 'Payroll run not found');
 		throw e;
 	}
-	const lines = await Promise.all(
-		data.batches.map(async (b) => [b.id, await listBatchLines(b.id)] as const)
-	);
-	const byBatch = new Map(lines);
-	const estName = new Map(data.batches.map((b) => [b.establishmentId, b.establishmentName]));
-
-	return {
-		run: {
-			id: data.run.id,
-			cutoffStart: data.run.cutoffStart,
-			cutoffEnd: data.run.cutoffEnd,
-			payDate: data.run.payDate,
-			frequency: data.run.frequency,
-			dayFactor: data.run.dayFactor,
-			ratesCheckedAt: data.run.ratesCheckedAt
-		},
-		rates: RATES_IN_FORCE,
-		batches: data.batches.map((b) => ({
-			...b,
-			lines: (byBatch.get(b.id) ?? []).map((l) => {
-				const earnings = l.earnings as Record<string, number>;
-				const deductions = l.deductions as Record<string, number>;
-				const adj = l.adjustments as Record<string, number | null>;
-				return {
-					id: l.id,
-					employeeName: l.employeeName,
-					employeeNo: l.employeeNo,
-					position: l.position,
-					daysWorked: l.daysWorked,
-					basic: earnings.basic ?? 0,
-					overtime: earnings.overtime ?? 0,
-					premium: (earnings.holiday_premium ?? 0) + (earnings.night_diff ?? 0),
-					extras: (earnings.allowances ?? 0) + (earnings.other ?? 0),
-					gross: l.grossCentavos,
-					statutory: (deductions.sss_ee ?? 0) + (deductions.philhealth_ee ?? 0) + (deductions.pagibig_ee ?? 0),
-					tax: deductions.withholding_tax ?? 0,
-					other: (deductions.cash_advance ?? 0) + (deductions.loans ?? 0) + (deductions.tardiness_undertime ?? 0) + (deductions.other ?? 0),
-					net: l.netPayCentavos,
-					sharedWith: Object.keys(l.costByEstablishment as Record<string, number>)
-						.filter((id) => id !== l.establishmentId)
-						.map((id) => estName.get(id) ?? 'another establishment'),
-					adjustments: {
-						allowances: (adj.allowancesCentavos ?? 0) / 100,
-						otherEarnings: (adj.otherEarningsCentavos ?? 0) / 100,
-						cashAdvance: (adj.cashAdvanceCentavos ?? 0) / 100,
-						loans: (adj.loansCentavos ?? 0) / 100,
-						otherDeductions: (adj.otherDeductionsCentavos ?? 0) / 100,
-						withholdingOverride: adj.withholdingOverrideCentavos == null ? '' : String((adj.withholdingOverrideCentavos as number) / 100)
-					}
-				};
-			})
-		}))
-	};
 };
 
 const idForm = z.object({ batchId: z.string().uuid() });
@@ -110,6 +54,7 @@ async function batchAction(
 	}
 }
 
+/** Shared with the one-establishment focus page (`[batchId]`), which re-exports them. */
 export const actions: Actions = {
 	generate: async (event) => {
 		const out = await batchAction(event, (id) => generateBatch(id), 'payroll.generate');

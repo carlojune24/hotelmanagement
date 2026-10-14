@@ -8,7 +8,7 @@ import {
 	sex
 } from '@mm/hr-core';
 import { db } from '$lib/server/db/index';
-import { employeeAssignments, employees, establishments } from '$lib/server/db/schema/index';
+import { employeeAssignments, employees, establishments, salaryHistory } from '$lib/server/db/schema/index';
 import { openAssignmentAt, toStaff, type StaffMember } from './assigned';
 import { mintRef } from '$lib/server/ids';
 import { normalizeEnrollId } from '$lib/hr-import';
@@ -223,6 +223,13 @@ export async function createEmployee(establishmentId: string, input: EmployeeFor
 			isPrimary: true,
 			...toAssignmentValues(input)
 		});
+		await tx.insert(salaryHistory).values({
+			employeeId: row!.id,
+			effectiveFrom: input.hiredOn,
+			payBasis: input.payBasis,
+			baseRateCentavos: Math.round(input.baseRatePesos * 100),
+			remarks: 'Starting salary'
+		});
 		return row!;
 	});
 }
@@ -240,9 +247,11 @@ export async function updateEmployee(
 	await assertEnrollIdFree(establishmentId, input.biometricEnrollId, id);
 
 	return db.transaction(async (tx) => {
+		// The rate is not part of this form: it changes only through Adjust salary, so it is always recorded.
+		const { payBasis: _basis, baseRateCentavos: _rate, ...person } = toEmployeeValues(input);
 		const [row] = await tx
 			.update(employees)
-			.set({ ...toEmployeeValues(input), photoUrl, updatedAt: new Date() })
+			.set({ ...person, photoUrl, updatedAt: new Date() })
 			.where(eq(employees.id, id))
 			.returning();
 		await tx

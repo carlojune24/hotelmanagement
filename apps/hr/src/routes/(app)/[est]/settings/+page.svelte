@@ -21,32 +21,36 @@
 </script>
 
 <div class="mx-auto max-w-xl space-y-6 p-4 sm:p-6">
-	{#if data.tabs.leavePolicy}
-		<a
-			href="settings/leave"
-			class="flex items-center justify-between rounded-2xl bg-white/70 px-4 py-3 text-sm font-medium hover:bg-gold-soft"
-		>
-			<span>Leave policy &amp; holiday calendar</span>
-			<span aria-hidden="true">&rarr;</span>
-		</a>
-	{/if}
+<a
+href="settings/leave"
+class="flex items-center justify-between rounded-2xl bg-white/70 px-4 py-3 text-sm font-medium hover:bg-gold-soft"
+>
+<span>
+Leave policy &amp; holiday calendar
+{#if !data.tabs.leavePolicy}<span class="font-normal text-ink-muted"> · view only</span>{/if}
+</span>
+<span aria-hidden="true">&rarr;</span>
+</a>
 	<div>
 		<h1 class="text-lg font-semibold text-ink">Night differential</h1>
 		<p class="mt-1 text-sm text-ink-muted">
 			Hours worked inside this window earn the premium. A shift can set its own window in Schedule
-			&rarr; Shifts; this one applies to every shift that doesn't.
-		</p>
+			&rarr; Shifts;this one applies to every shift that doesn't.
+{#if !data.canEditNightDiff}
+<strong class="font-medium text-ink">View only</strong> — Main HR sets this for your establishment.
+{/if}
+</p>
 	</div>
 
 	<form method="POST" action="?/saveNightDiff" use:enhance class="space-y-4">
 		<div class="grid grid-cols-3 gap-3">
 			<div>
 				<Label for="ndStart">From</Label>
-				<Input id="ndStart" name="start" type="time" required value={data.nightDiff.start} class="mt-1" />
+<Input id="ndStart" name="start" type="time" required value={data.nightDiff.start} class="mt-1" disabled={!data.canEditNightDiff} />
 			</div>
 			<div>
 				<Label for="ndEnd">To</Label>
-				<Input id="ndEnd" name="end" type="time" required value={data.nightDiff.end} class="mt-1" />
+<Input id="ndEnd" name="end" type="time" required value={data.nightDiff.end} class="mt-1" disabled={!data.canEditNightDiff} />
 			</div>
 			<div>
 				<Label for="ndRate">Premium (%)</Label>
@@ -58,17 +62,36 @@
 					max="100"
 					step="0.01"
 					required
-					value={data.nightDiff.ratePct}
-					class="mt-1"
-				/>
+value={data.nightDiff.ratePct}
+class="mt-1"
+disabled={!data.canEditNightDiff}
+/>
 			</div>
 		</div>
 		<p class="text-xs text-ink-muted">
 			Times after midnight wrap, so 22:00 to 06:00 covers the night. The statutory minimum is 10%.
 			Changing the window affects DTRs generated from now on; saved DTRs are not recomputed.
 		</p>
-		<Button type="submit">Save</Button>
-	</form>
+		<div class="rounded-2xl bg-ink/5 px-4 py-3 text-sm">
+			<p class="font-medium">Which window does the DTR follow?</p>
+			<ul class="mt-1 list-disc space-y-1 pl-5 text-ink-muted">
+				<li>
+					A shift's own window wins. It is set per shift template or per day in Schedule, and a template's
+					window is copied onto each day it is applied to.
+				</li>
+				<li>
+					A day with no window of its own — and any punch with no schedule — uses the window above.
+				</li>
+				<li>
+					The premium (%) is only set here; a shift can change the hours it covers but not the rate.
+				</li>
+				<li>
+					Changing a template later does not change days it was already applied to — apply it again.
+				</li>
+			</ul>
+		</div>
+{#if data.canEditNightDiff}<Button type="submit">Save</Button>{/if}
+</form>
 
 	{#if data.canKeys}
 		<section class="space-y-3 border-t border-dotted border-foreground/20 pt-6" aria-label="Hotel connection">

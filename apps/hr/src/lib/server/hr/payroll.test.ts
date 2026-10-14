@@ -19,11 +19,12 @@ async function hasEnvFile(): Promise<boolean> {
 
 describe.skipIf(!hasDb)('payroll (live DB)', async () => {
 	const { db } = await import('$lib/server/db/index');
-	const { dtrEntries, dtrSubmissions, establishments, organizations, payrollRuns, schedules } =
+	const { dtrEntries, dtrSubmissions, employees, establishments, organizations, payrollRuns, salaryHistory, schedules } =
 		await import('$lib/server/db/schema/index');
 	const { mintRef } = await import('$lib/server/ids');
 	const { eq } = await import('drizzle-orm');
 	const P = await import('./payroll');
+	const SAL = await import('./salary');
 
 	const tag = `paytest-${Math.random().toString(36).slice(2, 10)}`;
 	let org = '';
@@ -153,6 +154,33 @@ describe.skipIf(!hasDb)('payroll (live DB)', async () => {
 		expect(lines.some((l) => l.employeeId === bo)).toBe(false);
 	});
 
+	it('splits a cutoff by day when the salary changes inside it, and says so on the line', async () => {
+		// ₱10,000 → ₱20,000 a month from Mar 9: 8 days of the 15-day cutoff at the old rate, 7 at the new.
+		const { entry } = await SAL.adjustSalary(
+			org,
+			{ employeeId: ana, payBasis: 'monthly', rate: 20_000, effectiveFrom: '2026-03-09', remarks: 'Promoted' },
+			null
+		);
+		try {
+			await P.generateBatch(batchA);
+			const line = (await P.listBatchLines(batchA)).find((l) => l.employeeId === ana)!;
+			const dailyOld = Math.round((1_000_000 * 12) / 313);
+			const half = Math.round((1_000_000 * 8 + 2_000_000 * 7) / 15 / 2);
+			expect((line.earnings as { basic: number }).basic).toBe(half - dailyOld); // the Mar 6 absence is at the old rate
+			expect(line.baseRateCentavos).toBe(2_000_000); // the rate on the last day
+			expect((line.detail as { rateChanges: unknown[] }).rateChanges).toEqual([
+				{ date: '2026-03-09', fromCentavos: 1_000_000, toCentavos: 2_000_000 }
+			]);
+		} finally {
+			// Put the test person back on ₱10,000 so the tests after this one see what they expect.
+			await db.delete(salaryHistory).where(eq(salaryHistory.id, entry.id));
+			await db.update(employees).set({ baseRateCentavos: 1_000_000 }).where(eq(employees.id, ana));
+			await P.generateBatch(batchA);
+		}
+		const back = (await P.listBatchLines(batchA)).find((l) => l.employeeId === ana)!;
+		expect((back.earnings as { basic: number }).basic).toBe(500_000 - Math.round((1_000_000 * 12) / 313));
+	});
+
 	it('holds a multi-site person until every establishment they worked at has been received', async () => {
 		const lines = await P.listBatchLines(batchA);
 		expect(lines.some((l) => l.employeeId === cy)).toBe(false);
@@ -202,7 +230,6 @@ describe.skipIf(!hasDb)('payroll (live DB)', async () => {
 			allowances: 500,
 			otherEarnings: 0,
 			cashAdvance: 200,
-			loans: 0,
 			otherDeductions: 0,
 			withholdingOverride: null
 		});
@@ -226,7 +253,7 @@ describe.skipIf(!hasDb)('payroll (live DB)', async () => {
 		await P.acknowledgeRates(runId, null);
 		await P.lockBatch(batchA, null);
 		const [line] = (await P.listBatchLines(batchA)).filter((l) => l.employeeId === ana);
-		await expect(P.adjustLine({ lineId: line!.id, allowances: 1, otherEarnings: 0, cashAdvance: 0, loans: 0, otherDeductions: 0, withholdingOverride: null })).rejects.toThrow(/locked/);
+		await expect(P.adjustLine({ lineId: line!.id, allowances: 1, otherEarnings: 0, cashAdvance: 0, otherDeductions: 0, withholdingOverride: null })).rejects.toThrow(/locked/);
 		await expect(P.generateBatch(batchA)).rejects.toThrow(/locked/);
 
 		await P.unlockBatch(batchA);
@@ -236,6 +263,12 @@ describe.skipIf(!hasDb)('payroll (live DB)', async () => {
 		const slips = await P.releasedPayslipsFor(A);
 		expect(slips.map((s) => s.employeeName).sort()).toEqual(['Test, Ana', 'Test, Cy']);
 		expect(await P.releasedPayslipsFor(B)).toEqual([]); // listed under the home only
+	});
+
+	it('will not send back a DTR that a locked or released batch was built on', async () => {
+		const { returnDtr } = await import('./dtr-submissions');
+		const [sub] = await db.select().from(dtrSubmissions).where(eq(dtrSubmissions.establishmentId, A));
+		await expect(returnDtr(sub!.id, 'Fix the Tuesday punches', null)).rejects.toThrow(/already locked/);
 	});
 
 	it('masks government numbers to their last four characters', () => {

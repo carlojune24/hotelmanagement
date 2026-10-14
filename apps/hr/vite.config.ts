@@ -6,5 +6,7 @@ export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
 	// 5175 is the hotel app's dev port; HR runs beside it.
 	server: { port: 5176, allowedHosts: true },
-	test: { include: ['src/**/*.{test,spec}.{js,ts}'] }
+	// The live-DB suites share one organization row (its payroll day-factor) and one set of payroll
+	// cutoffs, so they must not run side by side.
+	test: { include: ['src/**/*.{test,spec}.{js,ts}'], fileParallelism: false }
 });

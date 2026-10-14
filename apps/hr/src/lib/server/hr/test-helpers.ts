@@ -4,6 +4,7 @@ import {
 	employeeAssignments,
 	employees,
 	establishments,
+	leaveTypes,
 	organizations
 } from '$lib/server/db/schema/index';
 import { mintRef } from '$lib/server/ids';
@@ -18,6 +19,21 @@ export async function testOrgId(): Promise<string> {
 		.values({ orgRef: mintRef('org'), name: 'HR test organization' })
 		.returning({ id: organizations.id });
 	return org!.id;
+}
+
+/** A throwaway company. Leave types are company-wide, so a test that edits them must use its own. */
+export async function createTestOrg(): Promise<string> {
+	const [org] = await db
+		.insert(organizations)
+		.values({ orgRef: mintRef('org'), name: `HR test company ${Math.random().toString(36).slice(2, 8)}` })
+		.returning({ id: organizations.id });
+	return org!.id;
+}
+
+/** Remove a throwaway company after its establishments are gone (leave types first: they restrict it). */
+export async function cleanupTestOrg(orgId: string) {
+	await db.delete(leaveTypes).where(eq(leaveTypes.organizationId, orgId));
+	await db.delete(organizations).where(eq(organizations.id, orgId));
 }
 
 /** A person plus an open primary assignment at `establishmentId`. Employee numbers are unique
