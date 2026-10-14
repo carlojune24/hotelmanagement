@@ -20,6 +20,7 @@
 <article class="mx-auto my-4 max-w-3xl bg-white p-8 text-sm text-ink shadow-sm print:my-0 print:shadow-none">
 	<header class="flex items-start justify-between border-b border-ink/30 pb-4">
 		<div>
+			{#if data.logoUrl}<img src={data.logoUrl} alt="" class="mb-2 h-12 w-auto max-w-48 object-contain" />{/if}
 			<h1 class="text-xl font-semibold">{data.company}</h1>
 			<p class="text-ink-muted">Loan statement of account</p>
 		</div>

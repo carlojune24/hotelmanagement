@@ -149,3 +149,28 @@ describe('split shift 08:00-12:00 + 13:00-17:00', () => {
 		expect(r.metrics.workedMinutes).toBe(240 + 242);
 	});
 });
+
+describe('clusterPunches with the roster', () => {
+	const at = (date: string, hhmm: string) => Date.parse(`${date}T${hhmm}:00Z`);
+
+	it('overtime until 9 PM and an 8 AM clock-in next day are two shifts, not one', () => {
+		const punches = [at('2026-03-02', '08:00'), at('2026-03-02', '21:00'), at('2026-03-03', '07:55'), at('2026-03-03', '17:00')];
+		const starts = [at('2026-03-02', '08:00'), at('2026-03-03', '08:00')];
+		const c = clusterPunches(punches, starts);
+		expect(c).toHaveLength(2);
+		expect(c[0]!.outMs).toBe(at('2026-03-02', '21:00'));
+		expect(c[1]!.inMs).toBe(at('2026-03-03', '07:55'));
+	});
+
+	it('keeps a long split-shift break inside one shift', () => {
+		const starts = [at('2026-03-02', '06:00'), at('2026-03-03', '06:00')];
+		const punches = [at('2026-03-02', '06:00'), at('2026-03-02', '10:00'), at('2026-03-02', '18:00'), at('2026-03-02', '22:00')];
+		expect(clusterPunches(punches, starts)).toHaveLength(1);
+	});
+
+	it('keeps a night shift together', () => {
+		const starts = [at('2026-03-02', '22:00'), at('2026-03-03', '22:00')];
+		const punches = [at('2026-03-02', '22:00'), at('2026-03-03', '02:00'), at('2026-03-03', '03:00'), at('2026-03-03', '06:00')];
+		expect(clusterPunches(punches, starts)).toHaveLength(1);
+	});
+});

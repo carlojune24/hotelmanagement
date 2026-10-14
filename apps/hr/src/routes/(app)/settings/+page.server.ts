@@ -11,6 +11,8 @@ import {
 } from '$lib/server/hr/leave';
 import { leaveTypeFromForm } from '$lib/server/hr/leave-form';
 import { EstablishmentError, getOrganization } from '$lib/server/establishments';
+import { logoUrlFor, removeLogo, setLogo } from '$lib/server/brand';
+import { UploadValidationError } from '$lib/server/uploads';
 import {
 	createEstablishmentType,
 	listEstablishmentTypes,
@@ -27,6 +29,13 @@ import {
 	updateLoanType
 } from '$lib/server/hr/loans';
 import { getRemittanceSettings, saveRemittanceSettings } from '$lib/server/hr/remittance';
+import {
+	DEFAULT_CLEARANCE,
+	MAX_CLEARANCE_ITEMS,
+	SeparationError,
+	getClearanceTemplate,
+	saveClearanceTemplate
+} from '$lib/server/hr/separations';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -36,7 +45,12 @@ export const load: PageServerLoad = async ({ locals }) => {
 const estTypes = await listEstablishmentTypes(org.id);
 	const leaveTypeRows = await listLeaveTypesForOrg(org.id);
 	const remittance = await getRemittanceSettings(org.id);
+	const clearanceItems = await getClearanceTemplate(org.id);
 	return {
+		clearanceItems,
+		logoUrl: logoUrlFor(org.config),
+		clearanceDefaults: DEFAULT_CLEARANCE,
+		maxClearanceItems: MAX_CLEARANCE_ITEMS,
 		remittance: { employerIds: remittance.employerIds, dueDay: remittance.dueDay },
 leaveTypes: leaveTypeRows.map((t) => ({
 			id: t.id,
@@ -85,6 +99,49 @@ const dueDay = z.preprocess(
 const fd = async (request: Request) => Object.fromEntries(await request.formData());
 
 export const actions: Actions = {
+	uploadLogo: async ({ request, locals }) => {
+		requireCap(locals.user, locals.access, 'payroll:*');
+		const file = (await request.formData()).get('logo');
+		if (!(file instanceof File) || file.size === 0) return fail(400, { error: 'Choose an image to upload.' });
+		try {
+			const org = await getOrganization();
+			await setLogo(org, file);
+			await writeAudit({ actor: locals.user, action: 'organization.logo', entityType: 'organization', entityId: org.id, after: { logo: 'set' } });
+			return { ok: 'Logo saved.' };
+		} catch (e) {
+			if (e instanceof UploadValidationError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
+	removeLogo: async ({ locals }) => {
+		requireCap(locals.user, locals.access, 'payroll:*');
+		const org = await getOrganization();
+		await removeLogo(org);
+		await writeAudit({ actor: locals.user, action: 'organization.logo', entityType: 'organization', entityId: org.id, after: { logo: 'removed' } });
+		return { ok: 'Logo removed.' };
+	},
+
+	saveClearance: async ({ request, locals }) => {
+		requireCap(locals.user, locals.access, 'payroll:*');
+		const items = (await request.formData()).getAll('item').map(String);
+		try {
+			const org = await getOrganization();
+			const saved = await saveClearanceTemplate(org.id, items);
+			await writeAudit({
+				actor: locals.user,
+				action: 'separation.clearance_template',
+				entityType: 'organization',
+				entityId: org.id,
+				after: { items: saved }
+			});
+			return { ok: 'Clearance checklist saved.' };
+		} catch (e) {
+			if (e instanceof SeparationError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
 	saveRemittance: async ({ request, locals }) => {
 		requireCap(locals.user, locals.access, 'payroll:*');
 		const parsed = z

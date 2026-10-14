@@ -47,6 +47,7 @@ export async function runView(runId: string) {
 					cashAdvance: deductions.cash_advance ?? 0,
 					otherDeductions: deductions.other ?? 0,
 					net: l.netPayCentavos,
+					payItems: ((l.detail as { payItems?: Array<{ id: string; kind: string; label: string; amountCentavos: number }> } | null)?.payItems ?? []),
 					loans: ((l.detail as { loans?: Array<{ label: string; due: number; deducted: number }> } | null)?.loans ?? []).map(
 						(x) => ({ label: x.label, due: x.due, deducted: x.deducted })
 					),

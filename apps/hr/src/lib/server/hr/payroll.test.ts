@@ -222,7 +222,7 @@ describe.skipIf(!hasDb)('payroll (live DB)', async () => {
 		expect((on!.deductions as { sss_ee: number }).sss_ee).toBeGreaterThan(0);
 	});
 
-	it('re-prices a line from adjustments and keeps them across a regenerate', async () => {
+	it('re-prices a line from a typed adjustment; a regenerate rebuilds from pay items instead', async () => {
 		const [line] = (await P.listBatchLines(batchA)).filter((l) => l.employeeId === ana);
 		const before = line!.netPayCentavos;
 		await P.adjustLine({
@@ -240,8 +240,9 @@ describe.skipIf(!hasDb)('payroll (live DB)', async () => {
 
 		await P.generateBatch(batchA);
 		const [again] = (await P.listBatchLines(batchA)).filter((l) => l.employeeId === ana);
-		expect((again!.earnings as { allowances: number }).allowances).toBe(50_000);
-		expect(again!.netPayCentavos).toBe(after!.netPayCentavos);
+		// Earnings and deductions now come from pay items (see pay-items.test.ts), so a typed figure is not kept.
+		expect((again!.earnings as { allowances: number }).allowances).toBe(0);
+		expect(again!.netPayCentavos).toBe(before);
 	});
 
 	it('cannot lock before the rates are confirmed, nor release before locking', async () => {

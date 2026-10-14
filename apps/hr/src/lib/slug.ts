@@ -14,6 +14,8 @@ export const RESERVED_SLUGS = new Set([
 	'print',
 	'api',
 	'uploads',
+	'brand',
+	'pay-items',
 	'admin',
 	'static',
 	'_app',

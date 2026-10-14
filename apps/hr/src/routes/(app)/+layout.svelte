@@ -9,6 +9,7 @@
 	import HandCoinsIcon from '@lucide/svelte/icons/hand-coins';
 	import UserRoundXIcon from '@lucide/svelte/icons/user-round-x';
 	import GiftIcon from '@lucide/svelte/icons/gift';
+	import CirclePlusIcon from '@lucide/svelte/icons/circle-plus';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
 	import LayoutDashboardIcon from '@lucide/svelte/icons/layout-dashboard';
@@ -18,9 +19,12 @@
 	import TimerIcon from '@lucide/svelte/icons/timer';
 import ReceiptIcon from '@lucide/svelte/icons/receipt-text';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
+	import BookOpenIcon from '@lucide/svelte/icons/book-open';
 	import ContactIcon from '@lucide/svelte/icons/contact';
 	import KeyIcon from '@lucide/svelte/icons/key-round';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
+	import SunIcon from '@lucide/svelte/icons/sun';
+	import MoonIcon from '@lucide/svelte/icons/moon';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import type { LayoutData } from './$types';
 
@@ -35,6 +39,7 @@ import ReceiptIcon from '@lucide/svelte/icons/receipt-text';
 overtime: TimerIcon,
 		memos: FileTextIcon,
 		payslips: ReceiptIcon,
+		guide: BookOpenIcon,
 		settings: SettingsIcon
 	} as const;
 
@@ -53,6 +58,7 @@ overtime: TimerIcon,
 			{ seg: 'payroll', label: 'Payroll', icon: WalletIcon, show: data.nav.payroll },
 			{ seg: 'loans', label: 'Loans', icon: HandCoinsIcon, show: data.nav.loans },
 			{ seg: 'bonuses', label: 'Bonuses', icon: GiftIcon, show: data.nav.bonuses },
+			{ seg: 'pay-items', label: 'Pay items', icon: CirclePlusIcon, show: data.nav.payItems },
 			{ seg: 'separations', label: 'Separations', icon: UserRoundXIcon, show: data.nav.separations },
 			{ seg: 'announcements', label: 'Announcements', icon: MegaphoneIcon, show: data.nav.announcements },
 			{ seg: 'remittances', label: 'Remittances', icon: LandmarkIcon, show: data.nav.remittances },
@@ -62,16 +68,32 @@ overtime: TimerIcon,
 		].filter((i) => i.show)
 	);
 	const active = (seg: string) => page.url.pathname.startsWith(`/${seg}`);
+
+	// The theme is the .dark class on <html> (set before paint by app.html); the choice is remembered per browser.
+	let dark = $state(typeof document !== 'undefined' && document.documentElement.classList.contains('dark'));
+	function toggleTheme() {
+		dark = !dark;
+		document.documentElement.classList.toggle('dark', dark);
+		try {
+			localStorage.setItem('hr-theme', dark ? 'dark' : 'light');
+		} catch {
+			// Private mode: the choice just lasts until reload.
+		}
+	}
 </script>
 
 <Sidebar.Provider>
 	<Sidebar.Root collapsible="icon" class="print:hidden">
 		<Sidebar.Header class="p-4">
 			<div class="flex items-center gap-3 group-data-[collapsible=icon]:justify-center">
-				<span
-					class="inline-flex h-9 shrink-0 items-center rounded-full border border-ink/40 px-4 font-display text-lg tracking-wide"
-					>HR</span
-				>
+				{#if data.logoUrl}
+					<img src={data.logoUrl} alt={data.orgName} class="h-9 w-auto max-w-24 shrink-0 object-contain" />
+				{:else}
+					<span
+						class="inline-flex h-9 shrink-0 items-center rounded-full border border-ink/40 px-4 font-display text-lg tracking-wide"
+						>HR</span
+					>
+				{/if}
 				<span class="truncate text-sm text-ink-muted group-data-[collapsible=icon]:hidden"
 					>{data.orgName}</span
 				>
@@ -127,6 +149,16 @@ overtime: TimerIcon,
 			</div>
 			<form method="POST" action="/auth/logout">
 				<Sidebar.Menu>
+					<Sidebar.MenuItem>
+						<Sidebar.MenuButton tooltipContent={dark ? 'Light mode' : 'Dark mode'}>
+							{#snippet child({ props })}
+								<button {...props} type="button" onclick={toggleTheme} aria-pressed={dark}>
+									{#if dark}<SunIcon />{:else}<MoonIcon />{/if}
+									<span>{dark ? 'Light mode' : 'Dark mode'}</span>
+								</button>
+							{/snippet}
+						</Sidebar.MenuButton>
+					</Sidebar.MenuItem>
 					<Sidebar.MenuItem>
 						<Sidebar.MenuButton isActive={active('account')} tooltipContent="Account">
 							{#snippet child({ props })}

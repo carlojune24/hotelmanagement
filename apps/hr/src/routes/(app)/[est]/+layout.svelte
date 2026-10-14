@@ -16,6 +16,7 @@
 { seg: '/overtime', label: 'Overtime', show: data.tabs.overtime },
 { seg: '/memos', label: 'Memos', show: data.tabs.memos },
 			{ seg: '/payslips', label: 'Payslips', show: data.tabs.payslips },
+			{ seg: '/guide', label: 'Guide', show: data.tabs.dtr },
 			{ seg: '/settings', label: 'Settings', show: data.tabs.settings }
 		].filter((t) => t.show)
 	);

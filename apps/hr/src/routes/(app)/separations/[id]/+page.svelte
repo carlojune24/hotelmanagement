@@ -230,9 +230,8 @@
 			<div class="flex flex-wrap items-center gap-3 border-t border-dotted border-ink/20 pt-4">
 				<Button variant="outline" onclick={() => (adding = true)}><PlusIcon /> Add line</Button>
 				<p class="min-w-0 flex-1 text-xs text-ink-muted">
-					A line is one amount on the final-pay statement: something owed to them (e.g. prorated 13th month) adds to
-					it, something charged to them (e.g. unreturned uniform) is taken off it.
-				</p>
+					A line is one amount on the final-pay statement: something owed to them (e.g. unused leave converted to cash) adds to
+					it, something charged to them (e.g. unreturned uniform) is taken off it. The 13th month has its own button above, so don't add it here.</p>
 			</div>
 		{/if}
 	</section>
@@ -476,7 +475,7 @@
 			</div>
 			<div class="space-y-1.5">
 				<Label for="label">For</Label>
-				<Input id="label" name="label" maxlength={120} placeholder="e.g. Prorated 13th month, Unreturned uniform" required />
+				<Input id="label" name="label" maxlength={120} placeholder="e.g. Unused leave conversion, Unreturned uniform" required />
 			</div>
 			<div class="space-y-1.5">
 				<Label for="amount">Amount (₱)</Label>

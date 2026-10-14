@@ -1110,6 +1110,43 @@ export const payrollLoanDeductions = pgTable(
 );
 
 /**
+ * One-off or recurring earnings and deductions Main HR files for a person (incentives, allowances, cash
+ * advances, uniform charges…). Payroll reads them when a batch is generated and whenever they change, and
+ * snapshots them onto the line. A wrong item is voided, never deleted. `endDate` null = open-ended;
+ * `startDate = endDate` = a single cutoff (the one that contains the date).
+ */
+export const payItems = pgTable(
+	'pay_items',
+	{
+		id: pk(),
+		organizationId: uuid('organization_id')
+			.notNull()
+			.references(() => organizations.id, { onDelete: 'restrict' }),
+		employeeId: uuid('employee_id')
+			.notNull()
+			.references(() => employees.id, { onDelete: 'restrict' }),
+		/** 'earning' | 'deduction' */
+		kind: text('kind').notNull(),
+		/** earning: 'allowance' | 'incentive' | 'other'; deduction: 'cash_advance' | 'other' */
+		category: text('category').notNull(),
+		label: text('label').notNull(),
+		/** Per cutoff it applies to. */
+		amountCentavos: bigint('amount_centavos', { mode: 'number' }).notNull(),
+		startDate: date('start_date', { mode: 'string' }).notNull(),
+		endDate: date('end_date', { mode: 'string' }),
+		note: text('note'),
+		/** The payslip line it is currently on (null until payroll picks it up). */
+		appliedLineId: uuid('applied_line_id').references(() => payrollRunLines.id, { onDelete: 'set null' }),
+		voidedAt: timestamp('voided_at', { withTimezone: true }),
+		voidReason: text('void_reason'),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [index('pay_items_employee_idx').on(t.employeeId), index('pay_items_org_idx').on(t.organizationId, t.startDate)]
+);
+
+/**
  * A notice from Main HR shown on the dashboard of the establishments it is addressed to. `audience` is
  * a list of establishment ids, or null for every establishment. It stops showing after `expires_on`
  * (inclusive) or once archived; nothing is ever deleted.

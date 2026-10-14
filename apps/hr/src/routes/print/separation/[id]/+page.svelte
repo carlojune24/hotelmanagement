@@ -37,6 +37,7 @@
 
 	<header class="flex items-start justify-between border-b border-ink/30 pb-3">
 		<div>
+			{#if data.logoUrl}<img src={data.logoUrl} alt="" class="mb-2 h-12 w-auto max-w-48 object-contain" />{/if}
 			<h1 class="text-xl font-semibold">{data.company}</h1>
 			<p class="text-ink-muted">Final pay and clearance statement</p>
 		</div>

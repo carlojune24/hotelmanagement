@@ -6,6 +6,8 @@
 import PlusIcon from '@lucide/svelte/icons/plus';
 	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
+	import ArrowUpIcon from '@lucide/svelte/icons/arrow-up';
+	import ArrowDownIcon from '@lucide/svelte/icons/arrow-down';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
 	import { EMPLOYMENT_TYPES, EMPLOYMENT_TYPE_LABEL } from '$lib/leave';
 	import { Badge } from '$lib/components/ui/badge/index.js';
@@ -22,18 +24,30 @@ import PlusIcon from '@lucide/svelte/icons/plus';
 		{ key: 'establishments', label: 'Establishment types' },
 { key: 'leave', label: 'Leave types' },
 		{ key: 'loans', label: 'Loan types' },
-		{ key: 'remittances', label: 'Employer numbers' }
+		{ key: 'remittances', label: 'Employer numbers' },
+		{ key: 'clearance', label: 'Clearance items' },
+		{ key: 'logo', label: 'Company logo' }
 	] as const;
 	type Tab = (typeof TABS)[number]['key'];
 	// The tab lives in the address (?tab=) so a reload or a shared link lands on the same one.
 const tabParam = page.url.searchParams.get('tab');
-	let tab = $state<Tab>(tabParam === 'loans' || tabParam === 'leave' || tabParam === 'remittances' ? tabParam : 'establishments');
+	let tab = $state<Tab>(tabParam === 'loans' || tabParam === 'leave' || tabParam === 'remittances' || tabParam === 'clearance' || tabParam === 'logo'
+			? tabParam
+			: 'establishments');
 	function pick(next: Tab) {
 		tab = next;
 		replaceState(`?tab=${next}`, {});
 	}
 
 	let adding = $state(false);
+	// Editable copy of the default clearance checklist; saved as a whole.
+	// svelte-ignore state_referenced_locally
+	let clearance = $state<string[]>([...data.clearanceItems]);
+	function moveClearance(i: number, by: -1 | 1) {
+		const next = [...clearance];
+		[next[i], next[i + by]] = [next[i + by]!, next[i]!];
+		clearance = next;
+	}
 	let editingId = $state<string | null>(null);
 type LeaveType = PageData['leaveTypes'][number];
 	let editingLeave = $state<LeaveType | 'new' | null>(null);
@@ -238,6 +252,94 @@ deletingLeave = null;
 				</div>
 			<div class="sm:col-span-2">
 				<Button type="submit" variant="outline" disabled={busy}>Save</Button>
+			</div>
+		</form>
+	</div>
+{:else if tab === 'logo'}
+	<div id="panel-logo" role="tabpanel" aria-labelledby="tab-logo" class="panel space-y-5 p-5 md:p-6" aria-label="Company logo">
+		<div class="max-w-2xl">
+			<h2 class="text-2xl font-light">Company logo</h2>
+			<p class="mt-1 text-sm text-ink-muted">
+				Shown in the sidebar, on the sign-in page and in the header of printed payslips, payroll registers, bonus
+				slips, loan statements and final pay. PNG, JPEG or WebP, up to 2 MB. A transparent PNG prints best.
+			</p>
+		</div>
+		{#if data.logoUrl}
+			<div class="inline-flex rounded-2xl border border-dashed border-ink/30 bg-white p-4">
+				<img src={data.logoUrl} alt="Current company logo" class="h-20 w-auto max-w-72 object-contain" />
+			</div>
+		{:else}
+			<p class="rounded-lg border border-dashed border-ink/30 px-4 py-3 text-sm text-ink-muted">No logo yet. The sidebar shows "HR".</p>
+		{/if}
+		<form method="POST" action="?/uploadLogo" enctype="multipart/form-data" use:enhance={submit} class="flex flex-wrap items-end gap-3">
+			<div class="space-y-1.5">
+				<Label for="logo">{data.logoUrl ? 'Replace logo' : 'Upload logo'}</Label>
+				<Input id="logo" name="logo" type="file" accept="image/png,image/jpeg,image/webp" required />
+			</div>
+			<Button type="submit" variant="gold" disabled={busy}>Save logo</Button>
+		</form>
+		{#if data.logoUrl}
+			<form method="POST" action="?/removeLogo" use:enhance={submit}>
+				<Button type="submit" variant="ghost" disabled={busy}>Remove logo</Button>
+			</form>
+		{/if}
+	</div>
+{:else if tab === 'clearance'}
+	<div id="panel-clearance" role="tabpanel" aria-labelledby="tab-clearance" class="panel space-y-5 p-5 md:p-6" aria-label="Clearance items">
+		<div class="max-w-2xl">
+			<h2 class="text-2xl font-light">Clearance items</h2>
+			<p class="mt-1 text-sm text-ink-muted">
+				The checklist every new separation starts with. A change applies to separations started after you save;
+				ones already in process keep the list they have (you can still add an item to a single separation).
+			</p>
+		</div>
+		<form method="POST" action="?/saveClearance" use:enhance={submit} class="space-y-3">
+			{#if clearance.length === 0}
+				<p class="rounded-lg border border-dashed border-ink/30 px-4 py-3 text-sm text-ink-muted">
+					No items — a separation can be cleared as soon as the money and loans are settled.
+				</p>
+			{/if}
+			<ol class="space-y-2">
+				{#each clearance as _, i (i)}
+					<li class="flex items-center gap-2">
+						<span class="w-6 text-right text-sm text-ink-muted tabular-nums">{i + 1}</span>
+						<Input name="item" maxlength={120} bind:value={clearance[i]} aria-label="Item {i + 1}" class="flex-1" />
+						<Button type="button" variant="ghost" size="icon-sm" aria-label="Move up" disabled={i === 0} onclick={() => moveClearance(i, -1)}>
+							<ArrowUpIcon />
+						</Button>
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-sm"
+							aria-label="Move down"
+							disabled={i === clearance.length - 1}
+							onclick={() => moveClearance(i, 1)}
+						>
+							<ArrowDownIcon />
+						</Button>
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-sm"
+							aria-label="Remove item {i + 1}"
+							onclick={() => (clearance = clearance.filter((_, k) => k !== i))}
+						>
+							<Trash2Icon />
+						</Button>
+					</li>
+				{/each}
+			</ol>
+			<div class="flex flex-wrap items-center gap-2 pt-2">
+				<Button
+					type="button"
+					variant="outline"
+					disabled={clearance.length >= data.maxClearanceItems}
+					onclick={() => (clearance = [...clearance, ''])}
+				>
+					<PlusIcon /> Add item
+				</Button>
+				<Button type="button" variant="ghost" onclick={() => (clearance = [...data.clearanceDefaults])}>Restore defaults</Button>
+				<Button type="submit" variant="gold" class="ml-auto" disabled={busy}>Save</Button>
 			</div>
 		</form>
 	</div>

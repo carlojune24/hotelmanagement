@@ -22,32 +22,30 @@
 			<Dialog.Header>
 				<Dialog.Title class="font-display text-2xl font-light">{line.employeeName}</Dialog.Title>
 				<Dialog.Description>
-					Amounts in pesos. Withholding tax is recomputed unless you set it yourself.
+					Withholding tax is recomputed unless you set it yourself.
 				</Dialog.Description>
 			</Dialog.Header>
 			<form method="POST" action="?/adjust" use:enhance={run} class="space-y-3">
 				<input type="hidden" name="lineId" value={line.id} />
-				<div class="grid grid-cols-2 gap-3">
-					<div class="space-y-1.5">
-						<Label for="allowances">Allowances</Label>
-						<Input id="allowances" name="allowances" type="number" min="0" step="0.01" value={line.adjustments.allowances} />
-					</div>
-					<div class="space-y-1.5">
-						<Label for="otherEarnings">Other earnings</Label>
-						<Input id="otherEarnings" name="otherEarnings" type="number" min="0" step="0.01" value={line.adjustments.otherEarnings} />
-					</div>
-					<div class="space-y-1.5">
-						<Label for="cashAdvance">Cash advance</Label>
-						<Input id="cashAdvance" name="cashAdvance" type="number" min="0" step="0.01" value={line.adjustments.cashAdvance} />
-					</div>
-					<div class="space-y-1.5">
-						<Label for="otherDeductions">Other deductions</Label>
-						<Input id="otherDeductions" name="otherDeductions" type="number" min="0" step="0.01" value={line.adjustments.otherDeductions} />
-					</div>
-					<div class="space-y-1.5">
-						<Label for="withholdingOverride">Withholding tax <span class="text-ink-muted">(blank = computed)</span></Label>
-						<Input id="withholdingOverride" name="withholdingOverride" type="number" min="0" step="0.01" value={line.adjustments.withholdingOverride} />
-					</div>
+				<div class="space-y-1.5">
+					<Label for="withholdingOverride">Withholding tax <span class="text-ink-muted">(blank = computed)</span></Label>
+					<Input id="withholdingOverride" name="withholdingOverride" type="number" min="0" step="0.01" value={line.adjustments.withholdingOverride} />
+				</div>
+				<div class="rounded-2xl bg-ink/5 px-4 py-3 text-sm">
+					<p class="font-medium">Pay items</p>
+					{#if line.payItems.length === 0}
+						<p class="mt-1 text-xs text-ink-muted">None for this cutoff.</p>
+					{:else}
+						<ul class="mt-1 space-y-0.5">
+							{#each line.payItems as it (it.id)}
+								<li class="flex justify-between gap-3 tabular-nums">
+									<span>{it.label}</span>
+									<span class={it.kind === 'deduction' ? 'text-danger' : ''}>{it.kind === 'deduction' ? '−' : ''}{money(it.amountCentavos)}</span>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+					<p class="mt-1 text-xs text-ink-muted">Add or void incentives, allowances and deductions under <a href="/pay-items" class="underline underline-offset-4">Pay items</a>; this payslip updates by itself.</p>
 				</div>
 				{#if line.loans.length > 0}
 					<div class="rounded-2xl bg-ink/5 px-4 py-3 text-sm">

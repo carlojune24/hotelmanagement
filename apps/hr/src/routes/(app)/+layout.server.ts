@@ -1,5 +1,6 @@
 import { requireUser } from '$lib/server/auth/rbac';
 import { getOrganization } from '$lib/server/establishments';
+import { logoUrlFor } from '$lib/server/brand';
 import { canAnywhere, roleCan } from '$lib/authz';
 import { pendingApprovalCount } from '$lib/server/hr/approvals';
 import { establishmentScope } from '$lib/server/scope';
@@ -14,6 +15,7 @@ export const load: LayoutServerLoad = async ({ locals, url }) => {
 	return {
 		user: { name: locals.user.name, email: locals.user.email },
 		orgName: org?.name ?? 'HR',
+		logoUrl: logoUrlFor(org?.config),
 		/** Set for a manager or clerk: the sidebar becomes their establishment's menu. Null for Main HR. */
 		scope,
 		/** Waiting decisions, for the sidebar badge — only computed for someone who can decide them. */
@@ -30,6 +32,7 @@ export const load: LayoutServerLoad = async ({ locals, url }) => {
 			loans: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			separations: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			bonuses: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
+			payItems: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			settings: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			users: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'user:*')
 		}

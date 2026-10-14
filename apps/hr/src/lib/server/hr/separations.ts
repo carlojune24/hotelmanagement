@@ -7,6 +7,7 @@ import {
 	employeeLoans,
 	employees,
 	establishments,
+	organizations,
 	separationClearance,
 	separationItems,
 	separations,
@@ -47,6 +48,37 @@ export const DEFAULT_CLEARANCE = [
 	'No pending cash accountability',
 	'Exit interview done'
 ];
+
+export const MAX_CLEARANCE_ITEMS = 30;
+
+/** The checklist a new separation starts with: the company's own list, else the built-in defaults. */
+export async function getClearanceTemplate(organizationId: string): Promise<string[]> {
+	const row = await db
+		.select({ config: organizations.config })
+		.from(organizations)
+		.where(eq(organizations.id, organizationId))
+		.then((r) => r.at(0));
+	const saved = (row?.config as { clearanceItems?: unknown } | null)?.clearanceItems;
+	return Array.isArray(saved) && saved.every((x) => typeof x === 'string') ? (saved as string[]) : DEFAULT_CLEARANCE;
+}
+
+/** Saves the company's checklist. Applies to separations started after this; existing ones keep theirs. */
+export async function saveClearanceTemplate(organizationId: string, items: string[]) {
+	const clean = [...new Set(items.map((s) => s.trim()).filter(Boolean))];
+	if (clean.length > MAX_CLEARANCE_ITEMS) throw new SeparationError(`At most ${MAX_CLEARANCE_ITEMS} items.`);
+	if (clean.some((s) => s.length > 120)) throw new SeparationError('Each item is at most 120 characters.');
+	const org = await db
+		.select({ config: organizations.config })
+		.from(organizations)
+		.where(eq(organizations.id, organizationId))
+		.then((r) => r.at(0));
+	if (!org) throw new SeparationError('Organization not found.');
+	await db
+		.update(organizations)
+		.set({ config: { ...(org.config as object), clearanceItems: clean }, updatedAt: new Date() })
+		.where(eq(organizations.id, organizationId));
+	return clean;
+}
 
 // ---------------------------------------------------------------------------
 // The money, as a pure function
@@ -389,6 +421,7 @@ export async function startSeparation(organizationId: string, input: z.infer<typ
 	const existing = await db.select({ id: separations.id }).from(separations).where(eq(separations.employeeId, emp.id)).then((r) => r.at(0));
 	if (existing) throw new SeparationError('This person already has a separation on file.');
 
+	const template = await getClearanceTemplate(organizationId);
 	const sep = await db.transaction(async (tx) => {
 		const [row] = await tx
 			.insert(separations)
@@ -401,9 +434,11 @@ export async function startSeparation(organizationId: string, input: z.infer<typ
 				startedByUserId: userId
 			})
 			.returning();
-		await tx
-			.insert(separationClearance)
-			.values(DEFAULT_CLEARANCE.map((label, i) => ({ separationId: row!.id, label, sortOrder: i })));
+		if (template.length > 0) {
+			await tx
+				.insert(separationClearance)
+				.values(template.map((label, i) => ({ separationId: row!.id, label, sortOrder: i })));
+		}
 		// Their assignments end on the last day (inclusive), so scheduling and DTR stop there.
 		await tx
 			.update(employeeAssignments)

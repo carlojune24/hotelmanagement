@@ -15,6 +15,7 @@ import {
 	employees,
 	establishments,
 	organizations,
+	payItems,
 	payrollBatches,
 	payrollLoanDeductions,
 	payrollRunLines,
@@ -22,6 +23,7 @@ import {
 	schedules
 } from '$lib/server/db/schema/index';
 import { getHandoff } from './dtr-submissions';
+import { appliesToCutoff, bucketsOf, type LinePayItem } from '$lib/pay-items-core';
 import { allocate, byPriority, closeSettledLoans, loansDueFor, reopenSettledLoans, type LoanDue } from './loans';
 import { parseNightDiff } from './night-diff';
 import { historiesFor, payTermsFor, type PayTerms } from './salary';
@@ -365,9 +367,18 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 	const estById = new Map(estRows.map((e) => [e.id, e]));
 	const holidayAt = new Map(holidays.map((h) => [`${h.establishmentId}|${h.date}`, h.kind]));
 	const keptAdjustments = new Map(existing.map((l) => [l.employeeId, l.adjustments]));
-	// Loans come from the ledger, never from a kept hand-typed figure.
+	// Earnings and deductions come from the pay items filed for the cutoff and loans from the ledger; only a
+	// withholding override Main HR typed on the line is kept.
+	const itemRows = (
+		await db.select().from(payItems).where(and(inArray(payItems.employeeId, candidateIds), isNull(payItems.voidedAt)))
+	).filter((i) => appliesToCutoff(i, run.cutoffStart, run.cutoffEnd));
+	const itemsOf = (employeeId: string): LinePayItem[] =>
+		itemRows
+			.filter((i) => i.employeeId === employeeId)
+			.map((i) => ({ id: i.id, kind: i.kind, category: i.category, label: i.label, amountCentavos: i.amountCentavos }));
 	const adjustmentsFor = (employeeId: string): PayrollAdjustments => ({
 		...adjustmentsOf(keptAdjustments.get(employeeId)),
+		...bucketsOf(itemsOf(employeeId)),
 		loansCentavos: 0
 	});
 	const loanDues = await loansDueFor(run, candidateIds);
@@ -527,6 +538,7 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 						...(b.pay.changes.length || b.pay.deferredBasisChange
 							? { rateChanges: b.pay.changes, deferredBasisChange: b.pay.deferredBasisChange }
 							: {}),
+						...(itemsOf(b.employee.id).length ? { payItems: itemsOf(b.employee.id) } : {}),
 						...(b.loans.length
 							? {
 									loans: b.loans.map((l) => ({
@@ -555,6 +567,13 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 				}))
 			);
 			if (deductionRows.length) await tx.insert(payrollLoanDeductions).values(deductionRows);
+			// Mark each item with the line it is on (old links went with the deleted lines or are stale).
+			const applied = [...new Set(itemRows.map((i) => i.id))];
+			if (applied.length) await tx.update(payItems).set({ appliedLineId: null }).where(inArray(payItems.id, applied));
+			for (const b of built) {
+				const ids = itemsOf(b.employee.id).map((i) => i.id);
+				if (ids.length) await tx.update(payItems).set({ appliedLineId: lineOf.get(b.employee.id)! }).where(inArray(payItems.id, ids));
+			}
 		}
 		await tx.update(payrollBatches).set({ generatedAt: new Date(), updatedAt: new Date() }).where(eq(payrollBatches.id, batchId));
 	});
@@ -568,10 +587,10 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 
 export const adjustmentSchema = z.object({
 	lineId: z.string().uuid(),
-	allowances: z.coerce.number().min(0).max(10_000_000).default(0),
-	otherEarnings: z.coerce.number().min(0).max(10_000_000).default(0),
-	cashAdvance: z.coerce.number().min(0).max(10_000_000).default(0),
-	otherDeductions: z.coerce.number().min(0).max(10_000_000).default(0),
+	allowances: z.coerce.number().min(0).max(10_000_000).optional(),
+	otherEarnings: z.coerce.number().min(0).max(10_000_000).optional(),
+	cashAdvance: z.coerce.number().min(0).max(10_000_000).optional(),
+	otherDeductions: z.coerce.number().min(0).max(10_000_000).optional(),
 	/** Blank = use the computed tax. */
 	withholdingOverride: z.preprocess(
 		(v) => (v === '' || v === null || v === undefined ? null : v),
@@ -593,12 +612,15 @@ export async function adjustLine(input: z.infer<typeof adjustmentSchema>) {
 	if (!row) throw new PayrollError('That payslip line does not exist.');
 	if (row.batch.status !== 'draft') throw new PayrollError('This batch is locked. Unlock it to adjust.');
 
+	// The four figures come from the person's pay items; a value passed in here overrides them for this line.
+	const kept = adjustmentsOf(row.line.adjustments);
+	const pick = (v: number | undefined, stored: number) => (v === undefined ? stored : centavos(v));
 	const adjustments: PayrollAdjustments = {
-		allowancesCentavos: centavos(input.allowances),
-		otherEarningsCentavos: centavos(input.otherEarnings),
-		cashAdvanceCentavos: centavos(input.cashAdvance),
+		allowancesCentavos: pick(input.allowances, kept.allowancesCentavos),
+		otherEarningsCentavos: pick(input.otherEarnings, kept.otherEarningsCentavos),
+		cashAdvanceCentavos: pick(input.cashAdvance, kept.cashAdvanceCentavos),
 		loansCentavos: 0,
-		otherDeductionsCentavos: centavos(input.otherDeductions),
+		otherDeductionsCentavos: pick(input.otherDeductions, kept.otherDeductionsCentavos),
 		withholdingOverrideCentavos: input.withholdingOverride === null ? null : centavos(input.withholdingOverride)
 	};
 	// Adjustments only touch their own lines; recompute the totals from the stored components.
@@ -758,3 +780,63 @@ export function maskId(value: string | undefined | null): string {
 	return v.length <= 4 ? v : `${'•'.repeat(v.length - 4)}${v.slice(-4)}`;
 }
 
+// ---------------------------------------------------------------------------
+// Pay items -> draft payslips
+// ---------------------------------------------------------------------------
+
+/**
+ * Re-reads one draft line's pay items and re-prices it: a new or voided item reaches the payslip at once,
+ * without regenerating the batch. A locked or released batch is never touched.
+ */
+export async function applyPayItemsToLine(lineId: string): Promise<boolean> {
+	const row = await db
+		.select({ line: payrollRunLines, batch: payrollBatches, run: payrollRuns })
+		.from(payrollRunLines)
+		.innerJoin(payrollBatches, eq(payrollBatches.id, payrollRunLines.batchId))
+		.innerJoin(payrollRuns, eq(payrollRuns.id, payrollRunLines.runId))
+		.where(eq(payrollRunLines.id, lineId))
+		.then((r) => r.at(0));
+	if (!row || row.batch.status !== 'draft') return false;
+	const items = (
+		await db
+			.select()
+			.from(payItems)
+			.where(and(eq(payItems.employeeId, row.line.employeeId), isNull(payItems.voidedAt)))
+	).filter((i) => appliesToCutoff(i, row.run.cutoffStart, row.run.cutoffEnd));
+	const b = bucketsOf(items);
+	const kept = adjustmentsOf(row.line.adjustments);
+	await adjustLine({
+		lineId,
+		allowances: b.allowancesCentavos / 100,
+		otherEarnings: b.otherEarningsCentavos / 100,
+		cashAdvance: b.cashAdvanceCentavos / 100,
+		otherDeductions: b.otherDeductionsCentavos / 100,
+		withholdingOverride: kept.withholdingOverrideCentavos === null ? null : kept.withholdingOverrideCentavos / 100
+	});
+	const fresh = await db.select({ detail: payrollRunLines.detail }).from(payrollRunLines).where(eq(payrollRunLines.id, lineId)).then((r) => r.at(0));
+	const detail = { ...((fresh?.detail ?? {}) as Record<string, unknown>) };
+	if (items.length) {
+		detail.payItems = items.map((i) => ({ id: i.id, kind: i.kind, category: i.category, label: i.label, amountCentavos: i.amountCentavos }));
+	} else delete detail.payItems;
+	await db.update(payrollRunLines).set({ detail }).where(eq(payrollRunLines.id, lineId));
+	await db.update(payItems).set({ appliedLineId: null }).where(eq(payItems.appliedLineId, lineId));
+	if (items.length) {
+		await db
+			.update(payItems)
+			.set({ appliedLineId: lineId })
+			.where(inArray(payItems.id, items.map((i) => i.id)));
+	}
+	return true;
+}
+
+/** Re-price every draft line an employee has, so a changed pay item shows up on their payslip straight away. */
+export async function applyPayItemsForEmployee(employeeId: string): Promise<number> {
+	const lines = await db
+		.select({ id: payrollRunLines.id })
+		.from(payrollRunLines)
+		.innerJoin(payrollBatches, eq(payrollBatches.id, payrollRunLines.batchId))
+		.where(and(eq(payrollRunLines.employeeId, employeeId), eq(payrollBatches.status, 'draft')));
+	let n = 0;
+	for (const l of lines) if (await applyPayItemsToLine(l.id)) n++;
+	return n;
+}

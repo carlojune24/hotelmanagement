@@ -148,6 +148,13 @@
       "when": 1791908027117,
       "tag": "0020_salary_history",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1791960282119,
+      "tag": "0021_pay_items",
+      "breakpoints": true
     }
   ]
 }

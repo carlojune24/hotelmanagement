@@ -9,6 +9,8 @@ import {
 } from '$lib/server/auth/rate-limit';
 import { safeNext } from '$lib/server/auth/redirect';
 import { createSession, generateSessionToken, setSessionCookie } from '$lib/server/auth/session';
+import { getOrganization } from '$lib/server/establishments';
+import { logoUrlFor } from '$lib/server/brand';
 import type { Actions, PageServerLoad } from './$types';
 
 const schema = z.object({
@@ -19,7 +21,8 @@ const schema = z.object({
 
 export const load: PageServerLoad = async ({ locals, url }) => {
 	if (locals.user) redirect(302, safeNext(url.searchParams.get('next'), '/'));
-	return { next: url.searchParams.get('next') ?? '' };
+	const org = await getOrganization().catch(() => null);
+	return { next: url.searchParams.get('next') ?? '', logoUrl: logoUrlFor(org?.config), orgName: org?.name ?? 'HR' };
 };
 
 export const actions: Actions = {

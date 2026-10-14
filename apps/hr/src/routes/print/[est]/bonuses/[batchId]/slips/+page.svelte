@@ -39,6 +39,7 @@
 			{/if}
 			<header class="flex items-start justify-between border-b border-ink/30 pb-2">
 				<div>
+					{#if data.logoUrl}<img src={data.logoUrl} alt="" class="mb-1 h-8 w-auto max-w-32 object-contain" />{/if}
 					<p class="font-semibold">{data.company.name}</p>
 					<p class="text-xs text-ink-muted">{data.establishment}</p>
 				</div>

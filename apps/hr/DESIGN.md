@@ -1,6 +1,6 @@
 # Design System: MM HR — "Gold & Black on a soft wash"
 
-**Scope: the whole HR app (`apps/hr`), a staff / operate-mode world of its own.** It is not the hotel's neutral blue staff theme and never the guest "Woven Ledger". Light only in v1 — dark mode was deliberately skipped.
+**Scope: the whole HR app (`apps/hr`), a staff / operate-mode world of its own.** It is not the hotel's neutral blue staff theme and never the guest "Woven Ledger". Light by default, with a dark theme (below).
 
 Visual authority: three user-supplied reference screens. Only their **component styling** was taken (how buttons, tables, chips, panels look); layout, placement and concept are this app's own.
 
@@ -51,3 +51,14 @@ Left collapsible sidebar (sheet on mobile) + inset content on the wash. Page = l
 - Do keep frosted surfaces ≥85% opaque; never place text directly on the gradient.
 - Do pair gold selection with a check/checkbox state — never color alone.
 - Don't use gold for text on white. Don't add a second accent hue. Don't add dark mode without re-deriving the wash.
+
+## Dark theme — "black & gold, lit from within"
+
+`.dark` on `<html>`, toggled from the sidebar footer (Dark mode / Light mode), remembered in `localStorage` (`hr-theme`), defaulting to the device setting and applied before paint in `app.html`. Tokens live in `src/app.css` (`.dark { … }`).
+
+- **Ground:** warm near-black wash with a faint gold glow from the top-right; panels are raised charcoal with a hairline border.
+- **Roles invert:** `--ink` becomes warm off-white so `text-ink`, `border-ink/*` and `bg-ink/*` keep working. Black can no longer "do", so the **primary action is gold with black text**; gold still marks selection and data. Text on gold is black (`--on-gold`).
+- **Sidebar:** the active item gets a gold outline pill.
+- **`bg-white` / `text-white`** map to `--white`: pure white in light, raised charcoal in dark.
+- **Print routes are always light** (`routes/print/+layout.svelte` removes `.dark`).
+- Decorative gem/glass art from the reference is deliberately left out; HR is a task tool.
