@@ -13,6 +13,7 @@
 	rows={data.rows}
 	range={data.range}
 	q={data.q}
+	filters={data.filters}
 	hotelName={data.hotelName}
 	hotelTin={data.hotelTin}
 	printedAt={data.printedAt}

@@ -674,6 +674,58 @@ export async function voidFolioCharge(
 // `lib/server/finance/payments.ts`'s `recordPayment` (method, tendered/change,
 // partial amounts) which also writes the matching `cash_movements` row.
 
+/**
+ * Posts a function-hall event's overtime as one folio line, "Overtime (Nh × ₱rate)", inside the
+ * caller's transaction (the hall check-out). The rate is the hall's own extra-hour fee and VAT is
+ * added on top, the way `priceEventHall` treats booked extra hours. Idempotent: a live overtime
+ * line already on the folio is left alone (a partial unique index is the backstop), so pressing
+ * check-out twice never bills twice. Returns what was posted, or null when there was nothing to bill.
+ */
+export async function addHallOvertimeCharge(
+	tx: Tx,
+	hotelId: string,
+	hallBookingId: string,
+	overtime: { hours: number; extraHourFeeCentavos: number; vatRateBps: number },
+	actor: SessionUser | null
+): Promise<{ chargeId: string; totalCentavos: number } | null> {
+	const { hours, extraHourFeeCentavos, vatRateBps } = overtime;
+	if (hours <= 0 || extraHourFeeCentavos <= 0) return null;
+
+	const folioId = await ensureFolio(tx, hotelId, { kind: 'hall', hallBookingId });
+	const [existing] = await tx
+		.select({ id: folioCharges.id, totalCentavos: folioCharges.totalCentavos })
+		.from(folioCharges)
+		.where(and(eq(folioCharges.folioId, folioId), eq(folioCharges.source, 'hall_overtime'), isNull(folioCharges.voidedAt)))
+		.limit(1);
+	if (existing) return { chargeId: existing.id, totalCentavos: existing.totalCentavos };
+
+	const subtotalCentavos = hours * extraHourFeeCentavos;
+	const taxCentavos = Math.round((subtotalCentavos * vatRateBps) / 10_000);
+	const [charge] = await tx
+		.insert(folioCharges)
+		.values({
+			folioId,
+			description: `Overtime (${hours}h × ₱${(extraHourFeeCentavos / 100).toFixed(2)})`,
+			quantity: 1,
+			unitPriceCentavos: subtotalCentavos,
+			taxCentavos,
+			totalCentavos: subtotalCentavos + taxCentavos,
+			source: 'hall_overtime',
+			addedByUserId: actor?.id ?? null
+		})
+		.returning({ id: folioCharges.id, totalCentavos: folioCharges.totalCentavos });
+	if (!charge) throw new FolioError('Could not post the overtime charge.');
+	return { chargeId: charge.id, totalCentavos: charge.totalCentavos };
+}
+
+/** Marks a hall event's folio closed when the event is closed. Same posture as `closeFolio`: a marker, not a balance gate. */
+export async function closeHallFolio(hotelId: string, hallBookingId: string): Promise<void> {
+	await db
+		.update(folios)
+		.set({ status: 'closed', closedAt: new Date(), updatedAt: new Date() })
+		.where(and(eq(folios.hallBookingId, hallBookingId), eq(folios.hotelId, hotelId)));
+}
+
 /** Marks a room booking's folio closed once it actually checks out — a historical marker, not a balance gate itself. */
 export async function closeFolio(hotelId: string, bookingId: string): Promise<void> {
 	const [folio] = await db

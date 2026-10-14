@@ -8,6 +8,7 @@ import {
 	expenseReport,
 	paymentMethodBreakdown,
 	revenueBySourceReport,
+	scPwdInRange,
 	toCsv,
 	type ReportScope
 } from './reports';
@@ -30,6 +31,16 @@ export type ReportSlug = (typeof REPORTS)[number]['slug'];
 export const SCOPED_REPORTS: readonly string[] = ['daily-sales', 'cashflow', 'revenue-by-source', 'payment-methods'];
 
 const peso = (c: number) => (c / 100).toFixed(2);
+
+/** Summary lines for SC/PWD discounts applied in the period. Information only: they explain why a room was
+ *  billed less than its price and never change what was received. Nothing is added when there were none. */
+const scPwdSummary = (x: { claims: number; discountCentavos: number; vatRemovedCentavos: number } | null): [string, string][] =>
+	!x || x.claims === 0
+		? []
+		: [
+				[`SC/PWD discounts applied (${x.claims}) — 20% part`, peso(x.discountCentavos)],
+				['SC/PWD — VAT removed', peso(x.vatRemovedCentavos)]
+			];
 
 export interface RunReportResult {
 	name: string;
@@ -100,7 +111,10 @@ export async function runReport(
 				summary: [
 					['Date', date],
 					...scopeSummary(),
-					['Gross revenue', peso(r.grossRevenueCentavos)],
+					['Gross received', peso(r.grossRevenueCentavos)],
+					['Less: refunds paid out', `-${peso(r.grossRevenueCentavos - r.netRevenueCentavos)}`],
+					['Net income (kept)', peso(r.netRevenueCentavos)],
+					...scPwdSummary(r.scPwd),
 					// A scope's net is its takings less its refunds; expenses are not split by business line.
 					[scope === 'all' ? 'Net cash' : 'Net of refunds', peso(r.netCashCentavos)]
 				]
@@ -146,7 +160,8 @@ export async function runReport(
 					...scopeSummary(),
 					['Total in', peso(r.totalInCentavos)],
 					['Total out', peso(r.totalOutCentavos)],
-					['Net', peso(r.totalInCentavos - r.totalOutCentavos)]
+					['Net', peso(r.totalInCentavos - r.totalOutCentavos)],
+					...(scope === 'dining' ? [] : scPwdSummary(await scPwdInRange(hotelId, from, to)))
 				]
 			};
 		}
@@ -162,7 +177,10 @@ export async function runReport(
 					['From', from],
 					['To', to],
 					...scopeSummary(),
-					['Total', peso(r.totalCentavos)]
+					['Gross received', peso(r.totalCentavos)],
+					['Less: refunds paid out', `-${peso(r.refundsCentavos)}`],
+					['Net income (kept)', peso(r.netCentavos)],
+					...(scope === 'dining' ? [] : scPwdSummary(await scPwdInRange(hotelId, from, to)))
 				]
 			};
 		}

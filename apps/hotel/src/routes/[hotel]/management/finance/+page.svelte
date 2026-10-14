@@ -246,9 +246,15 @@
 		<div class="rounded-xl border border-border p-4">
 			<div class="text-xs text-ink-muted">Revenue</div>
 			<div class="mt-1 text-lg font-semibold text-ink tabular-nums">
-				{peso(data.revenue.totalCentavos)}
+				{peso(data.revenue.netCentavos)}
 			</div>
-			<div class="mt-0.5 text-[11px] text-ink-muted">rooms, halls, incidentals</div>
+			<div class="mt-0.5 text-[11px] text-ink-muted">
+				{#if data.revenue.refundsCentavos > 0}
+					{peso(data.revenue.totalCentavos)} received − {peso(data.revenue.refundsCentavos)} refunded
+				{:else}
+					rooms, halls, incidentals
+				{/if}
+			</div>
 		</div>
 		<div class="rounded-xl border border-border p-4">
 			<div class="text-xs text-ink-muted">Expenses</div>

@@ -21,6 +21,8 @@ import type { SessionUser } from './auth/session';
 
 export class HousekeepingError extends Error {}
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 export type CleanlinessStatus = 'dirty' | 'in_progress' | 'clean';
 
 // ---------------------------------------------------------------------------
@@ -393,26 +395,27 @@ async function upsertHousekeepingStatus(
 		flaggedAt: Date | null;
 		clearedAt: Date | null;
 		clearedByUserId: string | null;
-	}>
+	}>,
+	exec: Tx | typeof db = db
 ) {
 	const whereTarget =
 		'roomId' in target
 			? eq(housekeepingStatus.roomId, target.roomId)
 			: eq(housekeepingStatus.functionHallId, target.functionHallId);
 
-	const [existing] = await db
+	const [existing] = await exec
 		.select({ id: housekeepingStatus.id })
 		.from(housekeepingStatus)
 		.where(and(eq(housekeepingStatus.hotelId, hotelId), whereTarget))
 		.limit(1);
 
 	if (existing) {
-		await db
+		await exec
 			.update(housekeepingStatus)
 			.set({ ...values, updatedAt: new Date() })
 			.where(eq(housekeepingStatus.id, existing.id));
 	} else {
-		await db.insert(housekeepingStatus).values({
+		await exec.insert(housekeepingStatus).values({
 			hotelId,
 			roomId: 'roomId' in target ? target.roomId : null,
 			functionHallId: 'functionHallId' in target ? target.functionHallId : null,
@@ -460,9 +463,11 @@ export async function flagRoomForHousekeeping(
 export async function flagHallForHousekeeping(
 	hotelId: string,
 	functionHallId: string,
-	reason: 'completed' | 'manual',
+	reason: 'checkout' | 'completed' | 'manual',
 	triggeringHallBookingId: string | null,
-	actor: SessionUser | null
+	actor: SessionUser | null,
+	/** Pass the caller's transaction so the dirty flag commits (or rolls back) with the check-out. */
+	tx?: Tx
 ): Promise<void> {
 	await upsertHousekeepingStatus(
 		hotelId,
@@ -474,9 +479,11 @@ export async function flagHallForHousekeeping(
 			flaggedAt: new Date(),
 			clearedAt: null,
 			clearedByUserId: null
-		}
+		},
+		tx ?? db
 	);
 	await writeAudit({
+		tx,
 		hotelId,
 		actor,
 		action: 'housekeeping.flag_hall',
@@ -637,6 +644,86 @@ export async function reportRoomDamage(
 	return { damageReportId: row.id };
 }
 
+/**
+ * The event a new hall damage report belongs to: the one on the hall right now (checked in), else
+ * the one that just finished and is waiting on housekeeping (checked out), else the most recently
+ * closed one. Always the latest by event date, never by when the row was created, so a hall booked
+ * weeks ahead cannot be mistaken for the event that just ended.
+ */
+export async function resolveBookingForHallDamage(
+	hotelId: string,
+	functionHallId: string
+): Promise<{ id: string } | null> {
+	for (const status of ['checked_in', 'checked_out', 'completed'] as const) {
+		const [row] = await db
+			.select({ id: hallBookings.id })
+			.from(hallBookings)
+			.innerJoin(orders, eq(orders.id, hallBookings.orderId))
+			.where(and(eq(orders.hotelId, hotelId), eq(hallBookings.functionHallId, functionHallId), eq(hallBookings.status, status)))
+			.orderBy(desc(hallBookings.eventDate), desc(hallBookings.endTime), desc(hallBookings.createdAt))
+			.limit(1);
+		if (row) return row;
+	}
+	return null;
+}
+
+/**
+ * What stands between a checked-out hall event and Close on the housekeeping side: the hall's
+ * cleanliness and any damage report that is still pending (this event's, or one nobody attached to
+ * an event). A hall with no housekeeping row reads as clean, the same default the board uses.
+ */
+export async function getHallCloseGate(
+	hotelId: string,
+	functionHallId: string,
+	hallBookingId: string,
+	exec: Tx | typeof db = db
+): Promise<{ status: CleanlinessStatus; pendingDamageCount: number }> {
+	const [row] = await exec
+		.select({ status: housekeepingStatus.status })
+		.from(housekeepingStatus)
+		.where(and(eq(housekeepingStatus.hotelId, hotelId), eq(housekeepingStatus.functionHallId, functionHallId)))
+		.limit(1);
+	const [pending] = await exec
+		.select({ n: sql<number>`count(*)::int` })
+		.from(housekeepingDamageReports)
+		.where(
+			and(
+				eq(housekeepingDamageReports.hotelId, hotelId),
+				eq(housekeepingDamageReports.functionHallId, functionHallId),
+				eq(housekeepingDamageReports.status, 'pending'),
+				sql`(${housekeepingDamageReports.hallBookingId} = ${hallBookingId} or ${housekeepingDamageReports.hallBookingId} is null)`
+			)
+		);
+	return { status: (row?.status ?? 'clean') as CleanlinessStatus, pendingDamageCount: pending?.n ?? 0 };
+}
+
+/** The pending damage reports for one hall event, for the front desk to charge or dismiss. */
+export async function listPendingHallDamageReports(
+	hotelId: string,
+	functionHallId: string,
+	hallBookingId: string
+): Promise<PendingDamageReport[]> {
+	const rows = await db
+		.select()
+		.from(housekeepingDamageReports)
+		.where(
+			and(
+				eq(housekeepingDamageReports.hotelId, hotelId),
+				eq(housekeepingDamageReports.functionHallId, functionHallId),
+				eq(housekeepingDamageReports.status, 'pending'),
+				sql`(${housekeepingDamageReports.hallBookingId} = ${hallBookingId} or ${housekeepingDamageReports.hallBookingId} is null)`
+			)
+		)
+		.orderBy(desc(housekeepingDamageReports.createdAt));
+	return rows.map((r) => ({
+		id: r.id,
+		bookingId: r.hallBookingId,
+		description: r.description,
+		photoUrl: r.photoUrl,
+		reportedAt: r.createdAt
+	}));
+}
+
 export async function reportHallDamage(
 	hotelId: string,
 	functionHallId: string,
@@ -644,12 +731,7 @@ export async function reportHallDamage(
 	actor: SessionUser | null
 ): Promise<{ damageReportId: string }> {
 	if (!input.description.trim()) throw new HousekeepingError('Describe the damage.');
-	const [hallBooking] = await db
-		.select({ id: hallBookings.id })
-		.from(hallBookings)
-		.where(and(eq(hallBookings.functionHallId, functionHallId), eq(hallBookings.status, 'completed')))
-		.orderBy(desc(hallBookings.createdAt))
-		.limit(1);
+	const hallBooking = await resolveBookingForHallDamage(hotelId, functionHallId);
 	const [row] = await db
 		.insert(housekeepingDamageReports)
 		.values({

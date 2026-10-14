@@ -1,10 +1,12 @@
 <script lang="ts">
 	import type { BookingTransactionExportRow } from '$lib/server/booking-transactions';
+	import { PAYMENT_FILTERS, SOURCE_FILTERS, type TransactionFilters } from '$lib/booking-payment-status';
 
 	let {
 		rows,
 		range,
 		q,
+		filters,
 		hotelName,
 		hotelTin,
 		printedAt
@@ -12,6 +14,7 @@
 		rows: BookingTransactionExportRow[];
 		range: { from: string; to: string };
 		q: string;
+		filters: TransactionFilters;
 		hotelName: string;
 		hotelTin: string | null;
 		printedAt: string;
@@ -26,6 +29,16 @@
 		cancelled: 'Cancelled'
 	};
 	const sum = (pick: (r: BookingTransactionExportRow) => number) => rows.reduce((s, r) => s + pick(r), 0);
+	// A plain-words line for any filter in force, so a filtered print is never mistaken for the whole list.
+	const filterNote = $derived(
+		[
+			filters.source !== 'all' ? SOURCE_FILTERS.find((f) => f.key === filters.source)?.label : null,
+			filters.pay !== 'all' ? PAYMENT_FILTERS.find((f) => f.key === filters.pay)?.label : null,
+			filters.scpwd ? 'SC/PWD only' : null
+		]
+			.filter(Boolean)
+			.join(' · ')
+	);
 	const rangeLabel = $derived(range.from === range.to ? range.from : `${range.from} to ${range.to}`);
 </script>
 
@@ -38,6 +51,7 @@
 		<div class="bt-title">
 			<div class="bt-title-word">Booking transactions</div>
 			<div class="bt-mono bt-sub">{rangeLabel}{q ? ` · search “${q}”` : ''}</div>
+			{#if filterNote}<div class="bt-mono bt-sub">Filter: {filterNote}</div>{/if}
 			<div class="bt-mono bt-sub">Printed {printedAt}</div>
 		</div>
 	</header>
@@ -59,6 +73,8 @@
 				<th>Status</th>
 				<th>Source</th>
 				<th>Paid by</th>
+				<th>Payment</th>
+				<th>SC/PWD</th>
 				<th class="bt-num">Charges</th>
 				<th class="bt-num">Paid</th>
 				<th class="bt-num">Balance</th>
@@ -77,12 +93,14 @@
 						{r.methods.join(', ') || '—'}
 						{#if r.references.length}<div class="bt-mono bt-sub">{r.references.join(', ')}</div>{/if}
 					</td>
+					<td>{r.paymentLabel}</td>
+					<td>{r.scPwdLabel ?? '—'}</td>
 					<td class="bt-num bt-mono">{peso(r.chargesCentavos)}</td>
 					<td class="bt-num bt-mono">{peso(r.paidCentavos)}</td>
 					<td class="bt-num bt-mono">{peso(r.balanceCentavos)}</td>
 				</tr>
 			{:else}
-				<tr><td colspan="10" class="bt-empty">No bookings with a room or event in this range.</td></tr>
+				<tr><td colspan="12" class="bt-empty">No bookings with a room or event in this range.</td></tr>
 			{/each}
 		</tbody>
 	</table>

@@ -3,6 +3,7 @@ import { db } from './db/index';
 import {
 	auditLog,
 	bookings,
+	cashMovements,
 	diningOrders,
 	diningPayments,
 	diningReservations,
@@ -42,6 +43,8 @@ export interface LookupHit {
 	cap: string;
 	/** The records whose audit entries make up this result's trail. */
 	refs: AuditRef[];
+	/** For a dining order or table reservation: its DN-/TB- number, which opens the full trail page. */
+	trailRef?: string;
 }
 
 const MAX_HITS = 25;
@@ -188,7 +191,8 @@ export async function resolveNumber(
 				orderId: documents.orderId,
 				diningOrderId: documents.diningOrderId,
 				billTo: documents.billToName,
-				paymentId: documents.paymentId
+				paymentId: documents.paymentId,
+				diningCode: sql<string | null>`(select code from dining_orders where id = ${documents.diningOrderId})`
 			})
 			.from(documents)
 			.where(
@@ -251,6 +255,7 @@ export async function resolveNumber(
 			subtitle: `${d.tableLabel ? `Table ${d.tableLabel}` : d.orderType.replace(/_/g, ' ')} · ${d.status.replace(/_/g, ' ')} · ${d.paymentStatus.replace(/_/g, ' ')} · ${peso(d.total)}`,
 			href: `${base}/print/bill/order/${d.id}`,
 			cap: 'dining:read',
+			trailRef: d.code,
 			refs: [{ entityType: 'dining_order', entityId: d.id }]
 		});
 	}
@@ -262,6 +267,7 @@ export async function resolveNumber(
 			subtitle: `Payment reference ${d.ref} · ${d.status.replace(/_/g, ' ')} · ${peso(d.total)}`,
 			href: `${base}/print/bill/order/${d.orderId}`,
 			cap: 'dining:read',
+			trailRef: d.code,
 			refs: [{ entityType: 'dining_order', entityId: d.orderId }]
 		});
 	}
@@ -273,6 +279,7 @@ export async function resolveNumber(
 			subtitle: `${r.guest} · party of ${r.party} · ${r.status.replace(/_/g, ' ')} · ${r.startsAt.toISOString().slice(0, 16).replace('T', ' ')} UTC`,
 			href: `${base}/management/dining/reservations`,
 			cap: 'dining:read',
+			trailRef: r.code,
 			refs: [{ entityType: 'dining_reservation', entityId: r.id }]
 		});
 	}
@@ -285,6 +292,7 @@ export async function resolveNumber(
 			subtitle: `${d.status}${d.billTo ? ` · ${d.billTo}` : ''}`,
 			href: `${base}/print/${d.type === 'invoice' ? 'invoice' : 'receipt'}/${d.id}`,
 			cap: isDining ? 'dining:read' : 'folio:read',
+			trailRef: d.diningCode ?? undefined,
 			refs: [
 				{ entityType: 'document', entityId: d.id },
 				...(d.orderId ? [{ entityType: 'order', entityId: d.orderId }] : []),
@@ -320,6 +328,51 @@ export async function resolveNumber(
 			const extra = (type: string, rows: { id: string; orderId: string | null }[]): AuditRef[] =>
 				rows.filter((r) => r.orderId === oid).map((r) => ({ entityType: type, entityId: r.id }));
 			h.refs.push(...extra('booking', rooms), ...extra('hall_booking', halls), ...extra('payment', pays), ...extra('document', docs));
+		}
+	}
+
+	// A dining order's trail also covers its table check, reservation, receipts and cash movements; a
+	// table reservation's covers its pre-orders and their bills. Same set the trail page reads.
+	const diningOrderIds = hits.flatMap((h) => h.refs.filter((r) => r.entityType === 'dining_order').map((r) => r.entityId));
+	const diningResIds = hits.flatMap((h) => h.refs.filter((r) => r.entityType === 'dining_reservation').map((r) => r.entityId));
+	if (diningOrderIds.length || diningResIds.length) {
+		const related = await db
+			.select({ id: diningOrders.id, checkId: diningOrders.checkId, reservationId: diningOrders.reservationId })
+			.from(diningOrders)
+			.where(
+				and(
+					eq(diningOrders.hotelId, hotelId),
+					or(
+						diningOrderIds.length ? inArray(diningOrders.id, diningOrderIds) : undefined,
+						diningResIds.length ? inArray(diningOrders.reservationId, diningResIds) : undefined
+					)
+				)
+			);
+		const relatedIds = related.map((o) => o.id);
+		const [docs, moves] = relatedIds.length
+			? await Promise.all([
+					db.select({ id: documents.id, diningOrderId: documents.diningOrderId }).from(documents).where(and(eq(documents.hotelId, hotelId), inArray(documents.diningOrderId, relatedIds))),
+					db
+						.select({ id: cashMovements.id, sourceId: cashMovements.sourceId })
+						.from(cashMovements)
+						.where(and(eq(cashMovements.hotelId, hotelId), eq(cashMovements.sourceType, 'dining_order'), inArray(cashMovements.sourceId, relatedIds)))
+				])
+			: [[], []];
+		for (const h of hits) {
+			const own = h.refs.filter((r) => r.entityType === 'dining_order').map((r) => r.entityId);
+			const res = h.refs.filter((r) => r.entityType === 'dining_reservation').map((r) => r.entityId);
+			const mine = related.filter((o) => own.includes(o.id) || (o.reservationId && res.includes(o.reservationId)));
+			const ids = new Set(mine.map((o) => o.id));
+			const add = (type: string, id: string | null | undefined) => {
+				if (id && !h.refs.some((r) => r.entityType === type && r.entityId === id)) h.refs.push({ entityType: type, entityId: id });
+			};
+			for (const o of mine) {
+				add('dining_order', o.id);
+				add('dining_table_check', o.checkId);
+				if (own.includes(o.id)) add('dining_reservation', o.reservationId);
+			}
+			for (const d of docs) if (d.diningOrderId && ids.has(d.diningOrderId)) add('document', d.id);
+			for (const m of moves) if (m.sourceId && ids.has(m.sourceId)) add('cash_movement', m.id);
 		}
 	}
 

@@ -2,6 +2,7 @@ import { requireCap } from '$lib/server/auth/rbac';
 import { todayInTimezone } from '$lib/server/front-desk';
 import { listBookingTransactions } from '$lib/server/booking-transactions';
 import { resolveRange } from '$lib/date-range';
+import { filtersFromParams } from '$lib/booking-payment-status';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
@@ -15,10 +16,12 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		today
 	);
 	const q = url.searchParams.get('q')?.trim() ?? '';
-	const rows = await listBookingTransactions(hotel.id, range, q);
+	const filters = filtersFromParams(url.searchParams);
+	const rows = await listBookingTransactions(hotel.id, range, q, filters);
 	return {
 		range,
 		q,
+		filters,
 		rows,
 		totals: {
 			count: rows.length,

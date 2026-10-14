@@ -1107,7 +1107,7 @@ export async function issueDiningDocument(
 	if (existing) return existing;
 
 	const [order] = await db
-		.select({ status: diningOrders.status, paymentStatus: diningOrders.paymentStatus })
+		.select({ status: diningOrders.status, paymentStatus: diningOrders.paymentStatus, code: diningOrders.code })
 		.from(diningOrders)
 		.where(and(eq(diningOrders.id, orderId), eq(diningOrders.hotelId, hotelId)))
 		.limit(1);
@@ -1168,17 +1168,19 @@ export async function issueDiningDocument(
 				issuedByUserId: actor?.id ?? null
 			})
 			.returning();
+		await writeAudit({
+			tx,
+			hotelId,
+			actor,
+			action: type === 'invoice' ? 'bir.issue_invoice' : 'bir.issue_official_receipt',
+			entityType: 'dining_order',
+			entityId: orderId,
+			refCode: order.code,
+			after: { orderId, documentId: inserted!.id, formattedNo: inserted!.formattedNo, type }
+		});
 		return inserted!;
 	});
 
-	await writeAudit({
-		hotelId,
-		actor,
-		action: type === 'invoice' ? 'bir.issue_invoice' : 'bir.issue_official_receipt',
-		entityType: 'dining_order',
-		entityId: orderId,
-		after: { documentId: row.id, formattedNo: row.formattedNo }
-	});
 	return row;
 }
 
@@ -1417,13 +1419,20 @@ export async function cancelDocument(
 		}
 	}
 
+	let refCode: string | null = null;
+	if (doc.diningOrderId) {
+		const [o] = await db.select({ code: diningOrders.code }).from(diningOrders).where(eq(diningOrders.id, doc.diningOrderId)).limit(1);
+		refCode = o?.code ?? null;
+	}
 	await writeAudit({
 		hotelId,
 		actor,
 		action: 'bir.cancel_document',
 		entityType: 'document',
 		entityId: documentId,
+		refCode,
 		after: {
+			diningOrderId: doc.diningOrderId,
 			formattedNo: doc.formattedNo,
 			reason: reason.trim(),
 			replacementId: replacement?.id ?? null

@@ -151,9 +151,15 @@ export const bookingStatusHistory = pgTable(
 	(t) => [index('booking_status_history_booking_idx').on(t.bookingId)]
 );
 
+/**
+ * `completed` is the terminal "Closed" state: Check in, then Check out (overtime posted, hall flagged
+ * for housekeeping), then Close (blocked until the hall is clean, no damage is pending and the bill is settled).
+ */
 export const hallBookingStatus = pgEnum('hall_booking_status', [
 	'pending_payment',
 	'confirmed',
+	'checked_in',
+	'checked_out',
 	'completed',
 	'cancelled'
 ]);

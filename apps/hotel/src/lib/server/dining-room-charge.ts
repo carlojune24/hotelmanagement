@@ -139,6 +139,24 @@ export async function chargeDiningOrderToRoom(args: {
 					updatedAt: new Date()
 				})
 				.where(eq(diningOrders.id, order.id));
+			await writeAudit({
+				tx,
+				hotelId: args.hotelId,
+				actor: args.actor,
+				action: 'dining_order.room_charge',
+				entityType: 'dining_order',
+				entityId: order.id,
+				refCode: order.code,
+				after: {
+					orderId: order.id,
+					bookingId: args.bookingId,
+					bookingCode: inHouse.bookingCode,
+					room: inHouse.roomNumber,
+					folioId,
+					chargeId: charge!.id,
+					totalCentavos: order.totalCentavos
+				}
+			});
 			return charge!.id;
 		});
 	} catch (e) {
@@ -147,14 +165,6 @@ export async function chargeDiningOrderToRoom(args: {
 		throw e;
 	}
 
-	await writeAudit({
-		hotelId: args.hotelId,
-		actor: args.actor,
-		action: 'dining_order.room_charge',
-		entityType: 'dining_order',
-		entityId: args.orderId,
-		after: { bookingId: args.bookingId, room: inHouse.roomNumber, chargeId }
-	});
 	return { chargeId, roomLabel: inHouse.roomNumber, guestName: inHouse.guestName, bookingCode: inHouse.bookingCode };
 }
 
@@ -208,6 +218,7 @@ export async function undoDiningRoomCharge(args: { hotelId: string; orderId: str
 		action: 'dining_order.undo_room_charge',
 		entityType: 'dining_order',
 		entityId: order.id,
-		after: { reason, bookingId: order.bookingId }
+		refCode: order.code,
+		after: { orderId: order.id, reason, bookingId: order.bookingId, folioChargeId: order.folioChargeId }
 	});
 }

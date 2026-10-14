@@ -38,7 +38,13 @@ export async function listFunctionHalls(hotelId: string): Promise<FunctionHallSu
 }
 
 /** Booking statuses that hold a hall's time slot (exclude cancelled). */
-export const ACTIVE_HALL_BOOKING_STATUSES = ['pending_payment', 'confirmed', 'completed'] as const;
+export const ACTIVE_HALL_BOOKING_STATUSES = [
+	'pending_payment',
+	'confirmed',
+	'checked_in',
+	'checked_out',
+	'completed'
+] as const;
 
 /**
  * Overlap check for one hall on one date: any active `hallBookings` row whose
@@ -105,7 +111,7 @@ export interface HallAvailabilityCalendar {
  *  used for same-day overlap checks): a completed event has already happened and must
  *  not still render as blocking a date nothing is actually holding — same fix as
  *  rooms excluding `checked_out` from their own calendar's status set. */
-const CALENDAR_BLOCKING_HALL_STATUSES = ['pending_payment', 'confirmed'] as const;
+const CALENDAR_BLOCKING_HALL_STATUSES = ['pending_payment', 'confirmed', 'checked_in'] as const;
 
 /**
  * Every active `hallBookings` row for one hall with `eventDate` inside

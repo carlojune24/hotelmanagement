@@ -3,6 +3,8 @@ import { db } from '../db/index';
 import {
 	cashMovements,
 	diningOrders,
+	hotels,
+	scPwdDiscounts,
 	expenseCategories,
 	expenses,
 	payments,
@@ -55,7 +57,7 @@ function scopeRevenueCategories(scope: ReportScope): readonly string[] {
  * (a dining refund carries `source_type = 'dining_refund'`; any other refund belongs to the hotel).
  * `undefined` for `all`, so the default query is untouched.
  */
-function scopeMovementFilter(scope: ReportScope): SQL | undefined {
+export function scopeMovementFilter(scope: ReportScope): SQL | undefined {
 	if (scope === 'all') return undefined;
 	const isDiningSource = sql`${cashMovements.sourceType} like 'dining%'`;
 	if (scope === 'dining') {
@@ -97,6 +99,58 @@ async function diningTender(
 	return rows.map((r) => ({ method: r.method, count: Number(r.count), amountCentavos: Number(r.amountCentavos) }));
 }
 
+/**
+ * SC/PWD discounts applied in a date range (by the hotel's own calendar day), for information on the
+ * reports. They explain why a room was billed less than its price: VAT removed plus the 20%.
+ * Never changes cash: the discount is a folio line, not a cash movement.
+ */
+export async function scPwdInRange(
+	hotelId: string,
+	from: string,
+	to: string
+): Promise<{ claims: number; discountCentavos: number; vatRemovedCentavos: number }> {
+	const [hotel] = await db.select({ tz: hotels.timezone }).from(hotels).where(eq(hotels.id, hotelId)).limit(1);
+	const tz = hotel?.tz ?? 'Asia/Manila';
+	const [row] = await db
+		.select({
+			claims: sql<number>`count(*)::int`,
+			discount: sql<number>`coalesce(sum(${scPwdDiscounts.discountCentavos}), 0)::bigint`,
+			vat: sql<number>`coalesce(sum(${scPwdDiscounts.vatRemovedCentavos}), 0)::bigint`
+		})
+		.from(scPwdDiscounts)
+		.where(
+			and(
+				eq(scPwdDiscounts.hotelId, hotelId),
+				sql`${scPwdDiscounts.reversedAt} is null`,
+				sql`(${scPwdDiscounts.appliedAt} at time zone ${tz})::date between ${from}::date and ${to}::date`
+			)
+		);
+	return {
+		claims: Number(row?.claims ?? 0),
+		discountCentavos: Number(row?.discount ?? 0),
+		vatRemovedCentavos: Number(row?.vat ?? 0)
+	};
+}
+
+/** Money handed back to guests in a range (cancellation and credit refunds), within a scope. */
+export async function refundsInRange(hotelId: string, from: string, to: string, scope: ReportScope = 'all'): Promise<number> {
+	const [row] = await db
+		.select({ total: sql<number>`coalesce(sum(${cashMovements.amountCentavos}), 0)::bigint` })
+		.from(cashMovements)
+		.where(
+			and(
+				eq(cashMovements.hotelId, hotelId),
+				eq(cashMovements.direction, 'out'),
+				sql`${cashMovements.category} in ('refund', 'deposit_refund')`,
+				gte(cashMovements.businessDate, from),
+				lte(cashMovements.businessDate, to),
+				sql`${cashMovements.voidedAt} is null`,
+				scopeMovementFilter(scope)
+			)
+		);
+	return Number(row?.total ?? 0);
+}
+
 export interface DailySalesReport {
 	date: string;
 	revenueBySource: { source: string; amountCentavos: number }[];
@@ -104,6 +158,10 @@ export interface DailySalesReport {
 	depositsCentavos: number;
 	refundsCentavos: number;
 	grossRevenueCentavos: number;
+	/** Gross received less refunds paid out: the income actually kept. */
+	netRevenueCentavos: number;
+	/** SC/PWD discounts applied that day (information only); null for the dining scope. */
+	scPwd: { claims: number; discountCentavos: number; vatRemovedCentavos: number } | null;
 	netCashCentavos: number;
 }
 
@@ -178,13 +236,21 @@ export async function dailySalesReport(
 	const scopedIn = movementRows.filter((m) => m.direction === 'in').reduce((s, m) => s + m.amountCentavos, 0);
 	const scopedOut = movementRows.filter((m) => m.direction === 'out').reduce((s, m) => s + m.amountCentavos, 0);
 
+	const grossRevenueCentavos = scoped ? scopedIn : snap.grossRevenueCentavos;
+	// Only refunds PAID OUT reduce income (a refund in this report's rows is always an out-movement).
+	const refundsPaidCentavos = movementRows
+		.filter((m) => m.direction === 'out' && (m.category === 'refund' || m.category === 'deposit_refund'))
+		.reduce((s, m) => s + m.amountCentavos, 0);
+
 	return {
 		date,
 		revenueBySource,
 		byMethod: [...methodMap.entries()].map(([method, v]) => ({ method, ...v })),
 		depositsCentavos,
 		refundsCentavos,
-		grossRevenueCentavos: scoped ? scopedIn : snap.grossRevenueCentavos,
+		grossRevenueCentavos,
+		netRevenueCentavos: grossRevenueCentavos - refundsPaidCentavos,
+		scPwd: scope === 'dining' ? null : await scPwdInRange(hotelId, date, date),
 		netCashCentavos: scoped ? scopedIn - scopedOut : snap.netCentavos
 	};
 }
@@ -327,7 +393,16 @@ export async function revenueBySourceReport(
 		source: r.category,
 		amountCentavos: Number(r.amountCentavos)
 	}));
-	return { rows, totalCentavos: rows.reduce((s, r) => s + r.amountCentavos, 0) };
+	const totalCentavos = rows.reduce((s, r) => s + r.amountCentavos, 0);
+	const refundsCentavos = await refundsInRange(hotelId, from, to, scope);
+	return {
+		rows,
+		/** Gross received. */
+		totalCentavos,
+		refundsCentavos,
+		/** Gross received less refunds paid out: the income actually kept. */
+		netCentavos: totalCentavos - refundsCentavos
+	};
 }
 
 // ---------------------------------------------------------------------------

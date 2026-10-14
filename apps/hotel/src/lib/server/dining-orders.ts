@@ -325,12 +325,31 @@ export async function createDiningOrder(
 		}
 
 		await writeAudit({
+			tx,
 			hotelId,
 			actor: input.actor ?? null,
 			action: 'dining_order.create',
 			entityType: 'dining_order',
 			entityId: order.id,
-			after: { code: order.code, venueId, lines: resolved.length, totalCentavos: totals.totalCentavos, source: input.source ?? 'staff' }
+			refCode: order.code,
+			after: {
+				code: order.code,
+				orderId: order.id,
+				venueId,
+				orderType: input.orderType,
+				reservationId: input.reservationId ?? null,
+				tableId: input.tableId ?? null,
+				tableLabel,
+				payMode: input.payMode ?? null,
+				fulfilment,
+				deliveryFeeCentavos: deliveryFee,
+				guestName: input.guestName?.trim() || null,
+				guestPhone: input.guestPhone?.trim() || null,
+				lines: resolved.length,
+				lineNames: resolved.map((r) => `${r.line.quantity}× ${r.item.name}`),
+				totalCentavos: totals.totalCentavos,
+				source: input.source ?? 'staff'
+			}
 		});
 		return order;
 	});
@@ -429,13 +448,15 @@ export async function setDiningOrderStatus(args: {
 			.where(eq(diningOrders.id, order.id))
 			.returning();
 		await writeAudit({
+			tx,
 			hotelId: args.hotelId,
 			actor: args.actor ?? null,
 			action: 'dining_order.status',
 			entityType: 'dining_order',
 			entityId: order.id,
+			refCode: order.code,
 			before: { status: order.status },
-			after: { status: args.to }
+			after: { status: args.to, orderId: order.id }
 		});
 		return updated!;
 	});
@@ -508,13 +529,20 @@ export async function setStationStatus(args: {
 			.where(eq(diningOrders.id, order.id))
 			.returning();
 		await writeAudit({
+			tx,
 			hotelId: args.hotelId,
 			actor: args.actor ?? null,
 			action: 'dining_order.station',
 			entityType: 'dining_order',
 			entityId: order.id,
+			refCode: order.code,
 			before: { status: order.status },
-			after: { status, station: args.station === undefined ? 'all' : (args.station ?? 'unassigned'), to: args.to }
+			after: {
+				orderId: order.id,
+				status,
+				station: args.station === undefined ? 'all' : (args.station ?? 'unassigned'),
+				to: args.to
+			}
 		});
 		return { updated: updated!, becameReady };
 	});
@@ -547,13 +575,15 @@ export async function dispatchDeliveryOrder(args: {
 			.set({ riderName, riderPhone, outForDeliveryAt: order.outForDeliveryAt ?? now, updatedAt: now })
 			.where(eq(diningOrders.id, order.id));
 		await writeAudit({
+			tx,
 			hotelId: args.hotelId,
 			actor: args.actor ?? null,
 			action: 'dining_order.dispatch',
 			entityType: 'dining_order',
 			entityId: order.id,
+			refCode: order.code,
 			before: { riderName: order.riderName },
-			after: { riderName, riderPhone }
+			after: { orderId: order.id, riderName, riderPhone }
 		});
 	});
 }
@@ -583,13 +613,15 @@ export async function cancelDiningOrder(args: {
 			.set({ status: 'cancelled', cancelledAt: new Date(), cancelReason: reason, updatedAt: new Date() })
 			.where(eq(diningOrders.id, order.id));
 		await writeAudit({
+			tx,
 			hotelId: args.hotelId,
 			actor: args.actor ?? null,
 			action: 'dining_order.cancel',
 			entityType: 'dining_order',
 			entityId: order.id,
+			refCode: order.code,
 			before: { status: order.status },
-			after: { status: 'cancelled', reason }
+			after: { orderId: order.id, status: 'cancelled', reason }
 		});
 	});
 }
@@ -614,13 +646,15 @@ export async function acceptOrder(args: { hotelId: string; orderId: string; acto
 			.where(eq(diningOrders.id, order.id))
 			.returning();
 		await writeAudit({
+			tx,
 			hotelId: args.hotelId,
 			actor: args.actor ?? null,
 			action: 'dining_order.accept',
 			entityType: 'dining_order',
 			entityId: order.id,
+			refCode: order.code,
 			before: { status: 'pending_acceptance' },
-			after: { status: 'new', checkId }
+			after: { orderId: order.id, status: 'new', checkId }
 		});
 		return updated!;
 	});
@@ -645,13 +679,15 @@ export async function declineOrder(args: { hotelId: string; orderId: string; rea
 			.set({ status: 'cancelled', cancelledAt: new Date(), cancelReason: reason, updatedAt: new Date() })
 			.where(eq(diningOrders.id, order.id));
 		await writeAudit({
+			tx,
 			hotelId: args.hotelId,
 			actor: args.actor ?? null,
 			action: 'dining_order.decline',
 			entityType: 'dining_order',
 			entityId: order.id,
+			refCode: order.code,
 			before: { status: 'pending_acceptance', paymentStatus: order.paymentStatus },
-			after: { status: 'cancelled', reason }
+			after: { orderId: order.id, status: 'cancelled', reason }
 		});
 	});
 }
@@ -765,12 +801,24 @@ export async function payDiningOrder(args: {
 			.where(eq(diningOrders.id, locked.id));
 
 		await writeAudit({
+			tx,
 			hotelId: args.hotelId,
 			actor: args.actor ?? null,
 			action: 'dining_order.paid',
 			entityType: 'dining_order',
 			entityId: locked.id,
-			after: { code: locked.code, totalCentavos: locked.totalCentavos, method: args.method }
+			refCode: locked.code,
+			after: {
+				code: locked.code,
+				orderId: locked.id,
+				totalCentavos: locked.totalCentavos,
+				method: args.method,
+				tenderedCentavos: tendered,
+				changeCentavos: change,
+				shiftId,
+				cashAccountId,
+				cashMovementId: movementId
+			}
 		});
 	});
 
@@ -830,6 +878,10 @@ export async function voidDiningOrderPayment(args: {
 		.from(cashMovements)
 		.where(and(eq(cashMovements.id, order.cashMovementId), eq(cashMovements.hotelId, args.hotelId)))
 		.limit(1);
+	// What is being reversed, captured before it is cleared, for the audit entry below.
+	const cancelledReceipts = (await listDiningOrderDocuments(args.hotelId, order.id).catch(() => [])).map(
+		(d) => d.formattedNo
+	);
 	if (!movement?.voidedAt) {
 		await voidCashMovement(args.hotelId, order.cashMovementId, `Dining ${order.code}: ${reason}`, args.actor ?? null);
 	}
@@ -861,7 +913,16 @@ export async function voidDiningOrderPayment(args: {
 		action: 'dining_order.void_payment',
 		entityType: 'dining_order',
 		entityId: order.id,
-		after: { code: order.code, reason }
+		refCode: order.code,
+		before: { receipts: cancelledReceipts },
+		after: {
+			code: order.code,
+			orderId: order.id,
+			reason,
+			amountCentavos: order.totalCentavos,
+			method: order.paymentMethod,
+			cashMovementId: order.cashMovementId
+		}
 	});
 }
 

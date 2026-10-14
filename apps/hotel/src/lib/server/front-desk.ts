@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, gt, inArray, lt, lte, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { db } from './db/index';
 import {
 	bookingRooms,
@@ -21,7 +21,7 @@ import {
 import { ACTIVE_BOOKING_STATUSES, getAvailableRoomType, roomHeldUntil } from './availability';
 import { checkHallAvailability } from './hall-availability';
 import { wallTimeToUtcMs } from './cancellation';
-import { FolioError, closeFolio, getFolioDetail } from './folio';
+import { FolioError, addHallOvertimeCharge, closeFolio, closeHallFolio, getFolioDetail } from './folio';
 import { planInRoomOrder } from '$lib/allocation';
 import { splitRoomLine } from '$lib/room-split';
 import { lineBalances } from './order-balances';
@@ -32,7 +32,8 @@ import { getBirSettings, issueInvoice } from './finance/documents';
 import { priceEventHall, type PriceBreakdown } from './pricing';
 import { addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
 import { writeAudit } from './audit';
-import { flagHallForHousekeeping, flagRoomForHousekeeping } from './housekeeping';
+import { flagRoomForHousekeeping, flagHallForHousekeeping, getHallCloseGate } from './housekeeping';
+import { hallOvertimeAmount, hallOvertimeHours } from '$lib/hall-overtime';
 import type { SessionUser } from './auth/session';
 
 /** Today's date (`YYYY-MM-DD`) in a hotel's own timezone — the front desk's "business date". */
@@ -1295,6 +1296,8 @@ export async function checkOutBooking(
 
 export interface HallGridEvent {
 	hallBookingId: string;
+	/** The event's own date. Earlier than the board's date only for an event still open from a previous day. */
+	eventDate: string;
 	guestName: string;
 	eventType: string;
 	guestCount: number;
@@ -1303,6 +1306,14 @@ export interface HallGridEvent {
 	status: string;
 	totalCentavos: number;
 	channel: string;
+	/** The booked end as an instant, in the hotel's timezone: what overtime is measured from. */
+	scheduledEndIso: string;
+	/** Checked-out events only: what stands between the event and Close. */
+	close: {
+		housekeeping: 'dirty' | 'in_progress' | 'clean';
+		pendingDamageCount: number;
+		balanceCentavos: number;
+	} | null;
 }
 
 export interface HallGridCell {
@@ -1311,6 +1322,10 @@ export interface HallGridCell {
 	capacity: number;
 	/** Hours included in the base price before the extra-hour rate kicks in — the walk-in drawer defaults a new event's duration to this. */
 	baseHours: number;
+	/** The hall's rate for each started hour past a booked end time (overtime). */
+	extraHourFeeCentavos: number;
+	/** For the check-out dialog's overtime preview. */
+	vatRateBps: number;
 	events: HallGridEvent[];
 }
 
@@ -1330,7 +1345,8 @@ export async function getHallStatusBoard(
 			id: functionHalls.id,
 			name: functionHalls.name,
 			capacity: functionHalls.capacity,
-			baseHours: functionHalls.baseHours
+			baseHours: functionHalls.baseHours,
+			extraHourFeeCentavos: functionHalls.extraHourFeeCentavos
 		})
 		.from(functionHalls)
 		.where(and(eq(functionHalls.hotelId, hotelId), eq(functionHalls.isActive, true)))
@@ -1341,6 +1357,7 @@ export async function getHallStatusBoard(
 		.select({
 			hallBookingId: hallBookings.id,
 			functionHallId: hallBookings.functionHallId,
+			eventDate: hallBookings.eventDate,
 			eventType: hallBookings.eventType,
 			guestCount: hallBookings.guestCount,
 			startTime: hallBookings.startTime,
@@ -1356,8 +1373,14 @@ export async function getHallStatusBoard(
 		.where(
 			and(
 				eq(orders.hotelId, hotelId),
-				eq(hallBookings.eventDate, businessDate),
-				inArray(hallBookings.status, ['confirmed', 'completed'])
+				or(
+					and(
+						eq(hallBookings.eventDate, businessDate),
+						inArray(hallBookings.status, ['confirmed', 'checked_in', 'checked_out', 'completed'])
+					),
+					// An event from an earlier day that was never checked out or closed stays on the board until it is.
+					and(lt(hallBookings.eventDate, businessDate), inArray(hallBookings.status, ['checked_in', 'checked_out']))
+				)
 			)
 		);
 
@@ -1373,11 +1396,22 @@ export async function getHallStatusBoard(
 		}
 	}
 
+	// Hotel timezone + VAT (overtime preview), and for a checked-out event what blocks Close.
+	const [hotel] = await db.select({ timezone: hotels.timezone, vatRateBps: hotels.vatRateBps }).from(hotels).where(eq(hotels.id, hotelId)).limit(1);
+	const timezone = hotel?.timezone ?? 'Asia/Manila';
+	const closeByEvent = new Map<string, NonNullable<HallGridEvent['close']>>();
+	for (const r of eventRows.filter((e) => e.status === 'checked_out')) {
+		const gate = await getHallCloseGate(hotelId, r.functionHallId, r.hallBookingId);
+		const folio = await getFolioDetail(hotelId, { kind: 'hall', hallBookingId: r.hallBookingId });
+		closeByEvent.set(r.hallBookingId, { housekeeping: gate.status, pendingDamageCount: gate.pendingDamageCount, balanceCentavos: folio.balanceCentavos });
+	}
+
 	const eventsByHall = new Map<string, HallGridEvent[]>();
 	for (const r of eventRows) {
 		const list = eventsByHall.get(r.functionHallId) ?? [];
 		list.push({
 			hallBookingId: r.hallBookingId,
+			eventDate: r.eventDate,
 			guestName: r.guestName,
 			eventType: r.eventType,
 			guestCount: r.guestCount,
@@ -1385,18 +1419,22 @@ export async function getHallStatusBoard(
 			endTime: r.endTime,
 			status: r.status,
 			totalCentavos: r.totalCentavos,
-			channel: channelByOrder.get(r.orderId) ?? 'paymongo'
+			channel: channelByOrder.get(r.orderId) ?? 'paymongo',
+			scheduledEndIso: new Date(wallTimeToUtcMs(r.eventDate, r.endTime, timezone)).toISOString(),
+			close: closeByEvent.get(r.hallBookingId) ?? null
 		});
 		eventsByHall.set(r.functionHallId, list);
 	}
 	for (const list of eventsByHall.values())
-		list.sort((a, b) => a.startTime.localeCompare(b.startTime));
+		list.sort((a, b) => a.eventDate.localeCompare(b.eventDate) || a.startTime.localeCompare(b.startTime));
 
 	return hallRows.map((h) => ({
 		functionHallId: h.id,
 		hallName: h.name,
 		capacity: h.capacity,
 		baseHours: h.baseHours,
+		extraHourFeeCentavos: h.extraHourFeeCentavos,
+		vatRateBps: hotel?.vatRateBps ?? 0,
 		events: eventsByHall.get(h.id) ?? []
 	}));
 }
@@ -1554,55 +1592,209 @@ export async function createWalkInHallBooking(params: {
 
 export class HallCompleteError extends Error {}
 
-/** Flips a confirmed event to `completed` once it's over — front desk's judgment call, nothing tracks the actual end time. */
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** The hall event row all three steps below start from, locked for the transaction. */
+async function loadHallEventForUpdate(tx: Tx, hotelId: string, hallBookingId: string) {
+	const [row] = await tx
+		.select({
+			id: hallBookings.id,
+			status: hallBookings.status,
+			functionHallId: hallBookings.functionHallId,
+			eventDate: hallBookings.eventDate,
+			endTime: hallBookings.endTime,
+			orderId: hallBookings.orderId,
+			orderStatus: orders.status
+		})
+		.from(hallBookings)
+		.innerJoin(orders, eq(orders.id, hallBookings.orderId))
+		.where(and(eq(hallBookings.id, hallBookingId), eq(orders.hotelId, hotelId)))
+		.for('update', { of: hallBookings })
+		.limit(1);
+	if (!row) throw new HallCompleteError('Hall booking not found.');
+	return row;
+}
+
+/**
+ * The event has started: `confirmed` → `checked_in`. Only on the event's own day (hotel timezone), so a
+ * tap on the wrong row cannot start tomorrow's event. The history row is the actual start time. A balance
+ * does not block this; it is settled before Close.
+ */
+export async function checkInHallBooking(
+	hotelId: string,
+	hallBookingId: string,
+	businessDate: string,
+	actor: SessionUser | null
+): Promise<void> {
+	await db.transaction(async (tx) => {
+		const row = await loadHallEventForUpdate(tx, hotelId, hallBookingId);
+		if (row.status !== 'confirmed' || row.orderStatus !== 'confirmed') {
+			throw new HallCompleteError('Only a confirmed event can be checked in.');
+		}
+		if (row.eventDate !== businessDate) {
+			throw new HallCompleteError(
+				row.eventDate > businessDate ? 'This event is not today. Check it in on the day.' : 'This event was booked for an earlier day.'
+			);
+		}
+		await tx.update(hallBookings).set({ status: 'checked_in' }).where(eq(hallBookings.id, hallBookingId));
+		await tx.insert(hallBookingStatusHistory).values({ hallBookingId, fromStatus: 'confirmed', toStatus: 'checked_in', note: null });
+		await writeAudit({
+			tx,
+			hotelId,
+			actor,
+			action: 'hall_booking.check_in',
+			entityType: 'hall_booking',
+			entityId: hallBookingId,
+			after: { functionHallId: row.functionHallId, eventDate: row.eventDate }
+		});
+	});
+}
+
+/**
+ * The event is over: `checked_in` → `checked_out`. If it ran past its booked end, the overtime is worked out
+ * here from the clock (per started hour, no grace) at the hall's extra-hour rate and posted to the event's
+ * bill once. The hall is flagged dirty in the same transaction, so housekeeping always has something to
+ * clear before Close. Leaving early earns no credit: the booked price stands.
+ */
+export async function checkOutHallBooking(
+	hotelId: string,
+	hallBookingId: string,
+	actor: SessionUser | null,
+	now: Date = new Date()
+): Promise<{ overtimeHours: number; overtimeCentavos: number }> {
+	return db.transaction(async (tx) => {
+		const row = await loadHallEventForUpdate(tx, hotelId, hallBookingId);
+		if (row.status !== 'checked_in') throw new HallCompleteError('Only a checked-in event can be checked out.');
+
+		const [hotel] = await tx.select({ timezone: hotels.timezone, vatRateBps: hotels.vatRateBps }).from(hotels).where(eq(hotels.id, hotelId)).limit(1);
+		const [hall] = await tx
+			.select({ extraHourFeeCentavos: functionHalls.extraHourFeeCentavos })
+			.from(functionHalls)
+			.where(eq(functionHalls.id, row.functionHallId))
+			.limit(1);
+		const scheduledEnd = wallTimeToUtcMs(row.eventDate, row.endTime, hotel?.timezone ?? 'Asia/Manila');
+		const hours = hallOvertimeHours(scheduledEnd, now.getTime());
+		const rate = hall?.extraHourFeeCentavos ?? 0;
+		const vatRateBps = hotel?.vatRateBps ?? 0;
+
+		const posted = await addHallOvertimeCharge(tx, hotelId, hallBookingId, { hours, extraHourFeeCentavos: rate, vatRateBps }, actor);
+
+		await tx.update(hallBookings).set({ status: 'checked_out' }).where(eq(hallBookings.id, hallBookingId));
+		await tx.insert(hallBookingStatusHistory).values({
+			hallBookingId,
+			fromStatus: 'checked_in',
+			toStatus: 'checked_out',
+			note: hours > 0 ? `Overtime ${hours}h` : null
+		});
+		await flagHallForHousekeeping(hotelId, row.functionHallId, 'checkout', hallBookingId, actor, tx);
+		await writeAudit({
+			tx,
+			hotelId,
+			actor,
+			action: 'hall_booking.check_out',
+			entityType: 'hall_booking',
+			entityId: hallBookingId,
+			after: {
+				functionHallId: row.functionHallId,
+				scheduledEnd: new Date(scheduledEnd).toISOString(),
+				actualEnd: now.toISOString(),
+				overtimeHours: hours,
+				overtimeRateCentavos: rate,
+				overtimeCentavos: posted?.totalCentavos ?? 0
+			}
+		});
+		return { overtimeHours: hours, overtimeCentavos: posted?.totalCentavos ?? 0 };
+	});
+}
+
+/**
+ * Close: `checked_out` → `completed`, the event is done. Refused until housekeeping has marked the hall
+ * clean, no damage report is still pending (charge it to the bill or dismiss it) and the bill is settled.
+ * A hotel admin can hand an unpaid balance to the city ledger instead (`cityLedger`), as at a room checkout.
+ * Closing shuts the event's folio and issues the invoice if BIR is set to do so on check-out, so the
+ * invoice carries the overtime and any damage.
+ */
 export async function completeHallBooking(
 	hotelId: string,
 	hallBookingId: string,
-	actor: SessionUser | null
+	actor: SessionUser | null,
+	cityLedger?: CityLedgerHandoff
 ): Promise<void> {
-	let functionHallId: string | undefined;
-	await db.transaction(async (tx) => {
-		const [row] = await tx
-			.select({
-				id: hallBookings.id,
-				status: hallBookings.status,
-				functionHallId: hallBookings.functionHallId
-			})
-			.from(hallBookings)
-			.innerJoin(orders, eq(orders.id, hallBookings.orderId))
-			.where(and(eq(hallBookings.id, hallBookingId), eq(orders.hotelId, hotelId)))
-			.limit(1);
-		if (!row) throw new HallCompleteError('Hall booking not found.');
-		if (row.status !== 'confirmed') {
-			throw new HallCompleteError('Only a confirmed event can be marked completed.');
+	// Read the gate first so the refusal names everything that is still outstanding at once.
+	const [row] = await db
+		.select({ status: hallBookings.status, functionHallId: hallBookings.functionHallId })
+		.from(hallBookings)
+		.innerJoin(orders, eq(orders.id, hallBookings.orderId))
+		.where(and(eq(hallBookings.id, hallBookingId), eq(orders.hotelId, hotelId)))
+		.limit(1);
+	if (!row) throw new HallCompleteError('Hall booking not found.');
+	if (row.status !== 'checked_out') {
+		throw new HallCompleteError(row.status === 'checked_in' ? 'Check the event out before closing it.' : 'Only a checked-out event can be closed.');
+	}
+
+	const gate = await getHallCloseGate(hotelId, row.functionHallId, hallBookingId);
+	let folio;
+	try {
+		folio = await getFolioDetail(hotelId, { kind: 'hall', hallBookingId });
+	} catch (e) {
+		if (e instanceof FolioError) throw new HallCompleteError(e.message);
+		throw e;
+	}
+	const owes = folio.balanceCentavos > 0 && !cityLedger;
+	const blockers: string[] = [];
+	if (gate.status !== 'clean') blockers.push(gate.status === 'dirty' ? 'housekeeping has not cleaned the hall yet' : 'housekeeping is still cleaning the hall');
+	if (gate.pendingDamageCount > 0) {
+		blockers.push(`${gate.pendingDamageCount} damage report${gate.pendingDamageCount === 1 ? ' is' : 's are'} waiting to be charged or dismissed`);
+	}
+	if (owes) blockers.push(`₱${(folio.balanceCentavos / 100).toFixed(2)} is still owed on the bill`);
+	if (blockers.length) throw new HallCompleteError(`Can't close yet: ${blockers.join('; ')}.`);
+
+	if (folio.balanceCentavos > 0 && cityLedger) {
+		try {
+			await openReceivable({
+				hotelId,
+				target: { kind: 'hall', hallBookingId },
+				billToName: cityLedger.billToName,
+				billToCompany: cityLedger.billToCompany ?? null,
+				referenceNo: cityLedger.referenceNo ?? null,
+				notes: cityLedger.notes ?? null,
+				actor
+			});
+		} catch (e) {
+			throw new HallCompleteError(e instanceof Error ? e.message : 'Could not move the balance to the city ledger.');
 		}
-		functionHallId = row.functionHallId;
+	}
 
-		await tx
-			.update(hallBookings)
-			.set({ status: 'completed' })
-			.where(eq(hallBookings.id, hallBookingId));
-
-		await tx.insert(hallBookingStatusHistory).values({
-			hallBookingId,
-			fromStatus: 'confirmed',
-			toStatus: 'completed',
-			note: null
+	await db.transaction(async (tx) => {
+		const locked = await loadHallEventForUpdate(tx, hotelId, hallBookingId);
+		if (locked.status !== 'checked_out') throw new HallCompleteError('Only a checked-out event can be closed.');
+		// The gate again, now that the row is locked: housekeeping or a damage report may have moved.
+		const again = await getHallCloseGate(hotelId, locked.functionHallId, hallBookingId, tx);
+		if (again.status !== 'clean' || again.pendingDamageCount > 0) {
+			throw new HallCompleteError("Can't close yet: housekeeping or a damage report changed. Refresh and check again.");
+		}
+		await tx.update(hallBookings).set({ status: 'completed' }).where(eq(hallBookings.id, hallBookingId));
+		await tx.insert(hallBookingStatusHistory).values({ hallBookingId, fromStatus: 'checked_out', toStatus: 'completed', note: null });
+		await writeAudit({
+			tx,
+			hotelId,
+			actor,
+			action: 'hall_booking.complete',
+			entityType: 'hall_booking',
+			entityId: hallBookingId,
+			after: { functionHallId: locked.functionHallId, balanceCentavos: folio.balanceCentavos, cityLedger: !!cityLedger && folio.balanceCentavos > 0 }
 		});
 	});
 
-	await writeAudit({
-		hotelId,
-		actor,
-		action: 'hall_booking.complete',
-		entityType: 'hall_booking',
-		entityId: hallBookingId
-	});
+	await closeHallFolio(hotelId, hallBookingId);
 
-	// Flag the hall for housekeeping turnover — best-effort, never blocks completion.
-	if (functionHallId) {
-		void flagHallForHousekeeping(hotelId, functionHallId, 'completed', hallBookingId, actor).catch((e) =>
-			console.error('completeHallBooking: flagHallForHousekeeping failed', functionHallId, e)
-		);
+	// The final Invoice, with overtime and damage on it. Non-fatal, like at a room checkout.
+	const bir = await getBirSettings(hotelId).catch(() => null);
+	if (bir?.autoIssueInvoiceOnCheckout) {
+		try {
+			await issueInvoice(hotelId, { kind: 'hall', hallBookingId }, actor);
+		} catch (e) {
+			console.warn('completeHallBooking: could not issue invoice', hallBookingId, e);
+		}
 	}
 }

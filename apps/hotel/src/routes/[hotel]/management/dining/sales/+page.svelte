@@ -9,6 +9,7 @@
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import PrinterIcon from '@lucide/svelte/icons/printer';
 	import ChartNoAxesColumnIcon from '@lucide/svelte/icons/chart-no-axes-column';
+	import DailySalesChart from '$lib/components/dining/daily-sales-chart.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -27,7 +28,7 @@
 	const r = $derived(data.report);
 	const average = $derived(r.orders ? Math.round(r.grossCentavos / r.orders) : 0);
 	const filterLabel = $derived(data.venues.find((v) => v.id === data.venueId)?.title ?? 'All venues');
-	const METHOD: Record<string, string> = { cash: 'Cash', card: 'Card', gcash: 'GCash', maya: 'Maya', room_charge: 'Charged to room', unknown: 'Unknown' };
+	const METHOD: Record<string, string> = { cash: 'Cash', card: 'Card', gcash: 'GCash', maya: 'Maya', paymongo: 'Online (PayMongo)', bank_transfer: 'Bank transfer', cheque: 'Cheque', house_use: 'House use', room_charge: 'Charged to room', unknown: 'Unknown' };
 
 	const query = (range: { from: string; to: string }, venue = data.venueId) => {
 		const q = new URLSearchParams({ from: range.from, to: range.to });
@@ -80,7 +81,7 @@
 					</Select.Content>
 				</Select.Root>
 			{/if}
-			<Button variant="outline" size="sm" class="print:hidden" onclick={() => window.print()}>
+			<Button href="/{page.params.hotel}/print/dining-sales?{query({ from: data.from, to: data.to })}" target="_blank" rel="noopener" variant="outline" size="sm">
 				<PrinterIcon class="size-4" /> Print
 			</Button>
 			<Button href="{base}/sales/csv?{query({ from: data.from, to: data.to })}" variant="outline" size="sm" download>
@@ -115,17 +116,39 @@
 			</div>
 		</dl>
 
-		<div class="mt-6 grid gap-6 lg:grid-cols-2">
+		<section aria-labelledby="trend" class="mt-6">
+			<h2 id="trend" class="mb-2 text-sm font-semibold text-ink">Sales trend</h2>
+			<div class="rounded-xl border border-border bg-surface p-3"><DailySalesChart days={r.byDay} /></div>
+		</section>
+
+		<div class="mt-6 space-y-8">
 			<section aria-labelledby="byDay">
 				<h2 id="byDay" class="mb-2 text-sm font-semibold text-ink">By day</h2>
 				<div class="overflow-x-auto rounded-xl border border-border">
 					<Table.Root>
-						<Table.Header><Table.Row><Table.Head>Date</Table.Head><Table.Head class="text-right">Orders</Table.Head><Table.Head class="text-right">Sales</Table.Head></Table.Row></Table.Header>
+						<Table.Header>
+							<Table.Row>
+								<Table.Head>Date</Table.Head>
+								<Table.Head class="w-36 text-right">Orders</Table.Head>
+								<Table.Head class="w-36 text-right">Sales</Table.Head>
+							</Table.Row>
+						</Table.Header>
 						<Table.Body>
 							{#each r.byDay as d (d.date)}
-								<Table.Row><Table.Cell>{fmtDay(d.date)}</Table.Cell><Table.Cell class="text-right tabular-nums">{d.orders}</Table.Cell><Table.Cell class="text-right tabular-nums">{peso(d.grossCentavos)}</Table.Cell></Table.Row>
+								<Table.Row>
+									<Table.Cell class="text-ink">{fmtDay(d.date)}</Table.Cell>
+									<Table.Cell class="text-right tabular-nums text-ink-muted">{d.orders}</Table.Cell>
+									<Table.Cell class="text-right font-medium tabular-nums text-ink">{peso(d.grossCentavos)}</Table.Cell>
+								</Table.Row>
 							{/each}
 						</Table.Body>
+						<Table.Footer>
+							<Table.Row>
+								<Table.Cell class="text-ink">Total</Table.Cell>
+								<Table.Cell class="text-right tabular-nums text-ink">{r.orders}</Table.Cell>
+								<Table.Cell class="text-right tabular-nums text-ink">{peso(r.grossCentavos)}</Table.Cell>
+							</Table.Row>
+						</Table.Footer>
 					</Table.Root>
 				</div>
 			</section>
@@ -134,12 +157,29 @@
 				<h2 id="byMethod" class="mb-2 text-sm font-semibold text-ink">By payment method</h2>
 				<div class="overflow-x-auto rounded-xl border border-border">
 					<Table.Root>
-						<Table.Header><Table.Row><Table.Head>Method</Table.Head><Table.Head class="text-right">Orders</Table.Head><Table.Head class="text-right">Sales</Table.Head></Table.Row></Table.Header>
+						<Table.Header>
+							<Table.Row>
+								<Table.Head>Method</Table.Head>
+								<Table.Head class="w-36 text-right">Orders</Table.Head>
+								<Table.Head class="w-36 text-right">Sales</Table.Head>
+							</Table.Row>
+						</Table.Header>
 						<Table.Body>
 							{#each r.byMethod as m (m.method)}
-								<Table.Row><Table.Cell>{METHOD[m.method] ?? m.method}</Table.Cell><Table.Cell class="text-right tabular-nums">{m.orders}</Table.Cell><Table.Cell class="text-right tabular-nums">{peso(m.grossCentavos)}</Table.Cell></Table.Row>
+								<Table.Row>
+									<Table.Cell class="text-ink">{METHOD[m.method] ?? m.method}</Table.Cell>
+									<Table.Cell class="text-right tabular-nums text-ink-muted">{m.orders}</Table.Cell>
+									<Table.Cell class="text-right font-medium tabular-nums text-ink">{peso(m.grossCentavos)}</Table.Cell>
+								</Table.Row>
 							{/each}
 						</Table.Body>
+						<Table.Footer>
+							<Table.Row>
+								<Table.Cell class="text-ink">Total</Table.Cell>
+								<Table.Cell class="text-right tabular-nums text-ink">{r.orders}</Table.Cell>
+								<Table.Cell class="text-right tabular-nums text-ink">{peso(r.grossCentavos)}</Table.Cell>
+							</Table.Row>
+						</Table.Footer>
 					</Table.Root>
 				</div>
 			</section>
@@ -149,12 +189,29 @@
 					<h2 id="byVenue" class="mb-2 text-sm font-semibold text-ink">By venue</h2>
 					<div class="overflow-x-auto rounded-xl border border-border">
 						<Table.Root>
-							<Table.Header><Table.Row><Table.Head>Venue</Table.Head><Table.Head class="text-right">Orders</Table.Head><Table.Head class="text-right">Sales</Table.Head></Table.Row></Table.Header>
+							<Table.Header>
+								<Table.Row>
+									<Table.Head>Venue</Table.Head>
+									<Table.Head class="w-36 text-right">Orders</Table.Head>
+									<Table.Head class="w-36 text-right">Sales</Table.Head>
+								</Table.Row>
+							</Table.Header>
 							<Table.Body>
 								{#each r.byVenue as v (v.venueId)}
-									<Table.Row><Table.Cell>{v.venue}</Table.Cell><Table.Cell class="text-right tabular-nums">{v.orders}</Table.Cell><Table.Cell class="text-right tabular-nums">{peso(v.grossCentavos)}</Table.Cell></Table.Row>
+									<Table.Row>
+										<Table.Cell class="text-ink">{v.venue}</Table.Cell>
+										<Table.Cell class="text-right tabular-nums text-ink-muted">{v.orders}</Table.Cell>
+										<Table.Cell class="text-right font-medium tabular-nums text-ink">{peso(v.grossCentavos)}</Table.Cell>
+									</Table.Row>
 								{/each}
 							</Table.Body>
+							<Table.Footer>
+								<Table.Row>
+									<Table.Cell class="text-ink">Total</Table.Cell>
+									<Table.Cell class="text-right tabular-nums text-ink">{r.orders}</Table.Cell>
+									<Table.Cell class="text-right tabular-nums text-ink">{peso(r.grossCentavos)}</Table.Cell>
+								</Table.Row>
+							</Table.Footer>
 						</Table.Root>
 					</div>
 				</section>
@@ -164,30 +221,57 @@
 				<h2 id="byStation" class="mb-2 text-sm font-semibold text-ink">By station</h2>
 				<div class="overflow-x-auto rounded-xl border border-border">
 					<Table.Root>
-						<Table.Header><Table.Row><Table.Head>Station</Table.Head><Table.Head class="text-right">Items</Table.Head><Table.Head class="text-right">Sales</Table.Head></Table.Row></Table.Header>
+						<Table.Header>
+							<Table.Row>
+								<Table.Head>Station</Table.Head>
+								<Table.Head class="w-36 text-right">Items</Table.Head>
+								<Table.Head class="w-36 text-right">Sales</Table.Head>
+							</Table.Row>
+						</Table.Header>
 						<Table.Body>
 							{#each r.byStation as st (st.station)}
-								<Table.Row><Table.Cell>{st.station}</Table.Cell><Table.Cell class="text-right tabular-nums">{st.quantity}</Table.Cell><Table.Cell class="text-right tabular-nums">{peso(st.grossCentavos)}</Table.Cell></Table.Row>
+								<Table.Row>
+									<Table.Cell class="text-ink">{st.station}</Table.Cell>
+									<Table.Cell class="text-right tabular-nums text-ink-muted">{st.quantity}</Table.Cell>
+									<Table.Cell class="text-right font-medium tabular-nums text-ink">{peso(st.grossCentavos)}</Table.Cell>
+								</Table.Row>
 							{/each}
 						</Table.Body>
+						<Table.Footer>
+							<Table.Row>
+								<Table.Cell class="text-ink">Total</Table.Cell>
+								<Table.Cell class="text-right tabular-nums text-ink">{r.byStation.reduce((s, x) => s + x.quantity, 0)}</Table.Cell>
+								<Table.Cell class="text-right tabular-nums text-ink">{peso(r.byStation.reduce((s, x) => s + x.grossCentavos, 0))}</Table.Cell>
+							</Table.Row>
+						</Table.Footer>
 					</Table.Root>
 				</div>
 			</section>
 
-			<section aria-labelledby="byItem" class="lg:col-span-2">
+			<section aria-labelledby="byItem">
 				<h2 id="byItem" class="mb-2 text-sm font-semibold text-ink">Top dishes</h2>
 				<div class="overflow-x-auto rounded-xl border border-border">
 					<Table.Root>
-						<Table.Header><Table.Row><Table.Head>Dish</Table.Head><Table.Head class="text-right">Sold</Table.Head><Table.Head class="text-right">Sales</Table.Head></Table.Row></Table.Header>
+						<Table.Header>
+							<Table.Row>
+								<Table.Head>Dish</Table.Head>
+								<Table.Head class="w-36 text-right">Sold</Table.Head>
+								<Table.Head class="w-36 text-right">Sales</Table.Head>
+							</Table.Row>
+						</Table.Header>
 						<Table.Body>
 							{#each r.byItem as i (i.name)}
-								<Table.Row><Table.Cell>{i.name}</Table.Cell><Table.Cell class="text-right tabular-nums">{i.quantity}</Table.Cell><Table.Cell class="text-right tabular-nums">{peso(i.grossCentavos)}</Table.Cell></Table.Row>
+								<Table.Row>
+									<Table.Cell class="text-ink">{i.name}</Table.Cell>
+									<Table.Cell class="text-right tabular-nums text-ink-muted">{i.quantity}</Table.Cell>
+									<Table.Cell class="text-right font-medium tabular-nums text-ink">{peso(i.grossCentavos)}</Table.Cell>
+								</Table.Row>
 							{/each}
 						</Table.Body>
 					</Table.Root>
 				</div>
 			</section>
 		</div>
-		<p class="mt-4 text-xs text-ink-muted">Counts paid orders by the day they were paid, and orders charged to a room by the day they were charged. A voided payment is taken back out. Room charges reach Finance as dining income when the guest pays their room bill.</p>
+		<p class="mt-4 text-xs text-ink-muted">Counts paid orders by the day they were paid, and orders charged to a room by the day they were charged. A voided payment is taken back out. Room charges reach Finance as dining income when the guest pays their room bill. Sales counts orders; <a class="underline" href="{base}/cashflow?{query({ from: data.from, to: data.to })}">Cashflow</a> counts the money actually received.</p>
 	{/if}
 </div>

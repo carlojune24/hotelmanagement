@@ -6,6 +6,7 @@ import {
 	financeSettings,
 	hallBookings,
 	hallBookingStatusHistory,
+	guests,
 	hotels,
 	orders,
 	orderStatusHistory,
@@ -168,6 +169,17 @@ export async function handlePaymongoEvent(
 						.where(eq(hallBookings.orderId, order.id))
 						.limit(1)
 						.then((r) => r.length > 0);
+					const guestRow = await tx
+						.select({ name: guests.fullName })
+						.from(guests)
+						.where(eq(guests.id, order.guestId))
+						.limit(1)
+						.then((r) => r.at(0));
+					// Why this money came in, in words: a downpayment (and what share of the total) or the full amount.
+					const isDownpayment = amountCentavos < order.totalCentavos;
+					const reasonMemo = isDownpayment
+						? `Online downpayment (PayMongo) — ${order.totalCentavos > 0 ? Math.round((amountCentavos / order.totalCentavos) * 100) : 0}% of the booking total`
+						: 'Online full payment (PayMongo)';
 					try {
 						await recordCashMovement(
 							{
@@ -178,10 +190,11 @@ export async function handlePaymongoEvent(
 								cashAccountId: settings.undepositedAccountId,
 								amountCentavos,
 								counterpartyType: 'guest',
+								counterpartyName: guestRow?.name ?? null,
 								sourceType: 'payment',
 								sourceId: paymentRow!.id,
 								paymentId: paymentRow!.id,
-								memo: 'Online payment (PayMongo)'
+								memo: reasonMemo
 							},
 							tx
 						);

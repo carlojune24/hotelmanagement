@@ -62,7 +62,10 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 						counterpartyName: null as string | null,
 						memo: 'Opening balance (set when the account was created)',
 						sourceType: 'opening',
-						voidedAt: null as Date | null
+						voidedAt: null as Date | null,
+						paymentPurpose: null as string | null,
+						paymentProvider: null as string | null,
+						orderId: null as string | null
 					}))
 			: [];
 

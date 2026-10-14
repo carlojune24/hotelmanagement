@@ -42,7 +42,7 @@ export const folioStatus = pgEnum('folio_status', ['open', 'closed']);
  * that line's matching payment already exists (the original payment, `payments.orderId`), so
  * the folio's math starts exactly balanced and only owes anything once a new charge is added
  * without a matching new payment. Closed (and `closedAt` set) once a room booking actually
- * checks out — a hall booking's folio has no equivalent close step yet.
+ * checks out; a hall booking's folio closes when the event is Closed (`closeHallFolio`).
  */
 export const folios = pgTable(
 	'folios',
@@ -114,7 +114,11 @@ export const folioCharges = pgTable(
 		// An order can sit on a folio once at a time (a voided line frees it to be charged again).
 		uniqueIndex('folio_charges_one_live_per_dining_order_idx')
 			.on(t.diningOrderId)
-			.where(sql`dining_order_id is not null and voided_at is null`)
+			.where(sql`dining_order_id is not null and voided_at is null`),
+		// A hall event is charged overtime at most once at a time (a voided line frees it to be re-posted).
+		uniqueIndex('folio_charges_one_live_hall_overtime_idx')
+			.on(t.folioId)
+			.where(sql`source = 'hall_overtime' and voided_at is null`)
 	]
 );
 
