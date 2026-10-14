@@ -28,7 +28,9 @@ import {
 	recordRemarks,
 	type DtrFlag,
 	type DtrMetrics,
-	type ScheduleInput
+	type ScheduleInput,
+	applyCredits,
+	flagsAfterCredit
 } from '$lib/hr-import';
 import { addDays, monthBounds, netShiftMinutes, timeToMinutes } from '$lib/roster';
 import { listCalendar } from '$lib/server/hr/calendar';
@@ -531,6 +533,49 @@ export async function computeMonthDtr(
 		byEnroll.set(p.enrollKey, list);
 	}
 
+	const [schedAll, existing] =
+		scopeIds.length === 0
+			? [[], []]
+			: await Promise.all([
+					db
+						.select()
+						.from(schedules)
+						.where(
+							and(
+								eq(schedules.establishmentId, establishmentId),
+								isNull(schedules.deletedAt),
+								inArray(schedules.employeeId, scopeIds),
+								gte(schedules.date, addDays(range.start, -1)),
+								lte(schedules.date, addDays(range.end, 1))
+							)
+						),
+					db
+						.select({
+							employeeId: dtrEntries.employeeId,
+							date: dtrEntries.date,
+							source: dtrEntries.source
+						})
+						.from(dtrEntries)
+						.where(
+							and(
+								eq(dtrEntries.establishmentId, establishmentId),
+								isNull(dtrEntries.deletedAt),
+								inArray(dtrEntries.employeeId, scopeIds),
+								gte(dtrEntries.date, range.start),
+								lte(dtrEntries.date, range.end)
+							)
+						)
+				]);
+	const schedRows = schedAll.filter((x) => x.date >= range.start && x.date <= range.end);
+	// Rostered shift starts per person, so a late finish and the next morning's clock-in are not one shift.
+	const startsByEmp = new Map<string, number[]>();
+	for (const x of schedAll) {
+		if (x.isRestDay || !x.startTime) continue;
+		const list = startsByEmp.get(x.employeeId) ?? [];
+		list.push(wallTimeToUtcMs(x.date, x.startTime, tz));
+		startsByEmp.set(x.employeeId, list);
+	}
+
 	const unmatched: MonthDtr['unmatched'] = [];
 	const clustered: Array<{
 		emp: (typeof emps)[number];
@@ -553,7 +598,7 @@ export async function computeMonthDtr(
 		}
 		if (!scopeIds.includes(emp.id)) continue;
 		const seenDates = new Set<string>();
-		for (const cluster of clusterPunches(instants)) {
+		for (const cluster of clusterPunches(instants, startsByEmp.get(emp.id) ?? [])) {
 			const date = dateOf.format(new Date(cluster.inMs));
 			if (date < range.start || date > range.end || seenDates.has(date)) continue;
 			seenDates.add(date);
@@ -563,39 +608,6 @@ export async function computeMonthDtr(
 	}
 	unmatched.sort((a, b) => b.punches - a.punches);
 
-	const [schedRows, existing] =
-		scopeIds.length === 0
-			? [[], []]
-			: await Promise.all([
-					db
-						.select()
-						.from(schedules)
-						.where(
-							and(
-								eq(schedules.establishmentId, establishmentId),
-								isNull(schedules.deletedAt),
-								inArray(schedules.employeeId, scopeIds),
-								gte(schedules.date, range.start),
-								lte(schedules.date, range.end)
-							)
-						),
-					db
-						.select({
-							employeeId: dtrEntries.employeeId,
-							date: dtrEntries.date,
-							source: dtrEntries.source
-						})
-						.from(dtrEntries)
-						.where(
-							and(
-								eq(dtrEntries.establishmentId, establishmentId),
-								isNull(dtrEntries.deletedAt),
-								inArray(dtrEntries.employeeId, scopeIds),
-								gte(dtrEntries.date, range.start),
-								lte(dtrEntries.date, range.end)
-							)
-						)
-				]);
 	const schedByKey = new Map(schedRows.map((s) => [`${s.employeeId}|${s.date}`, s]));
 	const existingByKey = new Map(existing.map((e) => [`${e.employeeId}|${e.date}`, e]));
 	const actionFor = (key: string): DtrAction => {
@@ -621,13 +633,16 @@ export async function computeMonthDtr(
 			const bs = timeToMinutes(sched.breakStart?.slice(0, 5));
 			const be = timeToMinutes(sched.breakEnd?.slice(0, 5));
 			const split = !sched.isRestDay && bs !== null && be !== null;
+			// On a shift that crosses midnight, a break clock time before the start is after midnight.
+			const overnight = s !== null && e !== null && e <= s;
+			const breakDate = (t: number | null) => (overnight && t !== null && s !== null && t < s ? addDays(date, 1) : date);
 			scheduleInput = {
 				isRestDay: sched.isRestDay,
 				startMs,
 				endMs,
 				breakMinutes: sched.breakMinutes,
-				breakStartMs: split ? wallTimeToUtcMs(date, sched.breakStart!, tz) : null,
-				breakEndMs: split ? wallTimeToUtcMs(date, sched.breakEnd!, tz) : null
+				breakStartMs: split ? wallTimeToUtcMs(breakDate(bs), sched.breakStart!, tz) : null,
+				breakEndMs: split ? wallTimeToUtcMs(breakDate(be), sched.breakEnd!, tz) : null
 			};
 		}
 
@@ -710,41 +725,46 @@ export async function computeMonthDtr(
 		const sm = scheduledMinutes(schedByKey.get(key));
 		const lv = leaveMap.get(key) ?? null;
 		const cal = calByDate.get(r.date) ?? null;
-		if (lv && !lv.halfDay) {
-			records[i] = {
-				...r,
-				timeIn: null,
-				timeOut: null,
-				breakOut: null,
-				breakIn: null,
-				flags: [],
-				manualPunch: false,
-				leave: lv,
-				calendar: null,
-				workedMinutes: lv.paid ? sm : 0,
-				leaveMinutes: lv.paid ? sm : 0,
-				otMinutes: 0,
-				unapprovedOtMinutes: 0,
-				nightDiffMinutes: 0,
-				tardinessMinutes: 0,
-				undertimeMinutes: 0
-			};
-		} else if (lv) {
-			const half = Math.round(sm / 2);
-			r.leave = lv;
-			r.undertimeMinutes = Math.max(0, r.undertimeMinutes - half);
-			if (lv.paid) {
-				r.workedMinutes = Math.min(sm, r.workedMinutes + half);
-				r.leaveMinutes = half;
+		if (lv || cal) {
+			const adj = applyCredits(
+				{ worked: r.workedMinutes, late: r.tardinessMinutes, under: r.undertimeMinutes, ot: r.otMinutes, night: r.nightDiffMinutes },
+				sm,
+				lv ? { paid: lv.paid, halfDay: lv.halfDay } : null,
+				cal ? { creditMinutes: cal.creditMinutes, waiveLateness: cal.waiveLateness } : null,
+				true
+			);
+			if (lv && !lv.halfDay) {
+				// Whole-day leave replaces the day, and any punches that day.
+				records[i] = {
+					...r,
+					timeIn: null,
+					timeOut: null,
+					breakOut: null,
+					breakIn: null,
+					flags: [],
+					manualPunch: false,
+					leave: lv,
+					calendar: null,
+					workedMinutes: adj.worked,
+					leaveMinutes: adj.leaveMinutes,
+					otMinutes: 0,
+					unapprovedOtMinutes: 0,
+					nightDiffMinutes: 0,
+					tardinessMinutes: 0,
+					undertimeMinutes: 0
+				};
+			} else {
+				r.flags = flagsAfterCredit(r.flags, r.undertimeMinutes, adj.under);
+				r.workedMinutes = adj.worked;
+				r.tardinessMinutes = adj.late;
+				r.undertimeMinutes = adj.under;
+				if (lv) {
+					r.leave = lv;
+					r.leaveMinutes = adj.leaveMinutes;
+				} else {
+					r.calendar = calInfo(r.date);
+				}
 			}
-		} else if (cal) {
-			const credit = cal.creditMinutes ?? sm;
-			r.workedMinutes = Math.max(r.workedMinutes, credit);
-			if (cal.waiveLateness) {
-				r.tardinessMinutes = 0;
-				r.undertimeMinutes = 0;
-			}
-			r.calendar = calInfo(r.date);
 		}
 	}
 

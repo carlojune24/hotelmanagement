@@ -8,12 +8,15 @@
 
 	const tabs = $derived(
 		[
+			{ seg: '/dashboard', label: 'Dashboard', show: data.tabs.dashboard },
 			{ seg: '/employees', label: 'Employees', show: data.tabs.employees },
 			{ seg: '/schedule', label: 'Schedule', show: data.tabs.schedule },
 			{ seg: '/dtr', label: 'DTR', show: data.tabs.dtr },
 			{ seg: '/leave', label: 'Leave', show: data.tabs.leave },
-			{ seg: '/overtime', label: 'Overtime', show: data.tabs.overtime },
+{ seg: '/overtime', label: 'Overtime', show: data.tabs.overtime },
+{ seg: '/memos', label: 'Memos', show: data.tabs.memos },
 			{ seg: '/payslips', label: 'Payslips', show: data.tabs.payslips },
+			{ seg: '/guide', label: 'Guide', show: data.tabs.dtr },
 			{ seg: '/settings', label: 'Settings', show: data.tabs.settings }
 		].filter((t) => t.show)
 	);
@@ -24,14 +27,17 @@
 <svelte:head><title>{data.establishment.name} · HR</title></svelte:head>
 
 <div class="mx-auto max-w-6xl space-y-5">
-	<header class="flex flex-wrap items-end justify-between gap-3">
+	<header class="space-y-3">
 		<div>
-			<p class="text-sm text-ink-muted">
-				<a href="/establishments" class="underline-offset-4 hover:underline">Establishments</a>
-			</p>
+			{#if !data.scope}
+				<p class="text-sm text-ink-muted">
+					<a href="/establishments" class="underline-offset-4 hover:underline">Establishments</a>
+				</p>
+			{/if}
 			<h1 class="text-4xl font-light tracking-tight">{data.establishment.name}</h1>
 		</div>
-		<nav class="flex flex-wrap gap-2" aria-label="Establishment sections">
+		<!-- A manager or clerk has these in the sidebar; Main HR keeps them here and the company menu there. -->
+		<nav class="flex flex-wrap gap-2 {data.scope ? 'hidden' : ''}" aria-label="Establishment sections">
 			{#each tabs as t (t.seg)}
 				<a
 					href={base + t.seg}

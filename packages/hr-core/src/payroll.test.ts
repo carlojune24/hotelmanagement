@@ -339,3 +339,100 @@ describe('computePayrollLine', () => {
 		expect(m.line.deductions.sss_ee).toBe(peso(1_000));
 	});
 });
+
+describe('a rate that changes inside the cutoff is split by day', () => {
+	// Oct 1–15 (15 days). The rate changes on the 11th: 10 days at the old rate, 5 at the new.
+	const cutoff = { start: '2026-10-01', change: '2026-10-11', end: '2026-10-15' };
+	const segments = (oldRate: number, newRate: number) => [
+		{ start: cutoff.start, end: '2026-10-10', baseRateCentavos: oldRate },
+		{ start: cutoff.change, end: cutoff.end, baseRateCentavos: newRate }
+	];
+
+	it('monthly-paid: half the month, weighted by the calendar days at each rate', () => {
+		const { line } = computePayrollLine({
+			...base,
+			payBasis: 'monthly',
+			baseRateCentavos: peso(30_000), // the rate on the last day
+			rateSegments: segments(peso(24_000), peso(30_000)),
+			days: []
+		});
+		// (24,000 × 10 + 30,000 × 5) ÷ 15 = 26,000 a month → 13,000 for the half
+		expect(line.earnings.basic).toBe(peso(13_000));
+	});
+
+	it('monthly-paid: an absence is valued at the rate of the day it fell on', () => {
+		const daily = (rate: number) => Math.round((rate * 12) / 313);
+		const early = computePayrollLine({
+			...base,
+			payBasis: 'monthly',
+			baseRateCentavos: peso(30_000),
+			rateSegments: segments(peso(24_000), peso(30_000)),
+			days: [day({ date: '2026-10-05', workedMinutes: 0 })]
+		});
+		const late = computePayrollLine({
+			...base,
+			payBasis: 'monthly',
+			baseRateCentavos: peso(30_000),
+			rateSegments: segments(peso(24_000), peso(30_000)),
+			days: [day({ date: '2026-10-13', workedMinutes: 0 })]
+		});
+		expect(early.line.earnings.basic).toBe(peso(13_000) - daily(peso(24_000)));
+		expect(late.line.earnings.basic).toBe(peso(13_000) - daily(peso(30_000)));
+	});
+
+	it('daily-paid: each day is paid at its own rate', () => {
+		const { line } = computePayrollLine({
+			...base,
+			payBasis: 'daily',
+			baseRateCentavos: peso(800),
+			rateSegments: segments(peso(600), peso(800)),
+			days: [day({ date: '2026-10-09' }), day({ date: '2026-10-10' }), day({ date: '2026-10-11' }), day({ date: '2026-10-12' })]
+		});
+		expect(line.earnings.basic).toBe(peso(600 * 2 + 800 * 2));
+	});
+
+	it('hourly-paid: hours and overtime use the day they were worked', () => {
+		const { line } = computePayrollLine({
+			...base,
+			payBasis: 'hourly',
+			baseRateCentavos: peso(120),
+			rateSegments: segments(peso(100), peso(120)),
+			days: [
+				day({ date: '2026-10-10', workedMinutes: 480 + 60, otMinutes: 60 }),
+				day({ date: '2026-10-11', workedMinutes: 480 + 60, otMinutes: 60 })
+			]
+		});
+		expect(line.earnings.basic).toBe(peso(100 * 8 + 120 * 8));
+		expect(line.earnings.overtime).toBe(peso(100 * 1.25 + 120 * 1.25));
+	});
+
+	it('computes contributions on the rate in force on the last day', () => {
+		const split = computePayrollLine({
+			...base,
+			payBasis: 'monthly',
+			baseRateCentavos: peso(30_000),
+			rateSegments: segments(peso(24_000), peso(30_000)),
+			days: []
+		});
+		const flat = computePayrollLine({ ...base, payBasis: 'monthly', baseRateCentavos: peso(30_000), days: [] });
+		expect(split.line.deductions.sss_ee).toBe(flat.line.deductions.sss_ee);
+		expect(split.line.deductions.philhealth_ee).toBe(flat.line.deductions.philhealth_ee);
+	});
+
+	it('a single segment is the same as no segments', () => {
+		const one = computePayrollLine({
+			...base,
+			payBasis: 'monthly',
+			baseRateCentavos: peso(20_000),
+			rateSegments: [{ start: '2026-10-01', end: '2026-10-15', baseRateCentavos: peso(20_000) }],
+			days: [day({ date: '2026-10-05', workedMinutes: 0 })]
+		});
+		const none = computePayrollLine({
+			...base,
+			payBasis: 'monthly',
+			baseRateCentavos: peso(20_000),
+			days: [day({ date: '2026-10-05', workedMinutes: 0 })]
+		});
+		expect(one.line).toEqual(none.line);
+	});
+});

@@ -11,16 +11,30 @@ import {
 	updateEmployee,
 	EmployeeError
 } from '$lib/server/hr/employees';
+import { getOrganization } from '$lib/server/establishments';
+import { SalaryError, adjustSalary, adjustSchema, listHistories, syncCurrentRates } from '$lib/server/hr/salary';
+import { businessDateFor } from '$lib/server/time';
 import { deleteUploadIfOwned, saveUpload, UploadValidationError } from '$lib/server/uploads';
+import { listCostCenters } from '$lib/server/hr/cost-centers';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
 	const est = locals.establishment!;
 	// Managers may view their own staff; creating/editing/archiving stays with Main HR.
 	requireCap(locals.user, locals.access, 'employee:read', est.id);
+	// A raise dated for today or earlier becomes the employee's current rate here, so the list is right.
+	await syncCurrentRates((await getOrganization()).id);
 	const employees = await listEmployees(est.id);
+	const costCenters = (await listCostCenters((await getOrganization()).id)).map((x) => ({
+		code: x.code,
+		name: x.name,
+		active: x.active
+	}));
 	return {
 		employees,
+		costCenters,
+		history: await listHistories(employees.map((e) => e.id)),
+		today: businessDateFor('Asia/Manila'),
 		canWrite: locals.user!.isSystemAdmin || canAt(locals.access!, 'employee:*', est.id)
 	};
 };
@@ -33,6 +47,38 @@ function parseForm(raw: Record<string, FormDataEntryValue>) {
 }
 
 export const actions: Actions = {
+	adjustSalary: async (event) => {
+		requireCap(event.locals.user, event.locals.access, 'employee:*', event.locals.establishment!.id);
+		const parsed = adjustSchema.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: parsed.error.issues[0]?.message ?? 'Check the adjustment.' });
+		try {
+			const org = await getOrganization();
+			const r = await adjustSalary(org.id, parsed.data, event.locals.user!.id);
+			await writeAudit({
+				actor: event.locals.user,
+				action: 'employee.salary_adjust',
+				entityType: 'employee',
+				entityId: parsed.data.employeeId,
+				before: { payBasis: r.previous.payBasis, baseRateCentavos: r.previous.baseRateCentavos },
+				after: {
+					payBasis: parsed.data.payBasis,
+					baseRateCentavos: r.entry.baseRateCentavos,
+					effectiveFrom: parsed.data.effectiveFrom,
+					remarks: parsed.data.remarks
+				}
+			});
+			return {
+				ok:
+					r.lockedPayslipsAffected > 0
+						? `Salary adjusted. ${r.lockedPayslipsAffected} locked payslip${r.lockedPayslipsAffected === 1 ? '' : 's'} on or after that date keep the old rate — correct them by hand if needed.`
+						: 'Salary adjusted and recorded.'
+			};
+		} catch (e) {
+			if (e instanceof SalaryError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
 	create: async (event) => {
 		requireCap(event.locals.user, event.locals.access, 'employee:*', event.locals.establishment!.id);
 		const establishmentId = event.locals.establishment!.id;

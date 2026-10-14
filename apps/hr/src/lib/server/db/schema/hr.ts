@@ -58,6 +58,9 @@ export const employees = pgTable(
 		/** @mm/hr-core's `employeeStatus` enum. */
 		status: text('status').notNull().default('active'),
 		separatedOn: date('separated_on', { mode: 'string' }),
+		/** PD 851 covers rank-and-file staff. Managerial employees are not entitled; Main HR marks them. */
+		thirteenthMonthCovered: boolean('thirteenth_month_covered').notNull().default(true),
+		thirteenthMonthNote: text('thirteenth_month_note'),
 		/** `/uploads/<establishmentId>/<file>` via `lib/server/uploads.ts` — unset shows a generic avatar. */
 		photoUrl: text('photo_url'),
 		/** The employee's own contact email — for sending payslips. */
@@ -374,14 +377,17 @@ export const biometricPunches = pgTable(
 // Leave, holidays and memorandums
 // ---------------------------------------------------------------------------
 
-/** A kind of leave and its policy. Edited in Settings; amending one never rewrites past approvals. */
+/**
+ * A kind of leave and its policy — one list for the whole company, decided by Main HR in Settings and
+ * used by every establishment. Amending one never rewrites past approvals.
+ */
 export const leaveTypes = pgTable(
 	'leave_types',
 	{
 		id: pk(),
-		establishmentId: uuid('establishment_id')
+		organizationId: uuid('organization_id')
 			.notNull()
-			.references(() => establishments.id, { onDelete: 'cascade' }),
+			.references(() => organizations.id, { onDelete: 'restrict' }),
 		/** Short label printed on the DTR (`SIL`, `SL`). */
 		code: text('code').notNull(),
 		name: text('name').notNull(),
@@ -410,7 +416,7 @@ export const leaveTypes = pgTable(
 		createdAt: createdAt(),
 		updatedAt: updatedAt()
 	},
-	(t) => [uniqueIndex('leave_types_establishment_code_idx').on(t.establishmentId, t.code)]
+	(t) => [uniqueIndex('leave_types_organization_code_idx').on(t.organizationId, t.code)]
 );
 
 export const leaveRequests = pgTable(
@@ -554,11 +560,13 @@ export const calendarDays = pgTable(
 		submittedAt: timestamp('submitted_at', { withTimezone: true }),
 		decidedByUserId: uuid('decided_by_user_id').references(() => users.id, { onDelete: 'set null' }),
 		decidedAt: timestamp('decided_at', { withTimezone: true }),
-		decisionNote: text('decision_note'),
-		createdAt: createdAt(),
-		updatedAt: updatedAt()
-	},
-	(t) => [uniqueIndex('calendar_days_establishment_date_idx').on(t.establishmentId, t.date)]
+decisionNote: text('decision_note'),
+/** Why the establishment is asking — what Main HR reads before deciding. */
+proposalNote: text('proposal_note'),
+createdAt: createdAt(),
+updatedAt: updatedAt()
+},
+(t) => [uniqueIndex('calendar_days_establishment_date_idx').on(t.establishmentId, t.date)]
 );
 
 // ---------------------------------------------------------------------------
@@ -776,6 +784,414 @@ export const remittances = pgTable(
 	(t) => [uniqueIndex('remittances_org_agency_period_idx').on(t.organizationId, t.agency, t.period)]
 );
 
+/**
+ * The kinds of loan Main HR deducts from pay. `key` is what a loan stores (immutable, so renaming a type never
+ * breaks history); `remit_to` decides which remittance schedule its deductions land on.
+ */
+export const loanTypes = pgTable(
+	'loan_types',
+	{
+		id: pk(),
+		organizationId: uuid('organization_id')
+			.notNull()
+			.references(() => organizations.id, { onDelete: 'restrict' }),
+		key: text('key').notNull(),
+		name: text('name').notNull(),
+		/** 'sss' | 'pagibig' | 'none' — 'none' is deducted from pay but remitted to no agency here. */
+		remitTo: text('remit_to').notNull().default('none'),
+		active: boolean('active').notNull().default(true),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [uniqueIndex('loan_types_org_key_idx').on(t.organizationId, t.key)]
+);
+
+/**
+ * A loan taken out against an employee's pay: SSS / Pag-IBIG government loans (collected and remitted
+ * separately from contributions) or a company loan. The balance is never stored — it is the principal less
+ * what was deducted on locked/released payslips (`payroll_loan_deductions`), so it cannot go stale.
+ */
+export const employeeLoans = pgTable(
+	'employee_loans',
+	{
+		id: pk(),
+		organizationId: uuid('organization_id')
+			.notNull()
+			.references(() => organizations.id, { onDelete: 'restrict' }),
+		employeeId: uuid('employee_id')
+			.notNull()
+			.references(() => employees.id, { onDelete: 'restrict' }),
+		/** 'sss_salary' | 'sss_calamity' | 'pagibig_mpl' | 'pagibig_calamity' | 'pagibig_housing' | 'company' */
+		kind: text('kind').notNull(),
+		referenceNo: text('reference_no'),
+		principalCentavos: bigint('principal_centavos', { mode: 'number' }).notNull(),
+		/** The monthly amount; a semi-monthly run takes half in each cutoff. */
+		amortizationCentavos: bigint('amortization_centavos', { mode: 'number' }).notNull(),
+		/** Paid before this system took over deductions; counts against the principal like a deduction. */
+		alreadyPaidCentavos: bigint('already_paid_centavos', { mode: 'number' }).notNull().default(0),
+		/** `YYYY-MM` — the first pay month it is deducted in. */
+		startPeriod: text('start_period').notNull(),
+		/** The date the agency or company actually released the loan; the first deduction month is `start_period`. */
+		releasedOn: date('released_on', { mode: 'string' }),
+		/** Months the agreement runs for, when known. Informational: the balance still decides when it ends. */
+		termMonths: integer('term_months'),
+		/** 'active' | 'paused' | 'paid_off' | 'cancelled' */
+		status: text('status').notNull().default('active'),
+		/** Why it was cancelled, paused or closed early. */
+		statusNote: text('status_note'),
+		note: text('note'),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [index('employee_loans_employee_idx').on(t.employeeId), index('employee_loans_org_status_idx').on(t.organizationId, t.status)]
+);
+
+/**
+ * Money received against a loan outside payroll (cash, bank transfer, early settlement). It counts
+ * against the balance like a deduction but never appears on a remittance schedule. Voided, never deleted.
+ */
+export const employeeLoanPayments = pgTable(
+	'employee_loan_payments',
+	{
+		id: pk(),
+		loanId: uuid('loan_id')
+			.notNull()
+			.references(() => employeeLoans.id, { onDelete: 'restrict' }),
+		paidOn: date('paid_on', { mode: 'string' }).notNull(),
+		amountCentavos: bigint('amount_centavos', { mode: 'number' }).notNull(),
+		note: text('note'),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt(),
+		voidedAt: timestamp('voided_at', { withTimezone: true }),
+		voidedByUserId: uuid('voided_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		voidReason: text('void_reason'),
+		/** Set when the money was taken from the employee's final pay on a separation. */
+		separationId: uuid('separation_id').references(() => separations.id, { onDelete: 'restrict' })
+	},
+	(t) => [index('employee_loan_payments_loan_idx').on(t.loanId)]
+);
+
+/**
+ * Every pay rate a person has had, dated. The employee row's rate is only the one in force today;
+ * payroll prices each cutoff from this history, splitting by day when a rate changes inside it.
+ * Rows are never edited — a raise is a new row with remarks.
+ */
+export const salaryHistory = pgTable(
+	'salary_history',
+	{
+		id: pk(),
+		employeeId: uuid('employee_id')
+			.notNull()
+			.references(() => employees.id, { onDelete: 'restrict' }),
+		effectiveFrom: date('effective_from', { mode: 'string' }).notNull(),
+		/** @mm/hr-core's `payBasis`. */
+		payBasis: text('pay_basis').notNull(),
+		/** Per the pay basis unit — integer centavos. */
+		baseRateCentavos: bigint('base_rate_centavos', { mode: 'number' }).notNull(),
+		/** What it replaced; null for the starting salary. */
+		previousPayBasis: text('previous_pay_basis'),
+		previousRateCentavos: bigint('previous_rate_centavos', { mode: 'number' }),
+		remarks: text('remarks').notNull(),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt()
+	},
+	(t) => [uniqueIndex('salary_history_employee_date_idx').on(t.employeeId, t.effectiveFrom)]
+);
+
+/**
+ * A bonus run for one establishment: the 13th month (mid-year installment or year-end balance) or any
+ * other bonus (Christmas, productivity…). Lines are snapshots; an issued batch never recomputes.
+ * Paid in cash outside payroll, so it never touches a payslip or a remittance schedule.
+ */
+export const bonusBatches = pgTable(
+	'bonus_batches',
+	{
+		id: pk(),
+		organizationId: uuid('organization_id')
+			.notNull()
+			.references(() => organizations.id, { onDelete: 'restrict' }),
+		establishmentId: uuid('establishment_id')
+			.notNull()
+			.references(() => establishments.id, { onDelete: 'restrict' }),
+		/** 'thirteenth_mid_year' | 'thirteenth_year_end' | 'other' */
+		kind: text('kind').notNull(),
+		label: text('label').notNull(),
+		year: integer('year').notNull(),
+		/** Mid-year only: basic earned up to this date is accrued. */
+		throughDate: date('through_date', { mode: 'string' }),
+		/** 'draft' | 'issued' */
+		status: text('status').notNull().default('draft'),
+		issuedOn: date('issued_on', { mode: 'string' }),
+		issuedByUserId: uuid('issued_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [uniqueIndex('bonus_batches_unique_idx').on(t.establishmentId, t.kind, t.year, t.label)]
+);
+
+export const bonusLines = pgTable(
+	'bonus_lines',
+	{
+		id: pk(),
+		batchId: uuid('batch_id')
+			.notNull()
+			.references(() => bonusBatches.id, { onDelete: 'restrict' }),
+		employeeId: uuid('employee_id')
+			.notNull()
+			.references(() => employees.id, { onDelete: 'restrict' }),
+		employeeNo: text('employee_no').notNull(),
+		employeeName: text('employee_name').notNull(),
+		position: text('position'),
+		/** The 13th-month working, frozen: basic earned and late/undertime in the period. */
+		basicEarnedCentavos: bigint('basic_earned_centavos', { mode: 'number' }).notNull().default(0),
+		lateCentavos: bigint('late_centavos', { mode: 'number' }).notNull().default(0),
+		/** `(basic − late) ÷ 12` for the period. */
+		accruedCentavos: bigint('accrued_centavos', { mode: 'number' }).notNull().default(0),
+		/** Already paid for the year (mid-year installment, or the 13th month in final pay). */
+		alreadyPaidCentavos: bigint('already_paid_centavos', { mode: 'number' }).notNull().default(0),
+		/** What this batch pays. */
+		amountCentavos: bigint('amount_centavos', { mode: 'number' }).notNull().default(0),
+		/** 'not_covered' | 'under_one_month' | 'nothing_earned' | 'paid_in_final_pay' */
+		excludedReason: text('excluded_reason'),
+		note: text('note'),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [uniqueIndex('bonus_lines_batch_employee_idx').on(t.batchId, t.employeeId)]
+);
+
+/**
+ * One person leaving the company: the last day, the final-pay statement, what they still owe and the
+ * clearance. Everything is entered on one page. A person stays `in_process` (and is monitored as
+ * owing) until nothing is owed and the checklist is done.
+ */
+export const separations = pgTable(
+	'separations',
+	{
+		id: pk(),
+		organizationId: uuid('organization_id')
+			.notNull()
+			.references(() => organizations.id, { onDelete: 'restrict' }),
+		employeeId: uuid('employee_id')
+			.notNull()
+			.references(() => employees.id, { onDelete: 'restrict' }),
+		/** 'resigned' | 'terminated' | 'end_of_contract' | 'retired' */
+		kind: text('kind').notNull(),
+		lastDay: date('last_day', { mode: 'string' }).notNull(),
+		note: text('note'),
+		/** 'in_process' | 'cleared' */
+		status: text('status').notNull().default('in_process'),
+		/** When the money owed to the employee was handed over. */
+		finalPayPaidOn: date('final_pay_paid_on', { mode: 'string' }),
+		finalPayPaidByUserId: uuid('final_pay_paid_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		clearedAt: timestamp('cleared_at', { withTimezone: true }),
+		clearedByUserId: uuid('cleared_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		startedByUserId: uuid('started_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [
+		uniqueIndex('separations_employee_idx').on(t.employeeId),
+		index('separations_org_status_idx').on(t.organizationId, t.status)
+	]
+);
+
+/**
+ * A line on the final-pay statement. `credit` is owed to the employee (13th month, leave conversion,
+ * anything else); `charge` is an accountability charged against it (uniform, equipment, advance);
+ * `receipt` is cash received from the employee toward charges; `writeoff` forgives part of what is
+ * left. Voided, never deleted.
+ */
+export const separationItems = pgTable(
+	'separation_items',
+	{
+		id: pk(),
+		separationId: uuid('separation_id')
+			.notNull()
+			.references(() => separations.id, { onDelete: 'restrict' }),
+		/** 'credit' | 'charge' | 'receipt' | 'writeoff' */
+		kind: text('kind').notNull(),
+		label: text('label').notNull(),
+		amountCentavos: bigint('amount_centavos', { mode: 'number' }).notNull(),
+		note: text('note'),
+		/** Set when the line was computed, not typed: 'thirteenth_month' (with `source_year`). */
+		source: text('source'),
+		sourceYear: integer('source_year'),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt(),
+		voidedAt: timestamp('voided_at', { withTimezone: true }),
+		voidReason: text('void_reason')
+	},
+	(t) => [index('separation_items_separation_idx').on(t.separationId)]
+);
+
+/** The clearance checklist for one separation (seeded from a default list; items can be added). */
+export const separationClearance = pgTable(
+	'separation_clearance',
+	{
+		id: pk(),
+		separationId: uuid('separation_id')
+			.notNull()
+			.references(() => separations.id, { onDelete: 'restrict' }),
+		label: text('label').notNull(),
+		sortOrder: integer('sort_order').notNull().default(0),
+		doneAt: timestamp('done_at', { withTimezone: true }),
+		doneByUserId: uuid('done_by_user_id').references(() => users.id, { onDelete: 'set null' })
+	},
+	(t) => [index('separation_clearance_separation_idx').on(t.separationId)]
+);
+
+/** A scanned agreement or the agency's approval voucher. The file is served only to payroll users. */
+export const employeeLoanDocuments = pgTable(
+	'employee_loan_documents',
+	{
+		id: pk(),
+		loanId: uuid('loan_id')
+			.notNull()
+			.references(() => employeeLoans.id, { onDelete: 'restrict' }),
+		/** `<ulid>.<ext>` under the loan-documents directory. */
+		storedName: text('stored_name').notNull(),
+		originalName: text('original_name').notNull(),
+		contentType: text('content_type').notNull(),
+		sizeBytes: integer('size_bytes').notNull(),
+		uploadedByUserId: uuid('uploaded_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt()
+	},
+	(t) => [index('employee_loan_documents_loan_idx').on(t.loanId)]
+);
+
+/**
+ * A pay month (`YYYY-MM`, by pay date) in which a loan is not deducted. The loan simply takes one month
+ * longer per skip; nothing is carried as a shortfall.
+ */
+export const employeeLoanSkips = pgTable(
+	'employee_loan_skips',
+	{
+		id: pk(),
+		loanId: uuid('loan_id')
+			.notNull()
+			.references(() => employeeLoans.id, { onDelete: 'restrict' }),
+		payMonth: text('pay_month').notNull(),
+		reason: text('reason').notNull(),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt()
+	},
+	(t) => [uniqueIndex('employee_loan_skips_loan_month_idx').on(t.loanId, t.payMonth)]
+);
+
+/**
+ * What one payslip line took (or failed to take) for one loan. Written when a batch is generated and
+ * replaced with the line on a regenerate; it only counts once its batch is locked. `reference_no` and
+ * `kind` are snapshots so a filed schedule never changes if the loan is edited.
+ */
+export const payrollLoanDeductions = pgTable(
+	'payroll_loan_deductions',
+	{
+		id: pk(),
+		loanId: uuid('loan_id')
+			.notNull()
+			.references(() => employeeLoans.id, { onDelete: 'restrict' }),
+		lineId: uuid('line_id')
+			.notNull()
+			.references(() => payrollRunLines.id, { onDelete: 'cascade' }),
+		kind: text('kind').notNull(),
+		/** The remittance schedule at the time ('sss_loan' | 'pagibig_loan'), null if not remitted. */
+		agency: text('agency'),
+		referenceNo: text('reference_no'),
+		/** The scheduled share plus anything carried over from earlier shortfalls, capped at the balance. */
+		dueCentavos: bigint('due_centavos', { mode: 'number' }).notNull(),
+		/** What the pay could cover; `due - deducted` is carried to the next cutoff. */
+		deductedCentavos: bigint('deducted_centavos', { mode: 'number' }).notNull(),
+		createdAt: createdAt()
+	},
+	(t) => [uniqueIndex('payroll_loan_deductions_loan_line_idx').on(t.loanId, t.lineId)]
+);
+
+/**
+ * The company's cost centers. An employee carries one by `code` (`employees.cost_center`); payroll freezes the
+ * code and name onto each line and reports cost by it. Deactivate rather than delete: history keeps the code.
+ */
+export const costCenters = pgTable(
+	'cost_centers',
+	{
+		id: pk(),
+		organizationId: uuid('organization_id')
+			.notNull()
+			.references(() => organizations.id, { onDelete: 'restrict' }),
+		code: text('code').notNull(),
+		name: text('name').notNull(),
+		active: boolean('active').notNull().default(true),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [uniqueIndex('cost_centers_org_code_idx').on(t.organizationId, t.code)]
+);
+
+/**
+ * One-off or recurring earnings and deductions Main HR files for a person (incentives, allowances, cash
+ * advances, uniform charges…). Payroll reads them when a batch is generated and whenever they change, and
+ * snapshots them onto the line. A wrong item is voided, never deleted. `endDate` null = open-ended;
+ * `startDate = endDate` = a single cutoff (the one that contains the date).
+ */
+export const payItems = pgTable(
+	'pay_items',
+	{
+		id: pk(),
+		organizationId: uuid('organization_id')
+			.notNull()
+			.references(() => organizations.id, { onDelete: 'restrict' }),
+		employeeId: uuid('employee_id')
+			.notNull()
+			.references(() => employees.id, { onDelete: 'restrict' }),
+		/** 'earning' | 'deduction' */
+		kind: text('kind').notNull(),
+		/** earning: 'allowance' | 'incentive' | 'other'; deduction: 'cash_advance' | 'other' */
+		category: text('category').notNull(),
+		label: text('label').notNull(),
+		/** Per cutoff it applies to. */
+		amountCentavos: bigint('amount_centavos', { mode: 'number' }).notNull(),
+		startDate: date('start_date', { mode: 'string' }).notNull(),
+		endDate: date('end_date', { mode: 'string' }),
+		note: text('note'),
+		/** The payslip line it is currently on (null until payroll picks it up). */
+		appliedLineId: uuid('applied_line_id').references(() => payrollRunLines.id, { onDelete: 'set null' }),
+		voidedAt: timestamp('voided_at', { withTimezone: true }),
+		voidReason: text('void_reason'),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [index('pay_items_employee_idx').on(t.employeeId), index('pay_items_org_idx').on(t.organizationId, t.startDate)]
+);
+
+/**
+ * A notice from Main HR shown on the dashboard of the establishments it is addressed to. `audience` is
+ * a list of establishment ids, or null for every establishment. It stops showing after `expires_on`
+ * (inclusive) or once archived; nothing is ever deleted.
+ */
+export const announcements = pgTable(
+	'announcements',
+	{
+		id: pk(),
+		organizationId: uuid('organization_id')
+			.notNull()
+			.references(() => organizations.id, { onDelete: 'restrict' }),
+		title: text('title').notNull(),
+		body: text('body').notNull(),
+		audience: jsonb('audience'),
+		pinned: boolean('pinned').notNull().default(false),
+		expiresOn: date('expires_on', { mode: 'string' }),
+		/** 'active' | 'archived' */
+		status: text('status').notNull().default('active'),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [index('announcements_org_status_idx').on(t.organizationId, t.status)]
+);
+
 // ---------------------------------------------------------------------------
 // Relations
 // ---------------------------------------------------------------------------
@@ -818,6 +1234,9 @@ export type NewDtrEntry = typeof dtrEntries.$inferInsert;
 export type EmployeeAssignment = typeof employeeAssignments.$inferSelect;
 export type SchedulePeriod = typeof schedulePeriods.$inferSelect;
 export type DtrSubmission = typeof dtrSubmissions.$inferSelect;
+export type EmployeeLoan = typeof employeeLoans.$inferSelect;
+export type LoanType = typeof loanTypes.$inferSelect;
+export type Announcement = typeof announcements.$inferSelect;
 export type PayrollRun = typeof payrollRuns.$inferSelect;
 export type PayrollBatch = typeof payrollBatches.$inferSelect;
 export type PayrollRunLineRow = typeof payrollRunLines.$inferSelect;

@@ -17,6 +17,9 @@
 
 	const money = (c: number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(c / 100);
 	const isBir = $derived(data.agency === 'bir');
+	const isLoan = $derived(data.agency === 'sss_loan' || data.agency === 'pagibig_loan');
+	/** Contribution schedules have an employer share; tax and loan collections do not. */
+	const hasEmployer = $derived(!isBir && !isLoan);
 	const hasEc = $derived(data.agency === 'sss');
 	const remitted = $derived(data.record?.status === 'remitted');
 	const base = $derived(`/remittances/${data.agency}/${data.period}`);
@@ -35,8 +38,12 @@
 			Paid in {data.period}{#if data.dueDate} · due {data.dueDate}{/if}{#if data.employerNo} · employer no. {data.employerNo}{/if}
 		</p>
 		<p class="mt-1 text-sm text-ink-muted">
-			Computed from the statutory rates on file, <strong class="font-medium text-ink">not yet verified</strong>
-			against the current circulars.
+			{#if isLoan}
+				Taken from each payslip's loan deductions. Loans are collected and paid separately from contributions.
+			{:else}
+				Computed from the statutory rates on file, <strong class="font-medium text-ink">not yet verified</strong>
+				against the current circulars.
+			{/if}
 		</p>
 	</div>
 
@@ -46,6 +53,19 @@
 			{data.draftBatches === 1 ? 'is' : 'are'} not locked yet — this schedule is incomplete until
 			{data.draftBatches === 1 ? 'it is' : 'they are'} locked.
 		</p>
+	{/if}
+	{#if data.skipped.length > 0}
+		<section class="rounded-lg border border-dashed border-ink/30 px-4 py-3 text-sm">
+			<p class="font-medium">Skipped this month — not deducted, so not on this schedule</p>
+			<p class="mt-0.5 text-ink-muted">The agency still expects these payments; the loan may show as behind until they are made.</p>
+			<ul class="mt-2">
+				{#each data.skipped as k (k.employeeNo + (k.reference ?? ''))}
+					<li>
+						{k.name} <span class="text-ink-muted">(#{k.employeeNo}{k.reference ? ` · ref ${k.reference}` : ''})</span> — {k.reason}
+					</li>
+				{/each}
+			</ul>
+		</section>
 	{/if}
 	{#if data.schedule.missingId.length > 0}
 		<p class="rounded-lg border border-dashed border-ink/30 px-4 py-3 text-sm">
@@ -59,8 +79,9 @@
 				<Table.Row>
 					<Table.Head>Employee</Table.Head>
 					<Table.Head>{isBir ? 'TIN' : 'ID number'}</Table.Head>
-					<Table.Head class="text-right">{isBir ? 'Tax withheld' : 'Employee share'}</Table.Head>
-					{#if !isBir}<Table.Head class="text-right">Employer share</Table.Head>{/if}
+					{#if isLoan}<Table.Head>Loan reference</Table.Head>{/if}
+					<Table.Head class="text-right">{isBir ? 'Tax withheld' : isLoan ? 'Amount deducted' : 'Employee share'}</Table.Head>
+					{#if hasEmployer}<Table.Head class="text-right">Employer share</Table.Head>{/if}
 					{#if hasEc}<Table.Head class="text-right">EC</Table.Head>{/if}
 					<Table.Head class="text-right">Total</Table.Head>
 				</Table.Row>
@@ -73,8 +94,9 @@
 							<div class="text-xs text-ink-muted">{r.employeeNo}</div>
 						</Table.Cell>
 						<Table.Cell class="tabular-nums">{r.idNumber ?? '—'}</Table.Cell>
+						{#if isLoan}<Table.Cell class="tabular-nums">{r.reference ?? '—'}</Table.Cell>{/if}
 						<Table.Cell class="text-right tabular-nums">{money(r.employee)}</Table.Cell>
-						{#if !isBir}<Table.Cell class="text-right tabular-nums">{money(r.employer)}</Table.Cell>{/if}
+						{#if hasEmployer}<Table.Cell class="text-right tabular-nums">{money(r.employer)}</Table.Cell>{/if}
 						{#if hasEc}<Table.Cell class="text-right tabular-nums">{money(r.ec)}</Table.Cell>{/if}
 						<Table.Cell class="text-right font-medium tabular-nums">{money(r.total)}</Table.Cell>
 					</Table.Row>
@@ -87,9 +109,9 @@
 				{/each}
 				{#if data.schedule.rows.length > 0}
 					<Table.Row class="font-medium">
-						<Table.Cell colspan={2}>Total</Table.Cell>
+						<Table.Cell colspan={isLoan ? 3 : 2}>Total</Table.Cell>
 						<Table.Cell class="text-right tabular-nums">{money(data.schedule.totals.employee)}</Table.Cell>
-						{#if !isBir}<Table.Cell class="text-right tabular-nums">{money(data.schedule.totals.employer)}</Table.Cell>{/if}
+						{#if hasEmployer}<Table.Cell class="text-right tabular-nums">{money(data.schedule.totals.employer)}</Table.Cell>{/if}
 						{#if hasEc}<Table.Cell class="text-right tabular-nums">{money(data.schedule.totals.ec)}</Table.Cell>{/if}
 						<Table.Cell class="text-right tabular-nums">{money(data.schedule.totals.total)}</Table.Cell>
 					</Table.Row>

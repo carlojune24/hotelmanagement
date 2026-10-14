@@ -2,7 +2,7 @@ import { error } from '@sveltejs/kit';
 import { requireCap, requireUser } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { getOrganization } from '$lib/server/establishments';
-import { AGENCY_LABEL, agencySchema, getSchedule, periodSchema } from '$lib/server/hr/remittance';
+import { AGENCY_LABEL, agencySchema, employerNoFor, getSchedule, periodSchema } from '$lib/server/hr/remittance';
 import type { PageServerLoad } from './$types';
 
 /** The printable schedule for one agency and month — Main HR only, and every print is audited. */
@@ -26,7 +26,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		label: AGENCY_LABEL[agency.data],
 		period: period.data,
 		employer: s.settings.employer,
-		employerNo: agency.data === 'bir' ? s.settings.employer.tin : s.settings.employerIds[agency.data],
+		employerNo: employerNoFor(agency.data, s.settings),
 		schedule: s.schedule,
 		record: s.record,
 		draftBatches: s.draftBatches

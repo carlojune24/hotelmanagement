@@ -4,6 +4,7 @@ import { db } from '$lib/server/db/index';
 import {
 	organizations,
 	payrollBatches,
+	payrollLoanDeductions,
 	payrollRunLines,
 	payrollRuns,
 	remittances,
@@ -12,21 +13,38 @@ import {
 
 export class RemittanceError extends Error {}
 
-export const AGENCIES = ['sss', 'philhealth', 'pagibig', 'bir'] as const;
+/** `sss_loan` / `pagibig_loan` are the loan collections — paid separately from the contributions. */
+export const AGENCIES = ['sss', 'philhealth', 'pagibig', 'bir', 'sss_loan', 'pagibig_loan'] as const;
 export type Agency = (typeof AGENCIES)[number];
 export const AGENCY_LABEL: Record<Agency, string> = {
 	sss: 'SSS',
 	philhealth: 'PhilHealth',
 	pagibig: 'Pag-IBIG',
-	bir: 'BIR (withholding tax)'
+	bir: 'BIR (withholding tax)',
+	sss_loan: 'SSS loans',
+	pagibig_loan: 'Pag-IBIG loans'
 };
+export const isLoanAgency = (a: Agency): boolean => a === 'sss_loan' || a === 'pagibig_loan';
 /** Which key of a person's government IDs each agency is filed under. */
 const ID_KEY: Record<Agency, 'sss' | 'philhealth' | 'pagibig' | 'tin'> = {
 	sss: 'sss',
 	philhealth: 'philhealth',
 	pagibig: 'pagibig',
-	bir: 'tin'
+	bir: 'tin',
+	sss_loan: 'sss',
+	pagibig_loan: 'pagibig'
 };
+
+/** The employer number an agency's schedule is filed under (loans use the contribution number). */
+export function employerNoFor(
+	agency: Agency,
+	settings: { employerIds: { sss?: string; philhealth?: string; pagibig?: string }; employer: { tin: string | null } }
+): string | null | undefined {
+	if (agency === 'bir') return settings.employer.tin;
+	if (agency === 'sss_loan') return settings.employerIds.sss;
+	if (agency === 'pagibig_loan') return settings.employerIds.pagibig;
+	return settings.employerIds[agency];
+}
 
 export const periodSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Pick a month.');
 export const agencySchema = z.enum(AGENCIES);
@@ -43,6 +61,8 @@ export interface ScheduleLine {
 	govIds: unknown;
 	deductions: unknown;
 	employerContributions: unknown;
+	/** What each loan took on this payslip, with the loan's kind and reference at that time. */
+	loans?: Array<{ kind: string; agency: string | null; referenceNo: string | null; deducted: number }>;
 	/** Snapshot taken when the payslip was generated. */
 	coverage?: { sss?: boolean; philhealth?: boolean; pagibig?: boolean; withholdingExempt?: boolean; note?: string | null };
 }
@@ -52,6 +72,8 @@ export interface ScheduleRow {
 	name: string;
 	employeeNo: string;
 	idNumber: string | null;
+	/** Loan reference numbers, for the loan schedules. */
+	reference: string | null;
 	employee: number;
 	employer: number;
 	ec: number;
@@ -95,6 +117,13 @@ function shares(agency: Agency, l: ScheduleLine) {
 			return { employee: num(l.deductions, 'pagibig_ee'), employer: num(l.employerContributions, 'pagibig_er'), ec: 0 };
 		case 'bir':
 			return { employee: num(l.deductions, 'withholding_tax'), employer: 0, ec: 0 };
+		case 'sss_loan':
+		case 'pagibig_loan':
+			return {
+				employee: (l.loans ?? []).filter((x) => x.agency === agency).reduce((a, x) => a + x.deducted, 0),
+				employer: 0,
+				ec: 0
+			};
 	}
 }
 
@@ -115,7 +144,11 @@ export function buildSchedule(agency: Agency, lines: ScheduleLine[]): Schedule {
 
 	for (const l of lines) {
 		const covered =
-			agency === 'bir' ? l.coverage?.withholdingExempt !== true : l.coverage?.[agency] !== false;
+			agency === 'bir'
+				? l.coverage?.withholdingExempt !== true
+				: isLoanAgency(agency)
+					? true
+					: l.coverage?.[agency as 'sss' | 'philhealth' | 'pagibig'] !== false;
 		if (!covered) notCovered.set(l.employeeId, { name: l.employeeName, note: l.coverage?.note ?? null });
 
 		const s = shares(agency, l);
@@ -127,11 +160,19 @@ export function buildSchedule(agency: Agency, lines: ScheduleLine[]): Schedule {
 				name: l.employeeName,
 				employeeNo: l.employeeNo,
 				idNumber: str(l.govIds, ID_KEY[agency]),
+				reference: null,
 				employee: 0,
 				employer: 0,
 				ec: 0,
 				total: 0
 			} satisfies ScheduleRow);
+		if (isLoanAgency(agency)) {
+			const refs = (l.loans ?? [])
+				.filter((x) => x.agency === agency && x.deducted > 0 && x.referenceNo)
+				.map((x) => x.referenceNo!);
+			const all = new Set([...(row.reference ? row.reference.split(', ') : []), ...refs]);
+			row.reference = all.size ? [...all].join(', ') : null;
+		}
 		row.employee += s.employee;
 		row.employer += s.employer;
 		row.ec += s.ec;
@@ -173,7 +214,9 @@ const settingsSchema = z.object({
 			sss: z.number().int().min(1).max(31).nullable().optional(),
 			philhealth: z.number().int().min(1).max(31).nullable().optional(),
 			pagibig: z.number().int().min(1).max(31).nullable().optional(),
-			bir: z.number().int().min(1).max(31).nullable().optional()
+bir: z.number().int().min(1).max(31).nullable().optional(),
+			sss_loan: z.number().int().min(1).max(31).nullable().optional(),
+			pagibig_loan: z.number().int().min(1).max(31).nullable().optional()
 		})
 		.default({})
 });
@@ -226,8 +269,9 @@ export async function monthLines(organizationId: string, period: string) {
 
 	const lines = final.length
 		? await db
-				.select({
-					employeeId: payrollRunLines.employeeId,
+.select({
+						lineId: payrollRunLines.id,
+						employeeId: payrollRunLines.employeeId,
 					employeeName: payrollRunLines.employeeName,
 					employeeNo: payrollRunLines.employeeNo,
 					establishmentId: payrollRunLines.establishmentId,
@@ -240,8 +284,27 @@ export async function monthLines(organizationId: string, period: string) {
 				.where(inArray(payrollRunLines.batchId, final.map((b) => b.id)))
 		: [];
 
-	const scheduleLines: ScheduleLine[] = lines.map(({ detail, ...l }) => ({
+	const loanRows = lines.length
+		? await db
+				.select({
+					lineId: payrollLoanDeductions.lineId,
+					kind: payrollLoanDeductions.kind,
+					agency: payrollLoanDeductions.agency,
+					referenceNo: payrollLoanDeductions.referenceNo,
+					deducted: payrollLoanDeductions.deductedCentavos
+				})
+				.from(payrollLoanDeductions)
+				.where(inArray(payrollLoanDeductions.lineId, lines.map((l) => l.lineId)))
+		: [];
+	const loansOf = new Map<string, NonNullable<ScheduleLine['loans']>>();
+	for (const r of loanRows) {
+		const list = loansOf.get(r.lineId) ?? [];
+		list.push({ kind: r.kind, agency: r.agency, referenceNo: r.referenceNo, deducted: r.deducted });
+		loansOf.set(r.lineId, list);
+	}
+	const scheduleLines: ScheduleLine[] = lines.map(({ detail, lineId, ...l }) => ({
 		...l,
+		loans: loansOf.get(lineId),
 		coverage: (detail as { coverage?: ScheduleLine['coverage'] } | null)?.coverage
 	}));
 	return { lines: scheduleLines, draftBatches, runCount: runIds.length };
@@ -285,12 +348,14 @@ export async function getOverview(organizationId: string, period: string, today:
 	return {
 		draftBatches,
 		runCount,
-		agencies: AGENCIES.map((agency) => {
+		agencies: AGENCIES.flatMap((agency) => {
 			const s = buildSchedule(agency, lines);
 			const record = byAgency.get(agency) ?? null;
 			const due = record?.dueDate ?? dueDateFor(period, settings.dueDay[agency]);
 			const remitted = record?.status === 'remitted';
-			return {
+// A loan collection only appears once there is a loan deduction (or a filed record) to show.
+			if (isLoanAgency(agency) && s.rows.length === 0 && !record) return [];
+			return [{
 				agency,
 				label: AGENCY_LABEL[agency],
 				people: s.rows.length,
@@ -298,8 +363,8 @@ export async function getOverview(organizationId: string, period: string, today:
 				status: (remitted ? 'remitted' : 'open') as 'remitted' | 'open',
 				dueDate: due,
 				overdue: !remitted && s.totals.total > 0 && due !== null && due < today,
-				warnings: s.missingId.length
-			};
+warnings: s.missingId.length
+			}];
 		})
 	};
 }
@@ -399,6 +464,13 @@ export async function remittedAgenciesForBatch(batchId: string): Promise<Agency[
 export function toCsv(schedule: Schedule): string {
 	const peso = (c: number) => (c / 100).toFixed(2);
 	const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+	if (isLoanAgency(schedule.agency)) {
+		const loanRows = schedule.rows.map((r) =>
+			[r.employeeNo, r.name, r.idNumber ?? '', r.reference ?? '', peso(r.total)].map(esc).join(',')
+		);
+		loanRows.push(['', 'TOTAL', '', '', peso(schedule.totals.total)].join(','));
+		return [['Employee no.', 'Name', 'ID number', 'Loan reference', 'Amount deducted'].join(','), ...loanRows].join('\r\n') + '\r\n';
+	}
 	const head = ['Employee no.', 'Name', 'ID number', 'Employee share', 'Employer share', 'EC', 'Total'];
 	const body = schedule.rows.map((r) =>
 		[r.employeeNo, r.name, r.idNumber ?? '', peso(r.employee), peso(r.employer), peso(r.ec), peso(r.total)].map(esc).join(',')

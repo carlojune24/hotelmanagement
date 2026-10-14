@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { cleanupTestEstablishments, createTestStaff, testOrgId } from './test-helpers';
+import { cleanupTestEstablishments, cleanupTestOrg, createTestOrg, createTestStaff } from './test-helpers';
 import { eq, inArray } from 'drizzle-orm';
 
 /**
@@ -45,10 +45,11 @@ describe.skipIf(!hasDb)('DTR with leave, holidays and biometric punches (live DB
 	const rows = (...punches: Array<[string, string]>) => punches.map(([id, dt]) => [id, dt]);
 	const MAP = { idColumn: 0, datetimeColumn: 1, hasHeader: false, dateFormat: 'ymd' as const };
 
+	let testOrg = '';
 	beforeAll(async () => {
 		const [h] = await db
 			.insert(establishments)
-			.values({ organizationId: await testOrgId(), kind: 'business', slug: tag, name: 'DTR leave test', orgRef: mintRef('org'), timezone: 'Asia/Manila' })
+			.values({ organizationId: (testOrg = await createTestOrg()), kind: 'business', slug: tag, name: 'DTR leave test', orgRef: mintRef('org'), timezone: 'Asia/Manila' })
 			.returning({ id: establishments.id });
 		establishment = h!.id;
 		ann = await mkEmployee('T1', 'Ann', '2024-01-01', '501');
@@ -79,6 +80,7 @@ describe.skipIf(!hasDb)('DTR with leave, holidays and biometric punches (live DB
 
 	afterAll(async () => {
 		await cleanupTestEstablishments([establishment]);
+		await cleanupTestOrg(testOrg);
 	});
 
 	const annRec = async (date: string) => {

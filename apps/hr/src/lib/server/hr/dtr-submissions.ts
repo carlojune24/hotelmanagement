@@ -1,9 +1,12 @@
-import { and, asc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db/index';
 import {
+	auditLog,
 	dtrEntries,
 	employees,
 	establishments,
+	payrollBatches,
+	payrollRuns,
 	schedules,
 	users,
 	dtrSubmissions
@@ -17,7 +20,9 @@ export class DtrSubmissionError extends Error {}
 export type DtrStatus = 'draft' | 'submitted' | 'received' | 'returned';
 
 export interface DtrHandoff {
-	month: string;
+/** The hand-off row, once the establishment has sent it; null while it is still a draft. */
+id: string | null;
+month: string;
 	start: string;
 	end: string;
 	status: DtrStatus;
@@ -46,11 +51,12 @@ export async function getHandoff(establishmentId: string, month: string): Promis
 			)
 		)
 		.then((r) => r.at(0));
-	return {
-		month,
-		start,
-		end,
-		status: (row?.status as DtrStatus | undefined) ?? 'draft',
+return {
+id: row?.id ?? null,
+month,
+start,
+end,
+status: (row?.status as DtrStatus | undefined) ?? 'draft',
 		note: row?.decisionNote ?? null,
 		submittedAt: row?.submittedAt ?? null,
 		decidedAt: row?.decidedAt ?? null
@@ -184,6 +190,29 @@ export async function receiveDtr(id: string, userId: string | null) {
 /** Main HR sends a submitted or received DTR back with a note; the manager can correct and resend. */
 export async function returnDtr(id: string, note: string, userId: string | null) {
 	if (!note.trim()) throw new DtrSubmissionError('Say what needs correcting so the manager knows what to fix.');
+	// A locked payslip is frozen on the DTR it was built from; sending that DTR back would let the two
+	// drift apart with no way to regenerate. Unlock the batch first so the correction can flow through.
+	const current = await db.select().from(dtrSubmissions).where(eq(dtrSubmissions.id, id)).then((r) => r.at(0));
+	if (current) {
+		const frozen = await db
+			.select({ id: payrollBatches.id })
+			.from(payrollBatches)
+			.innerJoin(payrollRuns, eq(payrollRuns.id, payrollBatches.runId))
+			.where(
+				and(
+					eq(payrollBatches.establishmentId, current.establishmentId),
+					inArray(payrollBatches.status, ['locked', 'released']),
+					lte(payrollRuns.cutoffStart, current.cutoffEnd),
+					gte(payrollRuns.cutoffEnd, current.cutoffStart)
+				)
+			)
+			.limit(1);
+		if (frozen.length > 0) {
+			throw new DtrSubmissionError(
+				'Payroll built on this DTR is already locked. Unlock that payroll batch first, then return the DTR.'
+			);
+		}
+	}
 	const [row] = await db
 		.update(dtrSubmissions)
 		.set({
@@ -263,4 +292,27 @@ export async function dtrBoard(month: string): Promise<BoardRow[]> {
 			note: s?.decisionNote ?? null
 		};
 	});
+}
+
+/** Every time Main HR sent this hand-off back, newest first — read from the audit trail, which keeps them all. */
+export async function returnHistory(submissionId: string) {
+	const rows = await db
+		.select({ after: auditLog.after, by: auditLog.actorLabel, at: auditLog.createdAt })
+		.from(auditLog)
+		.where(
+			and(
+				eq(auditLog.entityType, 'dtr_submission'),
+				eq(auditLog.entityId, submissionId),
+				eq(auditLog.action, 'dtr.returned')
+			)
+		)
+		.orderBy(desc(auditLog.createdAt));
+	return rows
+		.map((r) => ({
+			note: String((r.after as { note?: unknown } | null)?.note ?? '').trim(),
+			// "Name <email>" → the name
+			by: r.by ? r.by.replace(/\s*<[^>]*>\s*$/, '') : 'Main HR',
+			at: r.at.toISOString()
+		}))
+		.filter((r) => r.note);
 }

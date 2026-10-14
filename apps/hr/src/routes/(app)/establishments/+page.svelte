@@ -17,19 +17,25 @@
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
 	type Row = PageData['establishments'][number];
-	type Kind = 'all' | 'hotel' | 'business';
 
 	let query = $state('');
-	let kindFilter = $state<Kind>('all');
+	let typeFilter = $state('all');
 	let dialogOpen = $state(false);
 	let editing = $state<Row | null>(null);
-	let kind = $state<'hotel' | 'business'>('hotel');
+	let typeId = $state('');
+	const activeTypes = $derived(data.types.filter((t) => t.active));
+	/** What an establishment of the chosen type is: only a hotel-style type has a hotel reference. */
+	const chosenLinks = $derived(data.types.find((t) => t.id === typeId)?.linksToHotelApp ?? false);
+	/** When editing, only types that behave the same way as the current one are offered. */
+	const editTypes = $derived(
+		editing ? activeTypes.filter((t) => t.linksToHotelApp === (editing!.kind === 'hotel')) : activeTypes
+	);
 	let busy = $state(false);
 
 	const rows = $derived(
 		data.establishments.filter(
 			(r) =>
-				(kindFilter === 'all' || r.kind === kindFilter) &&
+				(typeFilter === 'all' || r.typeId === typeFilter) &&
 				r.name.toLowerCase().includes(query.trim().toLowerCase())
 		)
 	);
@@ -41,11 +47,12 @@
 
 	function openCreate() {
 		editing = null;
-		kind = 'hotel';
+		typeId = activeTypes[0]?.id ?? '';
 		dialogOpen = true;
 	}
 	function openEdit(row: Row) {
 		editing = row;
+		typeId = row.typeId ?? '';
 		dialogOpen = true;
 	}
 </script>
@@ -68,13 +75,19 @@
 				/>
 			</div>
 
-			<div class="flex gap-2" role="group" aria-label="Filter by kind">
-				{#each [['all', 'All'], ['hotel', 'Hotels'], ['business', 'Businesses']] as [value, label] (value)}
+			<div class="flex flex-wrap gap-2" role="group" aria-label="Filter by type">
+				<Button
+					variant={typeFilter === 'all' ? 'default' : 'outline'}
+					size="sm"
+					aria-pressed={typeFilter === 'all'}
+					onclick={() => (typeFilter = 'all')}>All</Button
+				>
+				{#each data.types.filter((t) => t.active || data.establishments.some((e) => e.typeId === t.id)) as t (t.id)}
 					<Button
-						variant={kindFilter === value ? 'default' : 'outline'}
+						variant={typeFilter === t.id ? 'default' : 'outline'}
 						size="sm"
-						aria-pressed={kindFilter === value}
-						onclick={() => (kindFilter = value as Kind)}>{label}</Button
+						aria-pressed={typeFilter === t.id}
+						onclick={() => (typeFilter = t.id)}>{t.name}</Button
 					>
 				{/each}
 			</div>
@@ -97,7 +110,7 @@
 				<Table.Header>
 					<Table.Row class="hover:bg-transparent">
 						<Table.Head>Name</Table.Head>
-						<Table.Head>Kind</Table.Head>
+						<Table.Head>Type</Table.Head>
 						<Table.Head>Timezone</Table.Head>
 						<Table.Head>Reference</Table.Head>
 						<Table.Head>Status</Table.Head>
@@ -108,7 +121,7 @@
 					{#each rows as row (row.id)}
 						<Table.Row>
 							<Table.Cell class="font-medium"><a href="/{row.slug}/employees" class="underline decoration-ink/30 underline-offset-4 hover:decoration-ink">{row.name}</a></Table.Cell>
-							<Table.Cell>{row.kind === 'hotel' ? 'Hotel' : 'Business'}</Table.Cell>
+							<Table.Cell>{row.typeName}</Table.Cell>
 							<Table.Cell class="text-ink-muted">{row.timezone}</Table.Cell>
 							<Table.Cell class="font-mono text-xs text-ink-muted" title={row.orgRef}
 								>{row.orgRef.slice(0, 12)}…</Table.Cell
@@ -151,8 +164,8 @@
 			</Dialog.Title>
 			<Dialog.Description>
 				{editing
-					? 'Kind and reference are fixed once an establishment exists.'
-					: 'A hotel links to its record in the hotel app by reference; leave it blank if the hotel is not set up there yet. A business is created here.'}
+					? 'A hotel stays a hotel; other types can be switched between each other. Add types under Settings.'
+					: 'A hotel-type establishment links to its record in the hotel app by reference; leave it blank if the hotel is not set up there yet. Add more types under Settings.'}
 			</Dialog.Description>
 		</Dialog.Header>
 
@@ -185,15 +198,16 @@
 				{#if fieldError('name')}<p class="text-sm text-destructive">{fieldError('name')}</p>{/if}
 			</div>
 
+			<div class="space-y-1.5">
+				<Label for="typeId">Type</Label>
+				<select id="typeId" name="typeId" class={selectClass} bind:value={typeId} required={!editing}>
+					{#if editing && !editing.typeId}<option value="">Not set</option>{/if}
+					{#each editTypes as t (t.id)}<option value={t.id}>{t.name}</option>{/each}
+				</select>
+				{#if fieldError('typeId')}<p class="text-sm text-destructive">{fieldError('typeId')}</p>{/if}
+			</div>
 			{#if !editing}
-				<div class="space-y-1.5">
-					<Label for="kind">Kind</Label>
-					<select id="kind" name="kind" class={selectClass} bind:value={kind}>
-						<option value="hotel">Hotel</option>
-						<option value="business">Business (HR only)</option>
-					</select>
-				</div>
-				{#if kind === 'hotel'}
+				{#if chosenLinks}
 					<div class="space-y-1.5">
 						<Label for="orgRef">Hotel reference <span class="text-ink-muted">(optional)</span></Label>
 						<Input id="orgRef" name="orgRef" placeholder="org_… — blank if not in the hotel app yet" class="font-mono" />

@@ -16,7 +16,8 @@ export const orgRefField = z
 
 export const establishmentSchema = z.object({
 	name: z.string().trim().min(1, 'Enter a name.').max(120),
-	kind: z.enum(['hotel', 'business']),
+	/** One of the types under Settings → Establishment types. */
+	typeId: z.string().uuid('Choose a type.'),
 	timezone: z.enum(TIMEZONES),
 	/** Printed on DTRs and rosters. */
 	legalName: z.string().trim().max(160).optional(),

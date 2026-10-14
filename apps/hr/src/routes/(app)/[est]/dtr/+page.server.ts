@@ -32,10 +32,13 @@ function sameDays(a: DtrDay[], b: DtrDay[]): boolean {
 
 import { canAt } from '$lib/authz';
 import {
-	DtrSubmissionError,
-	getHandoff,
-	handoffWarnings,
-	submitDtr
+DtrSubmissionError,
+getHandoff,
+handoffWarnings,
+receiveDtr,
+returnDtr,
+returnHistory,
+submitDtr
 } from '$lib/server/hr/dtr-submissions';
 
 /** Main HR may still correct a cutoff it is holding; a manager may not. */
@@ -62,9 +65,11 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const handoffInfo = {
 		handoff,
 		warnings,
-		canApprove,
-		locked: !canApprove && (handoff.status === 'submitted' || handoff.status === 'received')
-	};
+canApprove,
+locked: !canApprove && (handoff.status === 'submitted' || handoff.status === 'received'),
+/** Earlier "please correct" notes, shown to Main HR before it sends the month back again. */
+returnHistory: canApprove && handoff.id ? await returnHistory(handoff.id) : []
+};
 
 	const all = await listEmployees(establishment.id);
 	const people = all
@@ -196,6 +201,56 @@ export const actions: Actions = {
 				after: { employeeId: emp.id, date: parsed.data.date, time: parsed.data.time, note: parsed.data.note }
 			});
 			return { ok: 'Time added.' };
+		} catch (e) {
+			return failure(e);
+		}
+	},
+
+	/** Main HR, from the establishment's own DTR: receive what was sent. */
+	receiveMonth: async (event) => {
+		requireCap(event.locals.user, event.locals.access, 'approval:*');
+		try {
+			const establishmentId = event.locals.establishment!.id;
+			const month = monthSchema.safeParse((await event.request.formData()).get('month'));
+			if (!month.success) throw new DtrSubmissionError('Pick a month.');
+			const { id } = await getHandoff(establishmentId, month.data);
+			if (!id) throw new DtrSubmissionError('This month has not been sent yet.');
+			const row = await receiveDtr(id, event.locals.user!.id);
+			await writeAudit({
+				actor: event.locals.user,
+				establishmentId,
+				action: 'dtr.received',
+				entityType: 'dtr_submission',
+				entityId: row.id,
+				after: { cutoffStart: row.cutoffStart, note: '' }
+			});
+			return { ok: 'DTR received. It stays locked for the establishment.' };
+		} catch (e) {
+			return failure(e);
+		}
+	},
+
+	/** Main HR, from the establishment's own DTR: send it back with what needs correcting. */
+	returnMonth: async (event) => {
+		requireCap(event.locals.user, event.locals.access, 'approval:*');
+		try {
+			const establishmentId = event.locals.establishment!.id;
+			const fd = await event.request.formData();
+			const month = monthSchema.safeParse(fd.get('month'));
+			if (!month.success) throw new DtrSubmissionError('Pick a month.');
+			const { id } = await getHandoff(establishmentId, month.data);
+			if (!id) throw new DtrSubmissionError('This month has not been sent yet.');
+			const note = String(fd.get('note') ?? '');
+			const row = await returnDtr(id, note, event.locals.user!.id);
+			await writeAudit({
+				actor: event.locals.user,
+				establishmentId,
+				action: 'dtr.returned',
+				entityType: 'dtr_submission',
+				entityId: row.id,
+				after: { cutoffStart: row.cutoffStart, note: note.trim() }
+			});
+			return { ok: 'DTR sent back to the establishment with your note.' };
 		} catch (e) {
 			return failure(e);
 		}

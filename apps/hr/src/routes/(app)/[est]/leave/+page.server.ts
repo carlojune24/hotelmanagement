@@ -35,7 +35,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		year,
 		/** Main HR files and approves in one step; everyone else sends it for approval. */
 		canApprove: isApprover(locals),
-		canProposeMemo: locals.user!.isSystemAdmin || canAt(locals.access!, 'memo:propose', establishment.id),
+
 		today: businessDateFor(establishment.timezone),
 		requests,
 		types: types
@@ -158,35 +158,6 @@ export const actions: Actions = {
 				after: { note }
 			});
 			return { ok: 'Leave cancelled. The schedule and DTR go back to normal.' };
-		} catch (e) {
-			return failure(e);
-		}
-	},
-
-	/** A manager's suggestion for a holiday or memo; it changes nothing until Main HR approves it. */
-	proposeMemo: async (event) => {
-		requireCap(event.locals.user, event.locals.access, 'memo:propose', event.locals.establishment!.id);
-		try {
-			const establishmentId = event.locals.establishment!.id;
-			const fd = await event.request.formData();
-			const parsed = calendarFormSchema.safeParse({
-				date: fd.get('date'),
-				name: fd.get('name'),
-				kind: fd.get('kind'),
-				creditHours: fd.get('creditHours') ?? '',
-				waiveLateness: fd.get('waiveLateness') === 'on'
-			});
-			if (!parsed.success) throw new CalendarError(parsed.error.issues[0]!.message);
-			const row = await proposeCalendarDay(establishmentId, parsed.data, event.locals.user?.id ?? null);
-			await writeAudit({
-				establishmentId,
-				actor: event.locals.user,
-				action: 'calendar.propose',
-				entityType: 'calendar_day',
-				entityId: row.id,
-				after: { date: row.date, name: row.name, kind: row.kind }
-			});
-			return { ok: `"${row.name}" sent to Main HR for approval.` };
 		} catch (e) {
 			return failure(e);
 		}

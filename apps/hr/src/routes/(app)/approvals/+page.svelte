@@ -153,7 +153,8 @@
 								? ` · ${hours(m.creditMinutes)} credited`
 								: ''}{m.waiveLateness ? ' · lateness waived' : ''}
 						</p>
-						<p class="text-xs text-ink-muted">Sent by {m.submittedBy ?? 'unknown'} · {when(m.submittedAt)}</p>
+{#if m.note}<p class="mt-1 max-w-2xl text-sm whitespace-pre-line">{m.note}</p>{/if}
+<p class="text-xs text-ink-muted">Sent by {m.submittedBy ?? 'unknown'} · {when(m.submittedAt)}</p>
 					</div>
 					{@render decide('decideMemo', { id: m.id }, 'Approve', 'Reject')}
 				</div>

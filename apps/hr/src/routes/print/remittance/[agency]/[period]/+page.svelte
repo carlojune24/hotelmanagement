@@ -5,6 +5,8 @@
 
 	const money = (c: number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(c / 100);
 	const isBir = $derived(data.agency === 'bir');
+	const isLoan = $derived(data.agency === 'sss_loan' || data.agency === 'pagibig_loan');
+	const hasEmployer = $derived(!isBir && !isLoan);
 	const hasEc = $derived(data.agency === 'sss');
 </script>
 
@@ -43,8 +45,9 @@
 			<tr class="border-b border-ink/30 text-left">
 				<th class="py-1.5">Employee</th>
 				<th>{isBir ? 'TIN' : 'ID number'}</th>
-				<th class="text-right">{isBir ? 'Tax withheld' : 'Employee'}</th>
-				{#if !isBir}<th class="text-right">Employer</th>{/if}
+				{#if isLoan}<th>Loan reference</th>{/if}
+				<th class="text-right">{isBir ? 'Tax withheld' : isLoan ? 'Amount deducted' : 'Employee'}</th>
+				{#if hasEmployer}<th class="text-right">Employer</th>{/if}
 				{#if hasEc}<th class="text-right">EC</th>{/if}
 				<th class="text-right">Total</th>
 			</tr>
@@ -54,8 +57,9 @@
 				<tr class="border-b border-ink/10">
 					<td class="py-1.5">{r.name} <span class="text-ink-muted">({r.employeeNo})</span></td>
 					<td class="tabular-nums">{r.idNumber ?? '—'}</td>
+					{#if isLoan}<td class="tabular-nums">{r.reference ?? '—'}</td>{/if}
 					<td class="text-right tabular-nums">{money(r.employee)}</td>
-					{#if !isBir}<td class="text-right tabular-nums">{money(r.employer)}</td>{/if}
+					{#if hasEmployer}<td class="text-right tabular-nums">{money(r.employer)}</td>{/if}
 					{#if hasEc}<td class="text-right tabular-nums">{money(r.ec)}</td>{/if}
 					<td class="text-right tabular-nums">{money(r.total)}</td>
 				</tr>
@@ -63,9 +67,9 @@
 		</tbody>
 		<tfoot>
 			<tr class="font-semibold">
-				<td class="py-2" colspan="2">Total · {data.schedule.rows.length} {data.schedule.rows.length === 1 ? 'person' : 'people'}</td>
+				<td class="py-2" colspan={isLoan ? 3 : 2}>Total · {data.schedule.rows.length} {data.schedule.rows.length === 1 ? 'person' : 'people'}</td>
 				<td class="text-right tabular-nums">{money(data.schedule.totals.employee)}</td>
-				{#if !isBir}<td class="text-right tabular-nums">{money(data.schedule.totals.employer)}</td>{/if}
+				{#if hasEmployer}<td class="text-right tabular-nums">{money(data.schedule.totals.employer)}</td>{/if}
 				{#if hasEc}<td class="text-right tabular-nums">{money(data.schedule.totals.ec)}</td>{/if}
 				<td class="text-right tabular-nums">{money(data.schedule.totals.total)}</td>
 			</tr>
@@ -73,6 +77,8 @@
 	</table>
 
 	<p class="mt-6 text-xs text-ink-muted">
-		Computed from the statutory rates on file; not verified against the current circulars.
+		{isLoan
+			? 'Taken from the loan deductions on each payslip.'
+			: 'Computed from the statutory rates on file; not verified against the current circulars.'}
 	</p>
 </article>

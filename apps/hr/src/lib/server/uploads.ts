@@ -53,3 +53,77 @@ export function resolveUploadPath(scopeId: string, filename: string): string | n
 	if (!UPLOAD_FILENAME_RE.test(filename)) return null;
 	return path.join(UPLOADS_DIR, scopeId, filename);
 }
+
+// ---------------------------------------------------------------------------
+// Loan documents — never reachable through the public /uploads route: the directory name has an
+// underscore (that route's scope pattern rejects it) and they are served only to payroll users.
+// ---------------------------------------------------------------------------
+
+const LOAN_DOC_TYPES: Record<string, string> = {
+	'application/pdf': 'pdf',
+	'image/jpeg': 'jpg',
+	'image/png': 'png',
+	'image/webp': 'webp'
+};
+const LOAN_DOC_DIR = path.join(UPLOADS_DIR, '_loan-docs');
+const LOAN_DOC_NAME_RE = /^[0-9A-Za-z]{20,30}\.(pdf|jpg|png|webp)$/;
+
+export async function saveLoanDocument(file: File): Promise<{ storedName: string; contentType: string; sizeBytes: number }> {
+	if (file.size === 0) throw new UploadValidationError('The file is empty.');
+	if (file.size > MAX_UPLOAD_BYTES) throw new UploadValidationError('Documents must be 8 MB or smaller.');
+	const ext = LOAN_DOC_TYPES[file.type];
+	if (!ext) throw new UploadValidationError('Use a PDF, JPEG, PNG or WebP file.');
+	await mkdir(LOAN_DOC_DIR, { recursive: true });
+	const storedName = `${ulid()}.${ext}`;
+	await writeFile(path.join(LOAN_DOC_DIR, storedName), Buffer.from(await file.arrayBuffer()));
+	return { storedName, contentType: file.type, sizeBytes: file.size };
+}
+
+export function loanDocumentPath(storedName: string): string | null {
+	return LOAN_DOC_NAME_RE.test(storedName) ? path.join(LOAN_DOC_DIR, storedName) : null;
+}
+
+export async function deleteLoanDocument(storedName: string): Promise<void> {
+	const p = loanDocumentPath(storedName);
+	if (!p) return;
+	try {
+		await unlink(p);
+	} catch {
+		// Already gone — fine either way.
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Company logo — one public file under `_brand/`, served by /brand/<name> (the sign-in page shows it).
+// SVG is not accepted: it can carry script.
+// ---------------------------------------------------------------------------
+
+const LOGO_TYPES: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+const LOGO_DIR = path.join(UPLOADS_DIR, '_brand');
+const LOGO_NAME_RE = /^[0-9A-Za-z]{20,30}\.(png|jpg|webp)$/;
+const MAX_LOGO_BYTES = 2 * 1024 * 1024;
+
+export async function saveLogoFile(file: File): Promise<string> {
+	if (file.size === 0) throw new UploadValidationError('The file is empty.');
+	if (file.size > MAX_LOGO_BYTES) throw new UploadValidationError('The logo must be 2 MB or smaller.');
+	const ext = LOGO_TYPES[file.type];
+	if (!ext) throw new UploadValidationError('Use a PNG, JPEG or WebP image.');
+	await mkdir(LOGO_DIR, { recursive: true });
+	const name = `${ulid()}.${ext}`;
+	await writeFile(path.join(LOGO_DIR, name), Buffer.from(await file.arrayBuffer()));
+	return name;
+}
+
+export function logoFilePath(name: string): string | null {
+	return LOGO_NAME_RE.test(name) ? path.join(LOGO_DIR, name) : null;
+}
+
+export async function deleteLogoFile(name: string): Promise<void> {
+	const p = logoFilePath(name);
+	if (!p) return;
+	try {
+		await unlink(p);
+	} catch {
+		// Already gone — fine either way.
+	}
+}

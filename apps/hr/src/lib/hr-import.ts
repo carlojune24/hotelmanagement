@@ -15,6 +15,8 @@ export const DUPLICATE_PUNCH_MINUTES = 2;
 export const SHIFT_GAP_MINUTES = 12 * 60;
 /** A single record longer than this is surfaced as suspicious (missed out-punch, usually). */
 export const LONG_SHIFT_MINUTES = 16 * 60;
+/** After the break-in, a punch this much later is the clock-out; any closer is a re-tap. */
+export const MIN_STINT_AFTER_BREAK_MINUTES = 60;
 export const DEFAULT_NIGHT_WINDOW = { start: '22:00', end: '06:00' } as const;
 
 // ---------------------------------------------------------------------------
@@ -145,18 +147,54 @@ export type Cluster = {
 	punches: number[];
 };
 
-/** Sorts one employee's punch instants and splits them into shifts (first = in, last = out). */
-export function clusterPunches(instantsMs: number[]): Cluster[] {
+/** A long silence that ends within this of a rostered start is the next shift beginning, not a long break. */
+export const NEW_SHIFT_START_WINDOW_MINUTES = 3 * 60;
+/** Only a silence at least this long can be a gap between two shifts when the roster says one starts. */
+export const MIN_GAP_BETWEEN_SHIFTS_MINUTES = 6 * 60;
+/** A day that began at a rostered start stays one shift across a silence up to this (a 13h day of overtime). */
+export const SHIFT_GAP_WITH_ROSTER_MINUTES = 16 * 60;
+
+/**
+ * Sorts one employee's punch instants and splits them into shifts (first = in, last = out). A silence
+ * over 12h starts a new shift (16h when the roster is known, so a 13h day of overtime stays whole).
+ * With `scheduledStarts` (epoch ms of their rostered shift starts), a silence of 6h or more also starts
+ * a new shift when the next punch lands within 3h of a different rostered start, so overtime until
+ * 9 PM followed by an 8 AM clock-in is two days, not one.
+ */
+export function clusterPunches(instantsMs: number[], scheduledStarts: number[] = []): Cluster[] {
 	const sorted = [...instantsMs].sort((x, y) => x - y);
 	const deduped: number[] = [];
 	for (const t of sorted) {
 		const prev = deduped.at(-1);
 		if (prev === undefined || t - prev > DUPLICATE_PUNCH_MINUTES * 60_000) deduped.push(t);
 	}
+	/** The rostered start this punch is closest to (within the window), or null. */
+	const nearestStart = (t: number): number | null => {
+		let best: number | null = null;
+		for (const s of scheduledStarts) {
+			if (Math.abs(t - s) <= NEW_SHIFT_START_WINDOW_MINUTES * 60_000 && (best === null || Math.abs(t - s) < Math.abs(t - best))) best = s;
+		}
+		return best;
+	};
 	const groups: number[][] = [];
 	for (const t of deduped) {
 		const g = groups.at(-1);
-		if (g && t - g.at(-1)! <= SHIFT_GAP_MINUTES * 60_000) g.push(t);
+		const last = g?.at(-1);
+		const gap = last === undefined ? 0 : t - last;
+		// A long day of overtime with only in/out taps: it began at a rostered start and the next punch
+		// is not the start of another shift, so a silence up to 16h is still the same day.
+		const longDay =
+			last !== undefined &&
+			gap <= SHIFT_GAP_WITH_ROSTER_MINUTES * 60_000 &&
+			nearestStart(g![0]!) !== null &&
+			nearestStart(t) === null;
+		const newShift =
+			last !== undefined &&
+			((gap > SHIFT_GAP_MINUTES * 60_000 && !longDay) ||
+				(gap >= MIN_GAP_BETWEEN_SHIFTS_MINUTES * 60_000 &&
+					nearestStart(t) !== null &&
+					nearestStart(t) !== nearestStart(g![0]!)));
+		if (g && !newShift) g.push(t);
 		else groups.push([t]);
 	}
 	return groups.map((g) => ({
@@ -198,7 +236,8 @@ export type DtrFlag =
 	| 'missing_break_out'
 	| 'missing_break_in'
 	| 'no_return'
-	| 'missing_out';
+	| 'missing_out'
+	| 'missing_in';
 
 const minutesBetween = (fromMs: number, toMs: number) => Math.round((toMs - fromMs) / 60_000);
 
@@ -233,8 +272,11 @@ export function assignSplitPunches(
 	const slots: SplitSlots = { inMs: punches[0]!, breakOutMs: null, breakInMs: null, outMs: null };
 	for (const t of punches.slice(1)) {
 		if (t < midBreak) slots.breakOutMs ??= t;
-		else if (t < midSecond) slots.breakInMs ??= t;
-		else slots.outMs = t;
+		else if (t < midSecond) {
+			if (slots.breakInMs === null) slots.breakInMs = t;
+			// A re-tap right after coming back is ignored; a punch an hour or more later is the clock-out.
+			else if (t - slots.breakInMs >= MIN_STINT_AFTER_BREAK_MINUTES * 60_000) slots.outMs = t;
+		} else slots.outMs = t;
 	}
 	return slots;
 }
@@ -251,22 +293,32 @@ function computeSplitMetrics(
 		schedule.breakEndMs,
 		schedule.endMs!
 	);
-	const scheduledBreak = minutesBetween(schedule.breakStartMs, schedule.breakEndMs);
+	const { breakStartMs: bs, breakEndMs: be } = schedule;
+	const scheduledBreak = minutesBetween(bs, be);
 	const { inMs, breakOutMs, breakInMs, outMs } = slots;
 
 	// Time actually worked, and the interval that is *not* worked (for night differential).
 	let worked: number;
 	let notWorked: [number, number] | null = null;
+	// Back from lunch but never clocked out: the afternoon cannot be proven, so it is not paid.
+	let afternoonUnproven = false;
 	if (outMs === null) {
 		if (breakOutMs !== null) {
-			flags.push(breakInMs === null ? 'no_return' : 'missing_out');
+			if (breakInMs === null) {
+				flags.push('no_return');
+			} else {
+				flags.push('missing_out');
+				afternoonUnproven = true;
+			}
 			worked = minutesBetween(inMs, breakOutMs);
 		} else if (breakInMs !== null) {
 			flags.push('missing_out');
+			afternoonUnproven = true;
 			worked = Math.max(0, minutesBetween(inMs, breakInMs) - scheduledBreak);
-			notWorked = [schedule.breakStartMs, schedule.breakEndMs];
+			notWorked = [bs, be];
 		} else {
 			flags.push('single_punch');
+			if (inMs > (schedule.startMs! + schedule.endMs!) / 2) flags.push('missing_in');
 			worked = 0;
 		}
 	} else if (breakOutMs !== null && breakInMs !== null) {
@@ -274,14 +326,12 @@ function computeSplitMetrics(
 		notWorked = [breakOutMs, breakInMs];
 	} else {
 		// One or both middle punches are missing, but the clock-out proves they came back:
-		// assume the break ran as scheduled and say so.
-		if (breakOutMs === null && breakInMs === null) {
-			// Worked straight through (or never tapped for lunch): pay the scheduled break as usual.
-		} else {
+		// assume the break ran as scheduled (only the part that fell inside the stint) and say so.
+		if (breakOutMs !== null || breakInMs !== null) {
 			flags.push(breakOutMs === null ? 'missing_break_out' : 'missing_break_in');
 		}
-		worked = Math.max(0, minutesBetween(inMs, outMs) - scheduledBreak);
-		notWorked = [schedule.breakStartMs, schedule.breakEndMs];
+		worked = Math.max(0, minutesBetween(inMs, outMs) - overlapMinutes(inMs, outMs, bs, be));
+		notWorked = [bs, be];
 	}
 
 	const lastMs = outMs ?? breakInMs ?? breakOutMs ?? inMs;
@@ -297,19 +347,29 @@ function computeSplitMetrics(
 		return sum + Math.max(0, n);
 	}, 0);
 
-	// Late back from lunch counts as tardiness too, but only when both ends of the break were tapped.
+	// A lone punch is never "late": there is nothing to measure it against. Lateness excludes the
+	// scheduled break, which is unpaid time and not missed work.
+	const alone = flags.includes('single_punch');
 	const lateFromBreak =
-		breakInMs !== null && outMs !== null ? Math.max(0, minutesBetween(schedule.breakEndMs, breakInMs)) : 0;
-	const tardiness = Math.max(0, minutesBetween(schedule.startMs!, inMs)) + lateFromBreak;
+		breakInMs !== null && outMs !== null ? Math.max(0, minutesBetween(be, breakInMs)) : 0;
+	const tardiness = alone
+		? 0
+		: Math.max(0, minutesBetween(schedule.startMs!, inMs) - overlapMinutes(schedule.startMs!, inMs, bs, be)) +
+			lateFromBreak;
 
 	let undertime = 0;
 	let ot = 0;
 	if (outMs !== null) {
 		ot = Math.max(0, minutesBetween(schedule.endMs!, outMs));
-		undertime = Math.max(0, minutesBetween(outMs, schedule.endMs!));
+		undertime = Math.max(
+			0,
+			minutesBetween(outMs, schedule.endMs!) - overlapMinutes(outMs, schedule.endMs!, bs, be)
+		);
 	} else if (breakOutMs !== null && breakInMs === null) {
 		// Left at lunch and never came back: the rest of the scheduled day is unworked.
 		undertime = Math.max(0, minutesBetween(breakOutMs, schedule.endMs!) - scheduledBreak);
+	} else if (afternoonUnproven) {
+		undertime = Math.max(0, minutesBetween(be, schedule.endMs!));
 	}
 
 	return {
@@ -359,22 +419,32 @@ export function computeMetrics(
 		);
 	}
 
+	const working = schedule && !schedule.isRestDay && schedule.startMs != null && schedule.endMs != null;
+
 	if (cluster.outMs === null) {
 		flags.push('single_punch');
 		if (!schedule) flags.push('no_schedule');
+		else if (working && cluster.inMs > (schedule.startMs! + schedule.endMs!) / 2) flags.push('missing_in');
 		return { metrics: zero, flags };
 	}
 
 	const span = minutesBetween(cluster.inMs, cluster.outMs);
 	if (span > LONG_SHIFT_MINUTES) flags.push('long_shift');
 
-	const working = schedule && !schedule.isRestDay && schedule.startMs !== null && schedule.endMs !== null;
 	if (!schedule) flags.push('no_schedule');
 	else if (schedule.isRestDay) flags.push('rest_day');
 
+	// Without a break window the unpaid break is taken to sit in the middle of the shift; it is only
+	// deducted for the part that fell inside the time actually worked.
 	const breakMinutes = schedule?.breakMinutes ?? 0;
+	let breakWin: [number, number] | null = null;
+	if (working && breakMinutes > 0) {
+		const mid = (schedule!.startMs! + schedule!.endMs!) / 2;
+		breakWin = [mid - (breakMinutes * 60_000) / 2, mid + (breakMinutes * 60_000) / 2];
+	}
+	const inBreak = (a: number, b: number) => (breakWin ? overlapMinutes(a, b, breakWin[0], breakWin[1]) : 0);
 	// A short stint (e.g. half-day) never goes negative because of the scheduled break.
-	const worked = span > breakMinutes ? span - breakMinutes : span;
+	const worked = breakWin ? span - inBreak(cluster.inMs, cluster.outMs) : span > breakMinutes ? span - breakMinutes : span;
 
 	const nightDiff = nightWindows.reduce(
 		(sum, [s, e]) => sum + overlapMinutes(cluster.inMs, cluster.outMs!, s, e),
@@ -389,11 +459,74 @@ export function computeMetrics(
 			workedMinutes: worked,
 			otMinutes: Math.max(0, minutesBetween(schedule!.endMs!, cluster.outMs)),
 			nightDiffMinutes: nightDiff,
-			tardinessMinutes: Math.max(0, minutesBetween(schedule!.startMs!, cluster.inMs)),
-			undertimeMinutes: Math.max(0, minutesBetween(cluster.outMs, schedule!.endMs!))
+			tardinessMinutes: Math.max(
+				0,
+				minutesBetween(schedule!.startMs!, cluster.inMs) - inBreak(schedule!.startMs!, cluster.inMs)
+			),
+			undertimeMinutes: Math.max(
+				0,
+				minutesBetween(cluster.outMs, schedule!.endMs!) - inBreak(cluster.outMs, schedule!.endMs!)
+			)
 		},
 		flags
 	};
+}
+
+export type CreditMetrics = { worked: number; late: number; under: number; ot: number; night: number };
+
+/**
+ * How approved leave and a holiday/memo change a day's minutes, once the punches are measured.
+ * Whole-day leave replaces the day; a half day excuses lateness and undertime up to half the
+ * shift and (when paid) credits that half; a holiday/memo credits the day (or its set hours)
+ * and, if it waives lateness, clears late and undertime. Pure: used by the DTR and the scenarios.
+ */
+export function applyCredits(
+	m: CreditMetrics,
+	scheduledMinutes: number,
+	leave: { paid: boolean; halfDay: 'am' | 'pm' | null } | null,
+	calendar: { creditMinutes: number | null; waiveLateness: boolean } | null,
+	punched: boolean
+): CreditMetrics & { leaveMinutes: number; clearPunches: boolean } {
+	if (leave && !leave.halfDay) {
+		const credit = leave.paid ? scheduledMinutes : 0;
+		return { worked: credit, late: 0, under: 0, ot: 0, night: 0, leaveMinutes: credit, clearPunches: true };
+	}
+	if (leave) {
+		const half = Math.round(scheduledMinutes / 2);
+		return {
+			...m,
+			late: Math.max(0, m.late - half),
+			under: Math.max(0, m.under - half),
+			worked: leave.paid ? Math.min(scheduledMinutes, m.worked + half) : m.worked,
+			leaveMinutes: leave.paid ? half : 0,
+			clearPunches: false
+		};
+	}
+	if (calendar) {
+		const credit = calendar.creditMinutes ?? scheduledMinutes;
+		const waived = calendar.waiveLateness;
+		return {
+			...m,
+			worked: Math.max(m.worked, credit),
+			late: waived ? 0 : m.late,
+			under: waived ? 0 : m.under,
+			leaveMinutes: 0,
+			clearPunches: false
+		};
+	}
+	void punched;
+	return { ...m, leaveMinutes: 0, clearPunches: false };
+}
+
+/**
+ * Once leave or a memo has excused all the undertime, "no return / no clock-out" is no longer a
+ * problem to chase: the half of the day it described is covered.
+ */
+export function flagsAfterCredit(flags: DtrFlag[], undertimeBefore: number, undertimeAfter: number): DtrFlag[] {
+	if (undertimeBefore > 0 && undertimeAfter === 0) {
+		return flags.filter((f) => f !== 'no_return' && f !== 'missing_out');
+	}
+	return flags;
 }
 
 /** `HH:MM` pair → `{startMin, spansNextDay}` helper for building night windows. */
@@ -411,7 +544,8 @@ const FLAG_REMARK: Partial<Record<DtrFlag, string>> = {
 	missing_break_out: 'No break-out punch',
 	missing_break_in: 'No break-in punch',
 	no_return: 'No return from break',
-	missing_out: 'No clock-out punch'
+	missing_out: 'No clock-out punch',
+	missing_in: 'No clock-in punch'
 };
 
 /** The line printed in a DTR day's remarks: what looks off, and whether staff added a punch. */

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { itemisedRows } from '$lib/pay-items-core';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -8,14 +9,19 @@
 	const hrs = (m: number) => `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`;
 	const basisLabel = (b: string) => (b === 'monthly' ? 'per month' : b === 'daily' ? 'per day' : 'per hour');
 
+	const allowanceItems = $derived(data.payItems.filter((i) => i.kind === 'earning' && i.category === 'allowance'));
+	const otherEarningItems = $derived(data.payItems.filter((i) => i.kind === 'earning' && i.category !== 'allowance'));
+	const advanceItems = $derived(data.payItems.filter((i) => i.kind === 'deduction' && i.category === 'cash_advance'));
+	const otherDeductionItems = $derived(data.payItems.filter((i) => i.kind === 'deduction' && i.category !== 'cash_advance'));
+
 	const earningRows = $derived(
 		[
 			['Basic pay', data.earnings.basic],
 			['Overtime', data.earnings.overtime],
 			['Holiday / rest-day premium', data.earnings.holiday_premium],
 			['Night differential', data.earnings.night_diff],
-			['Allowances', data.earnings.allowances],
-			['Other earnings', data.earnings.other]
+			...itemisedRows(allowanceItems, data.earnings.allowances, 'Allowances'),
+			...itemisedRows(otherEarningItems, data.earnings.other, 'Other earnings')
 		].filter(([, v]) => (v as number) > 0) as Array<[string, number]>
 	);
 	const deductionRows = $derived(
@@ -25,11 +31,15 @@
 			['Pag-IBIG', data.deductions.pagibig_ee],
 			['Withholding tax', data.deductions.withholding_tax],
 			['Late / undertime', data.deductions.tardiness_undertime],
-			['Cash advance', data.deductions.cash_advance],
-			['Loans', data.deductions.loans],
-			['Other deductions', data.deductions.other]
+			...itemisedRows(advanceItems, data.deductions.cash_advance, 'Cash advance'),
+			...(data.loans.length > 0
+				? data.loans.map((l) => [l.label, l.deducted] as [string, number])
+				: [['Loans', data.deductions.loans] as [string, number]]),
+			...itemisedRows(otherDeductionItems, data.deductions.other, 'Other deductions')
 		].filter(([, v]) => (v as number) > 0) as Array<[string, number]>
 	);
+	/** A loan the pay could not fully cover — shown so the shortfall is never silent. */
+	const shortLoans = $derived(data.loans.filter((l) => l.deducted < l.due));
 </script>
 
 <svelte:head><title>Payslip · {data.employee.name}</title></svelte:head>
@@ -49,6 +59,7 @@
 
 	<header class="flex items-start justify-between border-b border-ink/30 pb-4">
 		<div>
+			{#if data.logoUrl}<img src={data.logoUrl} alt="" class="mb-2 h-12 w-auto max-w-48 object-contain" />{/if}
 			<h1 class="text-xl font-semibold">{data.company.name}</h1>
 			{#if data.company.address}<p class="text-ink-muted">{data.company.address}</p>{/if}
 			<p class="text-ink-muted">{data.establishment}</p>
@@ -66,6 +77,16 @@
 		<p><span class="text-ink-muted">Position</span> {data.employee.position}</p>
 		<p><span class="text-ink-muted">Department</span> {data.employee.department ?? '—'}</p>
 		<p><span class="text-ink-muted">Rate</span> {money(data.basis.rate)} {basisLabel(data.basis.payBasis)}</p>
+		{#each data.rateChanges as c (c.date)}
+			<p class="col-span-2 text-xs text-ink-muted">
+				Rate changed on {c.date}: {money(c.fromCentavos)} → {money(c.toCentavos)}. Basic pay for this period is split by day.
+			</p>
+		{/each}
+		{#if data.deferredBasisChange}
+			<p class="col-span-2 text-xs text-ink-muted">
+				A change of pay basis effective {data.deferredBasisChange} starts with the next period.
+			</p>
+		{/if}
 		<p>
 			<span class="text-ink-muted">Time</span>
 			{data.time.days} day{data.time.days === 1 ? '' : 's'} · {hrs(data.time.regularMinutes)}
@@ -78,7 +99,7 @@
 			<h2 class="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">Earnings</h2>
 			<table class="w-full">
 				<tbody>
-					{#each earningRows as [label, amount] (label)}
+					{#each earningRows as [label, amount], i (i)}
 						<tr><td class="py-0.5">{label}</td><td class="py-0.5 text-right tabular-nums">{money(amount)}</td></tr>
 					{/each}
 					<tr class="border-t border-ink/30 font-medium">
@@ -91,7 +112,7 @@
 			<h2 class="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">Deductions</h2>
 			<table class="w-full">
 				<tbody>
-					{#each deductionRows as [label, amount] (label)}
+					{#each deductionRows as [label, amount], i (i)}
 						<tr><td class="py-0.5">{label}</td><td class="py-0.5 text-right tabular-nums">{money(amount)}</td></tr>
 					{:else}
 						<tr><td class="py-0.5 text-ink-muted">None</td><td></td></tr>
@@ -110,6 +131,11 @@
 		<span class="text-2xl font-semibold tabular-nums">{money(data.net)}</span>
 	</section>
 
+	{#if shortLoans.length > 0}
+		<p class="mt-2 text-xs text-ink-muted">
+			Pay did not cover the full loan amount for {shortLoans.map((l) => `${l.label} (${money(l.due - l.deducted)} short)`).join(', ')}; the balance carries to the next payslip.
+		</p>
+	{/if}
 	{#if data.notCovered.length > 0}
 		<p class="mt-2 text-xs text-ink-muted">Not covered / exempt: {data.notCovered.join(', ')}.</p>
 	{/if}

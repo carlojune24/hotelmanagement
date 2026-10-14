@@ -10,7 +10,7 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
-	import { ESTABLISHMENT_ROLES, ORG_ROLES, ROLE_LABEL, type Role } from '$lib/authz';
+	import { ABILITY_ROWS, ESTABLISHMENT_ROLES, ORG_ROLES, ROLE_LABEL, ROLE_SUMMARY, can, type Role } from '$lib/authz';
 	import { MIN_PASSWORD, isOrgRole } from '$lib/user-schema';
 	import type { ActionData, PageData } from './$types';
 
@@ -43,6 +43,7 @@
 		target = row;
 		dialog = 'reset';
 	}
+	const ALL_ROLES: Role[] = [...ORG_ROLES, ...ESTABLISHMENT_ROLES];
 	const roleLabel = (r: string | null) => (r ? (ROLE_LABEL[r as Role] ?? r) : 'No access');
 </script>
 
@@ -109,6 +110,52 @@
 				{/each}
 			</Table.Body>
 		</Table.Root>
+	</section>
+
+	<section class="panel space-y-4 p-5 md:p-6" aria-label="What each role can do">
+		<div>
+			<h2 class="text-2xl font-light">What each role can do</h2>
+			<p class="mt-1 text-sm text-ink-muted">
+				Pick the role by what the person needs to do. A manager or clerk only ever sees the establishments
+				you tick for them.
+			</p>
+		</div>
+		<div class="overflow-x-auto">
+			<Table.Root>
+				<Table.Header>
+					<Table.Row class="hover:bg-transparent">
+						<Table.Head>Can they…</Table.Head>
+						{#each ALL_ROLES as r (r)}
+							<Table.Head class="text-center">{ROLE_LABEL[r]}</Table.Head>
+						{/each}
+					</Table.Row>
+				</Table.Header>
+				<Table.Body>
+					{#each ABILITY_ROWS as row (row.cap)}
+						<Table.Row>
+							<Table.Cell>{row.label}</Table.Cell>
+							{#each ALL_ROLES as r (r)}
+								<Table.Cell class="text-center">
+									{#if can(r, row.cap)}
+										<span class="font-medium" aria-label="Yes">Yes</span>
+									{:else}
+										<span class="text-ink-muted" aria-label="No">—</span>
+									{/if}
+								</Table.Cell>
+							{/each}
+						</Table.Row>
+					{/each}
+				</Table.Body>
+			</Table.Root>
+		</div>
+		<dl class="grid gap-3 text-sm md:grid-cols-2">
+			{#each ALL_ROLES as r (r)}
+				<div>
+					<dt class="font-medium">{ROLE_LABEL[r]}</dt>
+					<dd class="text-ink-muted">{ROLE_SUMMARY[r]}</dd>
+				</div>
+			{/each}
+		</dl>
 	</section>
 </div>
 
@@ -219,6 +266,7 @@
 							{#each ESTABLISHMENT_ROLES as r (r)}<option value={r}>{ROLE_LABEL[r]}</option>{/each}
 						</optgroup>
 					</select>
+					<p class="text-xs text-ink-muted">{ROLE_SUMMARY[role]}</p>
 				</div>
 
 				{#if scoped}

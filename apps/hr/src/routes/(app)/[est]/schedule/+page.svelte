@@ -1198,7 +1198,7 @@
 																	<Label for="cne" class="text-xs">to</Label>
 																	<Input id="cne" type="time" bind:value={customNdEnd} class="mt-1 h-8 px-2 text-sm" />
 																</div>
-																<p class="col-span-2 -mt-1 text-xs text-ink-muted">Blank uses the establishment default ({data.nightDiff.start}–{data.nightDiff.end}).</p>
+																<p class="col-span-2 -mt-1 text-xs text-ink-muted">Blank uses the establishment default ({data.nightDiff.start}–{data.nightDiff.end}). This day's window is the one the DTR follows.</p>
 															</div>
 														<div class="flex items-center justify-between gap-2">
 															<div class="flex gap-1.5">
@@ -1441,7 +1441,7 @@
 									<Label for="tplNdEnd">to</Label>
 									<Input id="tplNdEnd" name="nightEnd" type="time" bind:value={draft.nightEnd} class="mt-1" />
 								</div>
-								<p class="col-span-2 text-xs text-ink-muted">Leave blank to use the establishment default ({data.nightDiff.start}–{data.nightDiff.end}). Hours inside this window earn the night differential.</p>
+								<p class="col-span-2 text-xs text-ink-muted">Leave blank to use the establishment default ({data.nightDiff.start}–{data.nightDiff.end}). Hours inside this window earn the night differential, at the establishment's premium rate. A window set here is copied onto each day the shift is applied to; editing it later does not change days already applied.</p>
 							</div>
 					{/if}
 					<fieldset>

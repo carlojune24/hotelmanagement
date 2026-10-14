@@ -54,6 +54,7 @@ export interface PendingMemo {
 	waiveLateness: boolean;
 	submittedBy: string | null;
 	submittedAt: Date | null;
+	note: string | null;
 }
 
 export interface PendingWeek {
@@ -145,7 +146,8 @@ export async function listPendingApprovals(): Promise<PendingApprovals> {
 				name: calendarDays.name,
 				kind: calendarDays.kind,
 				creditMinutes: calendarDays.creditMinutes,
-				waiveLateness: calendarDays.waiveLateness,
+waiveLateness: calendarDays.waiveLateness,
+note: calendarDays.proposalNote,
 				submittedBy: submitter,
 				submittedAt: calendarDays.submittedAt
 			})
