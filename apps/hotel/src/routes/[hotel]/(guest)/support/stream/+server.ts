@@ -1,6 +1,7 @@
 import { error } from '@sveltejs/kit';
 import { getVisitorConversation, hashVisitorToken } from '$lib/server/support-chat';
 import { subscribeSupport } from '$lib/server/support-realtime';
+import { supportStreamByIp } from '$lib/server/auth/rate-limit';
 import { sseResponse } from '$lib/server/sse';
 import type { RequestHandler } from './$types';
 
@@ -9,10 +10,14 @@ import type { RequestHandler } from './$types';
  * widget already has; on connect (and reconnect) the stream sends everything newer, so a dropped
  * connection loses nothing. The widget de-duplicates by message id.
  */
-export const GET: RequestHandler = async ({ request, locals, cookies, url }) => {
+export const GET: RequestHandler = async ({ request, locals, cookies, url, getClientAddress }) => {
 	const hotel = locals.hotel!;
 	const token = cookies.get(`mm_support_${hotel.slug}`);
 	if (!token) error(404, 'No chat.');
+	// Reconnect storms (a flapping network, a restart) should not hammer the database.
+	const ipKey = `${hotel.id}|${getClientAddress()}`;
+	if (supportStreamByIp.retryAfter(ipKey) > 0) error(429, 'Too many connections. Try again in a moment.');
+	supportStreamByIp.consume(ipKey);
 	const tokenHash = hashVisitorToken(token);
 
 	const first = await getVisitorConversation(hotel.id, tokenHash, { after: new Date(0) });
@@ -51,6 +56,7 @@ export const GET: RequestHandler = async ({ request, locals, cookies, url }) => 
 						conversationId: conv.id,
 						status: conv.status,
 						agentName: conv.agentName,
+						seenAt: conv.seenAt,
 						messages: fresh
 					});
 				} while (again);
@@ -59,7 +65,12 @@ export const GET: RequestHandler = async ({ request, locals, cookies, url }) => 
 			}
 		};
 
-		const unsubscribe = await subscribeSupport({ hotelId: hotel.id, conversationId }, () => {
+		const unsubscribe = await subscribeSupport({ hotelId: hotel.id, conversationId }, (event) => {
+			// "Typing…" is relayed as it is: nothing to read from the database.
+			if (event.kind === 'typing') {
+				if (event.actor === 'staff') send('typing', {});
+				return;
+			}
 			void push();
 		});
 		await push();

@@ -58,6 +58,8 @@ export const ACTION_LABELS: Record<string, string> = {
 	'support_chat.availability': 'Changed support availability',
 	'support_chat.faq_save': 'Saved a support FAQ',
 	'support_chat.faq_delete': 'Deleted a support FAQ',
+	'support_chat.canned_save': 'Saved a support canned reply',
+	'support_chat.canned_delete': 'Deleted a support canned reply',
 	'review.approve': 'Approved a guest review',
 	'review.reject': 'Rejected a guest review',
 	'hotel.invite_member': 'Invited a staff member',

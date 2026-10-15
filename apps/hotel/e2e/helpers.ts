@@ -19,10 +19,11 @@ export function uniqueGuest() {
 
 export async function staffLogin(page: Page) {
 	await page.goto(`/${SLUG}/management/login`);
-	await page.locator('#email').fill(STAFF_EMAIL);
+	await page.locator('input[name="email"]').fill(STAFF_EMAIL);
 	await page.locator('input[name="password"]').fill(STAFF_PASSWORD);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await expect(page).toHaveURL(/\/management\//);
+	// The login page itself is under /management/, so wait until the visit has left it.
+	await expect(page).not.toHaveURL(/\/management\/login/);
 }
 
 /**

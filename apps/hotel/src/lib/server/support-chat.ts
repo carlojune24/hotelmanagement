@@ -4,6 +4,7 @@ import { db } from '$lib/server/db/index';
 import {
 	orders,
 	supportAgentPresence,
+	supportCannedReplies,
 	supportConversations,
 	supportFaqs,
 	supportMessages,
@@ -30,8 +31,10 @@ const AGENT_FRESH_SECONDS = 30;
 const RESUME_GRACE_MINUTES = 5;
 /** An open chat whose agent has been silent this long goes back to the queue. */
 const REQUEUE_AFTER_SECONDS = 120;
-/** A queued/open chat nobody has written in for this long is closed. */
+/** An open chat nobody has written in for this long is closed (and its messages deleted). */
 const IDLE_CLOSE_MINUTES = 120;
+/** A chat still waiting for a team member (e.g. nobody was online overnight) keeps its place this long. */
+const QUEUE_IDLE_HOURS = 24;
 const GUEST_MESSAGES_PER_HOUR = 40;
 const STARTS_PER_HOUR = 5;
 
@@ -69,6 +72,15 @@ function cleanBody(body: string): string {
 	if (text.length > SUPPORT_MAX_BODY)
 		throw new SupportError(`Please keep messages under ${SUPPORT_MAX_BODY.toLocaleString()} characters.`);
 	return text;
+}
+
+/**
+ * A chat does not outlive itself: once a conversation is closed its messages are deleted (the
+ * conversation row stays as a small record: who, when, which booking, who handled it). Message text is
+ * never copied into the audit trail either (only its length), so nothing is left behind.
+ */
+async function purgeMessages(tx: Tx, conversationId: string) {
+	await tx.delete(m).where(eq(m.conversationId, conversationId));
 }
 
 /** Inserts a message and bumps the conversation's activity time, inside the caller's tx. */
@@ -117,6 +129,9 @@ export async function getSupportAvailability(hotelId: string) {
 
 /** The online agent with the fewest open chats who still has room, or null. */
 async function pickAgent(tx: Tx, hotelId: string) {
+	// One assignment at a time per hotel (released at commit), so two chats starting together cannot
+	// both read "1 open" and push an agent past their max.
+	await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'support-assign:' + hotelId}))`);
 	const openCount = sql<number>`(select count(*)::int from support_conversations sc where sc.hotel_id = ${p.hotelId} and sc.assigned_user_id = ${p.userId} and sc.status = 'open')`;
 	const rows = await tx
 		.select({ userId: p.userId, name: users.name, max: p.maxConcurrent, open: openCount })
@@ -186,9 +201,17 @@ export interface VisitorMessage {
 
 export interface VisitorConversation {
 	id: string;
+	/** The chat's unique reference (SC-XXXXXXXX), shown to the guest and to staff. */
+	ref: string;
+	/** The booking this chat is about (short code), when it was opened from a booking page. */
+	orderCode: string | null;
+	/** Team replies the guest has not looked at yet. */
+	unreadFromTeam: number;
 	status: SupportConversationRow['status'];
 	agentName: string | null;
 	messages: VisitorMessage[];
+	/** Creation time of the newest guest message staff have read, for the "Seen" mark. */
+	seenAt: string | null;
 }
 
 /** The visitor's most recent conversation, with its messages (optionally only those after a time). */
@@ -216,10 +239,22 @@ export async function getVisitorConversation(
 		)
 		.orderBy(asc(m.createdAt))
 		.limit(300);
+	const [unreadRow] = await db
+		.select({ n: sql<number>`count(*)::int` })
+		.from(m)
+		.where(and(eq(m.conversationId, conv.row.id), eq(m.direction, 'staff'), sql`${m.readAt} is null`));
+	const [seen] = await db
+		.select({ at: sql<Date | null>`max(${m.createdAt})` })
+		.from(m)
+		.where(and(eq(m.conversationId, conv.row.id), eq(m.direction, 'guest'), sql`${m.readAt} is not null`));
 	return {
 		id: conv.row.id,
+		ref: refOf(conv.row.id),
+		orderCode: conv.row.orderId ? conv.row.orderId.slice(0, 8).toUpperCase() : null,
+		unreadFromTeam: unreadRow?.n ?? 0,
 		status: conv.row.status,
 		agentName: conv.agentName,
+		seenAt: seen?.at ? new Date(seen.at).toISOString() : null,
 		messages: rows.map((r) => ({
 			id: r.id,
 			direction: r.direction,
@@ -244,7 +279,7 @@ export async function startConversation(args: {
 	return db.transaction(async (tx) => {
 		// An unfinished chat is resumed, not duplicated.
 		const [existing] = await tx
-			.select({ id: c.id })
+			.select({ id: c.id, assignedUserId: c.assignedUserId })
 			.from(c)
 			.where(
 				and(
@@ -265,7 +300,8 @@ export async function startConversation(args: {
 				await notifySupport(tx, {
 					hotelId: args.hotelId,
 					conversationId: existing.id,
-					kind: 'guest_message'
+					kind: 'guest_message',
+					assignedUserId: existing.assignedUserId
 				});
 			}
 			return { conversationId: existing.id };
@@ -284,11 +320,12 @@ export async function startConversation(args: {
 		if (recent >= STARTS_PER_HOUR)
 			throw new SupportError('That is a lot of chats in a short time. Please wait a little.', 'rate_limited');
 
+		// Nobody online is fine: the chat waits in the queue, the guest keeps talking on the site, and the first
+		// team member to come online picks it up (see drainSupportQueue).
 		const [{ n: online } = { n: 0 }] = await tx
 			.select({ n: sql<number>`count(*)::int` })
 			.from(p)
 			.where(freshAgentWhere(args.hotelId));
-		if (online === 0) throw new SupportError('Nobody is online right now.', 'offline');
 
 		let orderId: string | null = null;
 		if (args.order) {
@@ -325,7 +362,9 @@ export async function startConversation(args: {
 			direction: 'system',
 			body: agent
 				? `${agent.name} joined the chat`
-				: 'Our team is helping other guests. You are in the queue and someone will be with you shortly.'
+				: online === 0
+					? 'Nobody from our team is online right now. Your messages are saved here, so you can keep this page open or come back later. A team member will reply in this chat as soon as they are back.'
+					: 'Our team is helping other guests. You are in the queue and someone will be with you shortly.'
 		});
 		if (first)
 			await addMessage(tx, {
@@ -348,7 +387,8 @@ export async function startConversation(args: {
 		await notifySupport(tx, {
 			hotelId: args.hotelId,
 			conversationId: conv!.id,
-			kind: 'new_conversation'
+			kind: 'new_conversation',
+			assignedUserId: agent?.userId ?? null
 		});
 		return { conversationId: conv!.id };
 	});
@@ -405,7 +445,7 @@ export async function leaveOfflineMessage(args: {
 			entityType: 'support_conversation',
 			entityId: conv!.id,
 			refCode: refOf(conv!.id),
-			after: { preview: body.slice(0, 200) }
+			after: { chars: body.length }
 		});
 		await notifySupport(tx, {
 			hotelId: args.hotelId,
@@ -464,12 +504,13 @@ export async function postGuestMessage(args: {
 			entityType: 'support_conversation',
 			entityId: conv.id,
 			refCode: refOf(conv.id),
-			after: { direction: 'guest', preview: text.slice(0, 200) }
+			after: { direction: 'guest', chars: text.length }
 		});
 		await notifySupport(tx, {
 			hotelId: args.hotelId,
 			conversationId: conv.id,
-			kind: 'guest_message'
+			kind: 'guest_message',
+			assignedUserId: conv.assignedUserId
 		});
 	});
 }
@@ -486,12 +527,7 @@ export async function endConversationAsGuest(args: {
 			.update(c)
 			.set({ status: 'closed', closedAt: new Date(), updatedAt: new Date() })
 			.where(eq(c.id, conv.id));
-		await addMessage(tx, {
-			hotelId: args.hotelId,
-			conversationId: conv.id,
-			direction: 'system',
-			body: 'The guest ended the chat'
-		});
+		await purgeMessages(tx, conv.id);
 		await writeAudit({
 			tx,
 			hotelId: args.hotelId,
@@ -508,19 +544,48 @@ export async function endConversationAsGuest(args: {
 	await drainSupportQueue(args.hotelId);
 }
 
-/** The widget was opened: staff replies up to now count as seen. */
-export async function markStaffMessagesRead(hotelId: string, conversationId: string): Promise<void> {
-	await db
-		.update(m)
-		.set({ readAt: new Date() })
-		.where(
-			and(
-				eq(m.hotelId, hotelId),
-				eq(m.conversationId, conversationId),
-				eq(m.direction, 'staff'),
-				sql`${m.readAt} is null`
+/** The guest is looking at the chat: staff replies up to now count as seen. Announces `read` only when it changed something. */
+export async function markStaffMessagesRead(hotelId: string, conversationId: string): Promise<boolean> {
+	return db.transaction(async (tx) => {
+		const rows = await tx
+			.update(m)
+			.set({ readAt: new Date() })
+			.where(
+				and(
+					eq(m.hotelId, hotelId),
+					eq(m.conversationId, conversationId),
+					eq(m.direction, 'staff'),
+					sql`${m.readAt} is null`
+				)
 			)
-		);
+			.returning({ id: m.id });
+		if (rows.length === 0) return false;
+		await notifySupport(tx, { hotelId, conversationId, kind: 'read', actor: 'guest' });
+		return true;
+	});
+}
+
+/**
+ * "Is typing…" for the guest side. Nothing is stored; the NOTIFY goes straight to the streams. The
+ * conversation must belong to this visitor and still be live.
+ */
+export async function signalGuestTyping(args: {
+	hotelId: string;
+	tokenHash: string;
+	conversationId: string;
+}): Promise<void> {
+	const [conv] = await db
+		.select({ status: c.status })
+		.from(c)
+		.where(and(eq(c.id, args.conversationId), eq(c.hotelId, args.hotelId), eq(c.visitorTokenHash, args.tokenHash)))
+		.limit(1);
+	if (!conv || (conv.status !== 'queued' && conv.status !== 'open')) return;
+	await notifySupport(db, {
+		hotelId: args.hotelId,
+		conversationId: args.conversationId,
+		kind: 'typing',
+		actor: 'guest'
+	});
 }
 
 export async function listSupportFaqs(hotelId: string, opts: { includeInactive?: boolean } = {}) {
@@ -570,12 +635,17 @@ export async function listSupportConversations(hotelId: string, userId: string, 
 		.limit(100);
 }
 
-/** Counts for the sidebar badge and tab labels. `unread` = chats with an unread guest message. */
+/**
+ * Counts for the sidebar badge and tab labels. `unread` = chats with an unread guest message.
+ * NB: this is a single-table query, so Drizzle renders `${c.id}` WITHOUT its table name, and inside the
+ * subquery a bare "id" would bind to support_messages.id (always no match, so the badge stayed at 0).
+ * The correlated reference is therefore spelled out.
+ */
 export async function countSupportAttention(hotelId: string, userId: string) {
 	const [row] = await db
 		.select({
 			queued: sql<number>`count(*) filter (where ${c.status} in ('queued','offline_message'))::int`,
-			unreadMine: sql<number>`count(*) filter (where ${c.status} = 'open' and ${c.assignedUserId} = ${userId} and exists (select 1 from support_messages mm where mm.conversation_id = ${c.id} and mm.direction = 'guest' and mm.read_at is null))::int`
+			unreadMine: sql<number>`count(*) filter (where ${c.status} = 'open' and ${c.assignedUserId} = ${userId} and exists (select 1 from support_messages mm where mm.conversation_id = support_conversations.id and mm.direction = 'guest' and mm.read_at is null))::int`
 		})
 		.from(c)
 		.where(and(eq(c.hotelId, hotelId), inArray(c.status, ['queued', 'open', 'offline_message'])));
@@ -591,7 +661,8 @@ export async function getSupportConversation(hotelId: string, id: string) {
 				id: orders.id,
 				status: orders.status,
 				totalCentavos: orders.totalCentavos
-			}
+			},
+			previousChats: sql<number>`(select count(*)::int from support_conversations sc where sc.hotel_id = ${c.hotelId} and sc.visitor_token_hash = ${c.visitorTokenHash} and sc.id <> ${c.id})`
 		})
 		.from(c)
 		.leftJoin(users, eq(users.id, c.assignedUserId))
@@ -605,6 +676,7 @@ export async function getSupportConversation(hotelId: string, id: string) {
 			direction: m.direction,
 			body: m.body,
 			createdAt: m.createdAt,
+			readAt: m.readAt,
 			authorName: users.name
 		})
 		.from(m)
@@ -616,24 +688,54 @@ export async function getSupportConversation(hotelId: string, id: string) {
 		...conv.row,
 		assignedName: conv.assignedName,
 		order: conv.order?.id
-			? { code: conv.order.id.slice(0, 8).toUpperCase(), status: conv.order.status, totalCentavos: conv.order.totalCentavos }
+			? { id: conv.order.id, code: conv.order.id.slice(0, 8).toUpperCase(), status: conv.order.status, totalCentavos: conv.order.totalCentavos }
 			: null,
+		previousChats: conv.previousChats,
+		ref: refOf(conv.row.id),
 		messages
 	};
 }
 
-export async function markSupportThreadRead(hotelId: string, conversationId: string): Promise<void> {
-	await db
-		.update(m)
-		.set({ readAt: new Date() })
-		.where(
-			and(
-				eq(m.hotelId, hotelId),
-				eq(m.conversationId, conversationId),
-				eq(m.direction, 'guest'),
-				sql`${m.readAt} is null`
+/** Staff opened the thread: the guest's messages up to now are read (the guest sees "Seen"). True if anything changed. */
+export async function markSupportThreadRead(hotelId: string, conversationId: string, userId?: string): Promise<boolean> {
+	return db.transaction(async (tx) => {
+		const rows = await tx
+			.update(m)
+			.set({ readAt: new Date() })
+			.where(
+				and(
+					eq(m.hotelId, hotelId),
+					eq(m.conversationId, conversationId),
+					eq(m.direction, 'guest'),
+					sql`${m.readAt} is null`
+				)
 			)
-		);
+			.returning({ id: m.id });
+		if (rows.length === 0) return false;
+		await notifySupport(tx, { hotelId, conversationId, kind: 'read', actor: 'staff', userId });
+		return true;
+	});
+}
+
+/** "Is typing…" for the staff side: ephemeral, no write. */
+export async function signalStaffTyping(args: {
+	hotelId: string;
+	conversationId: string;
+	userId: string;
+}): Promise<void> {
+	const [conv] = await db
+		.select({ status: c.status })
+		.from(c)
+		.where(and(eq(c.id, args.conversationId), eq(c.hotelId, args.hotelId)))
+		.limit(1);
+	if (!conv || (conv.status !== 'queued' && conv.status !== 'open')) return;
+	await notifySupport(db, {
+		hotelId: args.hotelId,
+		conversationId: args.conversationId,
+		kind: 'typing',
+		actor: 'staff',
+		userId: args.userId
+	});
 }
 
 async function loadStaffConversation(tx: Tx, hotelId: string, id: string) {
@@ -726,6 +828,8 @@ export async function postSupportStaffMessage(args: {
 					updatedAt: new Date()
 				})
 				.where(eq(c.id, conv.id));
+			// The answer is in the email; the stored conversation is deleted like any closed chat.
+			await purgeMessages(tx, conv.id);
 		} else {
 			if (conv.assignedUserId !== args.actor.id) {
 				await tx
@@ -757,7 +861,7 @@ export async function postSupportStaffMessage(args: {
 			entityType: 'support_conversation',
 			entityId: conv.id,
 			refCode: refOf(conv.id),
-			after: { direction: 'staff', preview: text.slice(0, 200), byEmail: conv.status === 'offline_message' }
+			after: { direction: 'staff', chars: text.length, byEmail: conv.status === 'offline_message' }
 		});
 		await notifySupport(tx, {
 			hotelId: args.hotelId,
@@ -802,12 +906,7 @@ export async function closeSupportConversation(args: {
 				updatedAt: new Date()
 			})
 			.where(eq(c.id, conv.id));
-		await addMessage(tx, {
-			hotelId: args.hotelId,
-			conversationId: conv.id,
-			direction: 'system',
-			body: 'This chat was closed. Thanks for contacting us.'
-		});
+		await purgeMessages(tx, conv.id);
 		await writeAudit({
 			tx,
 			hotelId: args.hotelId,
@@ -959,11 +1058,91 @@ export async function deleteSupportFaq(args: {
 }
 
 // ---------------------------------------------------------------------------
+// Canned replies (staff inbox "/" picker)
+// ---------------------------------------------------------------------------
+
+export async function listSupportCannedReplies(hotelId: string, opts: { includeInactive?: boolean } = {}) {
+	return db
+		.select()
+		.from(supportCannedReplies)
+		.where(
+			and(
+				eq(supportCannedReplies.hotelId, hotelId),
+				opts.includeInactive ? undefined : eq(supportCannedReplies.isActive, true)
+			)
+		)
+		.orderBy(asc(supportCannedReplies.sortOrder), asc(supportCannedReplies.createdAt));
+}
+
+export async function saveSupportCannedReply(args: {
+	hotelId: string;
+	actor: Actor;
+	id?: string | null;
+	title: string;
+	body: string;
+	sortOrder: number;
+	isActive: boolean;
+}): Promise<void> {
+	const title = args.title.trim().slice(0, 60);
+	const body = args.body.trim().slice(0, SUPPORT_MAX_BODY);
+	if (!title || !body) throw new SupportError('A title and the reply text are both needed.');
+	await db.transaction(async (tx) => {
+		let id = args.id ?? null;
+		if (id) {
+			const res = await tx
+				.update(supportCannedReplies)
+				.set({ title, body, sortOrder: args.sortOrder, isActive: args.isActive, updatedAt: new Date() })
+				.where(and(eq(supportCannedReplies.id, id), eq(supportCannedReplies.hotelId, args.hotelId)))
+				.returning({ id: supportCannedReplies.id });
+			if (res.length === 0) throw new SupportError('That reply could not be found.', 'not_found');
+		} else {
+			const [row] = await tx
+				.insert(supportCannedReplies)
+				.values({ hotelId: args.hotelId, title, body, sortOrder: args.sortOrder, isActive: args.isActive })
+				.returning({ id: supportCannedReplies.id });
+			id = row!.id;
+		}
+		await writeAudit({
+			tx,
+			hotelId: args.hotelId,
+			actor: args.actor,
+			action: 'support_chat.canned_save',
+			entityType: 'support_canned_reply',
+			entityId: id,
+			after: { title, isActive: args.isActive }
+		});
+	});
+}
+
+export async function deleteSupportCannedReply(args: {
+	hotelId: string;
+	actor: Actor;
+	id: string;
+}): Promise<void> {
+	await db.transaction(async (tx) => {
+		const res = await tx
+			.delete(supportCannedReplies)
+			.where(and(eq(supportCannedReplies.id, args.id), eq(supportCannedReplies.hotelId, args.hotelId)))
+			.returning({ title: supportCannedReplies.title });
+		if (res.length === 0) return;
+		await writeAudit({
+			tx,
+			hotelId: args.hotelId,
+			actor: args.actor,
+			action: 'support_chat.canned_delete',
+			entityType: 'support_canned_reply',
+			entityId: args.id,
+			before: { title: res[0]!.title }
+		});
+	});
+}
+
+// ---------------------------------------------------------------------------
 // Background sweep (pg-boss, every minute)
 // ---------------------------------------------------------------------------
 
 /** Requeues chats whose agent vanished, closes abandoned ones, then hands out the queue. */
-export async function sweepSupportChats(): Promise<{ requeued: number; closed: number; assigned: number }> {
+export async function sweepSupportChats(): Promise<{ requeued: number; closed: number; assigned: number; purged: number }> {
 	const requeued = await db.execute<{ id: string; hotel_id: string }>(sql`
 		update support_conversations sc
 		set status = 'queued', assigned_user_id = null, updated_at = now()
@@ -989,25 +1168,41 @@ export async function sweepSupportChats(): Promise<{ requeued: number; closed: n
 	const closedRows = await db.execute<{ id: string; hotel_id: string }>(sql`
 		update support_conversations sc
 		set status = 'closed', closed_at = now(), updated_at = now()
-		where sc.status in ('queued', 'open')
-		  and sc.last_message_at < now() - ${sql.raw(`interval '${IDLE_CLOSE_MINUTES} minutes'`)}
+		where (
+			(sc.status = 'open' and sc.last_message_at < now() - ${sql.raw(`interval '${IDLE_CLOSE_MINUTES} minutes'`)})
+			or (sc.status = 'queued' and sc.last_message_at < now() - ${sql.raw(`interval '${QUEUE_IDLE_HOURS} hours'`)})
+		)
 		returning sc.id, sc.hotel_id`);
 	for (const r of closedRows) {
 		await db.transaction(async (tx) => {
-			await addMessage(tx, {
+			await purgeMessages(tx, r.id);
+			await writeAudit({
+				tx,
 				hotelId: r.hotel_id,
-				conversationId: r.id,
-				direction: 'system',
-				body: 'This chat was closed because it was idle.'
+				actor: null,
+				actorKind: 'system',
+				action: 'support_chat.close',
+				entityType: 'support_conversation',
+				entityId: r.id,
+				refCode: refOf(r.id),
+				after: { by: 'idle_sweep' }
 			});
 			await notifySupport(tx, { hotelId: r.hotel_id, conversationId: r.id, kind: 'status' });
 		});
 	}
+
+	// Safety net: whatever way a conversation was closed (or was closed before this rule existed), no
+	// message survives it.
+	const purged = await db.execute<{ id: string }>(sql`
+		delete from support_messages sm
+		using support_conversations sc
+		where sm.conversation_id = sc.id and sc.status = 'closed'
+		returning sm.id`);
 
 	const hotelIds = await db.execute<{ hotel_id: string }>(
 		sql`select distinct hotel_id from support_conversations where status = 'queued'`
 	);
 	let assigned = 0;
 	for (const h of hotelIds) assigned += await drainSupportQueue(h.hotel_id);
-	return { requeued: requeued.length, closed: closedRows.length, assigned };
+	return { requeued: requeued.length, closed: closedRows.length, assigned, purged: purged.length };
 }

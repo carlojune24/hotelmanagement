@@ -1,20 +1,32 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { deserialize, enhance } from '$app/forms';
-	import { invalidate } from '$app/navigation';
+	import { getContext, tick } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
+	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import MailIcon from '@lucide/svelte/icons/mail';
+	import BellIcon from '@lucide/svelte/icons/bell';
+	import BellRingIcon from '@lucide/svelte/icons/bell-ring';
+	import Volume2Icon from '@lucide/svelte/icons/volume-2';
+	import VolumeXIcon from '@lucide/svelte/icons/volume-x';
+	import CheckCheckIcon from '@lucide/svelte/icons/check-check';
+	import ZapIcon from '@lucide/svelte/icons/zap';
 	import { relativeTime } from '$lib/dining-messages';
-	import { playTone, readSoundPref, unlockOnFirstTouch } from '$lib/staff-sound';
+	import { fillCanned } from '$lib/support-canned';
+	import type { SupportLive } from '$lib/support-live.svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
+	/** The staff app's live line to Support (opened by the management layout on every page). */
+	const live = getContext<SupportLive>('support-live');
+
 	const base = $derived(`/${page.params.hotel}/management/support`);
+	const bookingHref = (orderId: string) => `/${page.params.hotel}/management/transactions/${orderId}`;
 	const peso = (c: number) =>
 		`₱${(c / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -40,31 +52,35 @@
 				? 'bg-warning/15 text-ink'
 				: 'bg-surface-2 text-ink-muted';
 
-	// Canned replies: one tap drops the text into the box so it can still be edited.
-	const CANNED = [
-		'Thanks for reaching out. Let me check that for you.',
-		'Our check-in is from 2:00 PM and check-out is by 12:00 noon.',
-		'You can pay online with GCash, Maya, card or QR Ph when you confirm your booking.',
-		'Is there anything else I can help you with?'
-	];
-
 	let draft = $state('');
 	let sending = $state(false);
 	let nowMs = $state(Date.now());
-	let agentOn = $state(data.agent.available);
-	let live = $state(false);
-	let soundOn = $state(true);
 	let scroller: HTMLDivElement | undefined = $state();
+	let replyBox: HTMLTextAreaElement | null = $state(null);
+	let takeOverOpen = $state(false);
+	let cannedOpen = $state(false);
+	let cannedIndex = $state(0);
+	let tabVisible = $state(true);
 
-	$effect(() => {
-		agentOn = data.agent.available;
-	});
+	// What the agent sees: the live line's report, falling back to the page's own read before it connects.
+	const agentOn = $derived(live.available ?? data.agent.available);
 
 	const selected = $derived(data.conversations.find((c) => c.id === data.selectedId) ?? null);
 	const detail = $derived(data.detail);
 	const isOffline = $derived(detail?.status === 'offline_message');
 	const isClosed = $derived(detail?.status === 'closed');
 	const mineNow = $derived(detail?.assignedUserId === data.currentUserId);
+	const guestTyping = $derived(live.isTyping(detail?.id));
+
+	/** The newest of this agent's messages the guest has read: the one that gets "Seen". */
+	const seenMessageId = $derived.by(() => {
+		const msgs = detail?.messages ?? [];
+		for (let i = msgs.length - 1; i >= 0; i--) {
+			const m = msgs[i]!;
+			if (m.direction === 'staff' && m.readAt) return m.id;
+		}
+		return null;
+	});
 
 	const href = (id: string | null, tab: string = data.tab) => {
 		const p = new URLSearchParams();
@@ -83,51 +99,128 @@
 			timeZone: data.timezone
 		}).format(new Date(iso));
 
+	/** Posts a form action without navigating (for the small background calls: read, typing). */
+	async function postAction(name: string, fields: Record<string, string>) {
+		const body = new FormData();
+		for (const [k, v] of Object.entries(fields)) body.set(k, v);
+		try {
+			const res = await fetch(`${base}?/${name}`, {
+				method: 'POST',
+				headers: { 'x-sveltekit-action': 'true' },
+				body
+			});
+			return deserialize(await res.text());
+		} catch {
+			return null; // offline for a moment; the next call retries
+		}
+	}
+
 	// Keep the thread pinned to its newest message.
 	$effect(() => {
 		void detail?.messages.length;
+		void guestTyping;
 		if (scroller) scroller.scrollTop = scroller.scrollHeight;
 	});
 
-	// Live updates: the server pings on every change and the page re-reads its own data.
+	// Live updates: the shared stream pings on every change and this page re-reads its own data.
+	$effect(() =>
+		live.onChange(() => {
+			void invalidateSupport();
+		})
+	);
+	async function invalidateSupport() {
+		const { invalidate } = await import('$app/navigation');
+		await invalidate('app:support');
+	}
+
 	$effect(() => {
-		soundOn = readSoundPref('mm:support-sound');
-		const stopUnlock = unlockOnFirstTouch();
-		const es = new EventSource(`${base}/stream`);
-		es.addEventListener('ready', () => (live = true));
-		es.addEventListener('change', (e) => {
-			const { kind } = JSON.parse((e as MessageEvent).data) as { kind: string };
-			void invalidate('app:support');
-			void invalidate('app:staff-badges');
-			if (soundOn && (kind === 'new_conversation' || kind === 'guest_message')) playTone('ticket', 2);
-		});
-		es.onerror = () => (live = false);
 		const tick = setInterval(() => (nowMs = Date.now()), 30_000);
+		const onVis = () => (tabVisible = !document.hidden);
+		document.addEventListener('visibilitychange', onVis);
+		onVis();
 		return () => {
-			es.close();
-			stopUnlock();
 			clearInterval(tick);
+			document.removeEventListener('visibilitychange', onVis);
 		};
 	});
 
-	// Heartbeat: an open inbox tab is what keeps an available agent "online" for routing.
+	// "Seen": once the thread is actually on screen, the guest's messages are marked read (and the guest is told).
+	// Done here, not in the page load, so a live reload never rewrites them.
+	let markedKey = '';
 	$effect(() => {
-		const beat = async () => {
-			try {
-				const res = await fetch(`${base}?/heartbeat`, {
-					method: 'POST',
-					headers: { 'x-sveltekit-action': 'true' },
-					body: new FormData()
-				});
-				const result = deserialize(await res.text());
-				if (result.type === 'success' && result.data?.available === true) agentOn = true;
-			} catch {
-				/* offline for a moment; the next beat retries */
-			}
-		};
-		const t = setInterval(beat, 15_000);
-		return () => clearInterval(t);
+		const d = detail;
+		if (!d || !tabVisible) return;
+		const unread = d.messages.filter((m) => m.direction === 'guest' && !m.readAt).length;
+		if (unread === 0) {
+			markedKey = '';
+			return;
+		}
+		const key = `${d.id}:${unread}`;
+		if (key === markedKey) return;
+		markedKey = key;
+		void postAction('read', { conversationId: d.id });
 	});
+
+	// "Typing…" for the guest: at most one signal every 2.5 s, never for an emailed (offline) reply.
+	let lastTypingAt = 0;
+	function signalTyping() {
+		if (!detail || isOffline || isClosed) return;
+		const now = Date.now();
+		if (now - lastTypingAt < 2500) return;
+		lastTypingAt = now;
+		void postAction('typing', { conversationId: detail.id });
+	}
+
+	// ---- canned replies: type "/" to search, or open the list
+	const slashQuery = $derived(draft.startsWith('/') && !draft.includes('\n') ? draft.slice(1).trim().toLowerCase() : null);
+	const cannedShown = $derived(
+		data.canned.filter((r) => {
+			if (slashQuery === null || slashQuery === '') return true;
+			return r.title.toLowerCase().includes(slashQuery) || r.body.toLowerCase().includes(slashQuery);
+		})
+	);
+	const pickerOpen = $derived(cannedOpen || slashQuery !== null);
+	$effect(() => {
+		void cannedShown.length;
+		cannedIndex = 0;
+	});
+	function useCanned(r: { body: string }) {
+		draft = fillCanned(r.body, {
+			guest: detail?.guestName?.split(/\s+/)[0] ?? 'there',
+			...data.cannedContext
+		});
+		cannedOpen = false;
+		void tick().then(() => replyBox?.focus());
+	}
+	function onReplyKeydown(e: KeyboardEvent) {
+		if (e.isComposing) return;
+		if (pickerOpen && cannedShown.length > 0) {
+			if (e.key === 'ArrowDown') {
+				e.preventDefault();
+				cannedIndex = (cannedIndex + 1) % cannedShown.length;
+				return;
+			}
+			if (e.key === 'ArrowUp') {
+				e.preventDefault();
+				cannedIndex = (cannedIndex - 1 + cannedShown.length) % cannedShown.length;
+				return;
+			}
+			if (e.key === 'Enter' && slashQuery !== null) {
+				e.preventDefault();
+				useCanned(cannedShown[cannedIndex]!);
+				return;
+			}
+		}
+		if (e.key === 'Escape' && pickerOpen) {
+			cannedOpen = false;
+			if (slashQuery !== null) draft = '';
+			return;
+		}
+		if (e.key === 'Enter' && !e.shiftKey && draft.trim()) {
+			e.preventDefault();
+			(e.currentTarget as HTMLTextAreaElement).form?.requestSubmit();
+		}
+	}
 
 	$effect(() => {
 		if (form && 'error' in form && form.error) toast.error(form.error);
@@ -158,22 +251,56 @@
 
 		<div class="ml-auto flex flex-wrap items-center gap-3">
 			{#if data.canManage}
+				<a href="{base}/replies" class="text-sm text-brand underline underline-offset-2">Canned replies</a>
 				<a href="{base}/faq" class="text-sm text-brand underline underline-offset-2">Edit FAQ</a>
 			{/if}
+			<button
+				type="button"
+				class="inline-flex size-9 items-center justify-center rounded-full border border-border text-ink-muted hover:text-ink"
+				aria-pressed={live.soundOn}
+				aria-label={live.soundOn ? 'Mute new-chat sound' : 'Turn on new-chat sound'}
+				title={live.soundOn ? 'New-chat sound is on' : 'New-chat sound is off'}
+				onclick={() => live.toggleSound()}
+			>
+				{#if live.soundOn}<Volume2Icon class="size-4" aria-hidden="true" />{:else}<VolumeXIcon class="size-4" aria-hidden="true" />{/if}
+			</button>
+			{#if live.notifications === 'default'}
+				<button
+					type="button"
+					class="inline-flex h-9 items-center gap-1.5 rounded-full border border-border px-3 text-sm text-ink-muted hover:text-ink"
+					title="Get a desktop notification for new chats while this tab is in the background"
+					onclick={() => live.enableNotifications()}
+				>
+					<BellIcon class="size-4" aria-hidden="true" /> Enable alerts
+				</button>
+			{:else if live.notifications === 'granted'}
+				<span class="inline-flex items-center gap-1 text-xs text-ink-muted" title="Desktop notifications are on"><BellRingIcon class="size-4" aria-hidden="true" /> Alerts on</span>
+			{/if}
 			<span class="inline-flex items-center gap-1.5 text-xs text-ink-muted" title="Live connection to the guest chat">
-				<span class="size-2 rounded-full {live ? 'bg-success' : 'bg-border'}" aria-hidden="true"></span>
-				{live ? 'Live' : 'Reconnecting…'}
+				<span class="size-2 rounded-full {live.connected ? 'bg-success' : 'bg-border'}" aria-hidden="true"></span>
+				{live.connected ? 'Live' : 'Reconnecting…'}
 			</span>
 			<form
 				method="POST"
 				action="?/available"
-				use:enhance={() => {
-					return async ({ update }) => {
+				use:enhance={({ formData }) => {
+					// Decide the target from the state NOW and send exactly that; flipping the button's own state
+					// first used to make the form post the old value, so nothing ever changed.
+					const target = !agentOn;
+					formData.set('available', target ? '1' : '0');
+					const before = live.available;
+					live.available = target;
+					return async ({ result, update }) => {
+						if (result.type === 'success' && result.data && 'available' in result.data) {
+							live.available = Boolean(result.data.available);
+						} else {
+							live.available = before;
+							toast.error('Could not change your availability. Please try again.');
+						}
 						await update({ reset: false });
 					};
 				}}
 			>
-				<input type="hidden" name="available" value={agentOn ? '0' : '1'} />
 				<button
 					type="submit"
 					role="switch"
@@ -181,7 +308,6 @@
 					class="inline-flex h-9 items-center gap-2 rounded-full border px-3 text-sm {agentOn
 						? 'border-success bg-success/15 font-medium text-ink'
 						: 'border-border text-ink-muted hover:text-ink'}"
-					onclick={() => (agentOn = !agentOn)}
 				>
 					<span class="size-2.5 rounded-full {agentOn ? 'bg-success' : 'bg-ink-muted/40'}" aria-hidden="true"></span>
 					{agentOn ? "I'm available" : "I'm away"}
@@ -192,7 +318,7 @@
 
 	{#if !agentOn}
 		<p class="mb-4 rounded-lg border border-border bg-surface-2/60 px-4 py-2.5 text-sm text-ink-muted">
-			You are away, so new chats won't be assigned to you. Switch on <strong class="text-ink">I'm available</strong> and keep this page open to take chats.
+			You are away, so new chats won't be assigned to you. Switch on <strong class="text-ink">I'm available</strong> to take chats. You stay available on every staff page while this browser tab is open.
 		</p>
 	{/if}
 
@@ -200,7 +326,7 @@
 		<div class="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border p-12 text-center">
 			<MessageSquareIcon class="size-6 text-ink-muted" aria-hidden="true" />
 			<p class="text-sm text-ink-muted">
-				{data.tab === 'closed' ? 'No closed chats yet.' : 'No chats right now. When a guest writes in, it appears here.'}
+				{data.tab === 'closed' ? 'No closed chats yet. A chat\'s messages are deleted when it closes.' : 'No chats right now. When a guest writes in, it appears here, even while nobody is online.'}
 			</p>
 		</div>
 	{:else}
@@ -228,7 +354,11 @@
 										{#if c.orderCode}<span class="font-mono text-ink-muted">{c.orderCode}</span>{/if}
 									</span>
 									<span class="mt-1 flex items-center gap-2">
-										<span class="min-w-0 flex-1 truncate text-sm {c.unread > 0 ? 'text-ink' : 'text-ink-muted'}">{c.preview ?? 'No messages yet'}</span>
+										{#if live.isTyping(c.id)}
+											<span class="min-w-0 flex-1 truncate text-sm italic text-brand">typing…</span>
+										{:else}
+											<span class="min-w-0 flex-1 truncate text-sm {c.unread > 0 ? 'text-ink' : 'text-ink-muted'}">{c.preview ?? (c.status === 'closed' ? 'Messages deleted' : 'No messages yet')}</span>
+										{/if}
 										{#if c.unread > 0}
 											<span class="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-brand px-1.5 text-[11px] font-semibold tabular-nums text-brand-ink" aria-label="{c.unread} unread">{c.unread}</span>
 										{/if}
@@ -256,6 +386,10 @@
 							<div class="flex flex-wrap items-center gap-2">
 								<h2 class="text-base font-semibold text-ink">{detail.guestName ?? 'Guest'}</h2>
 								<span class="rounded px-1.5 py-0.5 text-xs font-semibold {statusClass(detail.status)}">{STATUS_LABEL[detail.status]}</span>
+								<span class="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-ink-muted" title="This chat's unique ID">{detail.ref}</span>
+								{#if detail.previousChats > 0}
+									<span class="rounded bg-surface-2 px-1.5 py-0.5 text-xs text-ink-muted" title="Chats this guest started before">Returning guest · {detail.previousChats} earlier</span>
+								{/if}
 							</div>
 							{#if detail.guestEmail}
 								<a href="mailto:{detail.guestEmail}" class="mt-1 inline-flex items-center gap-1 text-sm text-ink-muted underline-offset-2 hover:underline">
@@ -266,17 +400,25 @@
 								<div class="flex justify-between gap-3"><dt class="text-ink-muted">Started</dt><dd>{stamp(detail.createdAt)}</dd></div>
 								<div class="flex justify-between gap-3"><dt class="text-ink-muted">Agent</dt><dd>{detail.assignedName ? (mineNow ? 'You' : detail.assignedName) : 'Nobody yet'}</dd></div>
 								{#if detail.order}
-									<div class="flex justify-between gap-3"><dt class="text-ink-muted">Booking</dt><dd class="font-mono">{detail.order.code}</dd></div>
+									<div class="flex justify-between gap-3">
+										<dt class="text-ink-muted">Booking</dt>
+										<dd><a href={bookingHref(detail.order.id)} class="font-mono text-brand underline underline-offset-2">{detail.order.code}</a></dd>
+									</div>
 									<div class="flex justify-between gap-3"><dt class="text-ink-muted">Booking status</dt><dd class="capitalize">{detail.order.status.replace('_', ' ')} · {peso(detail.order.totalCentavos)}</dd></div>
 								{/if}
 							</dl>
 							{#if !isClosed}
 								<div class="mt-3 flex flex-wrap gap-2">
 									{#if !mineNow && !isOffline}
-										<form method="POST" action="?/claim" use:enhance>
-											<input type="hidden" name="conversationId" value={detail.id} />
-											<Button type="submit" size="sm">{detail.assignedUserId ? 'Take over' : 'Take this chat'}</Button>
-										</form>
+										{#if detail.assignedUserId}
+											<!-- Taking a colleague's live chat is a hand-over: ask first. -->
+											<Button type="button" size="sm" onclick={() => (takeOverOpen = true)}>Take over</Button>
+										{:else}
+											<form method="POST" action="?/claim" use:enhance>
+												<input type="hidden" name="conversationId" value={detail.id} />
+												<Button type="submit" size="sm">Take this chat</Button>
+											</form>
+										{/if}
 									{/if}
 									<form method="POST" action="?/close" use:enhance>
 										<input type="hidden" name="conversationId" value={detail.id} />
@@ -286,30 +428,40 @@
 							{/if}
 						</div>
 
-						<div bind:this={scroller} class="max-h-[50vh] min-h-48 space-y-3 overflow-y-auto px-5 py-4" aria-live="polite">
+						<div bind:this={scroller} class="h-[clamp(14rem,calc(100dvh-30rem),38rem)] space-y-3 overflow-y-auto px-5 py-4" aria-live="polite">
 							{#each detail.messages as m (m.id)}
 								{#if m.direction === 'system'}
 									<p class="text-center text-xs text-ink-muted">{m.body}</p>
 								{:else}
-									<div class="flex {m.direction === 'staff' ? 'justify-end' : 'justify-start'}">
+									<div class="flex flex-col {m.direction === 'staff' ? 'items-end' : 'items-start'}">
 										<div class="max-w-[85%] rounded-lg px-3 py-2 text-sm {m.direction === 'staff' ? 'bg-brand/10 text-ink' : 'bg-surface-2 text-ink'}">
 											<p class="whitespace-pre-line">{m.body}</p>
 											<p class="mt-1 text-[11px] text-ink-muted">
 												{m.direction === 'staff' ? (m.authorName ?? 'Staff') : (detail.guestName ?? 'Guest')} · {stamp(m.createdAt)}
 											</p>
 										</div>
+										{#if m.id === seenMessageId}
+											<p class="mt-0.5 inline-flex items-center gap-1 text-[11px] text-ink-muted">
+												<CheckCheckIcon class="size-3.5 text-brand" aria-hidden="true" /> Seen {m.readAt ? stamp(m.readAt) : ''}
+											</p>
+										{/if}
 									</div>
 								{/if}
 							{/each}
+							{#if guestTyping}
+								<div class="flex justify-start" aria-live="polite">
+									<p class="rounded-lg bg-surface-2 px-3 py-2 text-sm italic text-ink-muted">{detail.guestName ?? 'The guest'} is typing…</p>
+								</div>
+							{/if}
 						</div>
 
 						{#if isClosed}
-							<p class="border-t border-border px-5 py-4 text-sm text-ink-muted">This chat is closed.</p>
+							<p class="border-t border-border px-5 py-4 text-sm text-ink-muted">This chat is closed. Its messages were deleted when it ended; this record keeps only who, when and the booking.</p>
 						{:else}
 							<form
 								method="POST"
 								action="?/reply"
-								class="space-y-2 border-t border-border px-5 py-4"
+								class="relative space-y-2 border-t border-border px-5 py-4"
 								use:enhance={() => {
 									sending = true;
 									return async ({ result, update }) => {
@@ -320,27 +472,55 @@
 								}}
 							>
 								<input type="hidden" name="conversationId" value={detail.id} />
-								<div class="flex flex-wrap gap-1.5">
-									{#each CANNED as text (text)}
-										<button
-											type="button"
-											class="max-w-full truncate rounded-full border border-border px-2.5 py-1 text-xs text-ink-muted hover:text-ink"
-											onclick={() => (draft = draft ? `${draft} ${text}` : text)}
-										>{text}</button>
-									{/each}
+
+								{#if pickerOpen}
+									<div class="absolute inset-x-5 bottom-[calc(100%-3.25rem)] z-10 max-h-56 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-lg" role="listbox" aria-label="Canned replies">
+										{#each cannedShown as r, i (r.id)}
+											<button
+												type="button"
+												role="option"
+												aria-selected={i === cannedIndex}
+												class="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-2 {i === cannedIndex ? 'bg-surface-2' : ''}"
+												onclick={() => useCanned(r)}
+											>
+												<span class="block font-medium text-ink">{r.title}</span>
+												<span class="block truncate text-xs text-ink-muted">{fillCanned(r.body, { guest: detail.guestName?.split(/\s+/)[0] ?? 'there', ...data.cannedContext })}</span>
+											</button>
+										{:else}
+											<p class="px-3 py-2 text-sm text-ink-muted">
+												{data.canned.length === 0 ? 'No canned replies yet.' : 'No reply matches.'}
+												{#if data.canManage && data.canned.length === 0}<a href="{base}/replies" class="text-brand underline">Add some</a>{/if}
+											</p>
+										{/each}
+									</div>
+								{/if}
+
+								<div class="flex items-center justify-between gap-2">
+									<button
+										type="button"
+										class="inline-flex h-8 items-center gap-1.5 rounded-full border border-border px-3 text-xs text-ink-muted hover:text-ink"
+										aria-expanded={pickerOpen}
+										onclick={() => (cannedOpen = !cannedOpen)}
+									>
+										<ZapIcon class="size-3.5" aria-hidden="true" /> Quick replies
+									</button>
+									<span class="text-xs text-ink-muted">Type <kbd class="rounded border border-border px-1">/</kbd> to search</span>
 								</div>
 								<Textarea
 									name="body"
 									bind:value={draft}
+									bind:ref={replyBox}
 									rows={2}
 									maxlength={1000}
 									placeholder={isOffline ? `Reply to ${detail.guestName ?? 'the guest'} by email` : `Reply to ${detail.guestName ?? 'the guest'}`}
 									aria-label="Reply to the guest"
 									class="min-h-0"
+									oninput={signalTyping}
+									onkeydown={onReplyKeydown}
 								/>
 								<div class="flex items-center justify-between gap-3">
 									<p class="text-xs text-ink-muted">
-										{isOffline ? 'Sent to their email address, then the message is closed.' : 'Appears in the guest\'s chat window straight away.'}
+										{isOffline ? 'Sent to their email address, then the message is closed.' : 'Enter sends, Shift+Enter adds a line. Appears in the guest\'s chat window straight away.'}
 									</p>
 									<Button type="submit" disabled={sending || !draft.trim()}>{sending ? 'Sending…' : 'Send reply'}</Button>
 								</div>
@@ -352,3 +532,22 @@
 		</div>
 	{/if}
 </div>
+
+<!-- Taking over a colleague's live chat -->
+<Dialog.Root bind:open={takeOverOpen}>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>Take over this chat?</Dialog.Title>
+			<Dialog.Description>
+				{detail?.assignedName ?? 'A colleague'} is talking with {detail?.guestName ?? 'this guest'}. If you take over, the chat moves to you and the guest sees that you joined.
+			</Dialog.Description>
+		</Dialog.Header>
+		<Dialog.Footer>
+			<Button type="button" variant="outline" onclick={() => (takeOverOpen = false)}>Keep it with {detail?.assignedName ?? 'them'}</Button>
+			<form method="POST" action="?/claim" use:enhance={() => async ({ update }) => { takeOverOpen = false; await update({ reset: false }); }}>
+				<input type="hidden" name="conversationId" value={detail?.id ?? ''} />
+				<Button type="submit">Take over</Button>
+			</form>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>
