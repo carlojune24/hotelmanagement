@@ -44,6 +44,31 @@ const updateSchema = z.object({
 	sortOrder: z.coerce.number().int().min(0).max(999)
 });
 
+const FIELD_LABEL: Record<string, string> = {
+	title: 'Title',
+	category: 'Venue type',
+	tagline: 'Tagline',
+	description: 'Description',
+	highlights: 'Highlights',
+	operatingHours: 'Operating hours',
+	sortOrder: 'Sort order'
+};
+
+/** Names the field and the limit ("Tagline is too long: 173 characters, the most is 160.") instead of a generic failure. */
+function describeIssue(error: z.ZodError, raw: Record<string, unknown>): string {
+	const issue = error.issues[0];
+	if (!issue) return 'Check the dining item details and try again.';
+	const key = String(issue.path[0] ?? '');
+	const label = FIELD_LABEL[key] ?? 'A field';
+	if (issue.code === 'too_big' && typeof issue.maximum === 'number' && typeof raw[key] === 'string') {
+		return `${label} is too long: ${(raw[key] as string).length} characters, the most is ${issue.maximum}.`;
+	}
+	if (issue.code === 'too_small' && typeof issue.minimum === 'number') {
+		return `${label} is too short: it needs at least ${issue.minimum} characters.`;
+	}
+	return `Check the ${label.toLowerCase()} and try again.`;
+}
+
 /** Textarea → `string[]`: one highlight per non-blank line, capped at 6 — a venue
  *  card has room for a short list, not a second description. */
 function parseHighlights(raw: string | undefined): string[] {
@@ -237,7 +262,7 @@ export const actions: Actions = {
 
 		const raw = Object.fromEntries(await event.request.formData());
 		const parsed = updateSchema.safeParse({ ...raw, isActive: raw.isActive === 'on' });
-		if (!parsed.success) return fail(400, { error: 'Check the dining item details and try again.' });
+		if (!parsed.success) return fail(400, { error: describeIssue(parsed.error, raw) });
 
 		await db
 			.update(diningItems)

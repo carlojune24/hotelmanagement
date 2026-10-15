@@ -105,11 +105,12 @@
 			<Input
 				id="tagline"
 				name="tagline"
+				maxlength={160}
 				placeholder="Local & international cuisine, all day."
 				value={item.tagline ?? ''}
 				class="mt-1"
 			/>
-			<p class="mt-1 text-xs text-ink-muted">A one-line pitch shown under the title.</p>
+			<p class="mt-1 text-xs text-ink-muted">A one-line pitch shown under the title (up to 160 characters). Longer text belongs in the Description.</p>
 		</div>
 		<div>
 			<Label for="description">Description</Label>
