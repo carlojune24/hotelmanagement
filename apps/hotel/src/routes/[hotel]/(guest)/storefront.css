@@ -871,6 +871,84 @@ html:has(.woven-ledger) {
 	font-size: 0.9375rem;
 	color: var(--ledger-ink-muted);
 }
+/* ---- a room card's own date picker: opens right inside the room, never sends the guest up to the hero ---- */
+.woven-ledger .sf-room {
+	scroll-margin-top: 9.75rem;
+}
+.woven-ledger .sf-roompick {
+	display: grid;
+	grid-column: 1 / -1;
+	gap: 0.875rem;
+	margin-top: 0.25rem;
+	padding: 1.125rem 1.25rem 1.25rem;
+	background: var(--ledger-paper-2);
+	border: 1px solid var(--ledger-rule);
+	border-radius: 12px;
+	animation: sf-rise 0.35s var(--sf-ease) both;
+}
+.woven-ledger .sf-roompick-title {
+	font-family: var(--ledger-font-display);
+	font-size: 1.125rem;
+	font-weight: 500;
+	color: var(--ledger-ink);
+}
+.woven-ledger .sf-roompick .picker .trigger {
+	background: var(--ledger-paper);
+	border-color: var(--ledger-rule);
+	border-radius: 10px;
+}
+.woven-ledger .sf-roompick-guests {
+	display: grid;
+	gap: 0 2rem;
+	background: var(--ledger-paper);
+	border: 1px solid var(--ledger-rule);
+	border-radius: 10px;
+	padding: 0 1rem;
+}
+.woven-ledger .sf-roompick-guests .storefront-stepper-row:last-of-type {
+	border-bottom: none;
+}
+@media (min-width: 640px) {
+	.woven-ledger .sf-roompick-guests {
+		grid-template-columns: 1fr 1fr;
+	}
+	.woven-ledger .sf-roompick-guests .storefront-stepper-row {
+		border-bottom: none;
+	}
+}
+.woven-ledger .sf-roompick-note {
+	font-size: 0.8125rem;
+	color: var(--ledger-ink-muted);
+}
+.woven-ledger .sf-roompick-note.is-warn {
+	color: var(--hotel-accent-deep);
+}
+.woven-ledger .sf-roompick-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.75rem 1.25rem;
+}
+.woven-ledger .sf-room--stay > .sf-roompick {
+	margin: 0 clamp(1.25rem, 3vw, 2rem) 1.25rem;
+}
+@media (min-width: 720px) {
+	.woven-ledger .sf-roompick {
+		grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+		align-items: start;
+	}
+	.woven-ledger .sf-roompick-title,
+	.woven-ledger .sf-roompick-note,
+	.woven-ledger .sf-roompick-actions {
+		grid-column: 1 / -1;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.woven-ledger .sf-roompick {
+		animation: none;
+	}
+}
+
 /* ---- dated room card: the room on top, then "Choose a rate" ---- */
 .woven-ledger .sf-rooms:has(.sf-room--stay) {
 	gap: clamp(1.25rem, 3vw, 2rem);

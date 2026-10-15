@@ -110,6 +110,19 @@
 		void goto(`/${slug}/details`);
 	}
 
+	/** A room card's own "Check dates & price": same search as the booking bar, then back to THAT room. */
+	async function searchForRoom(roomId: string) {
+		if (!checkIn || !checkOut) return;
+		const q = new URLSearchParams({
+			checkIn,
+			checkOut,
+			adults: String(adults),
+			children: String(children)
+		});
+		await goto(`/${slug}?${q}`, { keepFocus: true, noScroll: true, invalidateAll: true });
+		document.getElementById(`room-${roomId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
+
 	/** Opens the booking bar's calendar — the docked bar in the hero, or the sticky one once scrolled. */
 	function pickDates() {
 		// Let the quick-view sheet finish closing first, so it doesn't swallow the calendar's focus.
@@ -411,10 +424,16 @@
 							{search}
 							live={liveById.get(rt.id) ?? null}
 							stockTonight={data.stockByRoomType[rt.id] ?? null}
+							days={data.dayAvailabilityByRoomType[rt.id] ?? data.dayAvailability}
+							today={data.today}
+							bind:checkIn
+							bind:checkOut
+							bind:adults
+							bind:children
+							onSearch={() => searchForRoom(rt.id)}
 							{stayQuery}
 							onQuickView={openQuickView}
 							onReserve={reserve}
-							onPickDates={pickDates}
 						/>
 					{/each}
 				</div>

@@ -43,6 +43,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		today,
 		/** One entry per night for the next year: free / few left / full. */
 		dayAvailability: availability.days,
+		/** The same, per room type: a room card's own calendar crosses out the nights THAT room is sold out. */
+		dayAvailabilityByRoomType: availability.daysByRoomType,
 		/** Per room type: rooms that exist and rooms free tonight, for the room cards. */
 		stockByRoomType: availability.stockByRoomType,
 		/** The guest's searched stay and what is bookable for it; null when no valid dates were given. */
