@@ -28,6 +28,13 @@ const KITCHEN_PW = process.env.SEED_KITCHEN_PASSWORD ?? 'kitchen12345';
 const DINING_EMAIL = (process.env.SEED_DINING_EMAIL ?? 'dining@example.com').toLowerCase();
 const DINING_PW = process.env.SEED_DINING_PASSWORD ?? 'dining12345';
 const HOTEL_SLUG = process.env.SEED_HOTEL_SLUG ?? 'hotel1';
+// Server seed: accounts + hotel + roles only, no demo rooms/rates, and no default passwords.
+const MINIMAL = process.env.SEED_MINIMAL === '1';
+if (MINIMAL) {
+	for (const k of ['ADMIN', 'MANAGER', 'KITCHEN', 'DINING']) {
+		if (!process.env[`SEED_${k}_PASSWORD`]) throw new Error(`SEED_MINIMAL needs SEED_${k}_PASSWORD`);
+	}
+}
 
 async function upsertUser(input: {
 	email: string;
@@ -381,7 +388,7 @@ async function main() {
 
 	await seedHotelAmenities(db, hotel.id);
 	await seedHotelAmenityLinks(hotel.id);
-	await seedInventory(hotel.id);
+	if (!MINIMAL) await seedInventory(hotel.id);
 	await seedFinance(hotel.id);
 
 	console.log('Seed complete:');

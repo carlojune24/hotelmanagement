@@ -21,7 +21,8 @@
 		"db:seed": "tsx src/lib/server/db/seed.ts",
 		"dev:tunnel": "node scripts/dev-tunnel.mjs cloudflare",
 		"dev:tunnel:ngrok": "node scripts/dev-tunnel.mjs ngrok",
-		"start:tunnel": "node scripts/serve-prod.mjs"
+		"start:tunnel": "node scripts/serve-prod.mjs",
+		"deploy:hotel": "bash scripts/deploy.sh"
 	},
 	"dependencies": {
 		"@fontsource-variable/cormorant-garamond": "^5.3.0",
