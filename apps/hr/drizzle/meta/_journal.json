@@ -162,6 +162,13 @@
       "when": 1791964275584,
       "tag": "0022_cost_centers",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1792025250522,
+      "tag": "0023_absence_notes",
+      "breakpoints": true
     }
   ]
 }

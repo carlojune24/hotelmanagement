@@ -153,6 +153,10 @@ describe.skipIf(!hasDb)('establishment dashboard (live DB)', async () => {
 		const early = await D.getDashboard(abs, `${tag}-abs`, today, 'Asia/Manila', Date.parse('2026-06-09T23:30:00Z'));
 		expect(early.absentToday.people).toEqual([]);
 
+		// The manual checklist lists everyone rostered today, flags the no-punch one, and starts unmarked.
+		expect(d.rosteredToday.every((p) => p.marked === null)).toBe(true);
+		expect(d.rosteredToday.filter((p) => p.noPunch).map((p) => p.name)).toEqual(['Test, Quin']);
+
 		// No punches uploaded for today at all: the list is withheld rather than naming everyone.
 		const none = await D.getDashboard(est, tag, today, 'Asia/Manila', noon);
 		expect(none.absentToday.state).toBe('no_punches_today');

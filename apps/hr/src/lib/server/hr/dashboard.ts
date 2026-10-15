@@ -1,6 +1,7 @@
 import { and, asc, eq, gte, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db/index';
 import {
+	absenceNotes,
 	biometricPunches,
 	calendarDays,
 	dtrEntries,
@@ -38,8 +39,20 @@ export interface Dashboard {
 	absentToday: {
 		state: 'ok' | 'no_punches_today' | 'holiday';
 		holiday: string | null;
-		people: Array<{ name: string; position: string; shift: string }>;
+		people: Array<{ id: string; name: string; position: string; shift: string }>;
 	};
+	/**
+	 * Rostered to work today and not on leave: the checklist the establishment ticks. `marked` is the
+	 * manual note (information only, never a DTR write); `noPunch` is the automatic detection.
+	 */
+	rosteredToday: Array<{
+		id: string;
+		name: string;
+		position: string;
+		shift: string;
+		noPunch: boolean;
+		marked: { note: string; by: string } | null;
+	}>;
 	attention: AttentionItem[];
 }
 
@@ -407,6 +420,7 @@ export async function getDashboard(
 			if (nowMs < wallTimeToUtcMs(today, row.start, timezone)) continue; // shift not started yet
 			if (punched.has(normalizeEnrollId(s.enrollId))) continue;
 			absentToday.people.push({
+				id: s.id,
 				name: `${s.last}, ${s.first}`,
 				position: s.position,
 				shift: `${hm(row.start)}–${hm(row.end)}`
@@ -414,10 +428,33 @@ export async function getDashboard(
 		}
 	}
 
+	const notes = await db
+		.select({ employeeId: absenceNotes.employeeId, note: absenceNotes.note, by: absenceNotes.markedByName })
+		.from(absenceNotes)
+		.where(and(eq(absenceNotes.establishmentId, establishmentId), eq(absenceNotes.date, today)));
+	const noteOf = new Map(notes.map((n) => [n.employeeId, n]));
+	const noPunch = new Set(absentToday.people.map((p) => p.id));
+	const hhmm = (t: string) => t.slice(0, 5);
+	const rosteredToday: Dashboard['rosteredToday'] = [];
+	for (const s of staff) {
+		const row = todayRows.get(s.id);
+		if (!row || row.isRestDay || !row.start || onLeaveToday.has(s.id)) continue;
+		const n = noteOf.get(s.id);
+		rosteredToday.push({
+			id: s.id,
+			name: `${s.last}, ${s.first}`,
+			position: s.position,
+			shift: `${hhmm(row.start)}–${hhmm(row.end ?? '')}`,
+			noPunch: noPunch.has(s.id),
+			marked: n ? { note: n.note, by: n.by } : null
+		});
+	}
+
 	return {
 		today,
 		staffCount: staff.length,
 		absentToday,
+		rosteredToday,
 		roster: { working, rest, onLeave: staffIds.filter((id) => onLeaveToday.has(id)).length, unscheduled },
 		onLeave,
 		week,

@@ -1241,3 +1241,30 @@ export type PayrollRun = typeof payrollRuns.$inferSelect;
 export type PayrollBatch = typeof payrollBatches.$inferSelect;
 export type PayrollRunLineRow = typeof payrollRunLines.$inferSelect;
 export type Remittance = typeof remittances.$inferSelect;
+
+/**
+ * Information only: "this person is absent today", ticked by the establishment before (or without)
+ * a biometric upload so Main HR can see it. Never read by the DTR, payroll or leave.
+ */
+export const absenceNotes = pgTable(
+	'absence_notes',
+	{
+		id: pk(),
+		establishmentId: uuid('establishment_id')
+			.notNull()
+			.references(() => establishments.id, { onDelete: 'cascade' }),
+		employeeId: uuid('employee_id')
+			.notNull()
+			.references(() => employees.id, { onDelete: 'cascade' }),
+		date: date('date', { mode: 'string' }).notNull(),
+		note: text('note').notNull().default(''),
+		markedByUserId: uuid('marked_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		/** Frozen name, so the line still reads right after the account is renamed or removed. */
+		markedByName: text('marked_by_name').notNull().default(''),
+		createdAt: createdAt()
+	},
+	(t) => [
+		uniqueIndex('absence_notes_employee_date_idx').on(t.employeeId, t.date),
+		index('absence_notes_establishment_date_idx').on(t.establishmentId, t.date)
+	]
+);

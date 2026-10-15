@@ -762,6 +762,7 @@ export async function releasedPayslipsFor(establishmentId: string) {
 	return db
 		.select({
 			id: payrollRunLines.id,
+			runId: payrollRunLines.runId,
 			employeeName: payrollRunLines.employeeName,
 			employeeNo: payrollRunLines.employeeNo,
 			position: payrollRunLines.position,

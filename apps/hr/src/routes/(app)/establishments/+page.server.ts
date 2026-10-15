@@ -13,6 +13,10 @@ import {
 } from '$lib/server/establishments';
 import { listEstablishmentTypes } from '$lib/server/establishment-types';
 import { orgRefField } from '$lib/establishment-schema';
+import { and, count, inArray } from 'drizzle-orm';
+import { db } from '$lib/server/db/index';
+import { absenceNotes } from '$lib/server/db/schema/index';
+import { businessDateFor } from '$lib/server/time';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -24,6 +28,21 @@ export const load: PageServerLoad = async ({ locals }) => {
 	const org = await getOrganization();
 	const types = await listEstablishmentTypes(org.id);
 	const typeById = new Map(types.map((t) => [t.id, t]));
+	// "Absent today" ticks per establishment (information only), each on its own business date.
+	const todayOf = new Map(rows.map((e) => [e.id, businessDateFor(e.timezone)]));
+	const ticks = rows.length
+		? await db
+				.select({ id: absenceNotes.establishmentId, date: absenceNotes.date, n: count() })
+				.from(absenceNotes)
+				.where(
+					and(
+						inArray(absenceNotes.establishmentId, rows.map((e) => e.id)),
+						inArray(absenceNotes.date, [...new Set(todayOf.values())])
+					)
+				)
+				.groupBy(absenceNotes.establishmentId, absenceNotes.date)
+		: [];
+	const absentOf = new Map(ticks.filter((t) => todayOf.get(t.id) === t.date).map((t) => [t.id, t.n]));
 	return {
 		types: types.map((t) => ({ id: t.id, name: t.name, linksToHotelApp: t.linksToHotelApp, active: t.active })),
 		establishments: rows.map((e) => ({
@@ -34,6 +53,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 			typeId: e.typeId,
 			typeName: (e.typeId && typeById.get(e.typeId)?.name) || (e.kind === 'hotel' ? 'Hotel' : 'Other'),
 			timezone: e.timezone,
+			absentToday: absentOf.get(e.id) ?? 0,
 			legalName: e.legalName ?? '',
 			addressLine: e.addressLine ?? '',
 			city: e.city ?? '',

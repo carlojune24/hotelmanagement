@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { enhance } from '$app/forms';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
 	import type { PageData } from './$types';
@@ -137,33 +138,60 @@
 	</section>
 
 	<section class="space-y-3 px-5 py-4 md:px-6" aria-label="Absent today">
-		<div>
+		<div class="flex flex-wrap items-baseline justify-between gap-x-4">
 			<h3 class="text-lg font-light">Absent today</h3>
-			<p class="text-xs text-ink-muted">
-				For information only — it is not written to anyone's DTR. Based on punches uploaded so far.
-			</p>
+			{#if d.rosteredToday.length > 0}
+				<p class="text-xs text-ink-muted tabular-nums">
+					{d.rosteredToday.filter((p) => p.marked).length} marked · {d.rosteredToday.length} rostered
+				</p>
+			{/if}
 		</div>
+		<p class="text-xs text-ink-muted">
+			For information only — it is not written to anyone's DTR.{data.canMarkAbsence ? ' Tick who is absent today.' : ''}
+		</p>
 		{#if d.absentToday.state === 'holiday'}
 			<p class="text-sm text-ink-muted">Today is {d.absentToday.holiday}, so no one is counted absent.</p>
-		{:else if d.absentToday.state === 'no_punches_today'}
-			<p class="text-sm text-ink-muted">
-				No punches have been uploaded for today yet, so absences can't be told. Upload the biometric file under
-				DTR → Biometric data.
-			</p>
-		{:else if d.absentToday.people.length === 0}
-			<p class="text-sm text-ink-muted">No one rostered to work has missed their shift start so far.</p>
+		{:else if d.rosteredToday.length === 0}
+			<p class="text-sm text-ink-muted">No one is rostered to work today.</p>
 		{:else}
 			<ul class="divide-y divide-dotted divide-ink/20">
-				{#each d.absentToday.people as p, i (i)}
-					<li class="flex flex-wrap items-baseline justify-between gap-2 py-2 text-sm">
-						<span>
-							<span class="font-medium">{p.name}</span>
-							<span class="text-ink-muted"> · {p.position}</span>
-						</span>
-						<span class="flex items-center gap-2 tabular-nums text-ink-muted">
-							Shift {p.shift}
-							<Badge variant="destructive">No punch</Badge>
-						</span>
+				{#each d.rosteredToday as p (p.id)}
+					<li class="py-1">
+						<form method="POST" action="?/mark" use:enhance={() => async ({ update }) => update({ reset: false })} class="flex flex-wrap items-center gap-x-3 gap-y-1 py-1 text-sm">
+							<input type="hidden" name="employeeId" value={p.id} />
+							<label class="flex min-h-11 min-w-0 flex-1 items-center gap-3">
+								<input
+									type="checkbox"
+									name="absent"
+									value="1"
+									checked={!!p.marked}
+									disabled={!data.canMarkAbsence}
+									class="size-5 accent-ink"
+									onchange={(e) => e.currentTarget.form!.requestSubmit()}
+								/>
+								<span class="min-w-0">
+									<span class="font-medium">{p.name}</span>
+									<span class="text-ink-muted"> · {p.position}</span>
+								</span>
+							</label>
+							<span class="flex items-center gap-2 tabular-nums text-ink-muted">
+								Shift {p.shift}
+								{#if p.noPunch}<Badge variant="destructive">No punch</Badge>{/if}
+							</span>
+							{#if p.marked}
+								<input
+									name="note"
+									value={p.marked.note}
+									maxlength="200"
+									placeholder="Note (optional)"
+									aria-label="Note for {p.name}"
+									disabled={!data.canMarkAbsence}
+									class="h-9 w-full rounded-full border border-transparent bg-white px-4 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:ml-8 sm:w-72"
+									onchange={(e) => e.currentTarget.form!.requestSubmit()}
+								/>
+								<span class="w-full text-xs text-ink-muted sm:ml-8">Marked by {p.marked.by}</span>
+							{/if}
+						</form>
 					</li>
 				{/each}
 			</ul>

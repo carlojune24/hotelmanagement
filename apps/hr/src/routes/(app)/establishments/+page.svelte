@@ -113,6 +113,7 @@
 						<Table.Head>Type</Table.Head>
 						<Table.Head>Timezone</Table.Head>
 						<Table.Head>Reference</Table.Head>
+						<Table.Head class="text-right">Absent today</Table.Head>
 						<Table.Head>Status</Table.Head>
 						{#if data.canWrite}<Table.Head class="w-12"><span class="sr-only">Actions</span></Table.Head>{/if}
 					</Table.Row>
@@ -126,6 +127,9 @@
 							<Table.Cell class="font-mono text-xs text-ink-muted" title={row.orgRef}
 								>{row.orgRef.slice(0, 12)}…</Table.Cell
 							>
+							<Table.Cell class="text-right tabular-nums">
+								{#if row.absentToday > 0}<a href="/{row.slug}/dashboard" class="underline decoration-ink/30 underline-offset-4 hover:decoration-ink">{row.absentToday}</a>{:else}<span class="text-ink-muted">0</span>{/if}
+							</Table.Cell>
 							<Table.Cell>
 								<Badge variant={row.status === 'active' ? 'ok' : 'muted'}>
 									<span class="size-1.5 rounded-full bg-current opacity-70"></span>
@@ -145,7 +149,7 @@
 						</Table.Row>
 					{:else}
 						<Table.Row class="hover:bg-transparent">
-							<Table.Cell colspan={data.canWrite ? 6 : 5} class="py-10 text-center text-ink-muted">
+							<Table.Cell colspan={data.canWrite ? 7 : 6} class="py-10 text-center text-ink-muted">
 								No establishment matches your search.
 							</Table.Cell>
 						</Table.Row>
