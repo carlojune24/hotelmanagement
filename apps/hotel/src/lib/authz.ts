@@ -68,6 +68,8 @@ export const ROLE_CAPS: Record<MembershipRole, string[]> = {
 		'payment:*',
 		'shift:*',
 		'finance:read',
+		// Front desk answers the guest Customer Support chat (Support inbox).
+		'support:*',
 		// Front desk sees the Dining section and runs orders/reservations; editing the menu
 		// itself (`dining:manage`) stays with hotel_admin. Starting/finishing dishes belongs to
 		// the Kitchen module, so front desk only gets a read-only view of it.
@@ -167,6 +169,7 @@ export const PERMISSION_SECTIONS = [
 	'Team & Access',
 	'Dining',
 	'Kitchen',
+	'Customer Support',
 	'Settings'
 ] as const;
 
@@ -229,6 +232,9 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 	{ cap: 'kitchen:read', label: 'See the Kitchen section (board, prep, sold-out, history)', section: 'Kitchen' },
 	{ cap: 'kitchen:write', label: 'Start and finish dishes, mark dishes sold out', section: 'Kitchen' },
 	{ cap: 'kitchen:manage', label: 'Set up kitchen stations and their timing targets', section: 'Kitchen' },
+
+	{ cap: 'support:read', label: 'Answer guest chats in the Support inbox', section: 'Customer Support' },
+	{ cap: 'support:manage', label: 'Edit the support FAQ and close any chat', section: 'Customer Support' },
 
 	{
 		cap: 'hotel:admin',
