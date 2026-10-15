@@ -6,6 +6,7 @@ import {
 	runHoldSweep,
 	runHrSync,
 	runNoShowAutoflag,
+	runPaymongoSync,
 	runRecurringExpenses,
 	runSupportSweep,
 	type JobRunSummary
@@ -43,7 +44,9 @@ const QUEUES = {
 	// Linked staff follow HR: a separation or transfer removes hotel access within the quarter hour.
 	hr_sync: { cron: '*/15 * * * *', run: runHrSync },
 	// Customer Support chat: requeue chats whose agent left, close idle ones (per-minute is pg-boss's finest cron).
-	support_sweep: { cron: '* * * * *', run: runSupportSweep }
+	support_sweep: { cron: '* * * * *', run: runSupportSweep },
+	// Finance → PayMongo: refresh the mirror of each hotel's PayMongo payments / refunds / payouts / wallet.
+	paymongo_sync: { cron: '*/15 * * * *', run: runPaymongoSync }
 } as const;
 
 async function boot(): Promise<PgBoss> {

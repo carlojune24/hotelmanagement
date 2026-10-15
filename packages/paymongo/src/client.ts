@@ -1,4 +1,12 @@
-import type { CheckoutSession, CheckoutSessionCreateAttributes, Refund, Webhook } from './types';
+import type {
+	CheckoutSession,
+	CheckoutSessionCreateAttributes,
+	PayMongoPaymentRecord,
+	PayMongoPayout,
+	PayMongoWallet,
+	Refund,
+	Webhook
+} from './types';
 
 export interface PayMongoClientOptions {
 	secretKey: string;
@@ -164,6 +172,60 @@ export class PayMongoClient {
 				}
 			}
 		});
+	}
+
+	// ---- Money records (read-only) -------------------------------------------
+	// What PayMongo itself says happened to the hotel's money: payments with their fee and net, refunds, payouts
+	// to the bank, and (for accounts that have the Money Movement product) a wallet. Newest first; page with the
+	// `after` cursor (a payment / refund page: the id of the last record; a payout page: `nextCursor`).
+
+	/** `GET /payments`: money in. */
+	async listPayments(params: { limit?: number; after?: string } = {}): Promise<{
+		data: PayMongoPaymentRecord[];
+		hasMore: boolean;
+	}> {
+		const res = await this.request<{ data: PayMongoPaymentRecord[]; has_more?: boolean }>(
+			`/payments${PayMongoClient.query({ limit: params.limit ?? 100, after: params.after })}`
+		);
+		return { data: res.data ?? [], hasMore: Boolean(res.has_more) };
+	}
+
+	/** `GET /refunds`: money back out to guests. */
+	async listRefunds(params: { limit?: number; after?: string } = {}): Promise<{ data: Refund[]; hasMore: boolean }> {
+		const res = await this.request<{ data: Refund[]; has_more?: boolean }>(
+			`/refunds${PayMongoClient.query({ limit: params.limit ?? 100, after: params.after })}`
+		);
+		return { data: res.data ?? [], hasMore: Boolean(res.has_more) };
+	}
+
+	/** `GET /payouts`: money paid out to the hotel's bank. */
+	async listPayouts(params: { limit?: number; after?: string } = {}): Promise<{
+		data: PayMongoPayout[];
+		nextCursor: string | null;
+	}> {
+		const res = await this.request<{
+			data: PayMongoPayout[];
+			pagination?: { next_cursor?: string | null };
+		}>(`/payouts${PayMongoClient.query({ limit: params.limit ?? 100, after: params.after })}`);
+		return { data: res.data ?? [], nextCursor: res.pagination?.next_cursor ?? null };
+	}
+
+	/** `GET /wallets`: empty unless the account has a PayMongo wallet (Money Movement). */
+	async listWallets(): Promise<PayMongoWallet[]> {
+		const res = await this.request<{ data: PayMongoWallet[] }>('/wallets');
+		return res.data ?? [];
+	}
+
+	async retrieveWallet(id: string): Promise<PayMongoWallet> {
+		const res = await this.request<{ data: PayMongoWallet }>(`/wallets/${id}`);
+		return res.data;
+	}
+
+	private static query(params: Record<string, string | number | undefined>): string {
+		const q = new URLSearchParams();
+		for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '') q.set(k, String(v));
+		const s = q.toString();
+		return s ? `?${s}` : '';
 	}
 
 	// ---- Webhooks ----------------------------------------------------------

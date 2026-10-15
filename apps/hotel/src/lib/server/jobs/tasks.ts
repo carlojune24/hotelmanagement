@@ -11,6 +11,7 @@ import { addDays } from '$lib/finance-range';
 import { getEnabledHotelIds } from './toggles';
 import { runErrorLogRetention } from '../error-log';
 import { sweepSupportChats } from '../support-chat';
+import { listPaymongoHotelIds, syncPaymongo } from '../finance/paymongo-sync';
 
 export interface JobRunSummary {
 	hotelsProcessed: number;
@@ -139,6 +140,20 @@ export async function runHrSync(): Promise<JobRunSummary> {
 		if (r.error) unreachable += 1;
 	}
 	return { hotelsProcessed: rows.length, detail: { removed, unreachable, protectedKept } };
+}
+
+/** Keeps each PayMongo-connected hotel's mirror of its PayMongo money (payments, refunds, payouts, wallet) fresh
+ *  for the Finance → PayMongo tab. Read-only against PayMongo; a failing hotel is recorded and skipped. */
+export async function runPaymongoSync(): Promise<JobRunSummary> {
+	const hotelIds = await listPaymongoHotelIds();
+	let synced = 0;
+	let failed = 0;
+	for (const hotelId of hotelIds) {
+		const r = await syncPaymongo(hotelId);
+		if (r.ok) synced += 1;
+		else failed += 1;
+	}
+	return { hotelsProcessed: hotelIds.length, detail: { synced, failed } };
 }
 
 /** Customer Support chat housekeeping: requeue chats whose agent went away, close idle ones,
