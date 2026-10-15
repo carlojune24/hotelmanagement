@@ -27,5 +27,6 @@ export * from './sc-pwd';
 export * from './promo-codes';
 export * from './email-log';
 export * from './guest-messages';
+export * from './support-chat';
 export * from './integrations';
 export * from './error-log';

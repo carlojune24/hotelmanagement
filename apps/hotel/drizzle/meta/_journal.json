@@ -666,6 +666,20 @@
       "when": 1791984918621,
       "tag": "0094_hall_check_in_out",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1792025546350,
+      "tag": "0095_support_chat",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1792025612011,
+      "tag": "0096_support_reply_email",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import type { CartStore } from '$lib/cart.svelte';
+	import type { CartItem, CartStore } from '$lib/cart.svelte';
 	import { itemLabel, itemDetail } from '$lib/cart-display';
 	import { Input } from '$lib/components/ui/input/index.js';
 
@@ -9,10 +9,26 @@
 	const peso = (centavos: number) =>
 		`₱${(centavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 
-	const checkIn = $derived(page.url.searchParams.get('checkIn'));
-	const checkOut = $derived(page.url.searchParams.get('checkOut'));
-	const adults = $derived(page.url.searchParams.get('adults') ?? '2');
+	// Rooms & Rates carries the search in the URL; Guest Info (`/details`) has no query string,
+	// so fall back to the first room line in the cart. The cart only keeps total occupancy per
+	// room, not the adults/children split.
+	const firstRoom = $derived(
+		cart.items.find((i): i is Extract<CartItem, { kind: 'room' }> => i.kind === 'room')
+	);
+	const hasPartyParams = $derived(page.url.searchParams.has('adults'));
+	const checkIn = $derived(page.url.searchParams.get('checkIn') ?? firstRoom?.checkIn ?? null);
+	const checkOut = $derived(page.url.searchParams.get('checkOut') ?? firstRoom?.checkOut ?? null);
+	const adults = $derived(
+		page.url.searchParams.get('adults') ?? (firstRoom ? String(firstRoom.occupancy) : '2')
+	);
 	const children = $derived(page.url.searchParams.get('children') ?? '0');
+	const guestsLabel = $derived(
+		hasPartyParams || !firstRoom
+			? `${adults} adult${adults === '1' ? '' : 's'}${
+					children !== '0' ? `, ${children} child${children === '1' ? '' : 'ren'}` : ''
+				}`
+			: `${adults} guest${adults === '1' ? '' : 's'} per room`
+	);
 
 	/** Editing dates/guests routes back to the Dates step, pre-filled with whatever's known
 	    right now — the only place occupancy can be corrected once past the Dates step, since
@@ -38,11 +54,7 @@
 		</div>
 		<div class="storefront-summary-row">
 			<span class="ledger-label">Guests</span>
-			<span class="ledger-data text-sm"
-				>{adults} adult{adults === '1' ? '' : 's'}{children !== '0'
-					? `, ${children} child${children === '1' ? '' : 'ren'}`
-					: ''}</span
-			>
+			<span class="ledger-data text-sm">{guestsLabel}</span>
 			<a href={editDatesHref} class="storefront-summary-edit">Edit</a>
 		</div>
 	{/if}

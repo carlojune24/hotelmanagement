@@ -9,7 +9,8 @@
 		days,
 		today,
 		checkIn = $bindable(''),
-		checkOut = $bindable('')
+		checkOut = $bindable(''),
+		inline = false
 	}: {
 		/** One entry per night from `today` on — free / few left / full. */
 		days: DayAvailability[];
@@ -17,6 +18,9 @@
 		today: string;
 		checkIn?: string;
 		checkOut?: string;
+		/** Render the calendar permanently in the page (wizard Dates step) instead of behind a
+		    popover/sheet trigger. */
+		inline?: boolean;
 	} = $props();
 
 	const byDate = $derived(new Map(days.map((d) => [d.date, d])));
@@ -25,7 +29,8 @@
 	);
 	const lastDate = $derived(days.at(-1)?.date ?? today);
 
-	let open = $state(false);
+	let openState = $state(false);
+	const open = $derived(inline || openState);
 	let hover = $state('');
 	let wide = $state(true);
 	let viewMonth = $state(''); // first day of the left-most month shown, YYYY-MM-01
@@ -50,12 +55,18 @@
 	function openPicker() {
 		viewMonth = monthOf(checkIn || today);
 		hover = '';
-		open = true;
+		openState = true;
 	}
 	function closePicker() {
-		open = false;
+		if (inline) return;
+		openState = false;
 		triggerEl?.focus();
 	}
+
+	// Inline calendars are always "open": position them on the stay (or today) once on mount.
+	$effect(() => {
+		if (inline && !viewMonth) viewMonth = monthOf(checkIn || today);
+	});
 
 	const shownMonths = $derived(
 		(wide ? [0, 1] : [0]).map((n) => {
@@ -149,14 +160,15 @@
 		if (e.key === 'Escape' && open) closePicker();
 	}
 	function onDocClick(e: MouseEvent) {
-		if (open && wide && rootEl && !rootEl.contains(e.target as Node)) open = false;
+		if (!inline && openState && wide && rootEl && !rootEl.contains(e.target as Node))
+			openState = false;
 	}
 
 	// Full-screen sheet on phones: lock page scroll behind it, and lift the search dock above the
 	// sticky nav (z-index 30) — the sheet lives inside the dock's own stacking layer, so without
 	// this the nav would paint over the top of it.
 	$effect(() => {
-		if (!open || wide) return;
+		if (inline || !open || wide) return;
 		const prevOverflow = document.body.style.overflow;
 		const dock = rootEl?.closest<HTMLElement>('.storefront-search-dock-panel');
 		const prevZ = dock?.style.zIndex ?? '';
@@ -175,31 +187,39 @@
 	<input type="hidden" name="checkIn" value={checkIn} />
 	<input type="hidden" name="checkOut" value={checkOut} />
 
-	<button
-		type="button"
-		class="trigger"
-		bind:this={triggerEl}
-		aria-haspopup="dialog"
-		aria-expanded={open}
-		onclick={() => (open ? closePicker() : openPicker())}
-	>
-		<CalendarDaysIcon class="size-5 shrink-0" aria-hidden="true" />
-		<span class="trigger-col">
-			<span class="trigger-label">Arrival</span>
-			<span class="trigger-value" class:placeholder={!checkIn}>{checkIn ? fmtShort(checkIn) : 'Select date'}</span>
-		</span>
-		<span class="trigger-arrow" aria-hidden="true">→</span>
-		<span class="trigger-col">
-			<span class="trigger-label">Departure</span>
-			<span class="trigger-value" class:placeholder={!checkOut}>{checkOut ? fmtShort(checkOut) : 'Select date'}</span>
-		</span>
-		{#if nights > 0}
-			<span class="trigger-nights">{nights} night{nights === 1 ? '' : 's'}</span>
-		{/if}
-	</button>
+	{#if !inline}
+		<button
+			type="button"
+			class="trigger"
+			bind:this={triggerEl}
+			aria-haspopup="dialog"
+			aria-expanded={open}
+			onclick={() => (open ? closePicker() : openPicker())}
+		>
+			<CalendarDaysIcon class="size-5 shrink-0" aria-hidden="true" />
+			<span class="trigger-col">
+				<span class="trigger-label">Arrival</span>
+				<span class="trigger-value" class:placeholder={!checkIn}>{checkIn ? fmtShort(checkIn) : 'Select date'}</span>
+			</span>
+			<span class="trigger-arrow" aria-hidden="true">→</span>
+			<span class="trigger-col">
+				<span class="trigger-label">Departure</span>
+				<span class="trigger-value" class:placeholder={!checkOut}>{checkOut ? fmtShort(checkOut) : 'Select date'}</span>
+			</span>
+			{#if nights > 0}
+				<span class="trigger-nights">{nights} night{nights === 1 ? '' : 's'}</span>
+			{/if}
+		</button>
+	{/if}
 
 	{#if open}
-		<div class="sheet" role="dialog" aria-modal={!wide} aria-label="Choose your dates">
+		<div
+			class="sheet"
+			class:inline
+			role={inline ? 'group' : 'dialog'}
+			aria-modal={inline ? undefined : !wide}
+			aria-label="Choose your dates"
+		>
 			<div class="sheet-head">
 				<div>
 					<div class="sheet-title">
@@ -283,22 +303,29 @@
 
 			<div class="legend" aria-hidden="true">
 				<span><i class="dot free"></i>Available</span>
+				{#if inline}
+					<span><i class="dot edge"></i>Check-in / check-out</span>
+					<span><i class="dot stay"></i>Period of stay</span>
+				{/if}
 				<span><i class="dot few"></i>Few rooms left</span>
-				<span><i class="dot full"></i>Sold out</span>
+				<span><i class="dot full"></i>Not available</span>
 			</div>
 
 			<div class="sheet-foot">
 				<button type="button" class="clear" onclick={reset} disabled={!checkIn && !checkOut}>
 					Clear dates
 				</button>
-				{#if !wide}
+				{#if inline && nights > 0}
+					<span class="foot-nights">{nights} night{nights === 1 ? '' : 's'}</span>
+				{/if}
+				{#if !wide && !inline}
 					<button type="button" class="done" onclick={closePicker} disabled={!checkOut}>
 						{checkOut ? `Done · ${nights} night${nights === 1 ? '' : 's'}` : 'Pick your dates'}
 					</button>
 				{/if}
 			</div>
 		</div>
-		{#if !wide}<div class="backdrop" aria-hidden="true"></div>{/if}
+		{#if !wide && !inline}<div class="backdrop" aria-hidden="true"></div>{/if}
 	{/if}
 </div>
 
@@ -587,6 +614,42 @@
 			transparent 2px,
 			transparent 4px
 		);
+	}
+
+	.dot.edge {
+		background: var(--hotel-accent);
+	}
+	.dot.stay {
+		background: color-mix(in oklch, var(--hotel-accent) 12%, var(--ledger-paper));
+		border: 1px solid var(--ledger-rule);
+	}
+	.foot-nights {
+		margin-left: auto;
+		font-family: var(--ledger-font-data, 'JetBrains Mono Variable', ui-monospace, monospace);
+		font-size: 0.8125rem;
+		font-weight: 500;
+		color: var(--hotel-accent-deep);
+	}
+
+	/* ---- inline mode: the Dates step's own calendar sheet, always in flow ---- */
+	.sheet.inline {
+		position: static;
+		inset: auto;
+		z-index: auto;
+		width: 100%;
+		max-width: none;
+		padding: 1rem 1rem 0;
+		overflow: visible;
+		border: 1px solid var(--ledger-rule);
+		border-radius: 10px;
+	}
+	.sheet.inline .sheet-head .icon-btn,
+	.sheet.inline .close {
+		display: none;
+	}
+	.sheet.inline .sheet-foot {
+		position: static;
+		padding: 0.75rem 0 1rem;
 	}
 
 	.sheet-foot {
