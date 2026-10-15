@@ -3223,7 +3223,7 @@
 				<div class="divide-y divide-border rounded-lg border border-border">
 					{#each walkInCart as line (line.id)}
 						<div class="flex items-center justify-between gap-3 px-3 py-2.5">
-							<div class="min-w-0">
+							<div class="min-w-0 flex-1">
 								<div class="truncate text-sm font-medium text-ink">
 									{#if line.roomId}
 										Room {line.roomNumber} · {line.roomTypeName}
@@ -3233,7 +3233,7 @@
 								</div>
 								{#if line.ratePlanOptions && line.ratePlanOptions.length > 1}
 									<select
-										class="mt-0.5 rounded-md border border-input bg-transparent px-1.5 py-0.5 text-xs text-ink-muted"
+										class="mt-0.5 block w-full max-w-full min-w-0 truncate rounded-md border border-input bg-transparent px-1.5 py-0.5 text-xs text-ink-muted"
 										value={line.ratePlanId}
 										onchange={(e) => setWalkInCartLineRatePlan(line.id, e.currentTarget.value)}
 									>
@@ -3242,7 +3242,9 @@
 										{/each}
 									</select>
 								{:else}
-									<div class="text-xs text-ink-muted">{line.ratePlanName}</div>
+									<div class="line-clamp-2 text-xs break-words text-ink-muted" title={line.ratePlanName}>
+										{line.ratePlanName}
+									</div>
 								{/if}
 								<div class="text-[11px] text-ink-muted">{line.checkIn} → {line.checkOut}</div>
 								{#if line.extraBedsNeeded > 0}
@@ -3256,9 +3258,9 @@
 									</span>
 								{/if}
 							</div>
-							<div class="flex items-center gap-1">
+							<div class="flex shrink-0 items-center gap-1">
 								{#if line.roomId}
-									<span class="px-1 text-xs text-ink-muted">1 room</span>
+									<span class="px-1 text-xs whitespace-nowrap text-ink-muted">1 room</span>
 								{:else}
 									<Button
 										type="button"
@@ -3285,14 +3287,14 @@
 									</Button>
 								{/if}
 							</div>
-							<div class="w-20 text-right text-sm font-medium text-ink">
+							<div class="w-20 shrink-0 text-right text-sm font-medium text-ink">
 								{peso(walkInCartLineTotal(line))}
 							</div>
 							<Button
 								type="button"
 								size="icon"
 								variant="ghost"
-								class="size-7"
+								class="size-7 shrink-0"
 								onclick={() => removeFromWalkInCart(line.id)}
 								aria-label="Remove {line.roomTypeName} from cart"
 							>
