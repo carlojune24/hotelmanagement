@@ -7,9 +7,10 @@ import { hashOpaqueToken } from '$lib/server/crypto';
 
 // Distinct from the hotel app's `mm_session` so two apps on one host/domain family never collide.
 export const SESSION_COOKIE = 'mm_hr_session';
-const DAY = 1000 * 60 * 60 * 24;
-const SESSION_TTL = 30 * DAY;
-const RENEW_WITHIN = 15 * DAY;
+const MINUTE = 1000 * 60;
+// `expiresAt` is the idle deadline: it slides forward on activity. The absolute cap counts from createdAt.
+const IDLE_TTL = 30 * MINUTE;
+const MAX_AGE = 8 * 60 * MINUTE;
 
 export interface SessionUser {
 	id: string;
@@ -26,7 +27,7 @@ const tokenToId = hashOpaqueToken;
 
 export async function createSession(token: string, userId: string) {
 	const id = tokenToId(token);
-	const expiresAt = new Date(Date.now() + SESSION_TTL);
+	const expiresAt = new Date(Date.now() + IDLE_TTL);
 	await db.insert(sessions).values({ id, userId, expiresAt });
 	return { id, userId, expiresAt };
 }
@@ -38,6 +39,7 @@ export async function validateSessionToken(
 	const row = await db
 		.select({
 			expiresAt: sessions.expiresAt,
+			createdAt: sessions.createdAt,
 			userId: users.id,
 			email: users.email,
 			name: users.name,
@@ -50,14 +52,18 @@ export async function validateSessionToken(
 		.then((r) => r.at(0));
 
 	if (!row) return null;
-	if (Date.now() >= row.expiresAt.getTime() || row.status !== 'active') {
+	const now = Date.now();
+	const hardEnd = row.createdAt.getTime() + MAX_AGE;
+	if (now >= row.expiresAt.getTime() || now >= hardEnd || row.status !== 'active') {
 		await db.delete(sessions).where(eq(sessions.id, id));
 		return null;
 	}
 
+	// Slide the idle deadline (never past the 8h cap); skip the write for sub-minute changes.
 	let expiresAt = row.expiresAt;
-	if (row.expiresAt.getTime() - Date.now() < RENEW_WITHIN) {
-		expiresAt = new Date(Date.now() + SESSION_TTL);
+	const target = new Date(Math.min(now + IDLE_TTL, hardEnd));
+	if (Math.abs(target.getTime() - expiresAt.getTime()) > MINUTE) {
+		expiresAt = target;
 		await db.update(sessions).set({ expiresAt }).where(eq(sessions.id, id));
 	}
 
