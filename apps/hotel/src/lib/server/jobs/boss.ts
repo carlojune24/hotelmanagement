@@ -7,7 +7,6 @@ import {
 	runHrSync,
 	runNoShowAutoflag,
 	runRecurringExpenses,
-	runSupportSweep,
 	type JobRunSummary
 } from './tasks';
 
@@ -41,9 +40,7 @@ const QUEUES = {
 	auto_day_close: { cron: '0 * * * *', run: runAutoDayClose },
 	error_log_retention: { cron: '30 3 * * *', run: runErrorLogRetentionJob },
 	// Linked staff follow HR: a separation or transfer removes hotel access within the quarter hour.
-	hr_sync: { cron: '*/15 * * * *', run: runHrSync },
-	// Customer Support chat: requeue chats whose agent left, close idle ones (per-minute is pg-boss's finest cron).
-	support_sweep: { cron: '* * * * *', run: runSupportSweep }
+	hr_sync: { cron: '*/15 * * * *', run: runHrSync }
 } as const;
 
 async function boot(): Promise<PgBoss> {

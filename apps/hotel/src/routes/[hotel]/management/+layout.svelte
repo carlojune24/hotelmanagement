@@ -17,7 +17,6 @@
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
-	import HeadsetIcon from '@lucide/svelte/icons/headset';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import WalletIcon from '@lucide/svelte/icons/wallet';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
@@ -111,7 +110,6 @@
 			},
 			{ seg: 'emails', label: 'Emails', icon: MailIcon, show: can('booking:read') },
 			{ seg: 'messages', label: 'Messages', icon: MessageSquareIcon, show: can('booking:read') },
-			{ seg: 'support', label: 'Support', icon: HeadsetIcon, show: can('support:read') },
 			{
 				seg: 'housekeeping',
 				label: 'Housekeeping',
@@ -207,15 +205,6 @@
 												class="ml-auto border-transparent bg-brand/15 px-1.5 text-brand"
 											>
 												{data.unreadMessageCount}
-											</Badge>
-										{/if}
-										{#if item.seg === 'support' && data.supportBadge > 0}
-											<Badge
-												variant="outline"
-												class="ml-auto border-transparent bg-brand/15 px-1.5 text-brand"
-												title="Guest chats waiting or with unread messages"
-											>
-												{data.supportBadge}
 											</Badge>
 										{/if}
 										{#if item.seg === 'reservations' && data.upcomingReservationCount > 0}

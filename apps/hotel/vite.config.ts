@@ -80,8 +80,6 @@ export default defineConfig({
 			'@lucide/svelte/icons/log-out',
 			'@lucide/svelte/icons/mail',
 			'@lucide/svelte/icons/map-pin',
-			'@lucide/svelte/icons/headset',
-			'@lucide/svelte/icons/message-circle',
 			'@lucide/svelte/icons/message-square',
 			'@lucide/svelte/icons/minus',
 			'@lucide/svelte/icons/moon',

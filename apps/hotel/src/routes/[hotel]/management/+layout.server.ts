@@ -3,7 +3,6 @@ import { requireHotelRole, roleCan } from '$lib/server/auth/rbac';
 import { NO_BADGES, listDiningBadges } from '$lib/server/dining-badges';
 import { countUnreadGuestMessages } from '$lib/server/guest-messages';
 import { countUpcomingReservations } from '$lib/server/reservations';
-import { countSupportAttention } from '$lib/server/support-chat';
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = async ({ locals, url, route, params, depends }) => {
@@ -17,7 +16,6 @@ export const load: LayoutServerLoad = async ({ locals, url, route, params, depen
 			role: locals.role,
 			unreadMessageCount: 0,
 			upcomingReservationCount: 0,
-			supportBadge: 0,
 			badges: NO_BADGES
 		};
 	}
@@ -54,18 +52,12 @@ export const load: LayoutServerLoad = async ({ locals, url, route, params, depen
 		kitchen: can('kitchen:read')
 	});
 
-	// Guest chats waiting for an agent, plus this agent's live chats with an unread guest message.
-	const supportAttention = can('support:read')
-		? await countSupportAttention(locals.hotel!.id, locals.user.id)
-		: { queued: 0, unreadMine: 0 };
-
 	return {
 		user: locals.user,
 		hotel: locals.hotel,
 		role: locals.role,
 		unreadMessageCount,
 		upcomingReservationCount,
-		supportBadge: supportAttention.queued + supportAttention.unreadMine,
 		badges
 	};
 };

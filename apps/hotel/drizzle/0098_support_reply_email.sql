@@ -1,1 +1,0 @@
-ALTER TYPE "public"."email_type" ADD VALUE 'support_reply';

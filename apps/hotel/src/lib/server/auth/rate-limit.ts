@@ -107,7 +107,3 @@ export function tooManyMessage(retryAfterSeconds: number): string {
 export const qrOrderByTable = new RateLimiter({ max: 12, windowMs: 10 * MIN });
 /** Per ip, across every table. */
 export const qrOrderByIp = new RateLimiter({ max: 25, windowMs: 10 * MIN });
-
-/** Per ip, Customer Support chat: starting chats / leaving offline messages. Cookie-based limits in
- *  `support-chat.ts` stop one visitor; this stops one that clears cookies between attempts. */
-export const supportStartByIp = new RateLimiter({ max: 12, windowMs: 15 * MIN });

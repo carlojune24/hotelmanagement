@@ -1,48 +1,80 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { getContext, onMount } from 'svelte';
-	import { AMENITY_CATEGORY_LABELS, AMENITY_CATEGORY_ORDER } from '$lib/amenity-categories';
-	import { DEFAULT_DISPLAY_FONT, DISPLAY_FONTS } from '$lib/branding';
-	import { roomCartItem } from '$lib/room-line';
-	import { formatStayDateShort, nightsLabel } from '$lib/stay-dates';
+	import { Button } from '$lib/components/ui/button/index.js';
+	import { Input } from '$lib/components/ui/input/index.js';
+	import { Label } from '$lib/components/ui/label/index.js';
+	import { amenityIcon } from '$lib/amenity-icons';
+	import {
+		AMENITY_CATEGORY_LABELS,
+		AMENITY_CATEGORY_ORDER,
+		AMENITY_CATEGORY_ICONS
+	} from '$lib/amenity-categories';
+	import BedIcon from '@lucide/svelte/icons/bed';
+	import UsersIcon from '@lucide/svelte/icons/users';
+	import RulerIcon from '@lucide/svelte/icons/ruler';
 	import ImageIcon from '@lucide/svelte/icons/image';
 	import StarIcon from '@lucide/svelte/icons/star';
-	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
+	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import CalendarDaysIcon from '@lucide/svelte/icons/calendar-days';
 	import CalendarCheckIcon from '@lucide/svelte/icons/calendar-check';
-	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
+	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
+	import InfoIcon from '@lucide/svelte/icons/info';
+	import ReceiptIcon from '@lucide/svelte/icons/receipt';
+	import { getContext, onMount } from 'svelte';
 	import type { CartStore } from '$lib/cart.svelte';
-	import type { AvailableRatePlan, AvailableRoomType, BrowsableRoomType } from '$lib/server/availability';
+	import type { BedConfigEntry } from '$lib/server/db/schema/inventory';
 	import type { HallPriceBreakdown } from '$lib/server/pricing';
 	import StorefrontNav from '$lib/components/storefront/storefront-nav.svelte';
 	import StorefrontFooter from '$lib/components/storefront/storefront-footer.svelte';
 	import StorefrontLightbox from '$lib/components/storefront/storefront-lightbox.svelte';
-	import BookingBar from '$lib/components/storefront/booking-bar.svelte';
-	import RoomCard from '$lib/components/storefront/room-card.svelte';
-	import RoomQuickView from '$lib/components/storefront/room-quick-view.svelte';
+	import AvailabilityRangePicker from '$lib/components/storefront/availability-range-picker.svelte';
+	import { FEW_LEFT_ROOMS } from '$lib/day-availability';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 
 	const cart = getContext<CartStore>('cart');
 
-	// The stay in the booking bar. A searched stay (in the URL) seeds it and re-seeds it on back/forward.
+	// Dates chosen in the availability calendar; submitted to /rooms by the search form.
 	let checkIn = $state('');
 	let checkOut = $state('');
-	let adults = $state(2);
-	let children = $state(0);
-	$effect(() => {
-		if (data.stay) {
-			checkIn = data.stay.checkIn;
-			checkOut = data.stay.checkOut;
-			adults = data.stay.adults;
-			children = data.stay.children;
-		}
-	});
 
-	const slug = $derived(data.hotel.slug);
+	/** "N rooms available tonight" / "Only N left" / "Fully booked tonight" for a room card —
+	 *  real counts from live bookings, never invented. Null when the hotel has no rooms of the
+	 *  type set up yet, so nothing is claimed. */
+	function stockBadge(roomTypeId: string): { text: string; tone: 'ok' | 'low' | 'out' } | null {
+		const s = data.stockByRoomType[roomTypeId];
+		if (!s || s.totalRooms === 0) return null;
+		if (s.freeTonight === 0) return { text: 'Fully booked tonight', tone: 'out' };
+		if (s.freeTonight <= FEW_LEFT_ROOMS)
+			return { text: `Only ${s.freeTonight} left tonight`, tone: 'low' };
+		return { text: `${s.freeTonight} of ${s.totalRooms} rooms free tonight`, tone: 'ok' };
+	}
+
+	// No "add to invoice, then separately open the floating invoice" step for halls —
+	// booking commits and takes the guest straight into the same guest-info → review →
+	// payment → confirmation wizard rooms already use, same as clicking "Continue" in the
+	// Booking Summary Sidebar does for a room. The cart already carries anything else the
+	// guest added (a room from Rooms & Rates) into that same order.
+	function bookHall(hallId: string, hallName: string) {
+		const f = hallForms[hallId];
+		if (!f?.quote || !f.eventDate) return;
+		cart.addHall({
+			functionHallId: hallId,
+			hallName,
+			eventDate: f.eventDate,
+			startTime: f.startTime,
+			endTime: addHours(f.startTime, f.hours),
+			eventType: f.eventType,
+			guestCount: f.guestCount,
+			price: f.quote
+		});
+		goto(`/${data.hotel.slug}/details`);
+	}
+
 	const peso = (centavos: number) =>
 		`₱${(centavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
-	const hotelMedia = $derived(Boolean(data.branding.heroVideoUrl || data.branding.heroImageUrl));
 
 	const coverPhoto = (photos: { url: string; tag: string }[] | undefined) =>
 		photos?.find((p) => p.tag === 'cover')?.url ?? photos?.[0]?.url ?? null;
@@ -63,7 +95,10 @@
 			.slice(0, 12)
 	);
 
-	const amenityGroups = $derived.by(() => {
+	const bedConfigText = (entries: BedConfigEntry[]) =>
+		entries.map((e) => `${e.quantity} ${e.type}`).join(' + ');
+
+	const groupedAmenities = $derived.by(() => {
 		const byCategory = new Map<string, typeof data.hotelAmenities>();
 		for (const a of data.hotelAmenities) {
 			const list = byCategory.get(a.category) ?? [];
@@ -77,86 +112,35 @@
 		}));
 	});
 
-	// ---- live rooms for the searched stay
-	const liveById = $derived(new Map(data.liveRooms.map((r) => [r.id, r])));
-	const search = $derived(
-		data.stay ? { checkIn: data.stay.checkIn, checkOut: data.stay.checkOut, nights: data.stay.nights } : null
-	);
-	const stayQuery = $derived(
-		data.stay
-			? `?${new URLSearchParams({
-					checkIn: data.stay.checkIn,
-					checkOut: data.stay.checkOut,
-					adults: String(data.stay.adults),
-					children: String(data.stay.children)
-				})}`
-			: ''
-	);
-	const availableCount = $derived(data.liveRooms.length);
+	let lightboxIndex = $state<number | null>(null);
 
-	function reserve(room: AvailableRoomType, plan: AvailableRatePlan) {
-		if (!data.stay) return;
-		cart.addRoom(
-			roomCartItem({
-				roomType: room,
-				plan,
-				checkIn: data.stay.checkIn,
-				checkOut: data.stay.checkOut,
-				occupancy: data.stay.adults + data.stay.children,
-				roomCount: 1,
-				vatRateBps: data.hotel.vatRateBps
-			})
-		);
-		void goto(`/${slug}/details`);
-	}
-
-	/** Opens the booking bar's calendar — the docked bar in the hero, or the sticky one once scrolled. */
-	function pickDates() {
-		// Let the quick-view sheet finish closing first, so it doesn't swallow the calendar's focus.
-		const delay = qvOpen ? 300 : 0;
-		qvOpen = false;
-		setTimeout(() => document.querySelector<HTMLButtonElement>('.sf-bar .trigger')?.click(), delay);
-	}
-
-	// ---- quick view
-	let qvOpen = $state(false);
-	let qvRoom = $state<BrowsableRoomType | null>(null);
-	function openQuickView(room: BrowsableRoomType) {
-		qvRoom = room;
-		qvOpen = true;
-	}
-	const fontFamily = $derived(DISPLAY_FONTS[data.branding.fontDisplay ?? DEFAULT_DISPLAY_FONT].family);
-	const sheetTheme = $derived(
-		`--hotel-accent: ${data.theme.accent}; --hotel-accent-light: ${data.theme.accentLight}; ` +
-			`--hotel-accent-deep: ${data.theme.accentDeep}; --hotel-woven-pattern: url("${data.theme.patternUri}"); ` +
-			`--ledger-paper: ${data.theme.paper}; --ledger-paper-2: ${data.theme.paperDeep}; ` +
-			`--ledger-font-display: ${fontFamily};`
-	);
-
-	// ---- hero media. A data-saver or slow connection gets the poster image, not an autoplaying video.
+	// PRODUCT.md calls out low-end Android / mobile-data guests explicitly — an
+	// autoplaying hero video is real weight to force on that connection, so a
+	// guest with data-saver on or a known-slow connection gets the static poster
+	// image instead. `navigator.connection` is Chromium-only; unsupported browsers
+	// (Safari, Firefox) just keep the existing autoplay behavior, unchanged.
 	let allowHeroVideo = $state(true);
 	onMount(() => {
 		const conn = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } })
 			.connection;
 		if (!conn) return;
-		if (conn.saveData || conn.effectiveType === 'slow-2g' || conn.effectiveType === '2g') allowHeroVideo = false;
+		const isSlow = conn.saveData || conn.effectiveType === 'slow-2g' || conn.effectiveType === '2g';
+		if (isSlow) allowHeroVideo = false;
 	});
 
-	let lightboxIndex = $state<number | null>(null);
-	/** A photo that fails to load hides itself so the woven placeholder underneath shows, never a broken icon. */
+	let galleryStripEl: HTMLDivElement | undefined = $state();
+	function scrollGallery(direction: 1 | -1) {
+		galleryStripEl?.scrollBy({ left: direction * 320, behavior: 'smooth' });
+	}
+
+	/** A room/gallery photo that fails to load (fake seed URLs, a stale hotel-set link) hides
+	    itself so the woven-pattern placeholder underneath shows through — never a broken-image icon. */
 	function hidePhoto(e: Event) {
 		(e.currentTarget as HTMLImageElement).style.display = 'none';
 	}
 
-	const aboutPhoto = $derived(data.branding.galleryImages?.[0] ?? data.branding.heroImageUrl ?? null);
-	const diningFeature = $derived(data.diningItems[0] ?? null);
-	const diningCover = $derived.by(() => {
-		const photos = (diningFeature?.photos as { url: string; tag: string }[] | null) ?? [];
-		return photos.find((p) => p.tag === 'cover')?.url ?? photos[0]?.url ?? null;
-	});
-
-	// ---- Function Hall reservation form — one state slot per hall. Hourly math never happens here:
-	// every quote is a real server round-trip to `/hall-quote`.
+	// Function Hall reservation mini-form — one state slot per hall. Hourly math never
+	// happens here: every quote is a real server round-trip to `/hall-quote`.
 	interface HallFormState {
 		eventDate: string;
 		startTime: string;
@@ -197,7 +181,7 @@
 		f.loading = true;
 		f.quoteError = null;
 		try {
-			const res = await fetch(`/${slug}/api/hall-quote`, {
+			const res = await fetch(`/${data.hotel.slug}/api/hall-quote`, {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({
@@ -222,392 +206,569 @@
 		}
 	}
 
-	// Booking commits and goes straight into the same guest-info → review → payment → confirmation flow
-	// rooms use; the cart already carries anything else the guest added into that same order.
-	function bookHall(hallId: string, hallName: string) {
-		const f = hallForms[hallId];
-		if (!f?.quote || !f.eventDate) return;
-		cart.addHall({
-			functionHallId: hallId,
-			hallName,
-			eventDate: f.eventDate,
-			startTime: f.startTime,
-			endTime: addHours(f.startTime, f.hours),
-			eventType: f.eventType,
-			guestCount: f.guestCount,
-			price: f.quote
-		});
-		void goto(`/${slug}/details`);
-	}
-
-	const description = $derived(
-		data.branding.tagline ?? data.branding.heroSubtitle ?? `Book directly with ${data.hotel.name}.`
-	);
 </script>
 
 <svelte:head>
 	<title>{data.hotel.name} — Book your stay</title>
-	<meta name="description" content={description} />
 </svelte:head>
 
 <StorefrontNav
-	hotelSlug={slug}
+	hotelSlug={data.hotel.slug}
 	hotelName={data.hotel.name}
 	logoUrl={data.branding.logoUrl}
 	showAmenities={data.hotelAmenities.length > 0}
 	showFunctionHall={data.functionHalls.length > 0}
 	showDining={data.diningItems.length > 0 || (data.dining.menuImages ?? []).length > 0}
 	showReviews={data.reviews.length > 0}
-	transparentOverHero={hotelMedia}
+	transparentOverHero={Boolean(data.branding.heroVideoUrl || data.branding.heroImageUrl)}
 	accent={data.theme.accent}
 	accentDeep={data.theme.accentDeep}
 	paper={data.theme.paper}
 	paperDeep={data.theme.paperDeep}
 />
 
-<main>
-	<!-- ============================ Hero ============================ -->
-	<section id="top" class="sf-hero is-home" class:no-media={!hotelMedia}>
-		{#if hotelMedia}
-			<div class="sf-hero-media">
-				{#if data.branding.heroVideoUrl && allowHeroVideo}
-					<!-- svelte-ignore a11y_media_has_caption -->
-					<video
-						src={data.branding.heroVideoUrl}
-						poster={data.branding.heroImageUrl ?? undefined}
-						autoplay
-						muted
-						loop
-						playsinline
-					></video>
-				{:else if data.branding.heroImageUrl}
-					<img src={data.branding.heroImageUrl} alt="" onerror={hidePhoto} />
-				{/if}
-			</div>
-			<div class="sf-hero-scrim"></div>
-		{/if}
+<div id="top"></div>
 
-		{#if galleryImages.length > 0}
-			<div class="sf-hero-photos">
-				<button type="button" class="sf-btn sf-btn--light sf-btn--sm" onclick={() => (lightboxIndex = 0)}>
-					<ImageIcon class="size-4" aria-hidden="true" /> Photos
-				</button>
-			</div>
-		{/if}
-
-		<div class="sf-wrap sf-hero-content">
-			<h1>{data.hotel.name}</h1>
-			{#if data.branding.tagline}<p class="sf-hero-tag">{data.branding.tagline}</p>{/if}
-			{#if data.branding.heroSubtitle}<p class="sf-hero-tag" style="margin-top: 0.75rem; font-size: 1rem">{data.branding.heroSubtitle}</p>{/if}
-			{#if startingPrice != null}
-				<p class="sf-hero-from">Rooms from <b>{peso(startingPrice)}</b> / night</p>
-			{/if}
+<section
+	class="storefront-hero {data.branding.heroVideoUrl || data.branding.heroImageUrl
+		? 'has-media'
+		: 'ledger-woven-band'}"
+>
+	{#if data.branding.heroVideoUrl && allowHeroVideo}
+		<div class="storefront-hero-photo">
+			<!-- svelte-ignore a11y_media_has_caption -->
+			<video
+				src={data.branding.heroVideoUrl}
+				poster={data.branding.heroImageUrl ?? undefined}
+				autoplay
+				muted
+				loop
+				playsinline
+				class="brightness-75"
+			></video>
 		</div>
+		<div class="storefront-hero-scrim"></div>
+		{#if galleryImages.length > 0}
+			<button
+				type="button"
+				class="storefront-hero-gallery-cta"
+				onclick={() => (lightboxIndex = 0)}
+			>
+				<ImageIcon aria-hidden="true" />
+				See the gallery
+			</button>
+		{/if}
+	{:else if data.branding.heroImageUrl}
+		<div class="storefront-hero-photo">
+			<img
+				src={data.branding.heroImageUrl}
+				alt=""
+				onerror={hidePhoto}
+				class="brightness-75"
+			/>
+		</div>
+		<div class="storefront-hero-scrim"></div>
+		{#if galleryImages.length > 0}
+			<button
+				type="button"
+				class="storefront-hero-gallery-cta"
+				onclick={() => (lightboxIndex = 0)}
+			>
+				<ImageIcon aria-hidden="true" />
+				See the gallery
+			</button>
+		{/if}
+	{/if}
+	<div class="storefront-hero-inner">
+		<p class="storefront-eyebrow is-hero">Welcome to {data.hotel.name}</p>
+		<h1 class="ledger-display mt-2 text-4xl sm:text-[clamp(2.25rem,5vw,3.5rem)]">
+			{data.hotel.name}
+		</h1>
+		{#if data.branding.tagline}
+			<p class="storefront-hero-tagline mt-1">{data.branding.tagline}</p>
+		{/if}
+		{#if data.branding.heroSubtitle}
+			<p class="storefront-hero-subtitle mt-4">{data.branding.heroSubtitle}</p>
+		{/if}
+		{#if startingPrice != null}
+			<p class="ledger-label mt-6">
+				Rates from <span class="ledger-data text-sm">{peso(startingPrice)}</span> / night
+			</p>
+		{/if}
+	</div>
+</section>
 
-		<div id="search" class="sf-wrap sf-hero-bar-slot">
-			<BookingBar
-				hotelSlug={slug}
+<div id="search" class="storefront-search-dock">
+	<div class="storefront-search-dock-panel">
+		<form
+			method="GET"
+			action="/{data.hotel.slug}/rooms"
+			class="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-stretch"
+		>
+			<AvailabilityRangePicker
 				days={data.dayAvailability}
 				today={data.today}
 				bind:checkIn
 				bind:checkOut
-				bind:adults
-				bind:children
 			/>
-		</div>
-	</section>
+			<Button
+				type="submit"
+				class="ledger-btn-primary h-auto min-h-[3.25rem] px-8"
+				disabled={!checkIn || !checkOut}
+			>
+				Check availability
+			</Button>
+		</form>
+		<p class="mt-3 text-xs text-[var(--ledger-ink-muted)]">
+			{#if checkIn && checkOut}
+				Great — we'll show every room and rate open for these dates.
+			{:else}
+				Pick your arrival and departure. Sold-out days are crossed out, and days with only a few
+				rooms left are marked.
+			{/if}
+		</p>
+	</div>
+</div>
 
-	<!-- ============================ About ============================ -->
-	{#if data.branding.about || data.hotel.city}
-		<section id="about" class="sf-section">
-			<div class="sf-wrap sf-about" class:has-photo={Boolean(aboutPhoto)}>
-				<div>
-					{#if data.branding.about}
-						<p class="sf-about-text">{data.branding.about}</p>
-					{:else}
-						<p class="sf-about-text">Welcome to {data.hotel.name}.</p>
+{#if data.branding.about || data.hotel.city}
+	{@const aboutPhoto = data.branding.galleryImages?.[0] ?? data.branding.heroImageUrl ?? null}
+	<section id="about" class="storefront-section">
+		<div class="storefront-about-grid {aboutPhoto ? 'has-photo' : ''}">
+			<div>
+				<div class="storefront-section-head">
+					<p class="storefront-eyebrow">Get to know us</p>
+					<h2 class="storefront-section-title ink-heading ledger-display mt-2 text-2xl sm:text-3xl">
+						About {data.hotel.name}
+					</h2>
+					{#if data.hotel.city}
+						<p class="ledger-label mt-2">{data.hotel.city}, Philippines</p>
 					{/if}
-					{#if data.hotel.city}<p class="sf-about-place">{data.hotel.city}, Philippines</p>{/if}
-					<div class="sf-feature-actions">
-						<a href="#rooms" class="sf-btn">See rooms &amp; rates</a>
-						<a href="/{slug}/contact" class="sf-link">Find us <ArrowRightIcon class="size-4" aria-hidden="true" /></a>
-					</div>
 				</div>
-				{#if aboutPhoto}
-					<div class="sf-about-photo"><img src={aboutPhoto} alt="" loading="lazy" onerror={hidePhoto} /></div>
+				{#if data.branding.about}
+					<p class="storefront-section-lede text-[0.9375rem] leading-relaxed">
+						{data.branding.about}
+					</p>
 				{/if}
 			</div>
-		</section>
-	{/if}
-
-	<!-- ============================ Rooms ============================ -->
-	<section id="rooms" class="sf-section" class:sf-section--tint={Boolean(data.branding.about || data.hotel.city)}>
-		<div class="sf-wrap">
-			<div class="sf-head">
-				<div>
-					<h2 class="sf-h2">Rooms &amp; Rates</h2>
-					<p class="sf-lede">
-						{#if search}
-							{availableCount > 0
-								? `${availableCount} room type${availableCount === 1 ? '' : 's'} available for your stay. Prices are for the whole stay, taxes and fees included.`
-								: 'Nothing is open for those dates. Try different dates and we will show what is.'}
-						{:else}
-							Choose a room to see what is included. Pick your dates above for live availability and the exact price.
-						{/if}
-					</p>
-				</div>
-			</div>
-
-			{#if search}
-				<div class="sf-stay-note">
-					<CalendarCheckIcon class="size-5 text-[var(--hotel-accent)]" aria-hidden="true" />
-					<span>
-						<b>{formatStayDateShort(search.checkIn)}</b> → <b>{formatStayDateShort(search.checkOut)}</b>
-						· {nightsLabel(search.nights)} · {data.stay!.adults} adult{data.stay!.adults === 1 ? '' : 's'}{data.stay!.children > 0 ? `, ${data.stay!.children} child${data.stay!.children === 1 ? '' : 'ren'}` : ''}
-					</span>
-					<button type="button" class="sf-link" onclick={pickDates}>Change</button>
-				</div>
-			{/if}
-
-			{#if data.browsableRoomTypes.length === 0}
-				<p class="sf-lede">Room types are being set up — check back shortly.</p>
-			{:else}
-				<div class="sf-rooms">
-					{#each data.browsableRoomTypes as rt (rt.id)}
-						<RoomCard
-							room={rt}
-							hotelSlug={slug}
-							vatRateBps={data.hotel.vatRateBps}
-							{search}
-							live={liveById.get(rt.id) ?? null}
-							stockTonight={data.stockByRoomType[rt.id] ?? null}
-							{stayQuery}
-							onQuickView={openQuickView}
-							onReserve={reserve}
-							onPickDates={pickDates}
-						/>
-					{/each}
+			{#if aboutPhoto}
+				<div class="storefront-about-photo">
+					<img src={aboutPhoto} alt="" onerror={hidePhoto} />
 				</div>
 			{/if}
 		</div>
 	</section>
+{/if}
 
-	<!-- ============================ Amenities ============================ -->
-	{#if amenityGroups.length > 0}
-		<section id="amenities" class="sf-section sf-section--night">
-			<div class="sf-wrap sf-amen">
-				<div>
-					<h2 class="sf-h2" style="color: var(--sf-on-night)">Everything is taken care of</h2>
-					<p class="sf-lede">What is included with your stay at {data.hotel.name}.</p>
+{#if groupedAmenities.length > 0}
+	<section id="amenities" class="storefront-section">
+		<div class="storefront-section-head">
+			<p class="storefront-eyebrow">Included in your stay</p>
+			<h2 class="storefront-section-title ink-heading ledger-display mt-2 text-2xl sm:text-3xl">
+				Amenities
+			</h2>
+		</div>
+		<p class="storefront-section-lede">Everything included in your stay.</p>
+
+		<div class="storefront-amenity-cards">
+			{#each groupedAmenities as group (group.category)}
+				{@const CategoryIcon = AMENITY_CATEGORY_ICONS[group.category] ?? amenityIcon(null)}
+				<div class="storefront-amenity-card">
+					<div class="storefront-amenity-card-icon">
+						<CategoryIcon aria-hidden="true" />
+					</div>
+					<h3 class="storefront-amenity-card-title">{group.label}</h3>
+					<ul class="storefront-amenity-card-list">
+						{#each group.items as a (a.name)}
+							<li class="storefront-amenity-card-item">
+								<CircleCheckIcon aria-hidden="true" />
+								<span>
+									{a.name}
+									{#if a.note}<span class="storefront-amenity-note"> — {a.note}</span>{/if}
+								</span>
+							</li>
+						{/each}
+					</ul>
 				</div>
-				<div class="sf-amen-groups">
-					{#each amenityGroups as group (group.category)}
-						<div class="sf-amen-group">
-							<h3>{group.label}</h3>
-							<ul>
-								{#each group.items as a (a.name)}
-									<li>
-										{a.name}
-										{#if a.note}<small>{a.note}</small>{/if}
-									</li>
+			{/each}
+		</div>
+	</section>
+{/if}
+
+<section id="rooms" class="storefront-section">
+	<div class="storefront-section-head">
+		<h2 class="storefront-section-title ledger-display text-2xl sm:text-3xl">Rooms &amp; Rates</h2>
+	</div>
+	<p class="storefront-section-lede">
+		Indicative starting rates below — pick your dates above for live availability and an exact
+		price.
+	</p>
+
+	{#if data.browsableRoomTypes.length === 0}
+		<p class="storefront-section-lede">Room types are being set up — check back shortly.</p>
+	{:else}
+		<div class="storefront-room-grid mt-8">
+			{#each data.browsableRoomTypes as rt (rt.id)}
+				{@const cover = coverPhoto(rt.photos)}
+				<a href="/{data.hotel.slug}/rooms/{rt.id}" class="storefront-room-card">
+					<div class="storefront-room-card-photo">
+						<span class="ledger-room-photo-mark">{rt.name.charAt(0)}</span>
+						{#if cover}<img src={cover} alt="" onerror={hidePhoto} />{/if}
+						{#if stockBadge(rt.id)}
+							{@const stock = stockBadge(rt.id)!}
+							<span class="storefront-room-card-stock is-{stock.tone}">{stock.text}</span>
+						{/if}
+						<div class="storefront-room-card-scrim"></div>
+						<div class="storefront-room-card-overlay">
+							<div class="storefront-room-card-name">{rt.name}</div>
+							<div class="storefront-room-card-rule"></div>
+							<div class="storefront-room-card-row">
+								<div class="storefront-room-card-glance">
+									{#if rt.bedConfiguration.length > 0}
+										<span class="storefront-glance-item">
+											<BedIcon aria-hidden="true" />
+											<span>{bedConfigText(rt.bedConfiguration)}</span>
+										</span>
+									{/if}
+									<span class="storefront-glance-item">
+										<UsersIcon aria-hidden="true" />
+										<span>{rt.maxOccupancy}</span>
+									</span>
+									{#if rt.sizeSqm}
+										<span class="storefront-glance-item">
+											<RulerIcon aria-hidden="true" />
+											<span>{rt.sizeSqm} m²</span>
+										</span>
+									{/if}
+								</div>
+								<div class="storefront-room-card-cta">
+									{#if rt.startingPriceCentavos != null}
+										<span class="ledger-data">from {peso(rt.startingPriceCentavos)}/night</span>
+									{/if}
+									<span class="storefront-room-card-details">Details →</span>
+								</div>
+							</div>
+						</div>
+					</div>
+					<div class="storefront-room-card-body">
+						{#if rt.description}
+							<p class="storefront-room-card-desc">{rt.description}</p>
+						{/if}
+						{#if rt.highlightedAmenities.length > 0}
+							<ul class="storefront-room-card-chips">
+								{#each rt.highlightedAmenities.slice(0, 3) as a (a.name)}
+									<li>{a.name}</li>
 								{/each}
 							</ul>
+						{/if}
+						<div class="storefront-room-card-rates">
+							{#if rt.startingPriceCentavos != null}
+								<span>
+									<span class="storefront-room-card-rates-from">from</span>
+									<span class="ledger-data storefront-room-card-rates-price"
+										>{peso(rt.startingPriceCentavos)}</span
+									>
+									<span class="storefront-room-card-rates-from">/ night</span>
+								</span>
+								{#if rt.ratePlanCount > 1}
+									<span class="storefront-room-card-rates-count">{rt.ratePlanCount} rate options</span>
+								{/if}
+							{:else}
+								<span class="storefront-room-card-rates-from">Rates coming soon</span>
+							{/if}
 						</div>
-					{/each}
-				</div>
-			</div>
-		</section>
-	{/if}
-
-	<!-- ============================ Dining ============================ -->
-	{#if diningFeature}
-		<section id="dining" class="sf-section">
-			<div class="sf-wrap sf-feature">
-				<div class="sf-feature-media">
-					{#if diningCover}<img src={diningCover} alt="" loading="lazy" onerror={hidePhoto} />{/if}
-				</div>
-				<div>
-					<h2 class="sf-h2">{diningFeature.title}</h2>
-					{#if diningFeature.tagline}<p class="sf-lede">{diningFeature.tagline}</p>{/if}
-					{#if diningFeature.operatingHours}
-						<p class="sf-lede" style="margin-top: 0.75rem; font-size: 0.9375rem">Open {diningFeature.operatingHours}</p>
-					{/if}
-					<div class="sf-feature-actions">
-						<a href="/{slug}/dining" class="sf-btn">View the menu</a>
-						{#if diningFeature.reservationsEnabled}
-							<a href="/{slug}/dining/reserve?venue={diningFeature.id}" class="sf-btn sf-btn--outline">Reserve a table</a>
-						{/if}
-						{#if data.orderableVenueIds.includes(diningFeature.id)}
-							<a href="/{slug}/dining/order?venue={diningFeature.id}" class="sf-link">Order online <ArrowRightIcon class="size-4" aria-hidden="true" /></a>
-						{/if}
 					</div>
-				</div>
-			</div>
-		</section>
+				</a>
+			{/each}
+		</div>
 	{/if}
+</section>
 
-	<!-- ============================ Function hall ============================ -->
-	{#if data.functionHalls.length > 0}
-		<section id="function-hall" class="sf-section sf-section--tint">
-			<div class="sf-wrap">
-				<div class="sf-head">
-					<div>
-						<h2 class="sf-h2">Weddings, meetings &amp; celebrations</h2>
-						<p class="sf-lede">Rent our event space by the hour. Pick a date and time and the price is worked out for you.</p>
-					</div>
-					<a href="/{slug}/meetings-events" class="sf-link">All event details <ArrowRightIcon class="size-4" aria-hidden="true" /></a>
-				</div>
-
-				{#each data.functionHalls as hall (hall.id)}
-					{@const cover = coverPhoto(hall.photos)}
-					{@const f = hallForms[hall.id]}
-					<div class="sf-hall">
-						<div class="sf-hall-top">
-							<div class="sf-hall-photo">
-								{#if cover}<img src={cover} alt="" loading="lazy" onerror={hidePhoto} />{/if}
-							</div>
-							<div class="sf-hall-body">
-								<h3>{hall.name}</h3>
-								{#if hall.description}<p class="line-clamp-4">{hall.description}</p>{/if}
-								<div class="sf-hall-meta">
-									<span>Up to {hall.capacity} guests</span>
-									{#if hall.supportedEventTypes.length > 0}<span>{hall.supportedEventTypes.join(', ')}</span>{/if}
-								</div>
+{#if data.functionHalls.length > 0}
+	<section id="function-hall" class="storefront-section">
+		<div class="storefront-section-head">
+			<h2 class="storefront-section-title ledger-display text-2xl sm:text-3xl">Function Hall</h2>
+			<p class="storefront-section-lede">
+				Rent our event space by the hour — weddings, seminars, celebrations, and more.
+			</p>
+		</div>
+		<div class="mt-8 space-y-8">
+			{#each data.functionHalls as hall (hall.id)}
+				{@const cover = coverPhoto(hall.photos)}
+				{@const f = hallForms[hall.id]}
+				<div class="storefront-hall-card">
+					<div class="storefront-hall-card-top">
+						<div class="storefront-hall-card-photo">
+							<span class="ledger-room-photo-mark">{hall.name.charAt(0)}</span>
+							{#if cover}<img src={cover} alt="" onerror={hidePhoto} />{/if}
+						</div>
+						<div class="storefront-hall-card-body">
+							<div>
+								<div class="ledger-display text-xl">{hall.name}</div>
+								{#if hall.description}
+									<p class="mt-0.5 max-w-md text-sm text-[var(--ledger-ink-muted)]">
+										{hall.description}
+									</p>
+								{/if}
 								{#if hall.includedServices.length > 0}
-									<div class="sf-hall-meta">
+									<div class="storefront-hall-facts">
 										{#each hall.includedServices as service (service)}
-											<span class="inline-flex items-center gap-1.5">
-												<CircleCheckIcon class="size-4 text-[var(--hotel-accent)]" aria-hidden="true" />{service}
+											<span class="storefront-hall-fact">
+												<CircleCheckIcon aria-hidden="true" />
+												<span>{service}</span>
 											</span>
 										{/each}
 									</div>
 								{/if}
-								<div class="sf-hall-price">
-									<span>From</span>
-									<b>{peso(hall.basePriceCentavos)}</b>
-									<span>/ {hall.baseHours}h · then {peso(hall.extraHourFeeCentavos)}/hr</span>
+								<p class="mt-2 text-xs text-[var(--ledger-ink-muted)]">
+									Up to <span class="ledger-data">{hall.capacity}</span> guests
+								</p>
+								{#if hall.supportedEventTypes.length > 0}
+									<p class="mt-1 text-xs text-[var(--ledger-ink-muted)]">
+										For: {hall.supportedEventTypes.join(', ')}
+									</p>
+								{/if}
+								<a
+									href="/{data.hotel.slug}/meetings-events#hall-{hall.id}"
+									class="storefront-view-details-btn"
+								>
+									View full details →
+								</a>
+							</div>
+							<div class="storefront-hall-card-price">
+								<span class="ledger-label">Starting from</span>
+								<div class="ledger-data text-xl">
+									{peso(hall.basePriceCentavos)} / {hall.baseHours}h
 								</div>
+								<span class="ledger-label">+ {peso(hall.extraHourFeeCentavos)}/hr after</span>
 							</div>
 						</div>
+					</div>
 
-						{#if f}
-							<div class="sf-hall-form">
-								<h4>Plan your event</h4>
-								<div class="sf-hall-grid">
-									<div>
-										<label for="eventDate-{hall.id}">Event date</label>
-										<input id="eventDate-{hall.id}" type="date" min={data.today} bind:value={f.eventDate} onchange={() => fetchHallQuote(hall.id)} />
-									</div>
-									<div>
-										<label for="startTime-{hall.id}">Start time</label>
-										<input id="startTime-{hall.id}" type="time" bind:value={f.startTime} onchange={() => fetchHallQuote(hall.id)} />
-									</div>
-									<div>
-										<label for="hours-{hall.id}">Hours</label>
-										<input id="hours-{hall.id}" type="number" min="1" max="15" bind:value={f.hours} onchange={() => fetchHallQuote(hall.id)} />
-									</div>
-									<div>
-										<label for="guestCount-{hall.id}">Guests</label>
-										<input id="guestCount-{hall.id}" type="number" min="1" max={hall.capacity} bind:value={f.guestCount} />
-									</div>
-									{#if hall.supportedEventTypes.length > 0}
-										<div>
-											<label for="eventType-{hall.id}">Event type</label>
-											<select id="eventType-{hall.id}" bind:value={f.eventType}>
-												{#each hall.supportedEventTypes as et (et)}<option value={et}>{et}</option>{/each}
-											</select>
-										</div>
-									{/if}
+					{#if f}
+						<div class="storefront-hall-form-zone">
+							<h3 class="storefront-hall-panel-head">
+								<CalendarDaysIcon aria-hidden="true" />
+								Event Details
+							</h3>
+							<div class="storefront-hall-details-grid">
+								<div>
+									<Label for="eventDate-{hall.id}" class="ledger-label">Event date</Label>
+									<Input
+										id="eventDate-{hall.id}"
+										type="date"
+										class="storefront-hall-field mt-1"
+										bind:value={f.eventDate}
+										onchange={() => fetchHallQuote(hall.id)}
+									/>
 								</div>
-
-								{#if f.loading}
-									<p class="sf-hall-status">Pricing…</p>
-								{:else if f.quoteError}
-									<p class="sf-hall-status" style="color: var(--ledger-danger, #b91c1c)">{f.quoteError}</p>
-								{:else if f.quote}
-									<div class="sf-hall-quote">
-										<div class="sf-quote-rows">
-											<div class="sf-quote-row"><span>Base ({f.quote.baseHours}h)</span><span class="ledger-data">{peso(f.quote.basePriceCentavos)}</span></div>
-											{#if f.quote.extraHours > 0}
-												<div class="sf-quote-row"><span>Extra {f.quote.extraHours}h × {peso(f.quote.extraHourFeeCentavos)}</span><span class="ledger-data">{peso(f.quote.extraHoursCostCentavos)}</span></div>
-											{/if}
-											{#each f.quote.fees as fee (fee.name)}
-												<div class="sf-quote-row"><span>{fee.name}</span><span class="ledger-data">{peso(fee.amountCentavos)}</span></div>
+								<div>
+									<Label for="startTime-{hall.id}" class="ledger-label">Start time</Label>
+									<Input
+										id="startTime-{hall.id}"
+										type="time"
+										class="storefront-hall-field mt-1"
+										bind:value={f.startTime}
+										onchange={() => fetchHallQuote(hall.id)}
+									/>
+								</div>
+								<div>
+									<Label for="hours-{hall.id}" class="ledger-label">Duration (hours)</Label>
+									<Input
+										id="hours-{hall.id}"
+										type="number"
+										min="1"
+										max="15"
+										class="storefront-hall-field mt-1"
+										bind:value={f.hours}
+										onchange={() => fetchHallQuote(hall.id)}
+									/>
+								</div>
+								<div>
+									<Label for="guestCount-{hall.id}" class="ledger-label">Guests</Label>
+									<Input
+										id="guestCount-{hall.id}"
+										type="number"
+										min="1"
+										max={hall.capacity}
+										class="storefront-hall-field mt-1"
+										bind:value={f.guestCount}
+									/>
+								</div>
+								{#if hall.supportedEventTypes.length > 0}
+									<div>
+										<Label for="eventType-{hall.id}" class="ledger-label">Event type</Label>
+										<select
+											id="eventType-{hall.id}"
+											class="storefront-hall-field mt-1"
+											bind:value={f.eventType}
+										>
+											{#each hall.supportedEventTypes as et (et)}
+												<option value={et}>{et}</option>
 											{/each}
-											<div class="sf-quote-row"><span>VAT</span><span class="ledger-data">{peso(f.quote.vatCentavos)}</span></div>
-											<div class="sf-quote-row is-total"><span>Total</span><span class="ledger-data">{peso(f.quote.totalCentavos)}</span></div>
-										</div>
-										<div>
-											<p class="sf-hall-status" style="margin-top: 0">
-												Additional hours are charged at {peso(hall.extraHourFeeCentavos)} per hour after the first {hall.baseHours}.
-												We confirm availability for your date before anything is charged.
-											</p>
-											{#if f.eventDate}
-												<button type="button" class="sf-btn" style="margin-top: 1rem" onclick={() => bookHall(hall.id, hall.name)}>
-													<CalendarCheckIcon class="size-4" aria-hidden="true" /> Reserve this date
-												</button>
-											{:else}
-												<p class="sf-hall-status">Pick an event date to continue.</p>
-											{/if}
-										</div>
+										</select>
 									</div>
-								{:else}
-									<p class="sf-hall-status">Pick a date and time to see the price.</p>
 								{/if}
 							</div>
-						{/if}
-					</div>
-				{/each}
-			</div>
-		</section>
-	{/if}
 
-	<!-- ============================ Gallery ============================ -->
-	{#if galleryImages.length > 0}
-		<section id="gallery" class="sf-section">
-			<div class="sf-wrap">
-				<div class="sf-head">
-					<h2 class="sf-h2">A look inside {data.hotel.name}</h2>
-					<button type="button" class="sf-link" onclick={() => (lightboxIndex = 0)}>
-						View all {galleryImages.length} photos <ArrowRightIcon class="size-4" aria-hidden="true" />
+							<div class="storefront-hall-status">
+								{#if f.loading}
+									<p class="text-xs text-[var(--ledger-ink-muted)]">Pricing…</p>
+								{:else if f.quoteError}
+									<p class="text-xs" style="color: var(--ledger-danger, #b91c1c);">
+										{f.quoteError}
+									</p>
+								{:else if f.quote}
+									<div class="storefront-hall-summary-row">
+										<div class="storefront-hall-panel">
+											<h3 class="storefront-hall-panel-head">
+												<ReceiptIcon aria-hidden="true" />
+												Quotation Summary
+											</h3>
+											<div class="storefront-hall-quote">
+												<div class="storefront-hall-quote-row">
+													<span>Base ({f.quote.baseHours}h)</span>
+													<span class="ledger-data">{peso(f.quote.basePriceCentavos)}</span>
+												</div>
+												{#if f.quote.extraHours > 0}
+													<div class="storefront-hall-quote-row">
+														<span
+															>Extra {f.quote.extraHours}h × {peso(
+																f.quote.extraHourFeeCentavos
+															)}</span
+														>
+														<span class="ledger-data">{peso(f.quote.extraHoursCostCentavos)}</span>
+													</div>
+												{/if}
+												{#each f.quote.fees as fee (fee.name)}
+													<div class="storefront-hall-quote-row">
+														<span>{fee.name}</span>
+														<span class="ledger-data">{peso(fee.amountCentavos)}</span>
+													</div>
+												{/each}
+												<div class="storefront-hall-quote-row">
+													<span>VAT</span>
+													<span class="ledger-data">{peso(f.quote.vatCentavos)}</span>
+												</div>
+												<div class="storefront-hall-quote-row is-total">
+													<span>Total</span>
+													<span class="ledger-data text-base">{peso(f.quote.totalCentavos)}</span>
+												</div>
+											</div>
+										</div>
+										<div class="storefront-hall-note">
+											<InfoIcon aria-hidden="true" />
+											<div>
+												<span class="storefront-hall-note-head">Note</span>
+												<p>
+													Additional hours will be charged at {peso(hall.extraHourFeeCentavos)} per hour
+													after the initial {hall.baseHours} hours.
+												</p>
+											</div>
+										</div>
+									</div>
+									{#if f.eventDate}
+										<Button
+											type="button"
+											class="ledger-btn-primary storefront-hall-cta"
+											onclick={() => bookHall(hall.id, hall.name)}
+										>
+											<CalendarCheckIcon aria-hidden="true" />
+											Check Availability
+										</Button>
+										<p class="mt-2 text-center text-xs text-[var(--ledger-ink-muted)]">
+											We'll confirm your booking details and availability.
+										</p>
+									{:else}
+										<p class="text-xs text-[var(--ledger-ink-muted)]">
+											Pick an event date to check availability.
+										</p>
+									{/if}
+								{:else}
+									<p class="text-xs text-[var(--ledger-ink-muted)]">
+										Pick a date and time to see pricing.
+									</p>
+								{/if}
+							</div>
+						</div>
+					{/if}
+				</div>
+			{/each}
+		</div>
+	</section>
+{/if}
+
+{#if galleryImages.length > 0}
+	<section id="gallery" class="storefront-section">
+		<div class="storefront-gallery-head-row">
+			<div class="storefront-section-head">
+				<p class="storefront-eyebrow">Gallery</p>
+				<h2 class="storefront-section-title ink-heading ledger-display mt-2 text-2xl sm:text-3xl">
+					A Glimpse of {data.hotel.name}
+				</h2>
+			</div>
+			{#if galleryImages.length > 1}
+				<div class="storefront-gallery-nav">
+					<button
+						type="button"
+						class="storefront-gallery-nav-btn"
+						onclick={() => scrollGallery(-1)}
+						aria-label="Scroll to previous photos"
+					>
+						<ChevronLeftIcon aria-hidden="true" />
+					</button>
+					<button
+						type="button"
+						class="storefront-gallery-nav-btn"
+						onclick={() => scrollGallery(1)}
+						aria-label="Scroll to next photos"
+					>
+						<ChevronRightIcon aria-hidden="true" />
 					</button>
 				</div>
-				<div class="sf-gallery">
-					{#each galleryImages.slice(0, 9) as url, i (url)}
-						<button type="button" onclick={() => (lightboxIndex = i)} aria-label="View photo {i + 1} larger">
-							<img src={url} alt="" loading="lazy" onerror={hidePhoto} />
-						</button>
-					{/each}
-				</div>
-			</div>
-		</section>
-	{/if}
+			{/if}
+		</div>
+		<div class="storefront-gallery-strip" bind:this={galleryStripEl}>
+			{#each galleryImages as url, i (url)}
+				<button
+					type="button"
+					class="storefront-gallery-tile"
+					onclick={() => (lightboxIndex = i)}
+					aria-label="View larger photo"
+				>
+					<img src={url} alt="" loading="lazy" onerror={hidePhoto} />
+				</button>
+			{/each}
+		</div>
+	</section>
+{/if}
 
-	<!-- ============================ Reviews ============================ -->
-	{#if data.reviews.length > 0}
-		<section id="reviews" class="sf-section sf-section--tint">
-			<div class="sf-wrap">
-				<div class="sf-head"><h2 class="sf-h2">What guests say</h2></div>
-				<div class="sf-reviews">
-					{#each data.reviews as r (r.guestDisplayName + r.submittedAt)}
-						<figure class="sf-review">
-							<div class="sf-stars" role="img" aria-label="{r.rating} out of 5 stars">
-								{#each Array(5) as _, i (i)}
-									<StarIcon class="size-4 {i < r.rating ? 'fill-current' : 'opacity-25'}" aria-hidden="true" />
-								{/each}
-							</div>
-							<blockquote style="margin-top: 0.75rem">“{r.comment}”</blockquote>
-							<figcaption>{r.guestDisplayName}</figcaption>
-						</figure>
-					{/each}
+{#if data.reviews.length > 0}
+	<section id="reviews" class="storefront-section">
+		<div class="storefront-section-head">
+			<h2 class="storefront-section-title ledger-display text-2xl sm:text-3xl">What guests say</h2>
+		</div>
+		<div class="storefront-reviews-grid">
+			{#each data.reviews as r (r.guestDisplayName + r.submittedAt)}
+				<div class="storefront-review">
+					<div class="storefront-review-stars">
+						{#each Array(5) as _, i (i)}
+							<StarIcon
+								class="size-3.5 {i < r.rating
+									? 'fill-current text-[var(--hotel-accent)]'
+									: 'text-[var(--ledger-rule)]'}"
+							/>
+						{/each}
+					</div>
+					<p class="mt-2 text-sm text-[var(--ledger-ink)]">{r.comment}</p>
+					<p class="mt-2 ledger-label">{r.guestDisplayName}</p>
 				</div>
-			</div>
-		</section>
-	{/if}
-</main>
+			{/each}
+		</div>
+	</section>
+{/if}
 
 <StorefrontFooter
-	hotelSlug={slug}
+	hotelSlug={data.hotel.slug}
 	hotelName={data.hotel.name}
 	city={data.hotel.city}
 	showAmenities={data.hotelAmenities.length > 0}
@@ -617,22 +778,6 @@
 	facebookUrl={data.branding.facebookUrl}
 	instagramUrl={data.branding.instagramUrl}
 	tiktokUrl={data.branding.tiktokUrl}
-	phone={data.branding.contactPhone}
-	email={data.branding.contactEmail}
-	address={data.branding.contactAddress}
 />
 
 <StorefrontLightbox images={galleryImages} bind:index={lightboxIndex} />
-
-<RoomQuickView
-	bind:open={qvOpen}
-	room={qvRoom}
-	live={qvRoom ? (liveById.get(qvRoom.id) ?? null) : null}
-	{search}
-	hotelSlug={slug}
-	vatRateBps={data.hotel.vatRateBps}
-	themeStyle={sheetTheme}
-	{stayQuery}
-	onReserve={reserve}
-	onPickDates={pickDates}
-/>
