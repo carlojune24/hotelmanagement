@@ -728,6 +728,9 @@ export async function getStorefrontAvailability(
 	days: number
 ): Promise<{
 	days: DayAvailability[];
+	/** The same per-night status, but for ONE room type, so a room card's own calendar can cross out the
+	 *  nights that room is sold out (the hotel-wide `days` only shows when everything is full). */
+	daysByRoomType: Record<string, DayAvailability[]>;
 	stockByRoomType: Record<string, { totalRooms: number; freeTonight: number }>;
 }> {
 	const to = addDays(from, days);
@@ -768,6 +771,12 @@ export async function getStorefrontAvailability(
 
 	return {
 		days: computeDayAvailability(types, held, from, days),
+		daysByRoomType: Object.fromEntries(
+			types.map((t) => [
+				t.id,
+				computeDayAvailability([t], held.filter((h) => h.roomTypeId === t.id), from, days)
+			])
+		),
 		stockByRoomType: Object.fromEntries(
 			types.map((t) => [
 				t.id,
