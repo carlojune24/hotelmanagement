@@ -12,11 +12,12 @@ Phased plan: `~/.claude/plans/lets-plan-this-out-logical-dragonfly.md`. Live che
 it belongs to) so the design is approved up front — never hand-roll a new screen straight
 into code.**
 
-Two established design worlds — a route never crosses between them:
+Three established design worlds — a route never crosses between them:
 
 | World | Routes | Look | Source |
 |---|---|---|---|
 | **Guest booking** — "Woven Ledger" | `/{slug}/...` (root — the landing page) | Literata / Inter / JetBrains Mono; ruled guest-register aesthetic; hotel accent color spun into a woven pattern | `apps/hotel/DESIGN.md`, `apps/hotel/.impeccable/surfaces/` |
+| **Group landing** — HR "Gold & Black", dark only | `/` (anonymous visitors only) | Urbanist / Inter; black wash, gold hairlines, one card per published hotel; scoped to that page, never shared with the other worlds | `apps/hotel/src/routes/+page.svelte` |
 | **Staff app** — operate mode | `/{slug}/management/...`, `/admin` | Neutral `shadcn-svelte` (bits-ui) + oklch tokens in `apps/hotel/src/app.css` | shadcn primitives under `apps/hotel/src/lib/components/ui/` |
 
 New guest surface → extend the Woven Ledger world. New staff surface → run `impeccable` to

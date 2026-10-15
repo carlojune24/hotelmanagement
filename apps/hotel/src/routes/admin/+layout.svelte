@@ -7,6 +7,7 @@
 	const nav = [
 		{ href: '/admin', label: 'Overview' },
 		{ href: '/admin/hotels', label: 'Hotels' },
+		{ href: '/admin/settings', label: 'Settings' },
 		{ href: '/admin/users', label: 'Users' },
 		{ href: '/admin/api-keys', label: 'API keys' },
 		{ href: '/admin/errors', label: 'Errors' }

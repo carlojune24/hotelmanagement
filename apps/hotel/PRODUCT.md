@@ -50,7 +50,7 @@ No real hotel photos, logos, or copy on hand yet — the demo/seed hotel (`hotel
 
 ## Product Principles
 
-1. The booking page is the hotel's storefront, not the platform's — design so per-hotel identity (once branding fields exist) reads as *that hotel's* site, with `mmhotel` invisible as a brand to the guest.
+1. The booking page is the hotel's storefront, not the platform's — design so per-hotel identity (once branding fields exist) reads as *that hotel's* site, with `mmhotel` invisible as a brand to the guest. The one deliberate exception is the public group landing at `/`: it lists every published hotel under the group's own logo (uploaded in /admin → Settings) and sends each guest on to that hotel's page; it is not a search or marketplace.
 2. Price transparency: whatever the guest is shown must match what `pricing.ts` actually computes (nightly rate, weekend/seasonal overrides, extra person/child/bed fees, taxes/fees, VAT) — no simplified marketing number that diverges from the real bill.
 3. Graceful with partial data: a hotel with zero photos, one room type, or no branding set should still look intentional, not broken.
 4. PayMongo's redirect is a trust moment, not just a technical handoff — the guest is leaving the site to pay; design the pre-redirect summary and the return/confirmation state carefully.

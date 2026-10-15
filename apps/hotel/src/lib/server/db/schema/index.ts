@@ -29,3 +29,4 @@ export * from './email-log';
 export * from './guest-messages';
 export * from './integrations';
 export * from './error-log';
+export * from './platform-settings';
