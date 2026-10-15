@@ -5,6 +5,7 @@ import { db } from '$lib/server/db/index';
 import { hotels, paymongoSettings } from '$lib/server/db/schema/index';
 import { decryptSecret } from '$lib/server/secrets';
 import { handlePaymongoEvent } from '$lib/server/paymongo/webhook-handler';
+import { syncPaymongoIfStale } from '$lib/server/finance/paymongo-sync';
 
 /**
  * One hotel's PayMongo webhook — registered in THAT hotel's PayMongo account by
@@ -42,5 +43,8 @@ export async function POST({ request, params }) {
 	}
 
 	await handlePaymongoEvent(JSON.parse(rawBody), { hotelId: row.hotelId });
+	// A payment or refund just happened: refresh Finance's mirror of PayMongo's records without delaying the reply
+	// (at most once a minute, so a burst of events costs one sync).
+	void syncPaymongoIfStale(row.hotelId, 60_000).catch(() => undefined);
 	return json({ received: true });
 }

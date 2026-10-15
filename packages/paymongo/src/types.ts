@@ -43,6 +43,68 @@ export interface PayMongoPayment {
 	};
 }
 
+/** A payment as `GET /v1/payments` returns it: money in, with PayMongo's fee and the net it keeps for you. */
+export interface PayMongoPaymentRecord {
+	id: string;
+	type: 'payment';
+	attributes: {
+		amount: number;
+		currency: string;
+		status: string;
+		fee: number;
+		net_amount: number;
+		/** Unix seconds. `available_at` = when the funds can be paid out; `credited_at` = when PayMongo schedules the credit. */
+		paid_at: number | null;
+		available_at: number | null;
+		credited_at: number | null;
+		created_at: number;
+		updated_at?: number;
+		/** Null until the payment joins a payout batch. */
+		payout: unknown;
+		balance_transaction_id?: string | null;
+		description?: string | null;
+		external_reference_number?: string | null;
+		livemode?: boolean;
+		metadata?: Record<string, string> | null;
+		/** How the guest paid: `{ id, type: 'gcash' | 'card' | 'qrph' | … }`. */
+		source?: { id?: string; type?: string; [key: string]: unknown } | null;
+		refunds?: unknown[];
+		[key: string]: unknown;
+	};
+}
+
+/** A payout as `GET /v1/payouts` returns it (flat, not wrapped in `attributes`). Amounts are centavos, dates Unix seconds. */
+export interface PayMongoPayout {
+	id: string;
+	type?: string;
+	status: string;
+	amount: number;
+	fee?: number;
+	refund_amount?: number;
+	adjustment_amount?: number;
+	dispute_amount?: number;
+	net_amount: number;
+	currency?: string;
+	description?: string | null;
+	provider?: string | null;
+	bank_name?: string | null;
+	bank_account_name?: string | null;
+	bank_account_number?: string | null;
+	last_payout_transfer?: { id?: string; status?: string; reference_number?: string | null; [key: string]: unknown } | null;
+	created_at: number;
+	status_updated_at?: number;
+	updated_at?: number;
+	[key: string]: unknown;
+}
+
+/** A PayMongo wallet (Money Movement product). Only present on accounts that have one. */
+export interface PayMongoWallet {
+	id: string;
+	type?: string;
+	attributes?: Record<string, unknown>;
+	[key: string]: unknown;
+}
+
 export interface CheckoutSession {
 	id: string;
 	type: 'checkout_session';
