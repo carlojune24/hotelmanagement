@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { Button } from '$lib/components/ui/button/index.js';
 	import { amenityIcon } from '$lib/amenity-icons';
 	import { AMENITY_CATEGORY_LABELS, AMENITY_CATEGORY_ORDER } from '$lib/amenity-categories';
 	import BedIcon from '@lucide/svelte/icons/bed';
@@ -11,8 +10,12 @@
 	import AccessibilityIcon from '@lucide/svelte/icons/accessibility';
 	import ShowerHeadIcon from '@lucide/svelte/icons/shower-head';
 	import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
+	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
+	import { humanize } from '$lib/room-line';
 	import type { BedConfigEntry } from '$lib/server/db/schema/inventory';
 	import type { AmenityDetail } from '$lib/server/availability';
+	import StorefrontNav from '$lib/components/storefront/storefront-nav.svelte';
+	import StorefrontFooter from '$lib/components/storefront/storefront-footer.svelte';
 	import StorefrontLightbox from '$lib/components/storefront/storefront-lightbox.svelte';
 	import type { PageData } from './$types';
 
@@ -22,14 +25,15 @@
 		`₱${(centavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 
 	const rt = $derived(data.roomType);
+	const slug = $derived(data.hotel.slug);
 
 	const bedConfigText = (entries: BedConfigEntry[]) =>
 		entries.map((e) => `${e.quantity} ${e.type}`).join(' + ');
 
 	const mainPhoto = $derived(rt.photos.find((p) => p.tag === 'cover') ?? rt.photos[0] ?? null);
 	const restPhotos = $derived(mainPhoto ? rt.photos.filter((p) => p.url !== mainPhoto.url) : []);
-	// Main photo first, then the strip — the same order the page shows them in, so a
-	// thumbnail's position in the lightbox matches the one the guest just clicked.
+	// Main photo first, then the strip — the same order the page shows them in, so a thumbnail's position
+	// in the lightbox matches the one the guest just clicked.
 	const allPhotoUrls = $derived(mainPhoto ? [mainPhoto, ...restPhotos].map((p) => p.url) : []);
 
 	const groupedAmenities = $derived.by(() => {
@@ -46,13 +50,12 @@
 		}));
 	});
 
-	/** Book Now hands off into the wizard as a plain link, not shared state — dated mode already
-	    has verified dates/occupancy, so it skips straight to room selection; undated mode starts
-	    the wizard at the Dates step, carrying this room type through as a UI hint only. */
+	/** Book now hands off into the wizard as a plain link, not shared state: dated mode already has
+	    verified dates/occupancy, so it skips to room selection; undated mode starts at the Dates step. */
 	const bookNowHref = $derived(
 		data.mode === 'dated'
-			? `../rooms?checkIn=${data.checkIn}&checkOut=${data.checkOut}&adults=${data.adults}&children=${data.children}&roomTypeId=${rt.id}`
-			: `../dates?roomTypeId=${rt.id}`
+			? `/${slug}/rooms?checkIn=${data.checkIn}&checkOut=${data.checkOut}&adults=${data.adults}&children=${data.children}&roomTypeId=${rt.id}`
+			: `/${slug}/dates?roomTypeId=${rt.id}`
 	);
 
 	let lightboxIndex = $state<number | null>(null);
@@ -65,144 +68,127 @@
 	<title>{rt.name} — {data.hotel.name}</title>
 </svelte:head>
 
-<div class="storefront-room-page mx-auto max-w-4xl px-4 py-8 sm:px-6">
-	<p class="ledger-label">{data.hotel.name}</p>
-	<h1 class="ledger-display mt-1 text-3xl sm:text-4xl">{rt.name}</h1>
+<StorefrontNav
+	hotelSlug={slug}
+	hotelName={data.hotel.name}
+	logoUrl={data.branding.logoUrl}
+	showAmenities={data.hotelAmenities.length > 0}
+	showFunctionHall={data.functionHalls.length > 0}
+	showDining={data.diningItems.length > 0 || (data.dining.menuImages ?? []).length > 0}
+	showReviews={data.reviews.length > 0}
+	accent={data.theme.accent}
+	accentDeep={data.theme.accentDeep}
+	paper={data.theme.paper}
+	paperDeep={data.theme.paperDeep}
+/>
 
-	{#if data.mode === 'dated'}
-		<p class="storefront-room-dialog-price">
-			<span class="ledger-data text-lg">{peso(data.fromTotalCentavos)}</span>
-			<span class="ledger-label">total · {data.checkIn} → {data.checkOut}</span>
-		</p>
-	{:else if data.roomType.startingPriceCentavos != null}
-		<p class="storefront-room-dialog-price">
-			<span class="ledger-data text-lg">{peso(data.roomType.startingPriceCentavos)}</span>
-			<span class="ledger-label">/ night, from</span>
-		</p>
-	{/if}
+<main>
+	<header class="sf-page-head" style="padding-bottom: clamp(1.5rem, 4vw, 2.5rem)">
+		<div class="sf-wrap">
+			<a href="/{slug}#rooms" class="sf-link" style="font-size: 0.875rem"><ArrowLeftIcon class="size-4" aria-hidden="true" /> All rooms</a>
+			<h1 style="margin-top: 1rem">{rt.name}</h1>
+		</div>
+	</header>
 
-	<Button href={bookNowHref} class="ledger-btn-primary mt-4">Book now</Button>
-
-	{#if mainPhoto}
-		<div class="storefront-room-dialog-gallery mt-8">
-			<button
-				type="button"
-				class="storefront-room-dialog-photo-main"
-				onclick={() => (lightboxIndex = 0)}
-				aria-label="View larger photo"
-			>
-				<img src={mainPhoto.url} alt="" onerror={hidePhoto} />
-			</button>
-			{#if restPhotos.length > 0}
-				<div class="storefront-room-dialog-photo-strip">
-					{#each restPhotos as photo, i (photo.url)}
-						<button
-							type="button"
-							class="storefront-room-dialog-photo-thumb"
-							onclick={() => (lightboxIndex = i + 1)}
-							aria-label="View larger photo"
-						>
-							<img src={photo.url} alt="" loading="lazy" onerror={hidePhoto} />
-						</button>
-					{/each}
+	<section class="sf-section" style="padding-top: clamp(1.5rem, 4vw, 2.5rem)">
+		<div class="sf-wrap">
+			{#if mainPhoto}
+				<div class="sf-venue-gallery" style="margin-bottom: clamp(2rem, 5vw, 3.5rem)">
+					<button type="button" class="sf-venue-main" style="aspect-ratio: 16 / 9" onclick={() => (lightboxIndex = 0)} aria-label="View photos of {rt.name} larger">
+						<img src={mainPhoto.url} alt="" onerror={hidePhoto} />
+					</button>
+					{#if restPhotos.length > 0}
+						<div class="sf-venue-thumbs" style="grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr))">
+							{#each restPhotos as photo, i (photo.url)}
+								<button type="button" onclick={() => (lightboxIndex = i + 1)} aria-label="View photo {i + 2} larger">
+									<img src={photo.url} alt="" loading="lazy" onerror={hidePhoto} />
+								</button>
+							{/each}
+						</div>
+					{/if}
 				</div>
 			{/if}
+
+			<div class="sf-room-page-grid">
+				<div>
+					{#if rt.description}<p class="sf-about-text" style="font-size: clamp(1.25rem, 2.2vw, 1.625rem)">{rt.description}</p>{/if}
+
+					<div class="sf-chips" style="margin-top: 1.5rem">
+						<span class="sf-chip-static"><UsersIcon aria-hidden="true" />Sleeps {rt.baseOccupancy}–{rt.maxOccupancy}</span>
+						{#if rt.sizeSqm}<span class="sf-chip-static"><RulerIcon aria-hidden="true" />{rt.sizeSqm} m²</span>{/if}
+						{#if rt.bedConfiguration.length > 0}
+							<span class="sf-chip-static"><BedIcon aria-hidden="true" />{bedConfigText(rt.bedConfiguration)}{rt.bedFlexible ? ' (flexible)' : ''}</span>
+						{/if}
+						{#if rt.viewType}<span class="sf-chip-static"><EyeIcon aria-hidden="true" />{humanize(rt.viewType)}</span>{/if}
+						<span class="sf-chip-static">
+							{#if rt.smokingPolicy === 'non_smoking'}<CigaretteOffIcon aria-hidden="true" />Non-smoking{:else}<FlameIcon aria-hidden="true" />Smoking allowed{/if}
+						</span>
+						{#if rt.wheelchairAccessible}<span class="sf-chip-static"><AccessibilityIcon aria-hidden="true" />Wheelchair accessible</span>{/if}
+						{#if rt.rollInShower}<span class="sf-chip-static"><ShowerHeadIcon aria-hidden="true" />Roll-in shower</span>{/if}
+						{#if rt.grabBars}<span class="sf-chip-static"><ShieldCheckIcon aria-hidden="true" />Grab bars</span>{/if}
+					</div>
+					{#if rt.bedFlexible && rt.flexibilityNote}
+						<p class="mt-3 text-sm text-[var(--ledger-ink-muted)]">{rt.flexibilityNote}</p>
+					{/if}
+
+					{#if groupedAmenities.length > 0}
+						<h2 class="sf-prose-h">What's included</h2>
+						{#each groupedAmenities as group (group.category)}
+							<p class="mt-5 text-xs font-semibold tracking-wide text-[var(--ledger-ink-muted)] uppercase">{group.label}</p>
+							<ul class="sf-plain-list" style="margin-top: 0.5rem">
+								{#each group.items as a (a.name)}
+									{@const Icon = amenityIcon(a.icon)}
+									<li class="flex items-center gap-2"><Icon class="size-4 shrink-0 text-[var(--hotel-accent)]" aria-hidden="true" />{a.name}</li>
+								{/each}
+							</ul>
+						{/each}
+					{/if}
+
+					{#if data.branding.checkInPolicy || data.branding.checkOutPolicy}
+						<h2 class="sf-prose-h">Check-in &amp; check-out</h2>
+						{#if data.branding.checkInPolicy}<p class="text-[var(--ledger-ink-muted)]"><b class="text-[var(--ledger-ink)]">Check-in.</b> {data.branding.checkInPolicy}</p>{/if}
+						{#if data.branding.checkOutPolicy}<p class="mt-2 text-[var(--ledger-ink-muted)]"><b class="text-[var(--ledger-ink)]">Check-out.</b> {data.branding.checkOutPolicy}</p>{/if}
+					{/if}
+				</div>
+
+				<aside class="sf-aside" aria-label="Book {rt.name}">
+					{#if data.mode === 'dated'}
+						<div class="sf-aside-price">
+							<span class="text-sm text-[var(--ledger-ink-muted)]">Your stay, from</span>
+							<b>{peso(data.fromTotalCentavos)}</b>
+							<span class="text-sm text-[var(--ledger-ink-muted)]">total · {data.checkIn} → {data.checkOut}</span>
+						</div>
+					{:else if data.roomType.startingPriceCentavos != null}
+						<div class="sf-aside-price">
+							<span class="text-sm text-[var(--ledger-ink-muted)]">From</span>
+							<b>{peso(data.roomType.startingPriceCentavos)}</b>
+							<span class="text-sm text-[var(--ledger-ink-muted)]">per night</span>
+						</div>
+					{/if}
+					<a href={bookNowHref} class="sf-btn" style="width: 100%; margin-top: 1.25rem">
+						{data.mode === 'dated' ? 'Choose a rate' : 'Check dates & book'}
+					</a>
+					<p class="mt-3 text-center text-xs text-[var(--ledger-ink-muted)]">Book directly with the hotel — no third-party markup.</p>
+				</aside>
+			</div>
 		</div>
-	{/if}
-
-	{#if rt.description}
-		<p class="storefront-room-dialog-desc mt-6">{rt.description}</p>
-	{/if}
-
-	<div class="storefront-glance-row mt-6">
-		<span class="storefront-room-dialog-spec-chip">
-			<UsersIcon aria-hidden="true" />
-			<span>Sleeps {rt.baseOccupancy}–{rt.maxOccupancy}</span>
-		</span>
-		{#if rt.sizeSqm}
-			<span class="storefront-room-dialog-spec-chip">
-				<RulerIcon aria-hidden="true" />
-				<span>{rt.sizeSqm} m²</span>
-			</span>
-		{/if}
-		{#if rt.bedConfiguration.length > 0}
-			<span class="storefront-room-dialog-spec-chip">
-				<BedIcon aria-hidden="true" />
-				<span
-					>{bedConfigText(rt.bedConfiguration)}{rt.bedFlexible ? ' (flexible)' : ''}</span
-				>
-			</span>
-		{/if}
-		{#if rt.viewType}
-			<span class="storefront-room-dialog-spec-chip">
-				<EyeIcon aria-hidden="true" />
-				<span>{rt.viewType}</span>
-			</span>
-		{/if}
-		<span class="storefront-room-dialog-spec-chip">
-			{#if rt.smokingPolicy === 'non_smoking'}
-				<CigaretteOffIcon aria-hidden="true" />
-				<span>Non-smoking</span>
-			{:else}
-				<FlameIcon aria-hidden="true" />
-				<span>Smoking allowed</span>
-			{/if}
-		</span>
-		{#if rt.wheelchairAccessible}
-			<span class="storefront-room-dialog-spec-chip">
-				<AccessibilityIcon aria-hidden="true" />
-				<span>Wheelchair accessible</span>
-			</span>
-		{/if}
-		{#if rt.rollInShower}
-			<span class="storefront-room-dialog-spec-chip">
-				<ShowerHeadIcon aria-hidden="true" />
-				<span>Roll-in shower</span>
-			</span>
-		{/if}
-		{#if rt.grabBars}
-			<span class="storefront-room-dialog-spec-chip">
-				<ShieldCheckIcon aria-hidden="true" />
-				<span>Grab bars</span>
-			</span>
-		{/if}
-	</div>
-	{#if rt.bedFlexible && rt.flexibilityNote}
-		<p class="storefront-room-dialog-note mt-2">{rt.flexibilityNote}</p>
-	{/if}
-
-	{#if data.branding.checkInPolicy || data.branding.checkOutPolicy}
-		<div class="storefront-room-page-policies mt-8">
-			{#if data.branding.checkInPolicy}
-				<h2 class="ledger-display text-xl">Check-in</h2>
-				<p class="mt-1 text-sm text-[var(--ledger-ink-muted)]">{data.branding.checkInPolicy}</p>
-			{/if}
-			{#if data.branding.checkOutPolicy}
-				<h2 class="ledger-display mt-4 text-xl">Check-out</h2>
-				<p class="mt-1 text-sm text-[var(--ledger-ink-muted)]">{data.branding.checkOutPolicy}</p>
-			{/if}
-		</div>
-	{/if}
-
-	{#if groupedAmenities.length > 0}
-		<div class="storefront-room-dialog-amenities mt-8">
-			<h2 class="ledger-display text-xl">Amenities</h2>
-			{#each groupedAmenities as group (group.category)}
-				<h3 class="storefront-amenity-group-head">{group.label}</h3>
-				<ul class="storefront-amenity-list">
-					{#each group.items as a (a.name)}
-						{@const Icon = amenityIcon(a.icon)}
-						<li class="storefront-amenity-item">
-							<Icon aria-hidden="true" />
-							<span>{a.name}</span>
-						</li>
-					{/each}
-				</ul>
-			{/each}
-		</div>
-	{/if}
-
-	<Button href={bookNowHref} class="ledger-btn-primary mt-10">Book now</Button>
-</div>
+	</section>
+</main>
 
 <StorefrontLightbox images={allPhotoUrls} bind:index={lightboxIndex} />
+
+<StorefrontFooter
+	hotelSlug={slug}
+	hotelName={data.hotel.name}
+	city={data.hotel.city}
+	showAmenities={data.hotelAmenities.length > 0}
+	showFunctionHall={data.functionHalls.length > 0}
+	showDining={data.diningItems.length > 0 || (data.dining.menuImages ?? []).length > 0}
+	showReviews={data.reviews.length > 0}
+	facebookUrl={data.branding.facebookUrl}
+	instagramUrl={data.branding.instagramUrl}
+	tiktokUrl={data.branding.tiktokUrl}
+	phone={data.branding.contactPhone}
+	email={data.branding.contactEmail}
+	address={data.branding.contactAddress}
+/>

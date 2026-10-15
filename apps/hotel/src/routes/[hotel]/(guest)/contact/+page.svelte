@@ -8,9 +8,9 @@
 
 	let { data }: { data: PageData } = $props();
 
-	/** A plain Google Maps embed — no API key needed either way. A precise pin dropped on
-	    the staff map picker (`contactLat`/`contactLng`) wins when set (an exact coordinate,
-	    not a geocoded guess); otherwise falls back to an address-search embed. */
+	/** A plain Google Maps embed — no API key needed either way. A precise pin dropped on the staff map
+	    picker (`contactLat`/`contactLng`) wins when set (an exact coordinate, not a geocoded guess);
+	    otherwise it falls back to an address-search embed. */
 	const mapSrc = $derived(
 		data.branding.contactLat != null && data.branding.contactLng != null
 			? `https://www.google.com/maps?q=${data.branding.contactLat},${data.branding.contactLng}&output=embed`
@@ -44,46 +44,59 @@
 	paperDeep={data.theme.paperDeep}
 />
 
-<div class="storefront-section mx-auto max-w-4xl px-4 py-10 sm:px-6">
-	<h1 class="storefront-section-title ledger-display text-3xl sm:text-4xl">Contact Us</h1>
-	<p class="storefront-section-lede mt-2">Reach {data.hotel.name} directly — no middleman.</p>
+<main>
+	<header class="sf-page-head">
+		<div class="sf-wrap">
+			<h1>Contact us</h1>
+			<p class="sf-lede">Reach {data.hotel.name} directly — no middleman. Use the chat button for quick questions.</p>
+		</div>
+	</header>
 
-	{#if hasAnyContactInfo}
-		<div class="storefront-contact-details mt-8">
-			{#if data.branding.contactAddress}
-				<div class="storefront-contact-row">
-					<MapPinIcon aria-hidden="true" />
-					<span>{data.branding.contactAddress}</span>
+	<section class="sf-section">
+		<div class="sf-wrap sf-contact">
+			<div>
+				{#if hasAnyContactInfo}
+					<div class="sf-contact-list">
+						{#if data.branding.contactAddress}
+							<div class="sf-contact-row">
+								<MapPinIcon aria-hidden="true" />
+								<div><small>Address</small>{data.branding.contactAddress}</div>
+							</div>
+						{/if}
+						{#if data.branding.contactPhone}
+							<div class="sf-contact-row">
+								<PhoneIcon aria-hidden="true" />
+								<div><small>Phone</small><a href="tel:{data.branding.contactPhone}">{data.branding.contactPhone}</a></div>
+							</div>
+						{/if}
+						{#if data.branding.contactEmail}
+							<div class="sf-contact-row">
+								<MailIcon aria-hidden="true" />
+								<div><small>Email</small><a href="mailto:{data.branding.contactEmail}">{data.branding.contactEmail}</a></div>
+							</div>
+						{/if}
+					</div>
+				{:else}
+					<p class="sf-lede" style="margin-top: 0">Contact details are coming soon.</p>
+				{/if}
+				<div class="sf-feature-actions">
+					<a href="/{data.hotel.slug}/dates" class="sf-btn">Check availability</a>
 				</div>
-			{/if}
-			{#if data.branding.contactPhone}
-				<div class="storefront-contact-row">
-					<PhoneIcon aria-hidden="true" />
-					<a href="tel:{data.branding.contactPhone}">{data.branding.contactPhone}</a>
-				</div>
-			{/if}
-			{#if data.branding.contactEmail}
-				<div class="storefront-contact-row">
-					<MailIcon aria-hidden="true" />
-					<a href="mailto:{data.branding.contactEmail}">{data.branding.contactEmail}</a>
+			</div>
+
+			{#if mapSrc}
+				<div class="sf-contact-map">
+					<iframe
+						title="Map to {data.hotel.name}"
+						src={mapSrc}
+						loading="lazy"
+						referrerpolicy="no-referrer-when-downgrade"
+					></iframe>
 				</div>
 			{/if}
 		</div>
-	{:else}
-		<p class="storefront-section-lede mt-8">Contact details are coming soon.</p>
-	{/if}
-
-	{#if mapSrc}
-		<div class="storefront-contact-map mt-8">
-			<iframe
-				title="Map to {data.hotel.name}"
-				src={mapSrc}
-				loading="lazy"
-				referrerpolicy="no-referrer-when-downgrade"
-			></iframe>
-		</div>
-	{/if}
-</div>
+	</section>
+</main>
 
 <StorefrontFooter
 	hotelSlug={data.hotel.slug}
@@ -96,4 +109,7 @@
 	facebookUrl={data.branding.facebookUrl}
 	instagramUrl={data.branding.instagramUrl}
 	tiktokUrl={data.branding.tiktokUrl}
+	phone={data.branding.contactPhone}
+	email={data.branding.contactEmail}
+	address={data.branding.contactAddress}
 />

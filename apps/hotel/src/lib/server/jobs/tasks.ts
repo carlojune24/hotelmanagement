@@ -10,6 +10,7 @@ import { businessDateFor } from '../finance/shared';
 import { addDays } from '$lib/finance-range';
 import { getEnabledHotelIds } from './toggles';
 import { runErrorLogRetention } from '../error-log';
+import { sweepSupportChats } from '../support-chat';
 
 export interface JobRunSummary {
 	hotelsProcessed: number;
@@ -138,4 +139,11 @@ export async function runHrSync(): Promise<JobRunSummary> {
 		if (r.error) unreachable += 1;
 	}
 	return { hotelsProcessed: rows.length, detail: { removed, unreachable, protectedKept } };
+}
+
+/** Customer Support chat housekeeping: requeue chats whose agent went away, close idle ones,
+ *  hand queued chats to agents with room. Cheap and idempotent, so it runs every minute. */
+export async function runSupportSweep(): Promise<JobRunSummary> {
+	const r = await sweepSupportChats();
+	return { hotelsProcessed: 0, detail: { ...r } };
 }
