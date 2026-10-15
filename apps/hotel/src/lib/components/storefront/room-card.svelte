@@ -9,9 +9,10 @@
 	import type { BedConfigEntry } from '$lib/server/db/schema/inventory';
 
 	/**
-	 * One room type as a large photo-led row. Undated: "from ₱X / night", Quick view and Details. Dated
-	 * (the guest searched): the stay's live rate options with Reserve buttons, or an honest "not available
-	 * for these dates". Rows alternate image side on wide screens (CSS), stack on phones.
+	 * One room type. Undated: a large photo-led row with "from ₱X / night", Quick view and Details (rows
+	 * alternate image side on wide screens, stack on phones). Dated (the guest searched): ONE card that reads
+	 * top to bottom: the room (photo, name, availability, what it is), then "Choose a rate" with every rate's
+	 * terms, total and Reserve button, or an honest "not available for these dates".
 	 */
 	let {
 		room,
@@ -68,42 +69,68 @@
 	}
 </script>
 
-<article class="sf-room" class:is-unavailable={unavailable}>
-	<a href={detailHref} class="sf-room-media" aria-label="{room.name}: full details">
-		{#if cover}<img src={cover} alt="" loading="lazy" onerror={hidePhoto} />{/if}
-		{#if pill}<span class="sf-room-pill {pill.tone}">{pill.text}</span>{/if}
-	</a>
-
-	<div>
-		<h3>{room.name}</h3>
-		<div class="sf-room-specs">
-			{#if room.bedConfiguration.length > 0}
-				<span><BedIcon aria-hidden="true" />{bedText(room.bedConfiguration)}</span>
-			{/if}
-			<span><UsersIcon aria-hidden="true" />Sleeps {room.maxOccupancy}</span>
-			{#if room.sizeSqm}<span><RulerIcon aria-hidden="true" />{room.sizeSqm} m²</span>{/if}
-		</div>
-		{#if room.description}<p class="sf-room-desc">{room.description}</p>{/if}
-		{#if room.highlightedAmenities.length > 0}
-			<p class="sf-room-amen">{room.highlightedAmenities.slice(0, 4).map((a) => a.name).join(' · ')}</p>
+{#snippet specs()}
+	<div class="sf-room-specs">
+		{#if room.bedConfiguration.length > 0}
+			<span><BedIcon aria-hidden="true" />{bedText(room.bedConfiguration)}</span>
 		{/if}
+		<span><UsersIcon aria-hidden="true" />Sleeps {room.maxOccupancy}</span>
+		{#if room.sizeSqm}<span><RulerIcon aria-hidden="true" />{room.sizeSqm} m²</span>{/if}
+	</div>
+{/snippet}
+
+{#if searched}
+	<!-- Dated: one card, top to bottom. -->
+	<article class="sf-room sf-room--stay" class:is-unavailable={unavailable}>
+		<div class="sf-stay-head">
+			<a href={detailHref} class="sf-room-media" aria-label="{room.name}: full details">
+				{#if cover}<img src={cover} alt="" loading="lazy" onerror={hidePhoto} />{/if}
+			</a>
+			<div class="sf-stay-info">
+				<div class="sf-stay-title">
+					<h3>{room.name}</h3>
+					{#if pill}
+						<span class="sf-badge {pill.tone}">{pill.text}</span>
+					{:else if live}
+						<span class="sf-badge is-ok">Available for your dates</span>
+					{/if}
+				</div>
+				{@render specs()}
+				{#if room.description}<p class="sf-room-desc">{room.description}</p>{/if}
+				{#if room.highlightedAmenities.length > 0}
+					<p class="sf-room-amen">{room.highlightedAmenities.slice(0, 4).map((a) => a.name).join(' · ')}</p>
+				{/if}
+				<div class="sf-room-actions">
+					<button type="button" class="sf-link" onclick={() => onQuickView(room)}>Quick view</button>
+					<a href={detailHref} class="sf-link">Photos &amp; full details <ArrowRightIcon class="size-4" aria-hidden="true" /></a>
+				</div>
+			</div>
+		</div>
 
 		{#if live}
 			<RoomRates room={live} nights={search!.nights} {vatRateBps} {onReserve} />
-			<div class="sf-room-actions">
-				<button type="button" class="sf-link" onclick={() => onQuickView(room)}>Quick view</button>
-				<a href={detailHref} class="sf-link">Full details <ArrowRightIcon class="size-4" aria-hidden="true" /></a>
-			</div>
-		{:else if unavailable}
-			<p class="sf-room-unavailable">
-				This room isn't available for your dates or party size. Try other dates, or have a look at the
-				other rooms.
-			</p>
-			<div class="sf-room-actions">
-				<button type="button" class="sf-btn sf-btn--outline sf-btn--sm" onclick={onPickDates}>Change dates</button>
-				<button type="button" class="sf-link" onclick={() => onQuickView(room)}>Quick view</button>
-			</div>
 		{:else}
+			<div class="sf-stay-none">
+				<p>This room isn't available for your dates or party size. Try other dates, or have a look at the other rooms.</p>
+				<button type="button" class="sf-btn sf-btn--outline sf-btn--sm" onclick={onPickDates}>Change dates</button>
+			</div>
+		{/if}
+	</article>
+{:else}
+	<article class="sf-room">
+		<a href={detailHref} class="sf-room-media" aria-label="{room.name}: full details">
+			{#if cover}<img src={cover} alt="" loading="lazy" onerror={hidePhoto} />{/if}
+			{#if pill}<span class="sf-room-pill {pill.tone}">{pill.text}</span>{/if}
+		</a>
+
+		<div>
+			<h3>{room.name}</h3>
+			{@render specs()}
+			{#if room.description}<p class="sf-room-desc">{room.description}</p>{/if}
+			{#if room.highlightedAmenities.length > 0}
+				<p class="sf-room-amen">{room.highlightedAmenities.slice(0, 4).map((a) => a.name).join(' · ')}</p>
+			{/if}
+
 			<div class="sf-room-price">
 				{#if room.startingPriceCentavos != null}
 					<span>from</span> <b>{peso(room.startingPriceCentavos)}</b> <span>/ night</span>
@@ -117,6 +144,6 @@
 				<button type="button" class="sf-link" onclick={() => onQuickView(room)}>Quick view</button>
 				<a href={detailHref} class="sf-link">Details <ArrowRightIcon class="size-4" aria-hidden="true" /></a>
 			</div>
-		{/if}
-	</div>
-</article>
+		</div>
+	</article>
+{/if}
