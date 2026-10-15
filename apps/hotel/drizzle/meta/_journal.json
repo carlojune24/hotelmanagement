@@ -694,6 +694,13 @@
       "when": 1792029434603,
       "tag": "0098_support_reply_email",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1792059561601,
+      "tag": "0099_support_canned_replies",
+      "breakpoints": true
     }
   ]
 }

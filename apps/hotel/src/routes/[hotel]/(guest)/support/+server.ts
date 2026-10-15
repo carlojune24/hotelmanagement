@@ -11,9 +11,10 @@ import {
 	markStaffMessagesRead,
 	newVisitorToken,
 	postGuestMessage,
+	signalGuestTyping,
 	startConversation
 } from '$lib/server/support-chat';
-import { supportStartByIp } from '$lib/server/auth/rate-limit';
+import { supportMessageByIp, supportStartByIp, supportTypingByVisitor } from '$lib/server/auth/rate-limit';
 import type { RequestHandler } from './$types';
 
 /**
@@ -22,7 +23,7 @@ import type { RequestHandler } from './$types';
  * so the audit trail records these writes as the guest's, not the system's.
  *
  *   GET  -> widget state: availability, FAQ chips, and this visitor's latest conversation
- *   POST -> one action: start | message | offline | end | read
+ *   POST -> one action: start | message | offline | end | read | typing
  */
 
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
@@ -48,7 +49,8 @@ const actionSchema = z.discriminatedUnion('action', [
 		message: z.string().min(1).max(2000)
 	}),
 	z.object({ action: z.literal('end'), conversationId: uuid }),
-	z.object({ action: z.literal('read'), conversationId: uuid })
+	z.object({ action: z.literal('read'), conversationId: uuid }),
+	z.object({ action: z.literal('typing'), conversationId: uuid })
 ]);
 
 /** "14:00:00" -> "2:00 PM". */
@@ -121,6 +123,17 @@ export const POST: RequestHandler = async ({ request, locals, cookies, getClient
 	}
 	const tokenHash = hashVisitorToken(token!);
 
+	// "Typing…" pings are frequent and carry nothing: a per-visitor cap that fails quietly.
+	if (input.action === 'typing') {
+		const key = `${hotel.id}|${tokenHash}`;
+		if (supportTypingByVisitor.retryAfter(key) > 0) return json({ ok: true });
+		supportTypingByVisitor.consume(key);
+	} else if (!needsIdentity) {
+		const key = `${hotel.id}|${getClientAddress()}`;
+		if (supportMessageByIp.retryAfter(key) > 0) error(429, 'Please slow down a little.');
+		supportMessageByIp.consume(key);
+	}
+
 	try {
 		switch (input.action) {
 			case 'start': {
@@ -165,6 +178,9 @@ export const POST: RequestHandler = async ({ request, locals, cookies, getClient
 				if (conv?.id === input.conversationId) await markStaffMessagesRead(hotel.id, conv.id);
 				return json({ ok: true });
 			}
+			case 'typing':
+				await signalGuestTyping({ hotelId: hotel.id, tokenHash, conversationId: input.conversationId });
+				return json({ ok: true });
 		}
 	} catch (e) {
 		if (e instanceof SupportError) {

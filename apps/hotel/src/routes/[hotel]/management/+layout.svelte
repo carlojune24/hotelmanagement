@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { invalidate } from '$app/navigation';
+	import { setContext } from 'svelte';
+	import { SupportLive } from '$lib/support-live.svelte';
 	import { MediaQuery } from 'svelte/reactivity';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
@@ -148,6 +150,22 @@
 		if (seg === 'settings') return path.startsWith(`${target}/`) && !path.startsWith(`${base}/settings/audit`);
 		return path.startsWith(`${target}/`);
 	};
+
+	// Customer Support's live line (SSE). Open on every page for staff who may answer chats, so a new guest chat
+	// is noticed anywhere and an "available" agent stays online while they work elsewhere (the server keeps the
+	// heartbeat while this connection is up). The inbox page and the sidebar badge read from it.
+	const supportLive = new SupportLive({
+		base: () => base,
+		userId: () => data.user?.id ?? ''
+	});
+	setContext('support-live', supportLive);
+	const canSupport = $derived(
+		!!data.user && !isLoginRoute && (isAdmin || (!!role && roleCan(role.capabilities, 'support:read')))
+	);
+	$effect(() => {
+		if (!canSupport) return;
+		return supportLive.start();
+	});
 
 	// Keep the unread badge live across the whole staff app — not just on the
 	// Messages page itself — so a new cancellation request is noticed without

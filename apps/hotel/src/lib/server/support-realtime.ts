@@ -22,12 +22,25 @@ export type SupportEventKind =
 	| 'guest_message'
 	| 'staff_message'
 	| 'status'
-	| 'presence';
+	| 'presence'
+	/** Someone is typing. Ephemeral: never stored, streams relay it without re-reading the DB. */
+	| 'typing'
+	/** Messages were marked read ("Seen"). */
+	| 'read'
+	/** The LISTEN connection (re)connected, so NOTIFYs may have been missed: re-read everything. */
+	| 'resync';
 
 export interface SupportEvent {
 	hotelId: string;
 	conversationId: string | null;
 	kind: SupportEventKind;
+	/** Who caused a `typing` event. */
+	actor?: 'guest' | 'staff';
+	/** The agent the conversation is assigned to (null = queued / unassigned), so a staff client can
+	    decide whether a new guest message is its business. Ids only, never message bodies. */
+	assignedUserId?: string | null;
+	/** The staff member who is typing / who read the thread. */
+	userId?: string;
 }
 
 interface Subscriber {
@@ -40,6 +53,8 @@ interface Subscriber {
 interface Hub {
 	subscribers: Set<Subscriber>;
 	listening: Promise<void> | null;
+	/** How many times the LISTEN session has been established; more than one = it reconnected. */
+	sessions: number;
 }
 
 declare global {
@@ -47,7 +62,22 @@ declare global {
 	var __mmhotelSupportHub: Hub | undefined;
 }
 
-const hub: Hub = (globalThis.__mmhotelSupportHub ??= { subscribers: new Set(), listening: null });
+const hub: Hub = (globalThis.__mmhotelSupportHub ??= { subscribers: new Set(), listening: null, sessions: 0 });
+hub.sessions ??= 0;
+
+function fanOut(event: SupportEvent) {
+	for (const s of hub.subscribers) {
+		if (event.kind !== 'resync') {
+			if (s.hotelId !== event.hotelId) continue;
+			if (s.conversationId && s.conversationId !== event.conversationId) continue;
+		}
+		try {
+			s.push(event);
+		} catch {
+			// A closed stream must never take the others down.
+		}
+	}
+}
 
 function ensureListening(): Promise<void> {
 	if (hub.listening) return hub.listening;
@@ -57,23 +87,24 @@ function ensureListening(): Promise<void> {
 	// A single connection, separate from the app pool: LISTEN needs a session that stays open.
 	const listener = postgres(url, { max: 1 });
 	hub.listening = listener
-		.listen(CHANNEL, (payload) => {
-			let event: SupportEvent;
-			try {
-				event = JSON.parse(payload) as SupportEvent;
-			} catch {
-				return;
-			}
-			for (const s of hub.subscribers) {
-				if (s.hotelId !== event.hotelId) continue;
-				if (s.conversationId && s.conversationId !== event.conversationId) continue;
+		.listen(
+			CHANNEL,
+			(payload) => {
+				let event: SupportEvent;
 				try {
-					s.push(event);
+					event = JSON.parse(payload) as SupportEvent;
 				} catch {
-					// A closed stream must never take the others down.
+					return;
 				}
+				fanOut(event);
+			},
+			// Runs on the first LISTEN and again after every automatic reconnect. Anything notified while the
+			// connection was down is gone, so tell every open stream to re-read.
+			() => {
+				hub.sessions++;
+				if (hub.sessions > 1) fanOut({ hotelId: '', conversationId: null, kind: 'resync' });
 			}
-		})
+		)
 		.then(() => undefined)
 		.catch((err) => {
 			console.error('[support] LISTEN failed:', err);

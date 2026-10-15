@@ -5,19 +5,27 @@ import { requireCap } from '$lib/server/auth/rbac';
 import {
 	SUPPORT_TABS,
 	SupportError,
-	agentHeartbeat,
 	claimSupportConversation,
 	closeSupportConversation,
 	countSupportAttention,
 	getAgentState,
 	getSupportConversation,
+	listSupportCannedReplies,
 	listSupportConversations,
 	markSupportThreadRead,
 	postSupportStaffMessage,
 	setAgentAvailability,
+	signalStaffTyping,
 	type SupportTab
 } from '$lib/server/support-chat';
 import type { Actions, PageServerLoad } from './$types';
+
+/** "14:00:00" -> "2:00 PM", for the canned-reply placeholders. */
+function clock(t: string): string {
+	const [h = '0', mm = '00'] = t.split(':');
+	const hour = Number(h);
+	return `${hour % 12 === 0 ? 12 : hour % 12}:${mm} ${hour >= 12 ? 'PM' : 'AM'}`;
+}
 
 /**
  * The Support inbox: every guest chat and left message, one selected conversation (`?c=`) so a
@@ -36,17 +44,18 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 	const selectedId = url.searchParams.get('c');
 	let detail: Awaited<ReturnType<typeof getSupportConversation>> = null;
 	if (selectedId && /^[0-9a-f-]{36}$/i.test(selectedId)) {
+		// Reading is NOT done here: a load runs on every live update, so marking messages read in it would
+		// rewrite them each time. The page asks for it (`?/read`) once the thread is actually on screen.
 		detail = await getSupportConversation(hotelId, selectedId);
-		// Opening the conversation is what reads the guest's messages.
-		if (detail) await markSupportThreadRead(hotelId, selectedId);
 	}
 
-	const [conversations, queuedList, mineList, attention, agent] = await Promise.all([
+	const [conversations, queuedList, mineList, attention, agent, canned] = await Promise.all([
 		listSupportConversations(hotelId, user.id, tab),
 		listSupportConversations(hotelId, user.id, 'queued'),
 		listSupportConversations(hotelId, user.id, 'mine'),
 		countSupportAttention(hotelId, user.id),
-		getAgentState(hotelId, user.id)
+		getAgentState(hotelId, user.id),
+		listSupportCannedReplies(hotelId)
 	]);
 
 	const can = (cap: string) =>
@@ -60,6 +69,13 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 		selectedId: detail ? selectedId : null,
 		detail,
 		agent,
+		canned: canned.map((r) => ({ id: r.id, title: r.title, body: r.body })),
+		cannedContext: {
+			agent: user.name,
+			hotel: locals.hotel!.name,
+			checkin: clock(locals.hotel!.checkInTime),
+			checkout: clock(locals.hotel!.checkOutTime)
+		},
 		currentUserId: user.id,
 		canManage: can('support:manage'),
 		timezone: locals.hotel!.timezone,
@@ -73,18 +89,28 @@ export const actions: Actions = {
 	available: async ({ locals, request }) => {
 		requireCap(locals.user, locals.role, 'support:read');
 		const form = await request.formData();
-		await setAgentAvailability({
-			hotelId: locals.hotel!.id,
-			actor: locals.user!,
-			available: form.get('available') === '1'
-		});
-		return { toggled: true };
+		const available = form.get('available') === '1';
+		await setAgentAvailability({ hotelId: locals.hotel!.id, actor: locals.user!, available });
+		// The page shows exactly what was saved; it never guesses from the form it sent.
+		return { toggled: true, available };
 	},
 
-	heartbeat: async ({ locals }) => {
+	/** The thread is on screen: the guest's messages up to now are read (the guest sees "Seen"). */
+	read: async ({ locals, request }) => {
 		requireCap(locals.user, locals.role, 'support:read');
-		const state = await agentHeartbeat(locals.hotel!.id, locals.user!.id);
-		return { beat: true, available: state.available };
+		const parsed = idField.safeParse((await request.formData()).get('conversationId'));
+		if (!parsed.success) return fail(400, { error: 'That chat could not be found.' });
+		const changed = await markSupportThreadRead(locals.hotel!.id, parsed.data, locals.user!.id);
+		return { read: true, changed };
+	},
+
+	/** "Is typing…": ephemeral, nothing is stored. */
+	typing: async ({ locals, request }) => {
+		requireCap(locals.user, locals.role, 'support:read');
+		const parsed = idField.safeParse((await request.formData()).get('conversationId'));
+		if (!parsed.success) return fail(400, { error: 'That chat could not be found.' });
+		await signalStaffTyping({ hotelId: locals.hotel!.id, conversationId: parsed.data, userId: locals.user!.id });
+		return { typing: true };
 	},
 
 	claim: async ({ locals, request }) => {

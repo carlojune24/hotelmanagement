@@ -131,6 +131,24 @@ export const supportFaqs = pgTable(
 	(t) => [index('support_faqs_hotel_idx').on(t.hotelId, t.sortOrder)]
 );
 
+/** Per-hotel canned replies for the staff inbox ("/" picker). Placeholders ({guest}, {agent}, {hotel}, {checkin}, {checkout}) are filled in client-side. */
+export const supportCannedReplies = pgTable(
+	'support_canned_replies',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		title: text('title').notNull(),
+		body: text('body').notNull(),
+		sortOrder: integer('sort_order').notNull().default(0),
+		isActive: boolean('is_active').notNull().default(true),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [index('support_canned_replies_hotel_idx').on(t.hotelId, t.sortOrder)]
+);
+
 export const supportConversationsRelations = relations(supportConversations, ({ one, many }) => ({
 	hotel: one(hotels, { fields: [supportConversations.hotelId], references: [hotels.id] }),
 	order: one(orders, { fields: [supportConversations.orderId], references: [orders.id] }),
@@ -153,3 +171,4 @@ export type SupportConversationRow = typeof supportConversations.$inferSelect;
 export type SupportMessageRow = typeof supportMessages.$inferSelect;
 export type SupportAgentPresenceRow = typeof supportAgentPresence.$inferSelect;
 export type SupportFaqRow = typeof supportFaqs.$inferSelect;
+export type SupportCannedReplyRow = typeof supportCannedReplies.$inferSelect;

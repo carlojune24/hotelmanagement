@@ -111,3 +111,9 @@ export const qrOrderByIp = new RateLimiter({ max: 25, windowMs: 10 * MIN });
 /** Per ip, Customer Support chat: starting chats / leaving offline messages. Cookie-based limits in
  *  `support-chat.ts` stop one visitor; this stops one that clears cookies between attempts. */
 export const supportStartByIp = new RateLimiter({ max: 12, windowMs: 15 * MIN });
+
+/** Customer Support chat, guest side: one cheap request is "typing…", so cap those per visitor; and cap
+ *  the chatty-but-legitimate paths (messages, read marks, opening the live stream) per ip. */
+export const supportTypingByVisitor = new RateLimiter({ max: 8, windowMs: 10_000 });
+export const supportMessageByIp = new RateLimiter({ max: 60, windowMs: MIN });
+export const supportStreamByIp = new RateLimiter({ max: 40, windowMs: MIN });

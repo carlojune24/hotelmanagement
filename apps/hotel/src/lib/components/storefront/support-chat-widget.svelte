@@ -3,12 +3,18 @@
 	import MessageCircleIcon from '@lucide/svelte/icons/message-circle';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
+	import CheckCheckIcon from '@lucide/svelte/icons/check-check';
+	import ArrowDownIcon from '@lucide/svelte/icons/arrow-down';
 
 	/**
 	 * Customer Support chat, guest side (Woven Ledger world): FAQ quick questions first, then a
-	 * live chat with whichever staff member is available, or a leave-a-message form when nobody is.
-	 * Anonymous — the server keeps the visitor's identity in an httpOnly cookie. Live updates
-	 * arrive over SSE while a conversation is active; everything else is plain fetch.
+	 * live chat on the site itself. With nobody online the chat simply waits in the queue: the guest keeps
+	 * talking here, and whoever comes online first picks it up and answers in the same window.
+	 * Anonymous: the server keeps the visitor's identity in an httpOnly cookie. Live updates
+	 * arrive over SSE while a conversation is active (messages, "typing…", "Seen"); if the stream drops
+	 * the widget reconnects itself with backoff, polls meanwhile, and catches up on missed messages.
+	 * Every chat has a unique reference (SC-XXXXXXXX), and when it was opened from a booking page the
+	 * booking's code too. When a chat ends its messages are deleted, on the server and in this window.
 	 */
 	let {
 		hotelSlug,
@@ -24,6 +30,10 @@
 	type Msg = { id: string; direction: 'guest' | 'staff' | 'system'; body: string; createdAt: string };
 	type Faq = { id: string; question: string; answer: string };
 	type View = 'home' | 'faq' | 'form' | 'chat' | 'sent';
+	type Item =
+		| { kind: 'day'; key: string; label: string }
+		| { kind: 'system'; m: Msg }
+		| { kind: 'bubble'; m: Msg; mine: boolean; first: boolean; last: boolean };
 
 	const api = $derived(`/${hotelSlug}/support`);
 	const FLAG = $derived(`mm:support:${hotelSlug}`);
@@ -36,10 +46,16 @@
 	let activeFaq = $state<Faq | null>(null);
 
 	let convId = $state<string | null>(null);
+	/** This chat's unique reference and, if opened from a booking page, that booking's code. */
+	let ref = $state<string | null>(null);
+	let orderCode = $state<string | null>(null);
 	let status = $state('');
 	let agentName = $state<string | null>(null);
 	let messages = $state<Msg[]>([]);
 	let unread = $state(0);
+	/** Creation time of the newest guest message staff have read ("Seen"). */
+	let seenAt = $state<string | null>(null);
+	let staffTyping = $state(false);
 
 	let name = $state('');
 	let email = $state('');
@@ -48,6 +64,14 @@
 	let busy = $state(false);
 	let error = $state('');
 
+	// ---- connection state
+	/** The live stream is open right now. */
+	let connected = $state(false);
+	/** Down for long enough to tell the guest (a blip under 1.5 s stays quiet). */
+	let showReconnect = $state(false);
+	let newBelow = $state(false);
+	let nearBottom = true;
+
 	let es: EventSource | null = null;
 	let scroller: HTMLDivElement | undefined = $state();
 	let panelEl: HTMLDivElement | undefined = $state();
@@ -55,59 +79,138 @@
 	const live = $derived(status === 'queued' || status === 'open');
 	const offlineMode = $derived(!available);
 
+	// A visitor with an unfinished chat gets it back on any later visit (the cookie identifies them): the flag only
+	// saves the server a lookup for people who never chatted.
 	function remember(on: boolean) {
 		try {
-			if (on) sessionStorage.setItem(FLAG, '1');
-			else sessionStorage.removeItem(FLAG);
+			if (on) localStorage.setItem(FLAG, '1');
+			else localStorage.removeItem(FLAG);
 		} catch {
-			/* storage blocked: the chat just won't resume after a full reload */
+			/* storage blocked: the chat just won't resume until the panel is opened */
 		}
 	}
 	function wasActive(): boolean {
 		try {
-			return sessionStorage.getItem(FLAG) === '1';
+			return localStorage.getItem(FLAG) === '1';
 		} catch {
 			return false;
 		}
 	}
 
-	function closeStream() {
-		es?.close();
-		es = null;
-	}
+	// ---------------------------------------------------------------- messages
 
 	function merge(incoming: Msg[]) {
 		const have = new Set(messages.map((m) => m.id));
 		const fresh = incoming.filter((m) => !have.has(m.id));
 		if (fresh.length === 0) return;
 		messages = [...messages, ...fresh].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+		const fromStaff = fresh.filter((m) => m.direction === 'staff').length;
 		if (!open) unread += fresh.filter((m) => m.direction !== 'guest').length;
+		if (fromStaff > 0) {
+			staffTyping = false;
+			if (!open || document.hidden) {
+				chime();
+				flagTitle();
+			}
+		}
+	}
+
+	// ---------------------------------------------------------------- live stream + recovery
+
+	let retryTimer: ReturnType<typeof setTimeout> | undefined;
+	let retryDelay = 1000;
+	let pollTimer: ReturnType<typeof setInterval> | undefined;
+	let reconnectNoticeTimer: ReturnType<typeof setTimeout> | undefined;
+	let typingTimer: ReturnType<typeof setTimeout> | undefined;
+
+	function stopPolling() {
+		clearInterval(pollTimer);
+		pollTimer = undefined;
+	}
+	function closeStream() {
+		es?.close();
+		es = null;
+		clearTimeout(retryTimer);
+		clearTimeout(reconnectNoticeTimer);
+		stopPolling();
+		connected = false;
+		showReconnect = false;
+	}
+
+	/** Reconnects with the CURRENT cursor (the browser's own retry would replay from where the stream began). */
+	function scheduleReconnect() {
+		clearTimeout(retryTimer);
+		// Until the stream is back, ask for new messages every 10 s so a long outage never silences the chat.
+		pollTimer ??= setInterval(() => void refresh(), 10_000);
+		retryTimer = setTimeout(connect, retryDelay);
+		retryDelay = Math.min(retryDelay * 2, 30_000);
 	}
 
 	function connect() {
-		closeStream();
+		es?.close();
+		es = null;
 		if (!convId || !live) return;
 		const after = messages.at(-1)?.createdAt ?? '';
-		es = new EventSource(`${api}/stream?after=${encodeURIComponent(after)}`);
-		es.addEventListener('update', (e) => {
+		const src = new EventSource(`${api}/stream?after=${encodeURIComponent(after)}`);
+		es = src;
+		src.onopen = () => {
+			connected = true;
+			showReconnect = false;
+			clearTimeout(reconnectNoticeTimer);
+			retryDelay = 1000;
+			stopPolling();
+		};
+		src.addEventListener('update', (e) => {
 			const u = JSON.parse((e as MessageEvent).data) as {
 				conversationId: string;
 				status: string;
 				agentName: string | null;
+				seenAt: string | null;
 				messages: Msg[];
 			};
 			if (u.conversationId !== convId) return;
-			merge(u.messages);
 			status = u.status;
 			agentName = u.agentName;
-			if (!(u.status === 'queued' || u.status === 'open')) closeStream();
+			seenAt = u.seenAt;
+			if (u.status === 'queued' || u.status === 'open') {
+				merge(u.messages);
+			} else {
+				// Ended: the server deleted the messages, so this window does not keep them either.
+				messages = [];
+				staffTyping = false;
+				closeStream();
+			}
 		});
+		src.addEventListener('typing', () => {
+			staffTyping = true;
+			clearTimeout(typingTimer);
+			typingTimer = setTimeout(() => (staffTyping = false), 4500);
+		});
+		src.onerror = () => {
+			connected = false;
+			clearTimeout(reconnectNoticeTimer);
+			reconnectNoticeTimer = setTimeout(() => (showReconnect = true), 1500);
+			// Take over from the browser's retry so every reconnect uses the latest cursor, and so a stream the
+			// server refused (an error status closes it for good) is revived too.
+			src.close();
+			if (es === src) es = null;
+			if (live) scheduleReconnect();
+		};
 	}
 
 	type State = {
 		availability: { available: boolean };
 		faqs: Faq[];
-		conversation: { id: string; status: string; agentName: string | null; messages: Msg[] } | null;
+		conversation: {
+			id: string;
+			ref: string;
+			orderCode: string | null;
+			unreadFromTeam: number;
+			status: string;
+			agentName: string | null;
+			seenAt: string | null;
+			messages: Msg[];
+		} | null;
 	};
 
 	async function refresh(): Promise<void> {
@@ -122,18 +225,27 @@
 			if (c && (c.status === 'queued' || c.status === 'open')) {
 				const changed = convId !== c.id;
 				convId = c.id;
+				ref = c.ref;
+				orderCode = c.orderCode;
 				status = c.status;
 				agentName = c.agentName;
-				if (changed) messages = c.messages;
-				else merge(c.messages);
+				seenAt = c.seenAt;
+				if (changed) {
+					messages = c.messages;
+					// Back on the site with replies waiting: say so on the launcher.
+					if (!open) unread = c.unreadFromTeam;
+				} else merge(c.messages);
 				if (view === 'home' || changed) view = 'chat';
 				if (!es) connect();
 				remember(true);
 			} else if (c && convId === c.id) {
-				// our chat ended (by staff or the idle sweep)
+				// our chat ended (by staff or the idle sweep): its messages are gone
 				status = c.status;
-				merge(c.messages);
+				messages = [];
 				closeStream();
+			} else {
+				// Nothing live for this visitor any more: stop asking on every page load.
+				remember(false);
 			}
 		} catch {
 			/* offline: the launcher still opens, the form will say so on send */
@@ -163,6 +275,7 @@
 	$effect(() => {
 		if (open) {
 			unread = 0;
+			clearTitle();
 			void refresh();
 		}
 	});
@@ -170,26 +283,100 @@
 	// Resume a chat after a full page load without hitting the server for visitors who never chatted.
 	$effect(() => {
 		if (wasActive()) void refresh();
-		return closeStream;
+		return () => {
+			closeStream();
+			clearTimeout(typingTimer);
+		};
 	});
 
-	// Staff replies seen while the chat is on screen count as read.
+	// Back from a sleeping tab, a lost network or a locked phone: catch up, and revive a stream that died meanwhile.
 	$effect(() => {
-		if (open && view === 'chat' && convId && messages.some((m) => m.direction === 'staff')) {
+		const wake = () => {
+			if (document.visibilityState === 'hidden') return;
+			if (convId && live) {
+				void refresh();
+				if (!es) connect();
+			}
+			if (open) clearTitle();
+		};
+		const down = () => {
+			connected = false;
+		};
+		document.addEventListener('visibilitychange', wake);
+		window.addEventListener('online', wake);
+		window.addEventListener('offline', down);
+		return () => {
+			document.removeEventListener('visibilitychange', wake);
+			window.removeEventListener('online', wake);
+			window.removeEventListener('offline', down);
+		};
+	});
+
+	// While the panel sits on the home view, "online / offline" is kept honest without a reload.
+	$effect(() => {
+		if (!open || view === 'chat' || view === 'sent') return;
+		const t = setInterval(() => void refresh(), 30_000);
+		return () => clearInterval(t);
+	});
+
+	// Staff replies seen while the chat is on screen count as read (the team then sees "Seen").
+	$effect(() => {
+		if (open && view === 'chat' && convId && !document.hidden && messages.some((m) => m.direction === 'staff')) {
 			void post({ action: 'read', conversationId: convId }).catch(() => {});
 		}
 	});
 
-	// Pin the conversation to its newest message.
+	// ---------------------------------------------------------------- scrolling
+
+	function onScroll() {
+		if (!scroller) return;
+		nearBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;
+		if (nearBottom) newBelow = false;
+	}
+	function toBottom(smooth = false) {
+		if (!scroller) return;
+		scroller.scrollTo({ top: scroller.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+		newBelow = false;
+	}
+	// Pin to the newest message, unless the guest scrolled up to read: then offer a "New messages" pill.
 	$effect(() => {
-		void messages.length;
-		if (scroller) scroller.scrollTop = scroller.scrollHeight;
+		const last = messages.at(-1);
+		void staffTyping;
+		if (!scroller || !last) return;
+		if (nearBottom || last.direction === 'guest') toBottom();
+		else newBelow = true;
+	});
+	$effect(() => {
+		if (view === 'chat' && scroller) toBottom();
 	});
 
-	// Focus moves into the panel when it opens, back to nothing special when it closes.
+	// Focus moves into the panel when it opens.
 	$effect(() => {
 		if (open) panelEl?.focus();
 	});
+
+	// A phone's full-screen sheet locks the page behind it and follows the on-screen keyboard.
+	$effect(() => {
+		if (!open || !window.matchMedia('(max-width: 639px)').matches) return;
+		const prev = document.body.style.overflow;
+		document.body.style.overflow = 'hidden';
+		const vv = window.visualViewport;
+		const fit = () => {
+			if (!panelEl || !vv) return;
+			panelEl.style.setProperty('--vvh', `${vv.height}px`);
+			panelEl.style.setProperty('--vvt', `${vv.offsetTop}px`);
+		};
+		fit();
+		vv?.addEventListener('resize', fit);
+		vv?.addEventListener('scroll', fit);
+		return () => {
+			document.body.style.overflow = prev;
+			vv?.removeEventListener('resize', fit);
+			vv?.removeEventListener('scroll', fit);
+		};
+	});
+
+	// ---------------------------------------------------------------- actions
 
 	function chooseFaq(f: Faq) {
 		activeFaq = f;
@@ -207,21 +394,6 @@
 		error = '';
 		busy = true;
 		try {
-			if (offlineMode) {
-				const { res, json } = await post({
-					action: 'offline',
-					name,
-					email,
-					message: firstMessage
-				});
-				if (json?.ok) {
-					firstMessage = '';
-					view = 'sent';
-				} else {
-					error = (json && 'message' in json && json.message) || (res.status === 429 ? 'Please wait a little before trying again.' : 'We could not send that. Please try again.');
-				}
-				return;
-			}
 			const { json } = await post({
 				action: 'start',
 				name,
@@ -236,10 +408,6 @@
 				messages = [];
 				convId = null;
 				await refresh();
-			} else if (json && 'code' in json && json.code === 'offline') {
-				// Everyone went away while the form was open.
-				available = false;
-				error = 'Nobody is online right now. Leave your message and we will email you back.';
 			} else {
 				error = (json && 'message' in json && json.message) || 'We could not start the chat. Please try again.';
 			}
@@ -261,15 +429,25 @@
 			if (json?.ok) {
 				draft = '';
 				// The stream normally delivers our own message back at once; if it is down, pull it.
-				if (!es || es.readyState !== EventSource.OPEN) await refresh();
+				if (!es || !connected) await refresh();
 			} else {
 				error = (json && 'message' in json && json.message) || 'We could not send that.';
 			}
 		} catch {
-			error = 'You seem to be offline. Please check your connection.';
+			error = 'You seem to be offline. Your message was not sent. Please check your connection.';
 		} finally {
 			busy = false;
 		}
+	}
+
+	// "Typing…" for the team: one signal per 2.5 s while the guest is writing in a live chat with an agent.
+	let lastTypingAt = 0;
+	function onInput() {
+		if (!convId || status !== 'open') return;
+		const now = Date.now();
+		if (now - lastTypingAt < 2500) return;
+		lastTypingAt = now;
+		void post({ action: 'typing', conversationId: convId }).catch(() => {});
 	}
 
 	async function endChat() {
@@ -283,34 +461,145 @@
 
 	function startOver() {
 		convId = null;
+		ref = null;
+		orderCode = null;
 		status = '';
 		messages = [];
 		agentName = null;
+		seenAt = null;
+		staffTyping = false;
 		error = '';
 		remember(false);
 		view = 'home';
 		void refresh();
 	}
 
+	/** Esc closes; Tab stays inside the panel while it is open. */
 	function onKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape' && open) open = false;
+		if (!open) return;
+		if (e.key === 'Escape') {
+			open = false;
+			return;
+		}
+		if (e.key !== 'Tab' || !panelEl || !panelEl.contains(document.activeElement)) return;
+		const f = [...panelEl.querySelectorAll<HTMLElement>('button, a[href], input, textarea, [tabindex="0"]')].filter(
+			(el) => !el.hasAttribute('disabled')
+		);
+		if (f.length === 0) return;
+		const first = f[0]!;
+		const last = f[f.length - 1]!;
+		if (e.shiftKey && document.activeElement === first) {
+			e.preventDefault();
+			last.focus();
+		} else if (!e.shiftKey && document.activeElement === last) {
+			e.preventDefault();
+			first.focus();
+		}
 	}
+
+	// ---------------------------------------------------------------- tab title + chime
+
+	function clearTitle() {
+		document.title = document.title.replace(/^\(\d+\)\s+/, '');
+	}
+	function flagTitle() {
+		if (document.hidden) document.title = `(${Math.max(1, unread)}) ${document.title.replace(/^\(\d+\)\s+/, '')}`;
+	}
+	let audio: AudioContext | null = null;
+	/** A soft two-note chime for a reply that arrives while the panel is closed or the tab is in the background. */
+	function chime() {
+		try {
+			audio ??= new AudioContext();
+			if (audio.state === 'suspended') void audio.resume();
+			if (audio.state !== 'running') return;
+			[660, 880].forEach((freq, i) => {
+				const osc = audio!.createOscillator();
+				const gain = audio!.createGain();
+				const t = audio!.currentTime + i * 0.14;
+				osc.frequency.value = freq;
+				gain.gain.setValueAtTime(0.0001, t);
+				gain.gain.exponentialRampToValueAtTime(0.08, t + 0.02);
+				gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+				osc.connect(gain).connect(audio!.destination);
+				osc.start(t);
+				osc.stop(t + 0.22);
+			});
+		} catch {
+			/* no audio available: the badge and title still tell them */
+		}
+	}
+
+	// ---------------------------------------------------------------- display
 
 	const clock = (iso: string) =>
 		new Intl.DateTimeFormat('en-PH', { hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
+	const dayKey = (iso: string) => new Date(iso).toDateString();
+	function dayLabel(iso: string) {
+		const d = new Date(iso);
+		const today = new Date();
+		const yest = new Date();
+		yest.setDate(today.getDate() - 1);
+		if (d.toDateString() === today.toDateString()) return 'Today';
+		if (d.toDateString() === yest.toDateString()) return 'Yesterday';
+		return new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric' }).format(d);
+	}
+	const initials = (n: string | null) =>
+		(n ?? 'Team')
+			.split(/\s+/)
+			.filter(Boolean)
+			.slice(0, 2)
+			.map((p) => p[0]!.toUpperCase())
+			.join('');
+
+	const GROUP_MS = 5 * 60 * 1000;
+	/** Messages as chat rows: day separators, system notes, and bubbles grouped by sender within 5 minutes. */
+	const items = $derived.by<Item[]>(() => {
+		const out: Item[] = [];
+		let lastDay = '';
+		let prev: Msg | null = null;
+		for (let i = 0; i < messages.length; i++) {
+			const m = messages[i]!;
+			const day = dayKey(m.createdAt);
+			if (day !== lastDay) {
+				out.push({ kind: 'day', key: day, label: dayLabel(m.createdAt) });
+				lastDay = day;
+				prev = null;
+			}
+			if (m.direction === 'system') {
+				out.push({ kind: 'system', m });
+				prev = null;
+				continue;
+			}
+			const next = messages[i + 1];
+			const joinsPrev =
+				prev !== null && prev.direction === m.direction && Date.parse(m.createdAt) - Date.parse(prev.createdAt) < GROUP_MS;
+			const joinsNext =
+				!!next &&
+				next.direction === m.direction &&
+				dayKey(next.createdAt) === day &&
+				Date.parse(next.createdAt) - Date.parse(m.createdAt) < GROUP_MS;
+			out.push({ kind: 'bubble', m, mine: m.direction === 'guest', first: !joinsPrev, last: !joinsNext });
+			prev = m;
+		}
+		return out;
+	});
+
+	/** The newest guest message the team has read: it gets the "Seen" mark. */
+	const seenId = $derived.by(() => {
+		if (!seenAt) return null;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const m = messages[i]!;
+			if (m.direction === 'guest' && m.createdAt <= seenAt) return m.id;
+		}
+		return null;
+	});
 </script>
 
 <svelte:window onkeydown={onKeydown} />
 
 <div class="support" class:lift class:is-open={open}>
 	{#if open}
-		<div
-			class="panel"
-			role="dialog"
-			aria-label="Customer Support"
-			tabindex="-1"
-			bind:this={panelEl}
-		>
+		<div class="panel" role="dialog" aria-label="Customer Support" tabindex="-1" bind:this={panelEl}>
 			<header class="head">
 				{#if view !== 'home' && !(view === 'chat' && live)}
 					<button type="button" class="icon-btn" onclick={() => (view === 'chat' ? startOver() : (view = 'home'))} aria-label="Back">
@@ -321,6 +610,7 @@
 					<span class="head-name">Customer Support</span>
 					<span class="head-sub">
 						{#if view === 'chat' && live}
+							<span class="head-dot" class:on={status === 'open'} aria-hidden="true"></span>
 							{status === 'open' && agentName ? `${agentName} · ${hotelName}` : 'Waiting for a team member'}
 						{:else}
 							{hotelName}
@@ -349,11 +639,12 @@
 					<div class="foot">
 						<p class="presence">
 							<span class="dot" class:on={available} aria-hidden="true"></span>
-							{available ? 'Our team is online' : 'Our team is offline right now'}
+							{available ? 'Our team is online' : 'Our team is away right now'}
 						</p>
-						<button type="button" class="primary" onclick={chatWithPerson}>
-							{available ? 'Chat with a person' : 'Leave a message'}
-						</button>
+						<button type="button" class="primary" onclick={chatWithPerson}>Chat with a person</button>
+						{#if !available}
+							<p class="hint">Nobody is online right now. You can still start a chat: it waits for you here, and we reply on this page as soon as someone is back.</p>
+						{/if}
 					</div>
 				{:else if view === 'faq' && activeFaq}
 					<div class="scroll">
@@ -362,15 +653,13 @@
 					</div>
 					<div class="foot">
 						<button type="button" class="ghost" onclick={() => (view = 'home')}>More questions</button>
-						<button type="button" class="primary" onclick={chatWithPerson}>
-							{available ? 'Still need help? Chat with a person' : 'Still need help? Leave a message'}
-						</button>
+						<button type="button" class="primary" onclick={chatWithPerson}>Still need help? Chat with a person</button>
 					</div>
 				{:else if view === 'form'}
 					<form class="form scroll" onsubmit={submitForm}>
 						<p class="row-hotel">
 							{offlineMode
-								? 'Nobody is online right now. Leave your question and we will reply by email.'
+								? 'Nobody is online right now. Tell us what you need: your chat waits here, and a team member will reply in this window as soon as they are back.'
 								: 'Tell us who you are and what you need. A team member will join the chat.'}
 						</p>
 						<label class="field">
@@ -378,8 +667,8 @@
 							<input bind:value={name} required maxlength="80" autocomplete="name" />
 						</label>
 						<label class="field">
-							<span class="label">Email{offlineMode ? '' : ' (optional)'}</span>
-							<input type="email" bind:value={email} required={offlineMode} maxlength="200" autocomplete="email" />
+							<span class="label">Email (optional)</span>
+							<input type="email" bind:value={email} maxlength="200" autocomplete="email" />
 						</label>
 						<label class="field">
 							<span class="label">{offlineMode ? 'Your message' : 'How can we help? (optional)'}</span>
@@ -387,7 +676,7 @@
 						</label>
 						{#if error}<p class="error" role="alert">{error}</p>{/if}
 						<button type="submit" class="primary" disabled={busy || !name.trim()}>
-							{busy ? 'Sending…' : offlineMode ? 'Send message' : 'Start chat'}
+							{busy ? 'Starting…' : 'Start chat'}
 						</button>
 					</form>
 				{:else if view === 'sent'}
@@ -398,22 +687,62 @@
 						<button type="button" class="primary" onclick={startOver}>Done</button>
 					</div>
 				{:else}
-					<div class="scroll" bind:this={scroller} aria-live="polite">
-						{#each messages as m (m.id)}
-							{#if m.direction === 'system'}
-								<p class="row-system">{m.body}</p>
-							{:else if m.direction === 'staff'}
-								<div class="row-hotel">
-									<span class="who">{agentName ?? 'Team'} <span class="ledger-data when">{clock(m.createdAt)}</span></span>
-									{m.body}
-								</div>
-							{:else}
-								<div class="row-guest">
-									<span class="who">You <span class="ledger-data when">{clock(m.createdAt)}</span></span>
-									{m.body}
+					{#if ref}
+						<p class="idstrip">
+							<span>Chat ID <b class="ledger-data">{ref}</b></span>
+							{#if orderCode}<span>Booking <b class="ledger-data">{orderCode}</b></span>{/if}
+						</p>
+					{/if}
+					{#if live && showReconnect}
+						<p class="banner" role="status">Reconnecting… your messages will still send.</p>
+					{:else if status === 'queued'}
+						<p class="banner" role="status">
+							{available
+								? 'All our team are busy right now. You are in line and will be answered here.'
+								: 'Nobody is online right now. Your messages are saved. Keep this page open or come back later: a team member will reply here.'}
+						</p>
+					{/if}
+					<div class="chat-wrap">
+						<div class="scroll chat" bind:this={scroller} onscroll={onScroll} aria-live="polite">
+							{#each items as it (it.kind === 'day' ? 'day-' + it.key : it.m.id)}
+								{#if it.kind === 'day'}
+									<p class="day"><span>{it.label}</span></p>
+								{:else if it.kind === 'system'}
+									<p class="row-system">{it.m.body}</p>
+								{:else}
+									<div class="msg" class:mine={it.mine} class:first={it.first} class:last={it.last}>
+										{#if !it.mine}
+											<span class="avatar" class:hidden-av={!it.last} aria-hidden="true">{initials(agentName)}</span>
+										{/if}
+										<div class="stack">
+											{#if it.first && !it.mine}<span class="who">{agentName ?? 'Team'}</span>{/if}
+											<div class="bubble">{it.m.body}</div>
+											{#if it.last}
+												<span class="meta">
+													{clock(it.m.createdAt)}
+													{#if it.mine && it.m.id === seenId}
+														<span class="seen"><CheckCheckIcon class="size-3.5" aria-hidden="true" /> Seen</span>
+													{/if}
+												</span>
+											{/if}
+										</div>
+									</div>
+								{/if}
+							{/each}
+							{#if staffTyping}
+								<div class="msg first last">
+									<span class="avatar" aria-hidden="true">{initials(agentName)}</span>
+									<div class="stack">
+										<div class="bubble typing" aria-label="{agentName ?? 'The team'} is typing"><i></i><i></i><i></i></div>
+									</div>
 								</div>
 							{/if}
-						{/each}
+						</div>
+						{#if newBelow}
+							<button type="button" class="pill" onclick={() => toBottom(true)}>
+								<ArrowDownIcon class="size-4" aria-hidden="true" /> New messages
+							</button>
+						{/if}
 					</div>
 					{#if live}
 						<form class="composer" onsubmit={send}>
@@ -425,8 +754,9 @@
 									maxlength="1000"
 									placeholder="Type here and press enter"
 									aria-label="Message"
+									oninput={onInput}
 									onkeydown={(e) => {
-										if (e.key === 'Enter' && !e.shiftKey) {
+										if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
 											e.preventDefault();
 											e.currentTarget.form?.requestSubmit();
 										}
@@ -434,11 +764,11 @@
 								></textarea>
 								<button type="submit" class="send" disabled={busy || !draft.trim()}>Send</button>
 							</div>
-							<button type="button" class="ghost end" onclick={endChat}>End chat</button>
+							<button type="button" class="ghost end" onclick={endChat} title="Ending the chat deletes its messages">End chat</button>
 						</form>
 					{:else}
 						<div class="foot">
-							<p class="presence">This chat has ended.</p>
+							<p class="presence">This chat has ended. Its messages have been deleted.</p>
 							<button type="button" class="primary" onclick={startOver}>Start a new chat</button>
 						</div>
 					{/if}
@@ -480,6 +810,10 @@
 	.support.lift {
 		bottom: calc(5rem + var(--sf-bottom-bar, 0px));
 	}
+	/* Open: above the sticky booking bar (z 46) and the floating invoice (z 50). */
+	.support.is-open {
+		z-index: 60;
+	}
 
 	/* ---- launcher ---- */
 	.launcher {
@@ -497,6 +831,7 @@
 		border: 0;
 		border-radius: 999px;
 		cursor: pointer;
+		box-shadow: 0 10px 28px -12px rgb(0 0 0 / 0.5);
 	}
 	.launcher:hover {
 		background: var(--hotel-accent-deep);
@@ -506,6 +841,7 @@
 	.primary:focus-visible,
 	.icon-btn:focus-visible,
 	.send:focus-visible,
+	.pill:focus-visible,
 	.ghost:focus-visible {
 		outline: 2px solid var(--hotel-accent);
 		outline-offset: 2px;
@@ -526,7 +862,7 @@
 		border-radius: 999px;
 	}
 
-	/* ---- panel: a ruled sheet; only the header carries the weave ---- */
+	/* ---- panel ---- */
 	.panel {
 		display: flex;
 		flex-direction: column;
@@ -535,7 +871,8 @@
 		overflow: hidden;
 		background: var(--ledger-paper);
 		border: 1px solid var(--ledger-rule);
-		border-radius: 10px;
+		border-radius: 14px;
+		box-shadow: 0 24px 60px -24px rgb(0 0 0 / 0.55);
 		outline: none;
 	}
 	.head {
@@ -544,19 +881,13 @@
 		gap: 0.5rem;
 		padding: 0.75rem 0.75rem 0.75rem 1rem;
 		color: var(--ledger-paper);
-		background-color: var(--hotel-accent);
-		background-image: var(--hotel-woven-pattern);
-		background-repeat: repeat;
-		background-size: 28px 28px;
+		background: var(--hotel-accent);
 	}
 	.head-title {
 		display: flex;
 		flex: 1;
 		flex-direction: column;
 		min-width: 0;
-		padding: 0.25rem 0.5rem;
-		background: color-mix(in oklch, var(--hotel-accent-deep) 82%, transparent);
-		border-radius: 4px;
 	}
 	.head-name {
 		font-family: var(--ledger-font-display, Georgia, serif);
@@ -564,11 +895,24 @@
 		font-weight: 500;
 	}
 	.head-sub {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
 		overflow: hidden;
 		font-size: 0.75rem;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-		opacity: 0.9;
+		opacity: 0.92;
+	}
+	.head-dot {
+		width: 0.5rem;
+		height: 0.5rem;
+		flex-shrink: 0;
+		border: 1px solid currentColor;
+		border-radius: 999px;
+	}
+	.head-dot.on {
+		background: currentColor;
 	}
 	.icon-btn {
 		display: inline-flex;
@@ -584,7 +928,7 @@
 		cursor: pointer;
 	}
 	.icon-btn:hover {
-		background: color-mix(in oklch, var(--hotel-accent-deep) 60%, transparent);
+		background: color-mix(in oklch, var(--ledger-paper) 18%, transparent);
 	}
 
 	.body {
@@ -598,9 +942,40 @@
 		min-height: 0;
 		padding: 1rem;
 		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+	.idstrip {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.25rem 1rem;
+		margin: 0;
+		padding: 0.35rem 1rem;
+		font-size: 0.6875rem;
+		color: var(--ledger-ink-muted);
+		background: var(--ledger-paper-2);
+		border-bottom: 1px solid var(--ledger-rule);
+	}
+	.idstrip b {
+		font-weight: 600;
+		color: var(--ledger-ink);
+	}
+	.hint {
+		margin: 0.625rem 0 0;
+		font-size: 0.75rem;
+		line-height: 1.45;
+		color: var(--ledger-ink-muted);
+	}
+	.banner {
+		margin: 0;
+		padding: 0.4rem 1rem;
+		font-size: 0.75rem;
+		text-align: center;
+		color: var(--ledger-ink);
+		background: color-mix(in oklch, var(--hotel-accent) 14%, var(--ledger-paper));
+		border-bottom: 1px solid var(--ledger-rule);
 	}
 
-	/* ---- ledger rows instead of speech bubbles ---- */
+	/* ---- FAQ / info rows (home, FAQ answer, forms) ---- */
 	.row-hotel,
 	.row-guest {
 		margin: 0;
@@ -611,38 +986,197 @@
 		overflow-wrap: anywhere;
 		border-bottom: 1px solid var(--ledger-rule);
 	}
-	.row-hotel .who {
-		color: var(--hotel-accent-deep);
-	}
 	.row-guest {
 		text-align: right;
-	}
-	.row-system {
-		margin: 0;
-		padding: 0.5rem 0;
-		font-size: 0.75rem;
-		text-align: center;
-		color: var(--ledger-ink-muted);
-	}
-	.who {
-		display: block;
-		margin-bottom: 0.125rem;
-		font-size: 0.6875rem;
-		font-weight: 500;
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
-		color: var(--ledger-ink-muted);
-	}
-	.when {
-		margin-left: 0.375rem;
-		letter-spacing: 0;
-		text-transform: none;
 	}
 	.muted {
 		font-size: 0.875rem;
 		color: var(--ledger-ink-muted);
 	}
 
+	/* ---- the conversation: bubbles ---- */
+	.chat-wrap {
+		position: relative;
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		min-height: 0;
+	}
+	.chat {
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+		padding: 0.75rem 0.875rem;
+	}
+	.day {
+		display: flex;
+		justify-content: center;
+		margin: 0.5rem 0;
+	}
+	.day span {
+		padding: 0.125rem 0.625rem;
+		font-size: 0.6875rem;
+		font-weight: 500;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: var(--ledger-ink-muted);
+		background: var(--ledger-paper-2);
+		border-radius: 999px;
+	}
+	.row-system {
+		margin: 0.5rem 0;
+		font-size: 0.75rem;
+		text-align: center;
+		color: var(--ledger-ink-muted);
+	}
+	.msg {
+		display: flex;
+		align-items: flex-end;
+		gap: 0.5rem;
+		max-width: 88%;
+	}
+	.msg.first {
+		margin-top: 0.5rem;
+	}
+	.msg.mine {
+		align-self: flex-end;
+		flex-direction: row-reverse;
+	}
+	.avatar {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.75rem;
+		height: 1.75rem;
+		flex-shrink: 0;
+		font-size: 0.6875rem;
+		font-weight: 600;
+		color: var(--ledger-paper);
+		background: var(--hotel-accent);
+		border-radius: 999px;
+	}
+	.avatar.hidden-av {
+		visibility: hidden;
+	}
+	.stack {
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+		gap: 0.125rem;
+	}
+	.msg.mine .stack {
+		align-items: flex-end;
+	}
+	.who {
+		margin-left: 0.25rem;
+		font-size: 0.6875rem;
+		font-weight: 500;
+		color: var(--ledger-ink-muted);
+	}
+	.bubble {
+		padding: 0.5rem 0.75rem;
+		font-size: 0.9375rem;
+		line-height: 1.45;
+		white-space: pre-line;
+		overflow-wrap: anywhere;
+		color: var(--ledger-ink);
+		background: var(--ledger-paper-2);
+		border: 1px solid var(--ledger-rule);
+		border-radius: 16px;
+	}
+	.msg.mine .bubble {
+		color: var(--ledger-paper);
+		background: var(--hotel-accent);
+		border-color: var(--hotel-accent);
+	}
+	/* Square off the corner that touches the same sender's neighbour, so a run reads as one block. */
+	.msg:not(.mine):not(.first) .bubble {
+		border-top-left-radius: 5px;
+	}
+	.msg:not(.mine):not(.last) .bubble {
+		border-bottom-left-radius: 5px;
+	}
+	.msg.mine:not(.first) .bubble {
+		border-top-right-radius: 5px;
+	}
+	.msg.mine:not(.last) .bubble {
+		border-bottom-right-radius: 5px;
+	}
+	.meta {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		margin: 0 0.25rem;
+		font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+		font-size: 0.625rem;
+		color: var(--ledger-ink-muted);
+	}
+	.seen {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.125rem;
+		font-family: 'Inter Variable', ui-sans-serif, sans-serif;
+		font-size: 0.6875rem;
+		color: var(--hotel-accent);
+	}
+	.bubble.typing {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		padding: 0.75rem 0.875rem;
+	}
+	.typing i {
+		width: 0.375rem;
+		height: 0.375rem;
+		background: var(--ledger-ink-muted);
+		border-radius: 999px;
+		animation: dot 1.2s infinite ease-in-out;
+	}
+	.typing i:nth-child(2) {
+		animation-delay: 0.15s;
+	}
+	.typing i:nth-child(3) {
+		animation-delay: 0.3s;
+	}
+	@keyframes dot {
+		0%,
+		60%,
+		100% {
+			opacity: 0.35;
+			transform: translateY(0);
+		}
+		30% {
+			opacity: 1;
+			transform: translateY(-3px);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.typing i {
+			animation: none;
+			opacity: 0.7;
+		}
+	}
+	.pill {
+		position: absolute;
+		bottom: 0.625rem;
+		left: 50%;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		padding: 0.375rem 0.75rem;
+		font: inherit;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: var(--ledger-paper);
+		background: var(--hotel-accent);
+		border: 0;
+		border-radius: 999px;
+		box-shadow: 0 6px 16px -8px rgb(0 0 0 / 0.5);
+		transform: translateX(-50%);
+		cursor: pointer;
+	}
+
+	/* ---- chips, footer, buttons ---- */
 	.chips {
 		display: flex;
 		flex-direction: column;
@@ -664,7 +1198,7 @@
 		text-decoration: none;
 		background: transparent;
 		border: 1px solid var(--hotel-accent);
-		border-radius: 4px;
+		border-radius: 8px;
 		cursor: pointer;
 	}
 	.chip:hover {
@@ -710,7 +1244,7 @@
 		color: var(--ledger-paper);
 		background: var(--hotel-accent);
 		border: 0;
-		border-radius: 4px;
+		border-radius: 8px;
 		cursor: pointer;
 	}
 	.primary:hover:not(:disabled) {
@@ -785,7 +1319,7 @@
 		color: var(--ledger-paper);
 		background: var(--hotel-accent);
 		border: 0;
-		border-radius: 4px;
+		border-radius: 8px;
 		cursor: pointer;
 	}
 	.send:disabled {
@@ -798,15 +1332,28 @@
 		color: var(--ledger-danger, #b91c1c);
 	}
 
-	/* Phones: the panel is a full-screen sheet, the launcher collapses to its icon. */
+	/* Phones: a full-screen sheet that follows the on-screen keyboard (visualViewport), the launcher collapses
+	   to its icon. 16px fields stop iOS zooming in on focus. */
 	@media (max-width: 639px) {
 		.panel {
 			position: fixed;
-			inset: 0;
+			top: var(--vvt, 0px);
+			left: 0;
+			right: 0;
 			width: auto;
-			height: auto;
+			height: var(--vvh, 100dvh);
 			border: 0;
 			border-radius: 0;
+			box-shadow: none;
+			padding-bottom: env(safe-area-inset-bottom);
+		}
+		.head {
+			padding-top: calc(0.75rem + env(safe-area-inset-top));
+		}
+		.field input,
+		.field textarea,
+		.composer textarea {
+			font-size: 1rem;
 		}
 		.launcher-label {
 			display: none;
