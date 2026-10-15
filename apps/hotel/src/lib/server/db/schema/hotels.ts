@@ -67,6 +67,8 @@ export const hotels = pgTable(
 		/** Free-form per-hotel configuration (branding, policies, defaults). */
 		config: jsonb('config').notNull().default({}),
 		status: hotelStatus('status').notNull().default('draft'),
+		/** Order on the public group landing page and in /admin/hotels (lower first). */
+		sortOrder: integer('sort_order').notNull().default(0),
 		createdAt: createdAt(),
 		updatedAt: updatedAt(),
 		deletedAt: deletedAt()

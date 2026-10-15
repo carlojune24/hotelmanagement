@@ -1,5 +1,5 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { asc } from 'drizzle-orm';
+import { asc, eq, isNull, max } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import { hotels } from '$lib/server/db/schema/index';
@@ -19,10 +19,12 @@ export const load: PageServerLoad = async () => {
 			slug: hotels.slug,
 			name: hotels.name,
 			status: hotels.status,
-			city: hotels.city
+			city: hotels.city,
+			sortOrder: hotels.sortOrder
 		})
 		.from(hotels)
-		.orderBy(asc(hotels.name));
+		.where(isNull(hotels.deletedAt))
+		.orderBy(asc(hotels.sortOrder), asc(hotels.name));
 	return { hotels: rows };
 };
 
@@ -32,6 +34,30 @@ const createSchema = z.object({
 });
 
 export const actions: Actions = {
+	/** Moves a hotel one place up or down, then renumbers 1..n so ties can never build up. */
+	move: async (event) => {
+		requirePlatformAdmin(event.locals.user);
+		const f = await event.request.formData();
+		const id = String(f.get('id') ?? '');
+		const dir = f.get('dir') === 'up' ? -1 : 1;
+		const rows = await db
+			.select({ id: hotels.id })
+			.from(hotels)
+			.where(isNull(hotels.deletedAt))
+			.orderBy(asc(hotels.sortOrder), asc(hotels.name));
+		const from = rows.findIndex((r) => r.id === id);
+		const to = from + dir;
+		if (from < 0 || to < 0 || to >= rows.length) return { ok: true };
+		const ids = rows.map((r) => r.id);
+		[ids[from], ids[to]] = [ids[to]!, ids[from]!];
+		await db.transaction(async (tx) => {
+			for (const [i, hid] of ids.entries()) {
+				await tx.update(hotels).set({ sortOrder: i + 1 }).where(eq(hotels.id, hid));
+			}
+		});
+		return { ok: true };
+	},
+
 	create: async (event) => {
 		requirePlatformAdmin(event.locals.user);
 		const parsed = createSchema.safeParse(Object.fromEntries(await event.request.formData()));
@@ -43,9 +69,10 @@ export const actions: Actions = {
 
 		let newId: string;
 		try {
+			const [top] = await db.select({ n: max(hotels.sortOrder) }).from(hotels);
 			const [row] = await db
 				.insert(hotels)
-				.values({ name: parsed.data.name.trim(), slug, orgRef: mintRef('org') })
+				.values({ name: parsed.data.name.trim(), slug, orgRef: mintRef('org'), sortOrder: (top?.n ?? 0) + 1 })
 				.returning({ id: hotels.id });
 			newId = row!.id;
 		} catch (e) {

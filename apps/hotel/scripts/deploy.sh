@@ -16,7 +16,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 echo "→ packing $ROOT"
 tar -C "$ROOT" --exclude=node_modules --exclude=.git --exclude=build --exclude=.svelte-kit \
-  --exclude=.env --exclude='.env.*' --exclude=uploads --exclude='*.worktrees' --exclude='*_snapshot.json' \
+  --exclude=.env --exclude='.env.*' --anchored --exclude=./uploads --exclude=./apps/hotel/uploads --exclude=./apps/hr/uploads --no-anchored --exclude='*.worktrees' --exclude='*_snapshot.json' \
   -czf "$TMP/src.tgz" .
 
 echo "→ uploading to $HOST"

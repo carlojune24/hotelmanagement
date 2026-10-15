@@ -11,6 +11,7 @@ import { safeNext } from '$lib/server/auth/redirect';
 import { homePathFor } from '$lib/authz';
 import { createSession, generateSessionToken, setSessionCookie } from '$lib/server/auth/session';
 import { getMembershipRole } from '$lib/server/tenant';
+import { parseBranding } from '$lib/server/branding';
 import type { Actions, PageServerLoad } from './$types';
 
 const schema = z.object({
@@ -28,7 +29,13 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		redirect(302, safeNext(url.searchParams.get('next'), homePathFor(base, locals.role?.capabilities, locals.user.isPlatformAdmin)));
 	}
 
-	return { next: url.searchParams.get('next') ?? '', hotelName: hotel.name };
+	const b = parseBranding(hotel.config);
+	return {
+		next: url.searchParams.get('next') ?? '',
+		hotelName: hotel.name,
+		logoUrl: b.logoUrl ?? null,
+		photoUrl: b.heroImageUrl ?? null
+	};
 };
 
 export const actions: Actions = {

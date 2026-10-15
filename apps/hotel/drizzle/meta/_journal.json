@@ -673,6 +673,13 @@
       "when": 1792027664024,
       "tag": "0095_platform_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1792029434601,
+      "tag": "0096_hotel_sort_order",
+      "breakpoints": true
     }
   ]
 }

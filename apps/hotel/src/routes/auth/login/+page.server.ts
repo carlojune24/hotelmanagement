@@ -9,6 +9,7 @@ import {
 } from '$lib/server/auth/rate-limit';
 import { safeNext } from '$lib/server/auth/redirect';
 import { createSession, generateSessionToken, setSessionCookie } from '$lib/server/auth/session';
+import { getPlatformBrand } from '$lib/server/platform-brand';
 import type { Actions, PageServerLoad } from './$types';
 
 const schema = z.object({
@@ -27,7 +28,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		}
 		redirect(302, safeNext(url.searchParams.get('next')));
 	}
-	return { next: url.searchParams.get('next') ?? '' };
+	const brand = await getPlatformBrand();
+	return { next: url.searchParams.get('next') ?? '', logoUrl: brand.logoUrl, photoUrl: brand.heroImageUrl };
 };
 
 export const actions: Actions = {

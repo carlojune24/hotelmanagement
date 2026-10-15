@@ -6,6 +6,8 @@
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
+	import ArrowUpIcon from '@lucide/svelte/icons/arrow-up';
+	import ArrowDownIcon from '@lucide/svelte/icons/arrow-down';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -32,14 +34,26 @@
 				<Table.Root>
 					<Table.Header>
 						<Table.Row>
+							<Table.Head class="w-24">Order</Table.Head>
 							<Table.Head>Name</Table.Head>
 							<Table.Head>Slug</Table.Head>
 							<Table.Head>Status</Table.Head>
 						</Table.Row>
 					</Table.Header>
 					<Table.Body>
-						{#each data.hotels as h (h.id)}
+						{#each data.hotels as h, i (h.id)}
 							<Table.Row>
+								<Table.Cell>
+									<form method="POST" action="?/move" use:enhance class="flex items-center gap-1">
+										<input type="hidden" name="id" value={h.id} />
+										<Button type="submit" name="dir" value="up" variant="ghost" size="icon" class="size-8" disabled={i === 0} aria-label="Move {h.name} up">
+											<ArrowUpIcon class="size-4" />
+										</Button>
+										<Button type="submit" name="dir" value="down" variant="ghost" size="icon" class="size-8" disabled={i === data.hotels.length - 1} aria-label="Move {h.name} down">
+											<ArrowDownIcon class="size-4" />
+										</Button>
+									</form>
+								</Table.Cell>
 								<Table.Cell>
 									<a class="font-medium text-brand hover:underline" href="/admin/hotels/{h.id}">
 										{h.name}
