@@ -51,6 +51,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		Math.max(1, Math.floor(Number(url.searchParams.get('party'))) || Math.min(2, bookable.partyCap))
 	);
 
+	// Offered only when this venue takes online orders; the table is held either way.
+	const ordering = await loadOnlineOrderingConfig(hotelId, venue.id);
+
 	const slots = date
 		? await getSlotsForDate({ hotelId, venueId: venue.id, timezone, date, partySize: party })
 		: null;
@@ -64,6 +67,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		maxDate,
 		date,
 		party,
+		orderAhead: ordering?.enabled ? { prepMinutes: ordering.prepMinutes } : null,
 		slots: slots?.map((s) => ({ time: s.time, available: s.available })) ?? null
 	};
 };
@@ -76,7 +80,9 @@ const reserveSchema = z.object({
 	guestName: z.string().trim().min(1, 'Please enter your name.').max(120),
 	guestPhone: z.string().trim().min(5, 'Please enter a mobile number we can reach.').max(40),
 	guestEmail: z.union([z.literal(''), z.string().trim().email('That email address looks off.')]).optional(),
-	remarks: z.string().trim().max(500).optional()
+	remarks: z.string().trim().max(500).optional(),
+	/** `1` = go on to choose dishes for this table; anything else = just the table. */
+	preorder: z.enum(['0', '1']).default('0')
 });
 
 export const actions: Actions = {
@@ -91,7 +97,8 @@ export const actions: Actions = {
 			guestName: String(raw.guestName ?? ''),
 			guestPhone: String(raw.guestPhone ?? ''),
 			guestEmail: String(raw.guestEmail ?? ''),
-			remarks: String(raw.remarks ?? '')
+			remarks: String(raw.remarks ?? ''),
+			preorder: raw.preorder === '1' ? '1' : '0'
 		};
 		// Honeypot: a real visitor never sees or fills this field.
 		if (raw.website) return fail(400, { error: 'Something went wrong. Please try again.', values: keep });
@@ -118,10 +125,11 @@ export const actions: Actions = {
 			});
 			if (d.guestEmail) void sendDiningReservationConfirmation(r.id);
 			const ticket = `/${params.hotel}/dining/reserve/${r.code}?t=${r.accessToken}`;
-			// Reserve with an order: when the venue takes online orders and the table is far enough
-			// ahead for the kitchen, go straight on to choosing dishes (and paying) for this table.
-			// The booking already stands; the guest can step back to the ticket from that page.
-			const ordering = await loadOnlineOrderingConfig(hotelId, d.venue);
+			// Reserve with an order: only when the guest chose it, the venue takes online orders and the
+			// table is far enough ahead for the kitchen, go on to choosing dishes (and paying) for this
+			// table. Otherwise it is just the table. Either way the booking already stands, and the
+			// guest can add an order later from the ticket.
+			const ordering = d.preorder === '1' ? await loadOnlineOrderingConfig(hotelId, d.venue) : null;
 			const canPreOrder = !!ordering?.enabled && r.startsAt.getTime() > Date.now() + ordering.prepMinutes * 60_000;
 			if (canPreOrder) {
 				redirect(303, `/${params.hotel}/dining/order?venue=${d.venue}&reservation=${r.code}&t=${r.accessToken}`);

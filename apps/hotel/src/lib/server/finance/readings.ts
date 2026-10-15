@@ -1,6 +1,18 @@
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/index';
-import { documents, hotels, orders, payments, scPwdDiscounts, zReadings } from '../db/schema/index';
+import {
+	bookings,
+	cashMovements,
+	documents,
+	folios,
+	hotels,
+	orders,
+	paymentAllocations,
+	payments,
+	scPwdDiscounts,
+	zReadings
+} from '../db/schema/index';
+import { loadOrderLedgers } from '../folio';
 import type { ZReading } from '../db/schema/documents';
 import type { SessionUser } from '../auth/session';
 import { writeAudit } from '../audit';
@@ -30,6 +42,12 @@ export interface ReadingData {
 	refundCount: number;
 	refundAmountCentavos: number;
 	netSalesCentavos: number;
+	/** VAT taken off SC/PWD sales that day. Information: it is already out of the sales above. */
+	scPwdVatRemovedCentavos: number;
+	/** Credit owed to SC/PWD guests and not yet refunded. Information only. */
+	scPwdCreditOwedCentavos: number;
+	/** 1 = original rule, 2 = money kept (received − refunds). See `z_readings.net_method`. */
+	netMethod: 1 | 2;
 	tenderBreakdown: Record<string, number>;
 }
 
@@ -67,6 +85,112 @@ async function serialSpan(hotelId: string, type: 'invoice' | 'official_receipt',
 }
 
 /**
+ * The part of the day's room/hall receipts that belongs to bookings with an SC/PWD discount, net of
+ * refunds paid out on them. Those are VAT-exempt sales. It looks at what each payment paid for:
+ * its explicit per-room split, else the folio it was rung on, else (an online payment tied to no
+ * room) the share of the order's charges that sit on discounted rooms.
+ */
+async function scPwdExemptCentavos(hotelId: string, businessDate: string): Promise<number> {
+	const moves = await db
+		.select({
+			direction: cashMovements.direction,
+			amountCentavos: cashMovements.amountCentavos,
+			paymentId: cashMovements.paymentId
+		})
+		.from(cashMovements)
+		.where(
+			and(
+				eq(cashMovements.hotelId, hotelId),
+				eq(cashMovements.businessDate, businessDate),
+				isNull(cashMovements.voidedAt),
+				sql`${cashMovements.paymentId} is not null`,
+				sql`${cashMovements.category} in ('room_revenue','hall_revenue','deposit','refund','deposit_refund')`
+			)
+		);
+	if (moves.length === 0) return 0;
+
+	const paymentIds = [...new Set(moves.map((m) => m.paymentId!))];
+	const payRows = await db
+		.select({ id: payments.id, orderId: payments.orderId, folioId: payments.folioId })
+		.from(payments)
+		.where(inArray(payments.id, paymentIds));
+	const orderIds = [...new Set(payRows.map((p) => p.orderId))];
+
+	const claims = await db
+		.select({ bookingId: scPwdDiscounts.bookingId, orderId: bookings.orderId })
+		.from(scPwdDiscounts)
+		.innerJoin(bookings, eq(bookings.id, scPwdDiscounts.bookingId))
+		.where(and(inArray(bookings.orderId, orderIds), isNull(scPwdDiscounts.reversedAt)));
+	if (claims.length === 0) return 0;
+	const claimed = new Set(claims.map((c) => c.bookingId));
+
+	const folioIds = [...new Set(payRows.flatMap((p) => (p.folioId ? [p.folioId] : [])))];
+	const [allocs, folioRows, ledgers] = await Promise.all([
+		db
+			.select({ paymentId: paymentAllocations.paymentId, bookingId: paymentAllocations.bookingId, amount: paymentAllocations.amountCentavos })
+			.from(paymentAllocations)
+			.where(inArray(paymentAllocations.paymentId, paymentIds)),
+		folioIds.length
+			? db.select({ id: folios.id, bookingId: folios.bookingId }).from(folios).where(inArray(folios.id, folioIds))
+			: Promise.resolve([] as { id: string; bookingId: string | null }[]),
+		loadOrderLedgers([...new Set(claims.map((c) => c.orderId))])
+	]);
+	const payById = new Map(payRows.map((p) => [p.id, p]));
+	const bookingOfFolio = new Map(folioRows.map((f) => [f.id, f.bookingId]));
+	const allocsBy = new Map<string, typeof allocs>();
+	for (const a of allocs) allocsBy.set(a.paymentId, [...(allocsBy.get(a.paymentId) ?? []), a]);
+
+	let exempt = 0;
+	for (const m of moves) {
+		const pay = payById.get(m.paymentId!);
+		if (!pay) continue;
+		const sign = m.direction === 'in' ? 1 : -1;
+		let share = 0;
+		const parts = allocsBy.get(pay.id);
+		if (parts && parts.length > 0) {
+			const total = parts.reduce((s, a) => s + a.amount, 0);
+			const claimedAmt = parts.filter((a) => a.bookingId && claimed.has(a.bookingId)).reduce((s, a) => s + a.amount, 0);
+			share = total > 0 ? (m.amountCentavos * claimedAmt) / total : 0;
+		} else if (pay.folioId) {
+			const b = bookingOfFolio.get(pay.folioId);
+			share = b && claimed.has(b) ? m.amountCentavos : 0;
+		} else {
+			const lines = ledgers.get(pay.orderId)?.lines ?? [];
+			const total = lines.reduce((s, l) => s + l.chargesCentavos, 0);
+			const claimedC = lines.filter((l) => claimed.has(l.id)).reduce((s, l) => s + l.chargesCentavos, 0);
+			share = total > 0 ? (m.amountCentavos * claimedC) / total : 0;
+		}
+		exempt += sign * Math.round(share);
+	}
+	return exempt;
+}
+
+/**
+ * Credit still owed to guests whose SC/PWD discount came after they paid: the negative balance on
+ * discounted rooms right now. Information for the cashier; it never changes a sale.
+ */
+async function scPwdCreditOwedCentavos(hotelId: string): Promise<number> {
+	const claims = await db
+		.select({ bookingId: scPwdDiscounts.bookingId, orderId: bookings.orderId })
+		.from(scPwdDiscounts)
+		.innerJoin(bookings, eq(bookings.id, scPwdDiscounts.bookingId))
+		.where(
+			and(
+				eq(scPwdDiscounts.hotelId, hotelId),
+				isNull(scPwdDiscounts.reversedAt),
+				gte(scPwdDiscounts.appliedAt, sql`now() - interval '120 days'`)
+			)
+		);
+	if (claims.length === 0) return 0;
+	const ledgers = await loadOrderLedgers([...new Set(claims.map((c) => c.orderId))]);
+	const claimed = new Set(claims.map((c) => c.bookingId));
+	let credit = 0;
+	for (const l of ledgers.values())
+		for (const line of l.lines) if (claimed.has(line.id) && line.balanceCentavos < 0) credit += -line.balanceCentavos;
+	return credit;
+}
+
+/**
  * The shared X/Z computation for one business date. Cash-basis, on the same
  * `cash_movements` gross the daily-sales report already uses; VAT is extracted
  * from the VAT-inclusive gross for a VAT-registered hotel. No row is written.
@@ -82,13 +206,22 @@ export async function computeReadingData(hotelId: string, businessDate: string):
 
 	const snap = await daySnapshot(hotelId, businessDate);
 	const gross = snap.grossRevenueCentavos;
-	const vat = isVat ? inputVatOf(gross, hotel?.vatRateBps ?? 0) : 0;
-	const vatable = isVat ? gross - vat : 0;
-	const vatExempt = isVat ? 0 : gross;
 
 	// Refunds — the `refund` / `deposit_refund` cash-out movements for the day.
 	const refundKey = ['out:refund', 'in:refund', 'out:deposit_refund', 'in:deposit_refund'];
 	const refundAmount = refundKey.reduce((s, k) => s + (snap.byCategory[k] ?? 0), 0);
+
+	// Net sales is the money the hotel KEPT: received less refunds paid out. An SC/PWD discount is not
+	// taken off again: when it came before payment the guest simply paid less, and when it came after,
+	// the credit goes back as a refund, which is already deducted here.
+	const netSales = gross - refundAmount;
+	// SC/PWD sales are VAT-exempt, so VAT is worked out only on the rest. A hotel that is not VAT
+	// registered reports everything as exempt, as before.
+	const scPwdExempt = isVat ? await scPwdExemptCentavos(hotelId, businessDate) : 0;
+	const vatableGross = isVat ? netSales - scPwdExempt : 0;
+	const vat = isVat ? inputVatOf(vatableGross, hotel?.vatRateBps ?? 0) : 0;
+	const vatable = isVat ? vatableGross - vat : 0;
+	const vatExempt = isVat ? scPwdExempt : netSales;
 
 	// Payments (for tender breakdown + refund/void counts) settled on the day.
 	const payRows = await db
@@ -147,7 +280,10 @@ export async function computeReadingData(hotelId: string, businessDate: string):
 	// voided/cancelled rows). Same timestamp-range convention as the `cancelled` documents
 	// query above: `sc_pwd_discounts` has no stored `businessDate` column of its own.
 	const [scPwdRow] = await db
-		.select({ sum: sql<number>`coalesce(sum(${scPwdDiscounts.discountCentavos}), 0)::int` })
+		.select({
+			sum: sql<number>`coalesce(sum(${scPwdDiscounts.discountCentavos}), 0)::int`,
+			vatRemoved: sql<number>`coalesce(sum(${scPwdDiscounts.vatRemovedCentavos}), 0)::int`
+		})
 		.from(scPwdDiscounts)
 		.where(
 			and(
@@ -157,8 +293,9 @@ export async function computeReadingData(hotelId: string, businessDate: string):
 			)
 		);
 	const scPwd = scPwdRow?.sum ?? 0;
+	const scPwdVatRemoved = scPwdRow?.vatRemoved ?? 0;
 	const otherDisc = 0;
-	const netSales = gross - scPwd - otherDisc;
+	const scPwdCreditOwed = await scPwdCreditOwedCentavos(hotelId);
 
 	return {
 		businessDate,
@@ -179,7 +316,10 @@ export async function computeReadingData(hotelId: string, businessDate: string):
 		voidAmountCentavos: voidedPayAmount + cancelledAmount,
 		refundCount,
 		refundAmountCentavos: refundAmount,
-		netSalesCentavos: netSales,
+		netSalesCentavos: netSales - otherDisc,
+		scPwdVatRemovedCentavos: scPwdVatRemoved,
+		scPwdCreditOwedCentavos: scPwdCreditOwed,
+		netMethod: 2,
 		tenderBreakdown
 	};
 }
@@ -273,6 +413,9 @@ export async function issueZReading(
 			refundCount: data.refundCount,
 			refundAmountCentavos: data.refundAmountCentavos,
 			netSalesCentavos: data.netSalesCentavos,
+			scPwdVatRemovedCentavos: data.scPwdVatRemovedCentavos,
+			scPwdCreditOwedCentavos: data.scPwdCreditOwedCentavos,
+			netMethod: data.netMethod,
 			prevGrandTotalCentavos: prevGrand,
 			newGrandTotalCentavos: newGrand,
 			tenderBreakdown: data.tenderBreakdown,
@@ -312,6 +455,9 @@ export function zRowToView(row: ZReading, id: Awaited<ReturnType<typeof hotelIde
 		refundCount: row.refundCount,
 		refundAmountCentavos: row.refundAmountCentavos,
 		netSalesCentavos: row.netSalesCentavos,
+		scPwdVatRemovedCentavos: row.scPwdVatRemovedCentavos,
+		scPwdCreditOwedCentavos: row.scPwdCreditOwedCentavos,
+		netMethod: row.netMethod === 2 ? 2 : 1,
 		tenderBreakdown: (row.tenderBreakdown as Record<string, number>) ?? {},
 		...id,
 		kind: 'z',

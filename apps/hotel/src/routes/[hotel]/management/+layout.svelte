@@ -104,9 +104,9 @@
 				seg: 'lookup',
 				label: 'Find by number',
 				icon: SearchIcon,
-				// Not offered to a dining-only account: it is about bookings and finance numbers, and it
-				// sat right above Dining in their menu as if it belonged there.
-				show: can('booking:read') || can('finance:read')
+				// A dining-only account can look up a DN-/TB- number too: the page only ever returns what
+				// that account may open, and the dining trail behind it is `dining:read`.
+				show: can('booking:read') || can('finance:read') || can('dining:read')
 			},
 			{ seg: 'emails', label: 'Emails', icon: MailIcon, show: can('booking:read') },
 			{ seg: 'messages', label: 'Messages', icon: MessageSquareIcon, show: can('booking:read') },

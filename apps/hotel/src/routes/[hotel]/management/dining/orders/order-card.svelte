@@ -89,6 +89,7 @@
 			<p class="flex items-center gap-1.5 font-mono text-sm font-semibold text-ink">
 				{order.code}
 				{#if order.source === 'online'}<span class="inline-flex items-center gap-0.5 font-sans text-[11px] font-medium text-ink-muted"><GlobeIcon class="size-3" aria-hidden="true" /> Online</span>{/if}
+				<a href="/{slug}/management/trail/{order.code}" class="font-sans text-[11px] font-medium text-ink-muted underline-offset-2 hover:text-ink hover:underline" title="Who did what, step by step">Trail</a>
 			</p>
 			<p class="truncate text-xs text-ink-muted">
 				{order.tableLabel ? `Table ${order.tableLabel}` : order.fulfilment === 'delivery' ? 'Delivery' : ORDER_TYPE_LABEL[order.orderType]}{order.tableLabel && order.orderType === 'takeaway' ? ' · Takeaway' : ''}{order.guestName ? ` · ${order.guestName}` : ''}

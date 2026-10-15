@@ -1,16 +1,35 @@
 import { requireCap } from '$lib/server/auth/rbac';
-import { listAuditEntityTypes, listAuditLog } from '$lib/server/audit';
+import {
+	listAuditActions,
+	listAuditActors,
+	listAuditEntityTypes,
+	parseAuditFilter,
+	queryAuditLog
+} from '$lib/server/audit';
+import { auditRowHref } from '$lib/server/audit-links';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
 	requireCap(locals.user, locals.role, 'hotel:admin');
-	const hotelId = locals.hotel!.id;
+	const hotel = locals.hotel!;
 
-	const entityType = url.searchParams.get('entityType') || undefined;
-	const [entries, entityTypes] = await Promise.all([
-		listAuditLog(hotelId, { entityType }),
-		listAuditEntityTypes(hotelId)
+	const filter = parseAuditFilter(url.searchParams);
+	const [result, entityTypes, actors, actions] = await Promise.all([
+		queryAuditLog(hotel.id, filter, hotel.timezone),
+		listAuditEntityTypes(hotel.id),
+		listAuditActors(hotel.id),
+		listAuditActions(hotel.id)
 	]);
 
-	return { entries, entityTypes, entityType: entityType ?? 'all' };
+	return {
+		entries: result.entries.map((e) => ({ ...e, href: auditRowHref(hotel.slug, e) })),
+		total: result.total,
+		page: result.page,
+		pages: result.pages,
+		entityTypes,
+		actors,
+		actions,
+		filter,
+		timezone: hotel.timezone
+	};
 };

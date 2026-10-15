@@ -256,6 +256,16 @@ export const zReadings = pgTable(
 		refundCount: integer('refund_count').notNull().default(0),
 		refundAmountCentavos: bigint('refund_amount_centavos', { mode: 'number' }).notNull().default(0),
 		netSalesCentavos: bigint('net_sales_centavos', { mode: 'number' }).notNull().default(0),
+		/** VAT taken off SC/PWD sales that day (information; already out of the sales above). */
+		scPwdVatRemovedCentavos: bigint('sc_pwd_vat_removed_centavos', { mode: 'number' }).notNull().default(0),
+		/** Credit owed to SC/PWD guests, not yet refunded, when the reading was taken (information). */
+		scPwdCreditOwedCentavos: bigint('sc_pwd_credit_owed_centavos', { mode: 'number' }).notNull().default(0),
+		/**
+		 * How net sales was worked out. 1 = the original rule (gross less discounts); 2 = money kept
+		 * (received less refunds, with the SC/PWD discount and VAT removed shown as information). Older
+		 * readings stay 1 so the slip still prints exactly what was true when they were locked.
+		 */
+		netMethod: integer('net_method').notNull().default(1),
 		// Grand-total accumulation
 		prevGrandTotalCentavos: bigint('prev_grand_total_centavos', { mode: 'number' })
 			.notNull()

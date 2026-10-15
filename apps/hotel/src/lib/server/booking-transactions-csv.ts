@@ -33,7 +33,9 @@ export const BOOKING_TRANSACTION_HEADERS = [
 	'Charges',
 	'Paid',
 	'Balance',
-	'Security deposit'
+	'Security deposit',
+	'Payment',
+	'SC/PWD'
 ];
 
 /**
@@ -56,7 +58,9 @@ export function bookingTransactionsCsv(rows: BookingTransactionExportRow[]): str
 		php(r.chargesCentavos),
 		php(r.paidCentavos),
 		php(r.balanceCentavos),
-		r.depositCentavos > 0 ? php(r.depositCentavos) : ''
+		r.depositCentavos > 0 ? php(r.depositCentavos) : '',
+		r.paymentLabel,
+		r.scPwdLabel ?? ''
 	]);
 	const sum = (pick: (r: BookingTransactionExportRow) => number) => rows.reduce((s, r) => s + pick(r), 0);
 	const totals = [
@@ -67,7 +71,9 @@ export function bookingTransactionsCsv(rows: BookingTransactionExportRow[]): str
 		php(sum((r) => r.chargesCentavos)),
 		php(sum((r) => r.paidCentavos)),
 		php(sum((r) => Math.max(0, r.balanceCentavos))),
-		php(sum((r) => r.depositCentavos))
+		php(sum((r) => r.depositCentavos)),
+		'',
+		''
 	];
 	return '\uFEFF' + toCsv(BOOKING_TRANSACTION_HEADERS, [...body, totals]);
 }

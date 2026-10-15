@@ -3,6 +3,7 @@ import { todayInTimezone } from '$lib/server/front-desk';
 import { listBookingTransactionsForExport } from '$lib/server/booking-transactions';
 import { bookingTransactionsCsv } from '$lib/server/booking-transactions-csv';
 import { resolveRange } from '$lib/date-range';
+import { filtersFromParams } from '$lib/booking-payment-status';
 import type { RequestHandler } from './$types';
 
 /** The Booking transactions list for the chosen range as a CSV (same range and search as the page). */
@@ -16,7 +17,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 		todayInTimezone(hotel.timezone)
 	);
 	const q = url.searchParams.get('q')?.trim() ?? '';
-	const rows = await listBookingTransactionsForExport(hotel.id, range, q);
+	const rows = await listBookingTransactionsForExport(hotel.id, range, q, filtersFromParams(url.searchParams));
 
 	return new Response(bookingTransactionsCsv(rows), {
 		headers: {

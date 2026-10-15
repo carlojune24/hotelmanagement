@@ -26,7 +26,9 @@ import {
 	HallCompleteError,
 	HallWalkInError,
 	WalkInError,
+	checkInHallBooking,
 	checkOutBooking,
+	checkOutHallBooking,
 	completeHallBooking,
 	createWalkInBooking,
 	createWalkInHallBooking,
@@ -43,6 +45,7 @@ import {
 	flagRoomForHousekeeping,
 	getDamageReportById,
 	getLatestRoomInspections,
+	listPendingHallDamageReports,
 	getRoomHousekeepingOverlay,
 	markDamageReportCharged
 } from '$lib/server/housekeeping';
@@ -205,7 +208,10 @@ async function loadHallDetailPayload(hotelId: string, hallBookingId: string) {
 	const detail = await getHallBookingDetail(hotelId, hallBookingId);
 	if (!detail) error(404, 'Hall booking not found');
 	const folio = await getFolioDetail(hotelId, { kind: 'hall', hallBookingId });
-	return { hallBookingDetail: detail, hallFolio: folio };
+	// Damage housekeeping reported on this hall that front desk still has to charge or dismiss:
+	// Close is blocked until there is none.
+	const hallPendingDamage = await listPendingHallDamageReports(hotelId, detail.hallBooking.functionHallId, hallBookingId);
+	return { hallBookingDetail: detail, hallFolio: folio, hallPendingDamage };
 }
 
 const searchSchema = z.object({
@@ -1061,20 +1067,155 @@ export const actions: Actions = {
 		redirect(303, `/${event.locals.hotel!.slug}/management/transactions/${orderId}${backQuery}`);
 	},
 
-	completeHall: async (event) => {
+	/** The event has started: confirmed → checked in (event day only). */
+	checkInHall: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'booking:write');
-		const hotelId = event.locals.hotel!.id;
+		const hotel = event.locals.hotel!;
 		const raw = await event.request.formData();
 		const hallBookingId = raw.get('hallBookingId');
 		if (typeof hallBookingId !== 'string') return fail(400, { error: 'Missing hall booking.' });
 
 		try {
-			await completeHallBooking(hotelId, hallBookingId, event.locals.user);
-			return { ok: 'Event marked completed.' };
+			await checkInHallBooking(hotel.id, hallBookingId, todayInTimezone(hotel.timezone), event.locals.user);
+			return { ok: 'Event checked in.' };
 		} catch (e) {
 			if (e instanceof HallCompleteError) return fail(400, { error: e.message });
 			throw e;
 		}
+	},
+
+	/** The event is over: checked in → checked out. Overtime past the booked end is worked out and
+	 *  billed by the server from the clock, never from anything the browser sends. */
+	checkOutHall: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		const hotel = event.locals.hotel!;
+		const raw = await event.request.formData();
+		const hallBookingId = raw.get('hallBookingId');
+		if (typeof hallBookingId !== 'string') return fail(400, { error: 'Missing hall booking.' });
+
+		try {
+			const r = await checkOutHallBooking(hotel.id, hallBookingId, event.locals.user);
+			return {
+				ok:
+					r.overtimeHours > 0
+						? `Event checked out. Overtime of ${r.overtimeHours} hour${r.overtimeHours === 1 ? '' : 's'} (₱${(r.overtimeCentavos / 100).toFixed(2)}) was added to the bill.`
+						: 'Event checked out.'
+			};
+		} catch (e) {
+			if (e instanceof HallCompleteError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
+	/** Close the event. Blocked until housekeeping has cleaned the hall, no damage is pending and
+	 *  the bill is settled; a hotel admin may move a balance to the city ledger instead. */
+	completeHall: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		const hotelId = event.locals.hotel!.id;
+		const raw = Object.fromEntries(await event.request.formData());
+		const parsed = z
+			.object({
+				hallBookingId: z.string().uuid(),
+				cityLedger: z.enum(['1']).optional(),
+				billToName: z.string().max(160).optional(),
+				billToCompany: z.string().max(160).optional(),
+				billReference: z.string().max(120).optional(),
+				billNotes: z.string().max(500).optional()
+			})
+			.safeParse(raw);
+		if (!parsed.success) return fail(400, { error: 'Missing hall booking.' });
+
+		const wantsCityLedger = parsed.data.cityLedger === '1';
+		if (wantsCityLedger) {
+			try {
+				requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+			} catch {
+				return fail(403, { error: 'Only a hotel admin can charge a balance to the city ledger.' });
+			}
+			if (!parsed.data.billToName?.trim()) return fail(400, { error: 'Enter who the balance is billed to.' });
+		}
+
+		try {
+			await completeHallBooking(
+				hotelId,
+				parsed.data.hallBookingId,
+				event.locals.user,
+				wantsCityLedger
+					? {
+							billToName: parsed.data.billToName!.trim(),
+							billToCompany: parsed.data.billToCompany?.trim() || null,
+							referenceNo: parsed.data.billReference?.trim() || null,
+							notes: parsed.data.billNotes?.trim() || null
+						}
+					: undefined
+			);
+			return { ok: 'Event closed.' };
+		} catch (e) {
+			if (e instanceof HallCompleteError) {
+				return fail(400, { ...(await loadHallDetailPayload(hotelId, parsed.data.hallBookingId)), error: e.message });
+			}
+			throw e;
+		}
+	},
+
+	/** Front desk puts a peso amount on damage housekeeping reported in a hall, posting it to the
+	 *  event's bill (so it must be paid before Close) and linking the report to the charge. The
+	 *  description is re-derived from the report, never trusted from the browser. */
+	resolveHallDamage: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		const hotelId = event.locals.hotel!.id;
+		const raw = Object.fromEntries(await event.request.formData());
+		const parsed = z
+			.object({ damageReportId: z.string().uuid(), hallBookingId: z.string().uuid(), amount: z.coerce.number().positive() })
+			.safeParse(raw);
+		if (!parsed.success) return fail(400, { folioError: 'Enter a valid amount.' });
+
+		const report = await getDamageReportById(hotelId, parsed.data.damageReportId);
+		const detail = await getHallBookingDetail(hotelId, parsed.data.hallBookingId);
+		if (!report || !detail || report.status !== 'pending' || report.functionHallId !== detail.hallBooking.functionHallId) {
+			return fail(400, {
+				...(detail ? await loadHallDetailPayload(hotelId, parsed.data.hallBookingId) : {}),
+				folioError: 'That damage report is no longer pending.'
+			});
+		}
+
+		try {
+			const { chargeId } = await addAdHocCharge(
+				hotelId,
+				{ kind: 'hall', hallBookingId: parsed.data.hallBookingId },
+				{
+					description: `Damage (reported by Housekeeping): ${report.description}`,
+					amountCentavos: Math.round(parsed.data.amount * 100),
+					taxable: false
+				},
+				event.locals.user
+			);
+			await markDamageReportCharged(hotelId, report.id, chargeId, event.locals.user);
+		} catch (e) {
+			if (e instanceof FolioError || e instanceof HousekeepingError) {
+				return fail(400, { ...(await loadHallDetailPayload(hotelId, parsed.data.hallBookingId)), folioError: e.message });
+			}
+			throw e;
+		}
+		return { ...(await loadHallDetailPayload(hotelId, parsed.data.hallBookingId)), depositOk: 'Damage charged.' };
+	},
+
+	dismissHallDamage: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		const hotelId = event.locals.hotel!.id;
+		const raw = Object.fromEntries(await event.request.formData());
+		const parsed = z.object({ damageReportId: z.string().uuid(), hallBookingId: z.string().uuid() }).safeParse(raw);
+		if (!parsed.success) return fail(400, { folioError: 'Missing report.' });
+
+		try {
+			await dismissDamageReport(hotelId, parsed.data.damageReportId, event.locals.user);
+		} catch (e) {
+			if (e instanceof HousekeepingError) {
+				return fail(400, { ...(await loadHallDetailPayload(hotelId, parsed.data.hallBookingId)), folioError: e.message });
+			}
+			throw e;
+		}
+		return { ...(await loadHallDetailPayload(hotelId, parsed.data.hallBookingId)), depositOk: 'Dismissed.' };
 	},
 
 	hallDetail: async (event) => {

@@ -246,7 +246,7 @@ export async function refundOrderViaPaymongo(params: {
 				.returning({ id: payments.id });
 			refundPaymentIds.push(row!.id);
 
-			if (!viaQrPh && settings.undepositedAccountId) {
+			if (!viaQrPh && settings.undepositedAccountId && settings.autoPostOnlinePayments) {
 				await recordCashMovement(
 					{
 						hotelId,

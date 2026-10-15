@@ -188,6 +188,27 @@ export async function settleCheck(args: {
 	}
 
 	const changeCentavos = args.method === 'cash' ? Math.max(0, (args.tenderedCentavos ?? 0) - owed) : 0;
+	if (paidCount > 0) {
+		await writeAudit({
+			hotelId: args.hotelId,
+			actor: args.actor ?? null,
+			action: 'dining_check.settle',
+			entityType: 'dining_table_check',
+			entityId: check.id,
+			after: {
+				checkId: check.id,
+				method: args.method,
+				paidCount,
+				orderCodes: unpaid.map((o) => o.code),
+				totalCentavos: owed,
+				tenderedCentavos: args.method === 'cash' ? (args.tenderedCentavos ?? null) : null,
+				changeCentavos,
+				bookingId: args.method === 'room' ? (args.bookingId ?? null) : null,
+				documents: documents.map((d) => d.formattedNo),
+				documentError: documentErrors[0] ?? null
+			}
+		});
+	}
 	const closed = await closeIfDone(args.hotelId, check.id, args.actor ?? null);
 	// The same reason usually repeats for every order (no series), so say it once.
 	return { paidCount, totalCentavos: owed, changeCentavos, closed, documents, documentError: documentErrors[0] ?? null };
@@ -242,13 +263,18 @@ async function finish(
 				.set({ status: 'completed', updatedAt: now })
 				.where(and(eq(diningReservations.id, check.reservationId), eq(diningReservations.status, 'seated')));
 		}
+		const [res] = check.reservationId
+			? await tx.select({ code: diningReservations.code }).from(diningReservations).where(eq(diningReservations.id, check.reservationId)).limit(1)
+			: [];
 		await writeAudit({
+			tx,
 			hotelId,
 			actor,
 			action,
 			entityType: 'dining_table_check',
 			entityId: check.id,
-			after: { tableId: check.tableId, ...extra }
+			refCode: res?.code ?? null,
+			after: { checkId: check.id, tableId: check.tableId, reservationId: check.reservationId, ...extra }
 		});
 	});
 }
@@ -269,7 +295,20 @@ export async function forceClearCheck(args: { hotelId: string; checkId: string; 
 		if (o.paymentStatus === 'unpaid') {
 			await cancelDiningOrder({ hotelId: args.hotelId, orderId: o.id, reason: `Table cleared: ${reason}`, actor: args.actor ?? null });
 		} else {
-			await db.update(diningOrders).set({ status: 'served', servedAt: now, updatedAt: now }).where(eq(diningOrders.id, o.id));
+			await db.transaction(async (tx) => {
+				await tx.update(diningOrders).set({ status: 'served', servedAt: now, updatedAt: now }).where(eq(diningOrders.id, o.id));
+				await writeAudit({
+					tx,
+					hotelId: args.hotelId,
+					actor: args.actor ?? null,
+					action: 'dining_order.force_served',
+					entityType: 'dining_order',
+					entityId: o.id,
+					refCode: o.code,
+					before: { status: o.status },
+					after: { orderId: o.id, checkId: check.id, status: 'served', reason }
+				});
+			});
 		}
 	}
 	await finish(args.hotelId, check, args.actor ?? null, 'dining_check.force_clear', { reason });
@@ -456,7 +495,7 @@ export async function moveCheckToTable(args: {
 						)
 					)
 				)
-				.returning({ id: diningOrders.id });
+				.returning({ id: diningOrders.id, code: diningOrders.code });
 
 			if (ignore) {
 				await tx
@@ -469,14 +508,36 @@ export async function moveCheckToTable(args: {
 			}
 
 			await writeAudit({
+				tx,
 				hotelId: args.hotelId,
 				actor,
 				action: 'dining_check.move_table',
 				entityType: 'dining_table_check',
 				entityId: check.id,
 				before: { tableId: check.tableId, tableName: source?.name ?? null },
-				after: { tableId: dest.id, tableName: dest.name, orderCount: moved.length, reservationId: ignore }
+				after: {
+					checkId: check.id,
+					tableId: dest.id,
+					tableName: dest.name,
+					orderCount: moved.length,
+					orderCodes: moved.map((o) => o.code),
+					reservationId: ignore
+				}
 			});
+			// One entry per order too, so each order's own trail shows the table change.
+			for (const o of moved) {
+				await writeAudit({
+					tx,
+					hotelId: args.hotelId,
+					actor,
+					action: 'dining_order.table_moved',
+					entityType: 'dining_order',
+					entityId: o.id,
+					refCode: o.code,
+					before: { tableId: check.tableId, tableName: source?.name ?? null },
+					after: { orderId: o.id, checkId: check.id, tableId: dest.id, tableName: dest.name }
+				});
+			}
 			return { fromName: source?.name ?? '', toName: dest.name, orderCount: moved.length };
 		});
 	} catch (e) {
@@ -543,7 +604,7 @@ export async function mergeCheckIntoCheck(args: {
 			.update(diningOrders)
 			.set({ ...atNewTable, checkId: into.id })
 			.where(and(eq(diningOrders.hotelId, args.hotelId), eq(diningOrders.checkId, from.id)))
-			.returning({ id: diningOrders.id });
+			.returning({ id: diningOrders.id, code: diningOrders.code });
 		// QR orders still waiting for a waiter follow too, but stay out of any check until accepted.
 		// Never match on the table alone: that would drag in earlier, closed sessions.
 		const waiting = await tx
@@ -557,7 +618,7 @@ export async function mergeCheckIntoCheck(args: {
 					isNull(diningOrders.checkId)
 				)
 			)
-			.returning({ id: diningOrders.id });
+			.returning({ id: diningOrders.id, code: diningOrders.code });
 		const moved = [...joined, ...waiting];
 
 		await tx
@@ -576,6 +637,7 @@ export async function mergeCheckIntoCheck(args: {
 		}
 
 		await writeAudit({
+			tx,
 			hotelId: args.hotelId,
 			actor,
 			action: 'dining_check.merge',
@@ -583,13 +645,28 @@ export async function mergeCheckIntoCheck(args: {
 			entityId: from.id,
 			before: { tableId: from.tableId, tableName: fromName },
 			after: {
+				checkId: from.id,
 				intoCheckId: into.id,
 				intoTableId: into.tableId,
 				intoTableName: toName,
 				orderCount: moved.length,
-				orderIds: moved.map((o) => o.id)
+				orderIds: moved.map((o) => o.id),
+				orderCodes: moved.map((o) => o.code)
 			}
 		});
+		for (const o of moved) {
+			await writeAudit({
+				tx,
+				hotelId: args.hotelId,
+				actor,
+				action: 'dining_order.table_moved',
+				entityType: 'dining_order',
+				entityId: o.id,
+				refCode: o.code,
+				before: { tableId: from.tableId, tableName: fromName, checkId: from.id },
+				after: { orderId: o.id, checkId: into.id, tableId: into.tableId, tableName: toName, merged: true }
+			});
+		}
 		return { fromName, toName, intoTableId: into.tableId, orderCount: moved.length };
 	});
 }

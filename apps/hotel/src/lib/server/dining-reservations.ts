@@ -294,13 +294,18 @@ export async function createReservation(
 			.values(assigned.map((t) => ({ reservationId: reservationId!, tableId: t.id })));
 
 		await writeAudit({
+			tx,
 			hotelId: input.hotelId,
 			actor: input.actor ?? null,
 			action: 'dining_reservation.create',
 			entityType: 'dining_reservation',
 			entityId: reservationId,
+			refCode: code,
 			after: {
+				reservationId,
 				code,
+				guestName: input.guestName.trim(),
+				guestPhone: input.guestPhone?.trim() || null,
 				venueId: input.venueId,
 				partySize: input.partySize,
 				startsAt: startsAt.toISOString(),
@@ -333,10 +338,10 @@ export async function attachPreOrdersToCheck(
 	tx: Tx,
 	hotelId: string,
 	res: { id: string; diningItemId: string },
-	opts: { onOccupied: 'throw' | 'skip' } = { onOccupied: 'throw' }
+	opts: { onOccupied: 'throw' | 'skip'; actor?: Actor } = { onOccupied: 'throw' }
 ): Promise<{ attached: number; cancelled: number }> {
 	const orders = await tx
-		.select({ id: diningOrders.id })
+		.select({ id: diningOrders.id, code: diningOrders.code })
 		.from(diningOrders)
 		.where(
 			and(
@@ -377,6 +382,18 @@ export async function attachPreOrdersToCheck(
 		.set({ checkId, tableId: table.id, tableLabel: table.name, updatedAt: new Date() })
 		.where(inArray(diningOrders.id, orders.map((o) => o.id)))
 		.returning({ id: diningOrders.id });
+	for (const o of orders.filter((x) => moved.some((m) => m.id === x.id))) {
+		await writeAudit({
+			tx,
+			hotelId,
+			actor: opts.actor ?? null,
+			action: 'dining_order.pre_order_attached',
+			entityType: 'dining_order',
+			entityId: o.id,
+			refCode: o.code,
+			after: { orderId: o.id, reservationId: res.id, checkId, tableId: table.id, tableLabel: table.name }
+		});
+	}
 	return { attached: moved.length, cancelled: 0 };
 }
 
@@ -390,7 +407,8 @@ async function releasePreOrders(
 	tx: Tx,
 	hotelId: string,
 	reservationId: string,
-	to: 'cancelled' | 'no_show'
+	to: 'cancelled' | 'no_show',
+	actor: Actor = null
 ): Promise<{ attached: number; cancelled: number }> {
 	const now = new Date();
 	const cancelled = await tx
@@ -409,7 +427,25 @@ async function releasePreOrders(
 				inArray(diningOrders.status, ['pending_payment', 'new', 'accepted'])
 			)
 		)
-		.returning({ id: diningOrders.id });
+		.returning({ id: diningOrders.id, code: diningOrders.code, paymentStatus: diningOrders.paymentStatus });
+	for (const o of cancelled) {
+		await writeAudit({
+			tx,
+			hotelId,
+			actor,
+			action: 'dining_order.pre_order_cancelled',
+			entityType: 'dining_order',
+			entityId: o.id,
+			refCode: o.code,
+			after: {
+				orderId: o.id,
+				reservationId,
+				status: 'cancelled',
+				reason: to === 'cancelled' ? 'The table reservation was cancelled.' : 'The guests did not arrive.',
+				refundDue: o.paymentStatus === 'paid'
+			}
+		});
+	}
 	if (cancelled.length) {
 		// A checkout the guest never finished must not stay payable.
 		await tx
@@ -456,19 +492,26 @@ export async function setReservationStatus(args: {
 		// A pre-order made for this table follows the reservation: it joins the table's bill the moment
 		// the party sits down, and is released if the booking is cancelled or the guests never come.
 		let preOrders: { attached: number; cancelled: number } | null = null;
-		if (args.to === 'seated') preOrders = await attachPreOrdersToCheck(tx, args.hotelId, row);
+		if (args.to === 'seated') {
+			preOrders = await attachPreOrdersToCheck(tx, args.hotelId, row, { onOccupied: 'throw', actor: args.actor ?? null });
+		}
 		if (args.to === 'cancelled' || args.to === 'no_show') {
-			preOrders = await releasePreOrders(tx, args.hotelId, row.id, args.to);
+			preOrders = await releasePreOrders(tx, args.hotelId, row.id, args.to, args.actor ?? null);
 		}
 
 		await writeAudit({
+			tx,
 			hotelId: args.hotelId,
 			actor: args.actor ?? null,
 			action: 'dining_reservation.status',
 			entityType: 'dining_reservation',
 			entityId: row.id,
+			refCode: row.code,
 			before: { status: row.status },
-			after: preOrders && (preOrders.attached || preOrders.cancelled) ? { status: args.to, preOrders } : { status: args.to }
+			after:
+				preOrders && (preOrders.attached || preOrders.cancelled)
+					? { reservationId: row.id, status: args.to, preOrders }
+					: { reservationId: row.id, status: args.to }
 		});
 		return updated!;
 	});
@@ -509,15 +552,22 @@ export async function reassignReservationTables(args: {
 		if (!tableIds.every((id) => free.some((f) => f.id === id))) {
 			throw new ReservationError('One of those tables is already taken at that time.');
 		}
+		const previous = await tx
+			.select({ tableId: diningReservationTables.tableId })
+			.from(diningReservationTables)
+			.where(eq(diningReservationTables.reservationId, res.id));
 		await tx.delete(diningReservationTables).where(eq(diningReservationTables.reservationId, res.id));
 		await tx.insert(diningReservationTables).values(tableIds.map((tableId) => ({ reservationId: res.id, tableId })));
 		await writeAudit({
+			tx,
 			hotelId: args.hotelId,
 			actor: args.actor ?? null,
 			action: 'dining_reservation.reassign',
 			entityType: 'dining_reservation',
 			entityId: res.id,
-			after: { tableIds }
+			refCode: res.code,
+			before: { tableIds: previous.map((p) => p.tableId) },
+			after: { reservationId: res.id, tableIds }
 		});
 	});
 }

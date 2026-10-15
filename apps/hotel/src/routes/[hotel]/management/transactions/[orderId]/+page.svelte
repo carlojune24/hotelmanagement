@@ -75,6 +75,13 @@
 			return 'border-transparent bg-danger/15 text-danger';
 		return 'border-border bg-surface-2 text-ink-muted';
 	}
+	const PAY_CLASS: Record<string, string> = {
+		paid: 'border-transparent bg-ok/15 text-ok',
+		downpayment: 'border-transparent bg-warning/15 text-warning',
+		balance: 'border-transparent bg-danger/15 text-danger',
+		credit: 'border-transparent bg-warning/15 text-warning',
+		unpaid: 'border-border bg-surface-2 text-ink-muted'
+	};
 	const methodLabel: Record<string, string> = {
 		cash: 'Cash',
 		card: 'Card',
@@ -133,14 +140,18 @@
 				{#if data.guest.email}· {data.guest.email}{/if}
 				{#if data.guest.phone}· {data.guest.phone}{/if}
 			</p>
-			<div class="mt-2 flex items-center gap-2">
+			<div class="mt-2 flex flex-wrap items-center gap-2">
 				<Badge variant="outline" class={statusClass(data.order.status)}>
 					{statusLabel(data.order.status)}
 				</Badge>
-				{#if data.order.amountDueNowCentavos != null}
-					<Badge variant="outline" class="border-border bg-surface-2 text-ink-muted">
-						Online downpayment
-					</Badge>
+				<Badge
+					variant="outline"
+					class={data.order.channel === 'online' ? 'border-transparent bg-accent text-ink' : 'border-border bg-surface-2 text-ink-muted'}
+					title={data.order.channel === 'online' ? 'The guest booked on the website and paid with PayMongo.' : 'Made at the front desk or by staff.'}
+				>{data.order.channelLabel}</Badge>
+				<Badge variant="outline" class={PAY_CLASS[data.order.paymentState]}>{data.order.paymentLabel}</Badge>
+				{#if data.order.scPwdLabel}
+					<Badge variant="outline" class="border-transparent bg-accent text-ink" title="VAT removed and 20% discount applied">SC/PWD · {data.order.scPwdLabel}</Badge>
 				{/if}
 				{#if data.cancelledCount > 0}
 					<Badge variant="outline" class="border-transparent bg-danger/15 text-danger">
@@ -256,6 +267,13 @@
 												>voided{#if c.voidReason} — {c.voidReason}{/if}</span
 											>
 										{/if}
+										{#if c.scPwd && l.scPwd && !c.voided}
+											<p class="mt-0.5 text-xs text-ink-muted">
+												How this is worked out: VAT removed {peso(l.scPwd.vatRemovedCentavos)} + {l.scPwd.discountBps / 100}% of the VAT-exclusive price
+												{peso(l.scPwd.baseCentavos)} = {peso(l.scPwd.discountCentavos)} → total reduction {peso(l.scPwd.totalReductionCentavos)}.
+												The {l.scPwd.discountBps / 100}% in the name is only the discount part.
+											</p>
+										{/if}
 									</div>
 									<span class="shrink-0 tabular-nums text-ink {c.voided ? 'line-through' : ''}">
 										{peso(c.totalCentavos)}
@@ -331,6 +349,12 @@
 								{/if}
 							</div>
 						</div>
+						{#if l.balanceCentavos < 0 && l.scPwd?.appliedAfterPayment}
+							<p class="border-t border-border bg-warning/5 px-3 py-2 text-xs text-ink-muted">
+								<strong class="text-ink">Why there is a credit:</strong> the {l.scPwd.type} discount ({peso(l.scPwd.totalReductionCentavos)}) was applied
+								after the guest had already paid, so they now owe less than they paid. Use <em>Refund credit</em> to give {peso(l.balanceCentavos)} back.
+							</p>
+						{/if}
 					</div>
 				{/each}
 			</section>
@@ -368,6 +392,9 @@
 											>
 										{/if}
 									</div>
+									{#if p.reason && !p.voidedAt}
+										<div class="mt-0.5 text-xs text-ink">{p.reason}</div>
+									{/if}
 									<div class="mt-0.5 text-xs text-ink-muted">
 										{#if p.lineTitle}<span class="font-medium text-ink">{p.lineTitle}</span> ·{/if}
 										{when(p.paidAt)}
@@ -608,6 +635,11 @@
 						{balance === 0 ? 'Settled' : peso(balance)}
 					</span>
 				</div>
+				{#if data.order.scPwdCreditCentavos > 0}
+					<p class="mt-2 text-xs text-ink-muted">
+						The credit is the SC/PWD discount, applied after the guest paid. Refund it from the room above.
+					</p>
+				{/if}
 				{#if data.order.amountDueNowCentavos != null && balance > 0}
 					<p class="mt-2 text-xs text-ink-muted">
 						The guest paid the downpayment online; the rest is collected here.
@@ -624,6 +656,11 @@
 				Every room keeps its own payments, deposit and balance. A payment is split across the
 				rooms it pays, and a hotel admin can move any one room's bill to the city ledger — the
 				others are paid separately.
+			</p>
+			<p class="text-xs text-ink-muted">
+				An SC/PWD discount takes the VAT off the room price, then 20% off the rest, so it is
+				larger than 20% of the price on the folio. If it is applied after the guest has paid, the
+				difference shows as a credit to refund.
 			</p>
 		</aside>
 	</div>
@@ -758,6 +795,7 @@
 					openShift: data.cashier.openShift
 				}}
 				mode="refund"
+				defaultReason={refundLine.scPwd?.appliedAfterPayment ? 'SC/PWD discount applied after payment' : ''}
 				onDone={() => (refundLine = null)}
 			/>
 		{/if}

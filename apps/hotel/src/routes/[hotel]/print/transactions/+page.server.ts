@@ -3,6 +3,7 @@ import { todayInTimezone } from '$lib/server/front-desk';
 import { listBookingTransactionsForExport } from '$lib/server/booking-transactions';
 import { getBirSettings } from '$lib/server/finance/documents';
 import { resolveRange } from '$lib/date-range';
+import { filtersFromParams } from '$lib/booking-payment-status';
 import type { PageServerLoad } from './$types';
 
 /** The Booking transactions register, printable: same range and search as the staff list. */
@@ -16,13 +17,15 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		todayInTimezone(hotel.timezone)
 	);
 	const q = url.searchParams.get('q')?.trim() ?? '';
+	const filters = filtersFromParams(url.searchParams);
 	const [rows, bir] = await Promise.all([
-		listBookingTransactionsForExport(hotel.id, range, q),
+		listBookingTransactionsForExport(hotel.id, range, q, filters),
 		getBirSettings(hotel.id)
 	]);
 	return {
 		range,
 		q,
+		filters,
 		rows,
 		hotelName: hotel.name,
 		hotelTin: bir?.tin ?? null,

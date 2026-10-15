@@ -43,8 +43,12 @@ export async function daySnapshot(hotelId: string, businessDate: string) {
 		'deposit'
 	]);
 	let grossRevenue = 0;
-	for (const r of rows)
+	let refunds = 0;
+	for (const r of rows) {
 		if (r.direction === 'in' && revenueCats.has(r.category)) grossRevenue += r.amountCentavos;
+		// Money handed back to guests (cancellations, SC/PWD credit): it is not income.
+		if (r.direction === 'out' && (r.category === 'refund' || r.category === 'deposit_refund')) refunds += r.amountCentavos;
+	}
 
 	return {
 		businessDate,
@@ -52,6 +56,10 @@ export async function daySnapshot(hotelId: string, businessDate: string) {
 		cashOutCentavos: cashOut,
 		netCentavos: cashIn - cashOut,
 		grossRevenueCentavos: grossRevenue,
+		/** Refunds paid out that day. */
+		refundsCentavos: refunds,
+		/** What the hotel kept: money received less money handed back. */
+		netRevenueCentavos: grossRevenue - refunds,
 		byCategory
 	};
 }

@@ -6,6 +6,7 @@ mapping.
 
 - [`hr.md`](./hr.md) — org, employee master, schedule, payroll-run result.
 - [`finance.md`](./finance.md) — chart of accounts, double-entry journal, cash movement.
+- [`audit.md`](./audit.md) — how `apps/hotel` records who did what (audit trail convention).
 
 ## Rules that apply to both
 
