@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { enhance } from '$app/forms';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -40,6 +41,12 @@
 			<Button variant="outline" size="icon" href="?year={data.year + 1}" aria-label="Next year">
 				<ChevronRightIcon class="size-4" />
 			</Button>
+			<Button
+				variant="outline"
+				href="/print/{page.params.est}/leave-card?year={data.year}"
+				target="_blank"
+				rel="noopener">Print all cards</Button
+			>
 		</div>
 	</div>
 
@@ -56,7 +63,16 @@
 			<Table.Body>
 				{#each data.rows as r (r.employeeId)}
 					<Table.Row>
-						<Table.Cell class="font-medium whitespace-nowrap">{r.name}</Table.Cell>
+						<Table.Cell class="font-medium whitespace-nowrap">
+							{r.name}
+							<a
+								href="/print/{page.params.est}/leave-card?employee={r.employeeId}&year={data.year}"
+								target="_blank"
+								rel="noopener"
+								class="ml-2 text-xs font-normal text-ink-muted underline decoration-ink/30 underline-offset-4 hover:text-ink"
+								>Card</a
+							>
+						</Table.Cell>
 						{#each r.lines as l, i (l.typeId)}
 							{@const t = data.types[i]!}
 							<Table.Cell class="text-right tabular-nums">

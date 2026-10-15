@@ -209,7 +209,7 @@ async function workDatesFor(establishmentId: string, employeeId: string, start: 
 
 type BalanceLine = { entitled: number; carried: number; adjusted: number; used: number; remaining: number };
 
-async function balanceFor(
+export async function balanceFor(
 	establishmentId: string,
 	employeeId: string,
 	type: LeaveTypeRow,
