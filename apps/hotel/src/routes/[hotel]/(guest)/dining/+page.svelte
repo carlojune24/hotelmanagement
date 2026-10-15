@@ -4,6 +4,8 @@
 	import StorefrontLightbox from '$lib/components/storefront/storefront-lightbox.svelte';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
 	import ClockIcon from '@lucide/svelte/icons/clock';
+	import UtensilsCrossedIcon from '@lucide/svelte/icons/utensils-crossed';
+	import SlidersHorizontalIcon from '@lucide/svelte/icons/sliders-horizontal';
 	import type { DiningPhoto } from '$lib/server/db/schema/dining';
 	import type { PageData } from './$types';
 
@@ -156,35 +158,65 @@
 					</div>
 
 					{#if sections.length > 0}
+						{@const dishCount = sections.reduce((n, sec) => n + sec.items.length, 0)}
+						{@const canReserve = item.reservationsEnabled}
+						{@const canOrder = data.orderableVenueIds.includes(item.id)}
 						<div class="sf-menu" aria-label="{item.title} menu">
-							<h3>Menu</h3>
-							<div class="sf-menu-cols">
-								{#each sections as section (section.id)}
-									<div class="sf-menu-block">
-										{#if section.name}<h4 class="sf-menu-cat">{section.name}</h4>{/if}
-										<ul>
-											{#each section.items as dish (dish.id)}
-												<li class="sf-dish" class:has-photo={dish.imageUrl} class:is-sold-out={!dish.isAvailable}>
-													{#if dish.imageUrl}
-														{@const dp = dishPhotos(item.id)}
-														<button type="button" class="sf-dish-photo" onclick={() => openLightbox(dp, dp.indexOf(dish.imageUrl!))} aria-label="View photo of {dish.name}">
-															<img src={dish.imageUrl} alt="" loading="lazy" onerror={hidePhoto} />
-														</button>
-													{/if}
-													<div>
-														<p class="sf-dish-name">
-															{dish.name}
-															{#if !dish.isAvailable}<span class="sf-dish-flag">Sold out today</span>{/if}
-														</p>
-														{#if dish.description}<p class="sf-dish-desc">{dish.description}</p>{/if}
-													</div>
-													<span class="sf-dish-price">{peso(dish.priceCentavos)}</span>
-												</li>
-											{/each}
-										</ul>
+							<div class="sf-menu-head">
+								<div>
+									<h3>The {item.title} menu</h3>
+									<p class="sf-menu-sub">
+										{dishCount} dish{dishCount === 1 ? '' : 'es'}{sections.length > 1 ? ` across ${sections.length} categories` : ''}. Tap a photo to see it larger.
+									</p>
+								</div>
+								{#if canOrder || canReserve}
+									<div class="sf-feature-actions">
+										{#if canOrder}<a href="/{data.hotel.slug}/dining/order?venue={item.id}" class="sf-btn">Order online</a>{/if}
+										{#if canReserve}<a href="/{data.hotel.slug}/dining/reserve?venue={item.id}" class="sf-btn sf-btn--outline">Reserve a table</a>{/if}
 									</div>
-								{/each}
+								{/if}
 							</div>
+
+							{#if sections.length > 1}
+								<ul class="sf-menu-tabs" aria-label="Menu categories">
+									{#each sections as section (section.id)}
+										<li><a class="sf-chip" href="#menu-{item.id}-{section.id}">{section.name || 'Menu'}</a></li>
+									{/each}
+								</ul>
+							{/if}
+
+							{#each sections as section (section.id)}
+								<div class="sf-menu-block" id="menu-{item.id}-{section.id}">
+									{#if section.name}
+										<h4 class="sf-menu-cat">{section.name} <span>{section.items.length}</span></h4>
+									{/if}
+									<ul class="sf-dishes">
+										{#each section.items as dish (dish.id)}
+											{@const dp = dishPhotos(item.id)}
+											<li class="sf-dish" class:is-sold-out={!dish.isAvailable}>
+												{#if dish.imageUrl}
+													<button type="button" class="sf-dish-photo" onclick={() => openLightbox(dp, dp.indexOf(dish.imageUrl!))} aria-label="View photo of {dish.name} larger">
+														<img src={dish.imageUrl} alt="" loading="lazy" onerror={hidePhoto} />
+													</button>
+												{:else}
+													<div class="sf-dish-photo is-empty" aria-hidden="true"><UtensilsCrossedIcon /></div>
+												{/if}
+												{#if !dish.isAvailable}<span class="sf-dish-flag">Sold out today</span>{/if}
+												<div class="sf-dish-body">
+													<div class="sf-dish-top">
+														<h5 class="sf-dish-name">{dish.name}</h5>
+														<span class="sf-dish-price">{peso(dish.priceCentavos)}</span>
+													</div>
+													{#if dish.description}<p class="sf-dish-desc">{dish.description}</p>{/if}
+													{#if dish.hasAddons && dish.isAvailable}
+														<p class="sf-dish-note"><SlidersHorizontalIcon aria-hidden="true" />Make it yours: add-ons and options available</p>
+													{/if}
+												</div>
+											</li>
+										{/each}
+									</ul>
+								</div>
+							{/each}
 						</div>
 					{/if}
 				</div>

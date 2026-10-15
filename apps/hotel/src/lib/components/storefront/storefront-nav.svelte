@@ -1,8 +1,12 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { getContext, onMount } from 'svelte';
 	import { page } from '$app/state';
 	import * as Sheet from '$lib/components/ui/sheet/index.js';
 	import MenuIcon from '@lucide/svelte/icons/menu';
+	import SunIcon from '@lucide/svelte/icons/sun';
+	import MoonIcon from '@lucide/svelte/icons/moon';
+	import { lighten } from '$lib/woven-pattern';
+	import type { StorefrontTheme } from '$lib/storefront-mode.svelte';
 
 	let {
 		hotelSlug,
@@ -37,8 +41,10 @@
 		paperDeep: string;
 	} = $props();
 
+	const sfTheme = getContext<StorefrontTheme>('sf-theme');
+
 	const sheetThemeStyle = $derived(
-		`--hotel-accent: ${accent}; --hotel-accent-deep: ${accentDeep}; ` +
+		`--hotel-accent: ${accent}; --hotel-accent-light: ${lighten(accent, 0.55)}; --hotel-accent-deep: ${accentDeep}; ` +
 			`--ledger-paper: ${paper}; --ledger-paper-2: ${paperDeep}; ` +
 			`--ledger-ink: oklch(0.26 0.02 60); --ledger-rule: oklch(0.82 0.02 65);`
 	);
@@ -88,6 +94,15 @@
 		</div>
 
 		<div class="sf-nav-actions">
+			<button
+				type="button"
+				class="sf-nav-menu-btn sf-mode-btn"
+				aria-label="Switch between light and dark mode"
+				onclick={() => sfTheme.toggle()}
+			>
+				<SunIcon class="sf-mode-sun size-5" aria-hidden="true" />
+				<MoonIcon class="sf-mode-moon size-5" aria-hidden="true" />
+			</button>
 			<a href="{base}/dates" class="sf-btn sf-btn--sm">Book now</a>
 			<button
 				type="button"
@@ -106,6 +121,7 @@
 	<Sheet.Content
 		side="right"
 		style={sheetThemeStyle}
+		data-mode={sfTheme.mode}
 		class="woven-ledger w-full border-l-[var(--ledger-rule)] bg-[var(--ledger-paper)] text-[var(--ledger-ink)] sm:max-w-sm"
 	>
 		<Sheet.Header>
@@ -116,6 +132,11 @@
 				<a href={l.href} class="sf-nav-mobile-link" onclick={() => (menuOpen = false)}>{l.label}</a>
 			{/each}
 			<a href="{base}/dates" class="sf-btn mt-6" onclick={() => (menuOpen = false)}>Book now</a>
+			<button type="button" class="sf-btn sf-btn--outline mt-3" onclick={() => sfTheme.toggle()}>
+				<SunIcon class="sf-mode-sun size-4" aria-hidden="true" />
+				<MoonIcon class="sf-mode-moon size-4" aria-hidden="true" />
+				Switch light / dark
+			</button>
 		</nav>
 	</Sheet.Content>
 </Sheet.Root>

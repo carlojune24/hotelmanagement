@@ -1,5 +1,7 @@
 <script lang="ts">
+	import { getContext } from 'svelte';
 	import * as Sheet from '$lib/components/ui/sheet/index.js';
+	import type { StorefrontTheme } from '$lib/storefront-mode.svelte';
 	import BedIcon from '@lucide/svelte/icons/bed';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import RulerIcon from '@lucide/svelte/icons/ruler';
@@ -42,6 +44,8 @@
 		onPickDates: () => void;
 	} = $props();
 
+	const sfTheme = getContext<StorefrontTheme | undefined>('sf-theme');
+
 	const peso = (centavos: number) =>
 		`₱${(centavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 	const bedText = (entries: BedConfigEntry[]) => entries.map((e) => `${e.quantity} ${e.type}`).join(' + ');
@@ -80,6 +84,7 @@
 	<Sheet.Content
 		side="right"
 		style={themeStyle}
+		data-mode={sfTheme?.mode ?? 'light'}
 		showCloseButton={false}
 		class="woven-ledger w-full gap-0 overflow-hidden border-l-[var(--ledger-rule)] bg-[var(--ledger-paper)] p-0 text-[var(--ledger-ink)] sm:max-w-lg"
 	>

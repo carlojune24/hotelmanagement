@@ -8,12 +8,17 @@
 	import BookingSummarySidebar from '$lib/components/storefront/booking-summary-sidebar.svelte';
 	import SupportChatWidget from '$lib/components/storefront/support-chat-widget.svelte';
 	import { DEFAULT_DISPLAY_FONT, DISPLAY_FONTS } from '$lib/branding';
+	import { StorefrontTheme } from '$lib/storefront-mode.svelte';
 	import type { LayoutData } from './$types';
 
 	let { data, children }: { data: LayoutData; children: import('svelte').Snippet } = $props();
 
 	const cart = new CartStore(data.hotel.slug);
 	setContext('cart', cart);
+
+	// Light/dark for the storefront pages; the nav's toggle flips it (see storefront-mode.svelte.ts).
+	const sfTheme = new StorefrontTheme(data.themeMode);
+	setContext('sf-theme', sfTheme);
 
 	/** The 4 wizard steps. Review & Payment and Confirmation are one step ("Booking
 	    Confirmation": pay, then the ticket), so both routes map to step 4. The room detail page
@@ -41,6 +46,18 @@
 	    its own authoritative, DB-backed itemized bill, and Confirmation shows the ticket. */
 	const showSidebar = $derived(showStepChrome && currentStepIndex >= 1 && currentStepIndex <= 2);
 
+	/** Pages built from the storefront nav/footer ("boutique editorial"), the only ones with a dark mode. */
+	const STOREFRONT_ROUTES = [
+		'/[hotel]/(guest)',
+		'/[hotel]/(guest)/contact',
+		'/[hotel]/(guest)/meetings-events',
+		'/[hotel]/(guest)/rooms/[roomTypeId]'
+	];
+	const isStorefrontPage = $derived.by(() => {
+		const id = page.route.id ?? '';
+		return STOREFRONT_ROUTES.includes(id) || id.startsWith('/[hotel]/(guest)/dining');
+	});
+
 	const fontDisplayFamily = $derived(
 		DISPLAY_FONTS[data.branding.fontDisplay ?? DEFAULT_DISPLAY_FONT].family
 	);
@@ -60,7 +77,9 @@
 	<title>{data.hotel.name} — Book your stay</title>
 </svelte:head>
 
-<div class="woven-ledger" style={rootStyle}>
+<!-- Only the storefront pages follow the mode; the booking wizard and the guest self-service pages keep
+     the ruled-ledger light look. -->
+<div class="woven-ledger" style={rootStyle} data-mode={isStorefrontPage ? sfTheme.mode : 'light'}>
 	{#if showStepChrome}
 		<!-- Compact header: shown on every wizard step below the lg breakpoint, the only step
 		     indicator there. -->

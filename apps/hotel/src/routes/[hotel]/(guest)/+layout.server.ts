@@ -1,5 +1,6 @@
 import { error } from '@sveltejs/kit';
 import { guestTheme } from '$lib/server/guest-theme';
+import { parseStorefrontMode, STOREFRONT_MODE_COOKIE } from '$lib/storefront-mode.svelte';
 import { listFunctionHalls } from '$lib/server/hall-availability';
 import { listApprovedReviews } from '$lib/server/reviews';
 import { listDiningItems, parseDiningConfig } from '$lib/server/dining';
@@ -13,7 +14,7 @@ import type { LayoutServerLoad } from './$types';
  *  by the homepage, Dining, Meetings & Events, and Contact) needs `functionHalls`/`reviews`/
  *  `diningItems`/`hotelAmenities` to decide which optional nav links to show, regardless of
  *  which page renders it. */
-export const load: LayoutServerLoad = async ({ locals }) => {
+export const load: LayoutServerLoad = async ({ locals, cookies }) => {
 	if (!locals.hotel) error(404, 'Hotel not found');
 
 	const { branding, theme } = guestTheme(locals.hotel.config);
@@ -55,6 +56,7 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 		},
 		branding,
 		theme,
+		themeMode: parseStorefrontMode(cookies.get(STOREFRONT_MODE_COOKIE)),
 		functionHalls,
 		reviews,
 		diningItems,

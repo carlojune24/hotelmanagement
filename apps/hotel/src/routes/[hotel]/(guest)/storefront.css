@@ -19,7 +19,7 @@
 	--sf-night-rule: color-mix(in oklch, var(--ledger-paper) 18%, transparent);
 	--sf-accent-on-night: var(--hotel-accent-light);
 	--sf-gutter: clamp(1.25rem, 4.5vw, 3.5rem);
-	--sf-max: 78rem;
+	--sf-max: 68rem;
 	--sf-nav-h: 4.5rem;
 	--sf-radius: 10px;
 	--sf-ease: cubic-bezier(0.16, 1, 0.3, 1);
@@ -60,12 +60,11 @@ html:has(.woven-ledger) {
 .woven-ledger .sf-section--night :is(h1, h2, h3, h4) {
 	color: var(--sf-on-night);
 }
-
 .woven-ledger .sf-h2 {
 	font-family: var(--ledger-font-display);
 	font-weight: 500;
-	font-size: clamp(2rem, 4.6vw, 3.4rem);
-	line-height: 1.06;
+	font-size: clamp(1.75rem, 3.4vw, 2.5rem);
+	line-height: 1.1;
 	letter-spacing: -0.02em;
 	text-wrap: balance;
 	color: var(--ledger-ink);
@@ -257,6 +256,45 @@ html:has(.woven-ledger) {
 	border-radius: 999px;
 	cursor: pointer;
 }
+/* Light/dark toggle: shows the icon of the mode you would switch TO (moon in light, sun in dark). It reuses
+   the round menu-button look but stays visible on desktop, where the menu button itself is hidden. */
+.woven-ledger .sf-nav-menu-btn.sf-mode-btn {
+	display: none;
+}
+@media (min-width: 1024px) {
+	.woven-ledger .sf-nav-menu-btn.sf-mode-btn {
+		display: inline-flex;
+	}
+}
+.woven-ledger .sf-nav-actions .sf-btn {
+	white-space: nowrap;
+}
+.woven-ledger .sf-mode-sun {
+	display: none;
+}
+.woven-ledger[data-mode='dark'] .sf-mode-sun {
+	display: block;
+}
+.woven-ledger[data-mode='dark'] .sf-mode-moon {
+	display: none;
+}
+@media (prefers-color-scheme: dark) {
+	.woven-ledger[data-mode='system'] .sf-mode-sun {
+		display: block;
+	}
+	.woven-ledger[data-mode='system'] .sf-mode-moon {
+		display: none;
+	}
+}
+/* Dark: the About photo glows gold instead of casting a shadow (a shadow is invisible on black). */
+.woven-ledger[data-mode='dark'] .sf-about-photo {
+	box-shadow: 0 0 60px -20px color-mix(in oklch, var(--hotel-accent) 55%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+	.woven-ledger[data-mode='system'] .sf-about-photo {
+		box-shadow: 0 0 60px -20px color-mix(in oklch, var(--hotel-accent) 55%, transparent);
+	}
+}
 .woven-ledger .sf-nav.is-over-hero {
 	color: #fff;
 	background: transparent;
@@ -348,7 +386,7 @@ html:has(.woven-ledger) {
 	max-width: 14ch;
 	font-family: var(--ledger-font-display);
 	font-weight: 500;
-	font-size: clamp(2.9rem, 8.4vw, 6rem);
+	font-size: clamp(2.25rem, 5.2vw, 3.75rem);
 	line-height: 0.98;
 	letter-spacing: -0.03em;
 	text-wrap: balance;
@@ -512,8 +550,6 @@ html:has(.woven-ledger) {
 }
 @media (min-width: 900px) {
 	.woven-ledger .sf-bar {
-		grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr) auto;
-		align-items: end;
 		padding: 0.75rem;
 	}
 }
@@ -578,38 +614,122 @@ html:has(.woven-ledger) {
 }
 
 /* ---------------------------------------------------------------- about */
+/* Same .sf-wrap column as every other section, so nav, booking bar, About, rooms and gallery share one width. */
 .woven-ledger .sf-about {
 	display: grid;
-	gap: clamp(2rem, 6vw, 5rem);
+	gap: clamp(2.5rem, 6vw, 6rem);
 	align-items: center;
+	width: 100%;
+}
+.woven-ledger .sf-about-copy {
+	min-width: 0;
+}
+.woven-ledger .sf-eyebrow {
+	display: flex;
+	align-items: center;
+	gap: 1rem;
+	margin-bottom: 1.25rem;
+	font-size: 0.8125rem;
+	font-weight: 600;
+	letter-spacing: 0.22em;
+	text-transform: uppercase;
+	color: var(--hotel-accent);
+}
+.woven-ledger .sf-eyebrow span {
+	width: clamp(3rem, 8vw, 6rem);
+	height: 2px;
+	background: var(--hotel-accent);
+}
+.woven-ledger .sf-about-head {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15em;
+	margin-bottom: clamp(1.5rem, 3vw, 2.25rem);
+	font-weight: 500;
+	line-height: 1.08;
+	letter-spacing: -0.02em;
+}
+.woven-ledger .sf-about-kicker {
+	font-size: clamp(1.125rem, 1.8vw, 1.5rem);
+	color: var(--hotel-accent);
+}
+.woven-ledger .sf-about-title {
+	font-size: clamp(2rem, 4.2vw, 3.25rem);
+	color: var(--ledger-ink);
+	text-wrap: balance;
+}
+.woven-ledger .sf-about-title em {
+	font-style: normal;
+	color: var(--hotel-accent);
 }
 .woven-ledger .sf-about-text {
-	font-family: var(--ledger-font-display);
-	font-size: clamp(1.375rem, 2.6vw, 2rem);
-	line-height: 1.4;
-	letter-spacing: -0.012em;
+	max-width: 62ch;
+	font-size: clamp(0.9375rem, 1vw, 1rem);
+	line-height: 1.75;
 	color: var(--ledger-ink);
 	text-wrap: pretty;
+}
+.woven-ledger .sf-about-text + .sf-about-text {
+	margin-top: 1.1em;
+}
+.woven-ledger .sf-about-text.has-dropcap::first-letter {
+	float: left;
+	margin: 0.08em 0.12em 0 0;
+	font-family: var(--ledger-font-display);
+	font-size: 3.6em;
+	line-height: 0.8;
+	color: var(--hotel-accent);
 }
 .woven-ledger .sf-about-place {
 	margin-top: 1.5rem;
 	font-size: 0.9375rem;
 	color: var(--ledger-ink-muted);
 }
+/* The photo: a larger frame with a gold offset outline and a lift, so it reads as the section's centrepiece. */
 .woven-ledger .sf-about-photo {
+	position: relative;
 	aspect-ratio: 4 / 5;
-	overflow: hidden;
+	width: 100%;
+	max-width: 36rem;
+	margin-inline: auto;
 	background: var(--ledger-paper-2);
 	border-radius: var(--sf-radius);
+	box-shadow: 0 32px 64px -28px rgb(0 0 0 / 0.55);
+	transition: transform 0.6s var(--sf-ease), box-shadow 0.6s var(--sf-ease);
+}
+.woven-ledger .sf-about-photo::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	border: 2px solid var(--hotel-accent);
+	border-radius: var(--sf-radius);
+	transform: translate(14px, 14px);
+	transition: transform 0.6s var(--sf-ease);
 }
 .woven-ledger .sf-about-photo img {
+	display: block;
 	width: 100%;
 	height: 100%;
 	object-fit: cover;
+	border-radius: inherit;
+}
+@media (hover: hover) {
+	.woven-ledger .sf-about-photo:hover {
+		transform: translateY(-6px);
+		box-shadow: 0 44px 72px -28px rgb(0 0 0 / 0.6);
+	}
+	.woven-ledger .sf-about-photo:hover::before {
+		transform: translate(20px, 20px);
+	}
 }
 @media (min-width: 900px) {
 	.woven-ledger .sf-about.has-photo {
-		grid-template-columns: 1.15fr 0.85fr;
+		grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+	}
+	.woven-ledger .sf-about-photo {
+		margin-inline: 0 14px;
+		justify-self: end;
 	}
 }
 
@@ -1032,14 +1152,17 @@ html:has(.woven-ledger) {
 }
 
 /* ---------------------------------------------------------------- gallery */
+/* A uniform grid: every tile the same 4:3 frame, photos cropped to fit (object-fit), so mixed portrait and
+   landscape uploads never make a ragged wall. */
 .woven-ledger .sf-gallery {
-	columns: 2;
-	column-gap: 0.75rem;
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 0.75rem;
 }
 .woven-ledger .sf-gallery button {
 	display: block;
 	width: 100%;
-	margin: 0 0 0.75rem;
+	aspect-ratio: 4 / 3;
 	padding: 0;
 	overflow: hidden;
 	background: var(--ledger-paper-2) var(--hotel-woven-pattern);
@@ -1047,25 +1170,31 @@ html:has(.woven-ledger) {
 	border: 0;
 	border-radius: var(--sf-radius);
 	cursor: zoom-in;
-	break-inside: avoid;
 }
 .woven-ledger .sf-gallery img {
 	display: block;
 	width: 100%;
-	height: auto;
-	min-height: 6rem;
+	height: 100%;
+	object-fit: cover;
 	transition: transform 0.9s var(--sf-ease);
 }
 .woven-ledger .sf-gallery button:hover img {
-	transform: scale(1.03);
+	transform: scale(1.04);
 }
 @media (min-width: 720px) {
 	.woven-ledger .sf-gallery {
-		columns: 3;
-		column-gap: 1rem;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 1rem;
 	}
-	.woven-ledger .sf-gallery button {
-		margin-bottom: 1rem;
+	/* Counts that would strand a lone tile on the last row of a 3-column grid fill the width instead. */
+	.woven-ledger .sf-gallery:is([data-count='1'], [data-count='2'], [data-count='4']) {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+	.woven-ledger .sf-gallery[data-count='1'] {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.woven-ledger .sf-gallery[data-count='1'] button {
+		aspect-ratio: 16 / 9;
 	}
 }
 
@@ -1374,94 +1503,200 @@ html:has(.woven-ledger) {
 	}
 }
 
-/* Dining menu: two quiet columns of dishes; a dish photo is a small tipped-in plate. */
+/* Dining menu: the venue's showcase. A header with the real dish count and the ways to order, category
+   chips, then a grid of dish cards (large photo, name, price, full description). Only data the hotel entered
+   is shown: no invented ratings, spice levels or "chef's picks". */
 .woven-ledger .sf-menu {
-	margin-top: clamp(2.5rem, 6vw, 4rem);
+	margin-top: clamp(3rem, 7vw, 5rem);
+	padding-top: clamp(2rem, 5vw, 3rem);
+	border-top: 1px solid var(--ledger-rule);
 }
-.woven-ledger .sf-menu > h3 {
+.woven-ledger .sf-menu-head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: end;
+	justify-content: space-between;
+	gap: 1rem 2rem;
+}
+.woven-ledger .sf-menu-head > .sf-feature-actions {
+	margin-top: 0;
+}
+.woven-ledger .sf-menu > .sf-menu-head h3 {
 	font-family: var(--ledger-font-display);
-	font-size: clamp(1.75rem, 3vw, 2.25rem);
+	font-size: clamp(1.75rem, 3.4vw, 2.5rem);
 	font-weight: 500;
+	line-height: 1.1;
 	letter-spacing: -0.02em;
 }
-.woven-ledger .sf-menu-cols {
-	margin-top: 1rem;
-	column-gap: clamp(2rem, 6vw, 5rem);
+.woven-ledger .sf-menu-sub {
+	margin-top: 0.5rem;
+	color: var(--ledger-ink-muted);
 }
-.woven-ledger .sf-menu-block {
-	break-inside: avoid;
-}
-.woven-ledger .sf-menu-cat {
-	margin-top: 1.75rem;
-	padding-bottom: 0.5rem;
-	font-family: var(--ledger-font-display);
-	font-size: 1.25rem;
-	font-weight: 500;
-	border-bottom: 1px solid var(--ledger-ink);
-}
-.woven-ledger .sf-menu-cols ul {
-	margin: 0;
+.woven-ledger .sf-menu-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	margin: 1.5rem 0 0;
 	padding: 0;
 	list-style: none;
 }
-.woven-ledger .sf-dish {
-	display: grid;
-	grid-template-columns: minmax(0, 1fr) auto;
-	gap: 0.25rem 1rem;
-	align-items: center;
-	padding: 1rem 0;
-	border-bottom: 1px solid var(--ledger-rule);
+.woven-ledger .sf-menu-block {
+	margin-top: clamp(2rem, 4vw, 3rem);
+	scroll-margin-top: 10rem;
 }
-.woven-ledger .sf-dish.has-photo {
-	grid-template-columns: 4.25rem minmax(0, 1fr) auto;
+.woven-ledger .sf-menu-cat {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	font-family: var(--ledger-font-display);
+	font-size: clamp(1.25rem, 2vw, 1.5rem);
+	font-weight: 500;
+}
+.woven-ledger .sf-menu-cat span {
+	font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+	font-size: 0.8125rem;
+	color: var(--ledger-ink-muted);
+}
+.woven-ledger .sf-menu-cat::after {
+	content: '';
+	flex: 1;
+	height: 1px;
+	background: var(--ledger-rule);
+}
+.woven-ledger .sf-dishes {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 1rem;
+	margin: 1.25rem 0 0;
+	padding: 0;
+	list-style: none;
+}
+/* A listing row: a medium photo on the left, name + price + description on the right. */
+.woven-ledger .sf-dish {
+	position: relative;
+	display: grid;
+	grid-template-columns: 7rem minmax(0, 1fr);
+	align-items: center;
+	overflow: hidden;
+	background: var(--ledger-paper-2);
+	border: 1px solid var(--ledger-rule);
+	border-radius: 14px;
+	transition: border-color 0.3s var(--sf-ease), box-shadow 0.3s var(--sf-ease);
+}
+@media (min-width: 640px) {
+	.woven-ledger .sf-dish {
+		grid-template-columns: 12rem minmax(0, 1fr);
+	}
+}
+@media (hover: hover) {
+	.woven-ledger .sf-dish:hover {
+		border-color: var(--hotel-accent);
+		box-shadow: 0 18px 36px -26px rgb(0 0 0 / 0.5);
+	}
 }
 .woven-ledger .sf-dish-photo {
-	width: 4.25rem;
-	height: 4.25rem;
+	display: block;
+	width: 100%;
+	aspect-ratio: 4 / 3;
+	align-self: center;
 	padding: 0;
 	overflow: hidden;
 	background: var(--ledger-paper-2);
 	border: 0;
-	border-radius: 8px;
 	cursor: zoom-in;
 }
 .woven-ledger .sf-dish-photo img {
+	display: block;
 	width: 100%;
 	height: 100%;
 	object-fit: cover;
+	transition: transform 0.8s var(--sf-ease);
+}
+.woven-ledger .sf-dish:hover .sf-dish-photo img {
+	transform: scale(1.05);
+}
+.woven-ledger .sf-dish-photo.is-empty {
+	display: grid;
+	place-items: center;
+	cursor: default;
+	color: var(--ledger-ink-muted);
+	background: var(--ledger-paper-2) var(--hotel-woven-pattern);
+	background-size: 20px 20px;
+}
+.woven-ledger .sf-dish-photo.is-empty svg {
+	width: 2rem;
+	height: 2rem;
+	opacity: 0.6;
+}
+.woven-ledger .sf-dish-body {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	justify-content: center;
+	gap: 0.4rem;
+	padding: 1rem 1.25rem;
+}
+.woven-ledger .sf-dish-top {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 1rem;
 }
 .woven-ledger .sf-dish-name {
-	font-weight: 600;
-}
-.woven-ledger .sf-dish-desc {
-	margin-top: 0.125rem;
-	font-size: 0.875rem;
-	color: var(--ledger-ink-muted);
+	font-family: var(--ledger-font-display);
+	font-size: clamp(1.0625rem, 1.6vw, 1.3125rem);
+	font-weight: 500;
+	line-height: 1.2;
+	letter-spacing: -0.01em;
+	color: var(--ledger-ink);
 }
 .woven-ledger .sf-dish-price {
+	flex-shrink: 0;
 	font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
-	font-weight: 500;
+	font-size: 1rem;
+	font-weight: 600;
+	color: var(--hotel-accent);
 }
-.woven-ledger .sf-dish.is-sold-out :is(.sf-dish-name, .sf-dish-price) {
+.woven-ledger .sf-dish-desc {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 3;
+	line-clamp: 3;
+	overflow: hidden;
+	font-size: 0.9375rem;
+	line-height: 1.6;
 	color: var(--ledger-ink-muted);
-	text-decoration: line-through;
+}
+.woven-ledger .sf-dish-note {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	font-size: 0.8125rem;
+	font-weight: 500;
+	color: var(--hotel-accent);
+}
+.woven-ledger .sf-dish-note svg {
+	width: 1rem;
+	height: 1rem;
+	flex-shrink: 0;
 }
 .woven-ledger .sf-dish.is-sold-out .sf-dish-photo {
 	filter: grayscale(1);
-	opacity: 0.6;
+	opacity: 0.55;
 }
-.woven-ledger .sf-dish-flag {
-	margin-left: 0.5rem;
-	font-size: 0.75rem;
-	font-weight: 500;
-	text-decoration: none;
-	display: inline-block;
+.woven-ledger .sf-dish.is-sold-out :is(.sf-dish-name, .sf-dish-price) {
 	color: var(--ledger-ink-muted);
 }
-@media (min-width: 900px) {
-	.woven-ledger .sf-menu-cols {
-		columns: 2;
-	}
+.woven-ledger .sf-dish-flag {
+	position: absolute;
+	top: 0.5rem;
+	left: 0.5rem;
+	padding: 0.25rem 0.65rem;
+	font-size: 0.6875rem;
+	font-weight: 600;
+	color: var(--ledger-paper);
+	background: var(--ledger-ink);
+	border-radius: 999px;
 }
 
 /* Plain prose pages (Contact, room detail) */

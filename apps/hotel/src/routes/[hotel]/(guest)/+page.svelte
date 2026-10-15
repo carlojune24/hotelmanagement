@@ -148,6 +148,31 @@
 		(e.currentTarget as HTMLImageElement).style.display = 'none';
 	}
 
+	/** The About body as readable paragraphs: the hotel's own blank-line breaks, or — for one long block —
+	    sentences grouped into chunks of roughly 300 characters. */
+	const aboutParagraphs = $derived.by(() => {
+		const raw = data.branding.about?.trim();
+		if (!raw) return [`Welcome to ${data.hotel.name}.`];
+		const blocks = raw.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+		if (blocks.length > 1) return blocks;
+		const out: string[] = [];
+		let cur = '';
+		for (const s of raw.split(/(?<=[.!?])\s+/)) {
+			if (cur && cur.length + s.length > 340) {
+				out.push(cur);
+				cur = s;
+			} else cur = cur ? `${cur} ${s}` : s;
+		}
+		if (cur) out.push(cur);
+		return out;
+	});
+	/** The tagline for the About heading, with its last two words set apart to take the accent colour. */
+	const tagline = $derived.by(() => {
+		const words = data.branding.tagline?.trim().split(/\s+/) ?? [];
+		if (words.length === 0 || words[0] === '') return null;
+		if (words.length < 4) return { lead: words.join(' '), accent: '' };
+		return { lead: words.slice(0, -2).join(' '), accent: words.slice(-2).join(' ') };
+	});
 	const aboutPhoto = $derived(data.branding.galleryImages?.[0] ?? data.branding.heroImageUrl ?? null);
 	const diningFeature = $derived(data.diningItems[0] ?? null);
 	const diningCover = $derived.by(() => {
@@ -321,12 +346,17 @@
 	{#if data.branding.about || data.hotel.city}
 		<section id="about" class="sf-section">
 			<div class="sf-wrap sf-about" class:has-photo={Boolean(aboutPhoto)}>
-				<div>
-					{#if data.branding.about}
-						<p class="sf-about-text">{data.branding.about}</p>
-					{:else}
-						<p class="sf-about-text">Welcome to {data.hotel.name}.</p>
-					{/if}
+				<div class="sf-about-copy">
+					<p class="sf-eyebrow"><span aria-hidden="true"></span>About us</p>
+					<h2 class="sf-about-head">
+						<span class="sf-about-kicker">Discover {data.hotel.name}</span>
+						{#if tagline}
+							<span class="sf-about-title">{tagline.lead}{#if tagline.accent}&nbsp;<em>{tagline.accent}</em>{/if}</span>
+						{/if}
+					</h2>
+					{#each aboutParagraphs as para, i (i)}
+						<p class="sf-about-text" class:has-dropcap={i === 0 && para.length > 80}>{para}</p>
+					{/each}
 					{#if data.hotel.city}<p class="sf-about-place">{data.hotel.city}, Philippines</p>{/if}
 					<div class="sf-feature-actions">
 						<a href="#rooms" class="sf-btn">See rooms &amp; rates</a>
@@ -572,7 +602,7 @@
 						View all {galleryImages.length} photos <ArrowRightIcon class="size-4" aria-hidden="true" />
 					</button>
 				</div>
-				<div class="sf-gallery">
+				<div class="sf-gallery" data-count={galleryImages.slice(0, 9).length}>
 					{#each galleryImages.slice(0, 9) as url, i (url)}
 						<button type="button" onclick={() => (lightboxIndex = i)} aria-label="View photo {i + 1} larger">
 							<img src={url} alt="" loading="lazy" onerror={hidePhoto} />
