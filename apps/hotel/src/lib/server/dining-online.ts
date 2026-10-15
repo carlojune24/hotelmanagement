@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 import { db } from './db/index';
 import {
 	diningItems,
@@ -280,6 +280,11 @@ export async function startDiningCheckout(args: {
 
 	const client = await getPaymongoClient(args.hotelId);
 
+	// A payment may already have landed (the webhook could not reach us): the guest goes straight to their paid order.
+	const { verifyOrderNow } = await import('./paymongo/verify');
+	const already = await verifyOrderNow({ diningOrderId: order.id }, 0).catch(() => null);
+	if (already?.paid) return { checkoutUrl: args.successUrl };
+
 	// Expire any earlier unpaid session so only the newest link can be paid.
 	const pending = await db
 		.select()
@@ -360,6 +365,18 @@ export async function startDiningCheckout(args: {
 			paymongoCheckoutSessionId: session.id
 		})
 		.returning({ id: diningPayments.id });
+	// Keep the session: the worker checks it with PayMongo until it is paid or can no longer be, and the guest
+	// gets a link they can always come back to.
+	const { recordAttempt, supersedeOpenAttempts } = await import('./paymongo/attempts');
+	await supersedeOpenAttempts(args.hotelId, { diningOrderId: order.id }, session.id).catch(() => undefined);
+	const attemptId = await recordAttempt({
+		hotelId: args.hotelId,
+		scope: 'dining',
+		diningOrderId: order.id,
+		sessionId: session.id,
+		amountCentavos: order.totalCentavos
+	});
+	void import('./email/send-payment-status').then((m) => m.sendPaymentStatusEmail(attemptId, 'tracking'));
 	await writeAudit({
 		hotelId: args.hotelId,
 		actor: null,
@@ -391,9 +408,20 @@ export async function confirmDiningPayment(args: {
 	paymentId: string | null;
 	amountCentavos: number;
 	payload: unknown;
-}): Promise<{ handled: boolean; confirmed: boolean; needsRefund: boolean; hotelId: string | null }> {
+}): Promise<{ handled: boolean; confirmed: boolean; needsRefund: boolean; hotelId: string | null; paymentRowId?: string | null }> {
 	const result = await db.transaction(async (tx) => {
-		const [dup] = await tx.select({ id: diningPayments.id }).from(diningPayments).where(eq(diningPayments.paymongoEventId, args.eventId)).limit(1);
+		// Idempotent per event, and per PayMongo payment: the same `pay_` ID arriving by the webhook and by the verifier
+		// is recorded once.
+		const [dup] = await tx
+			.select({ id: diningPayments.id })
+			.from(diningPayments)
+			.where(
+				or(
+					eq(diningPayments.paymongoEventId, args.eventId),
+					args.paymentId ? and(eq(diningPayments.paymongoPaymentId, args.paymentId), eq(diningPayments.status, 'paid')) : undefined
+				)
+			)
+			.limit(1);
 		if (dup) return { handled: false, confirmed: false, needsRefund: false, hotelId: null as string | null, paymentRowId: null as string | null, code: null as string | null };
 
 		const [order] = await tx.select().from(diningOrders).where(eq(diningOrders.id, args.orderId)).for('update');
@@ -529,7 +557,7 @@ export async function confirmDiningPayment(args: {
 		}
 		await sendDiningOrderEmail(args.orderId, 'confirmation').catch((e) => console.error('dining confirmation email failed', args.orderId, e));
 	}
-	return { handled: true, confirmed: result.confirmed, needsRefund: result.needsRefund, hotelId: result.hotelId };
+	return { handled: true, confirmed: result.confirmed, needsRefund: result.needsRefund, hotelId: result.hotelId, paymentRowId: result.paymentRowId };
 }
 
 /** Records a declined attempt for staff visibility. It does not touch the order: the guest may retry. */
@@ -569,12 +597,18 @@ export async function recordDiningPaymentFailure(args: { eventId: string; orderI
 export async function expirePendingDiningOrders(opts: { hotelId?: string; olderThanMinutes?: number; now?: Date } = {}): Promise<number> {
 	const cutoff = new Date((opts.now ?? new Date()).getTime() - (opts.olderThanMinutes ?? PENDING_PAYMENT_MINUTES) * 60_000);
 	const stale = await db
-		.select({ id: diningOrders.id, hotelId: diningOrders.hotelId })
+		.select({ id: diningOrders.id, hotelId: diningOrders.hotelId, createdAt: diningOrders.createdAt })
 		.from(diningOrders)
 		.where(and(eq(diningOrders.status, 'pending_payment'), lt(diningOrders.createdAt, cutoff), opts.hotelId ? eq(diningOrders.hotelId, opts.hotelId) : undefined));
 
 	let released = 0;
 	for (const o of stale) {
+		// Ask PayMongo before releasing: the guest may have paid while our webhook was unreachable.
+		const { verifyOrderNow } = await import('./paymongo/verify');
+		const verified = await verifyOrderNow({ diningOrderId: o.id }, 0, 'hold_sweep').catch(() => null);
+		if (verified?.paid) continue;
+		if (verified?.unknown && (opts.now ?? new Date()).getTime() - o.createdAt.getTime() < 24 * 60 * 60_000) continue;
+
 		const sessions = await db.transaction(async (tx) => {
 			const [locked] = await tx.select().from(diningOrders).where(eq(diningOrders.id, o.id)).for('update');
 			if (!locked || locked.status !== 'pending_payment') return null; // paid or cancelled meanwhile

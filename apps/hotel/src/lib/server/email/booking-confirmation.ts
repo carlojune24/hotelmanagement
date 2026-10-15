@@ -53,6 +53,8 @@ export interface BookingConfirmationData {
 	totalCentavos: number;
 	/** A redeemed promo code, already subtracted out of `totalCentavos`. Absent = none. */
 	promo?: { code: string; terms: string | null; discountCentavos: number } | null;
+	/** PayMongo's own payment ID (`pay_…`), once known: the guest's proof of payment and what a refund is traced by. */
+	paymentRef?: string | null;
 	/** Set only for a downpayment order that still owes a balance (see `getOrderPaymentSummary`).
 	 *  Absent/null = paid in full, and the email reads exactly as it always has. */
 	payment?: { paidCentavos: number; dueAtHotelCentavos: number } | null;
@@ -273,6 +275,7 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 			${breakdown}
 		</table>
 		<div style="margin-top:8px;font-family:${FONT_BODY};font-size:12px;color:${INK_MUTED};">${partial ? 'Downpayment paid via PayMongo. The balance is paid at the hotel.' : 'Paid in full via PayMongo.'}</div>
+		${data.paymentRef ? `<div style="margin-top:8px;font-family:${FONT_BODY};font-size:12px;color:${INK_MUTED};">Payment reference: <span style="font-family:${FONT_DATA};color:${INK};">${esc(data.paymentRef)}</span><br>Quote it with your confirmation code if you ever ask about this payment.</div>` : ''}
 	</td></tr>
 
 	<!-- CTA -->
@@ -361,6 +364,7 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 		tLines.push(`TOTAL PAID  ${money(data.totalCentavos, currency)}   (via PayMongo)`);
 	}
 	tLines.push(rule);
+	if (data.paymentRef) tLines.push(`PAYMENT REFERENCE  ${data.paymentRef}`);
 	tLines.push('');
 	tLines.push('View your booking:');
 	tLines.push(data.manageUrl);

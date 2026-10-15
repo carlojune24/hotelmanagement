@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import { getOrderPaymentSummary } from '../order-payment';
 import { env } from '$env/dynamic/private';
 import { db } from '../db/index';
@@ -11,6 +11,7 @@ import {
 	hallBookings,
 	hotels,
 	orders,
+	payments,
 	ratePlans,
 	roomTypes
 } from '../db/schema/index';
@@ -107,6 +108,16 @@ export async function sendBookingConfirmation(
 			vatCentavos: order.vatCentavos,
 			totalCentavos: order.totalCentavos,
 			payment: await getOrderPaymentSummary(order),
+			// PayMongo's payment ID, the guest's proof of payment.
+			paymentRef:
+				(
+					await db
+						.select({ id: payments.paymongoPaymentId })
+						.from(payments)
+						.where(and(eq(payments.orderId, order.id), eq(payments.provider, 'paymongo'), eq(payments.status, 'paid')))
+						.orderBy(desc(payments.createdAt))
+						.limit(1)
+				)[0]?.id ?? null,
 			promo: await getOrderPromo(order.id),
 			securityDepositCentavos: await orderSecurityDepositCentavos(order.hotelId, order.id),
 			manageUrl,

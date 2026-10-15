@@ -1,4 +1,4 @@
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 import {
 	bigint,
 	date,
@@ -315,6 +315,10 @@ export const payments = pgTable(
 	(t) => [
 		index('payments_order_idx').on(t.orderId),
 		uniqueIndex('payments_paymongo_event_idx').on(t.paymongoEventId),
+		/** One PayMongo payment is recorded as paid once, however many routes (webhook, verifier) find it. */
+		uniqueIndex('payments_paymongo_payment_paid_uq')
+			.on(t.paymongoPaymentId)
+			.where(sql`status = 'paid' and purpose <> 'refund' and paymongo_payment_id is not null`),
 		index('payments_folio_idx').on(t.folioId),
 		index('payments_shift_idx').on(t.shiftId),
 		index('payments_refunds_payment_idx').on(t.refundsPaymentId),

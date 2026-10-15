@@ -22,6 +22,7 @@
 			{ seg: '/accounts', label: 'Accounts' },
 			{ seg: '/bir', label: 'BIR' },
 			{ seg: '/paymongo', label: 'PayMongo' },
+			{ seg: '/reconciliation', label: 'Reconciliation' },
 			{ seg: '/settings', label: 'Settings', show: data.finance.canAdmin }
 		].filter((t) => t.show === undefined || t.show)
 	);

@@ -634,7 +634,10 @@ export const diningPayments = pgTable(
 	},
 	(t) => [
 		index('dining_payments_order_idx').on(t.orderId),
-		uniqueIndex('dining_payments_event_uq').on(t.paymongoEventId).where(sql`paymongo_event_id is not null`)
+		uniqueIndex('dining_payments_event_uq').on(t.paymongoEventId).where(sql`paymongo_event_id is not null`),
+		uniqueIndex('dining_payments_payment_paid_uq')
+			.on(t.paymongoPaymentId)
+			.where(sql`status = 'paid' and kind = 'payment' and paymongo_payment_id is not null`)
 	]
 );
 

@@ -12,6 +12,8 @@ import { getEnabledHotelIds } from './toggles';
 import { runErrorLogRetention } from '../error-log';
 import { sweepSupportChats } from '../support-chat';
 import { listPaymongoHotelIds, syncPaymongo } from '../finance/paymongo-sync';
+import { runPaymentVerify } from '../paymongo/verify';
+import { expirePendingDiningOrders } from '../dining-online';
 
 export interface JobRunSummary {
 	hotelsProcessed: number;
@@ -154,6 +156,21 @@ export async function runPaymongoSync(): Promise<JobRunSummary> {
 		else failed += 1;
 	}
 	return { hotelsProcessed: hotelIds.length, detail: { synced, failed } };
+}
+
+/** Confirms payments without needing PayMongo's webhook: asks PayMongo about every checkout that is still open
+ *  (every minute at first, gentler later, never giving up while it can still be paid), then releases bookings
+ *  that really went unpaid. Releasing verifies first, so a paid booking is confirmed, never cancelled. */
+export async function runPaymentVerifyJob(): Promise<JobRunSummary> {
+	const r = await runPaymentVerify();
+	const hotelIds = await listPaymongoHotelIds();
+	let released = 0;
+	for (const hotelId of hotelIds) {
+		const a = await expirePendingOrders({ hotelId }).catch(() => ({ expiredOrderIds: [] as string[] }));
+		const b = await expirePendingDiningOrders({ hotelId }).catch(() => 0);
+		released += a.expiredOrderIds.length + b;
+	}
+	return { hotelsProcessed: hotelIds.length, detail: { ...r, released } };
 }
 
 /** Customer Support chat housekeeping: requeue chats whose agent went away, close idle ones,

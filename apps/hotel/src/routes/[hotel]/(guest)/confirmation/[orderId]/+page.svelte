@@ -18,17 +18,54 @@
 	const peso = (centavos: number) =>
 		`₱${(centavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 
-	const MAX_POLLS = 12;
-	let pollCount = $state(0);
+	// While the payment is pending the page keeps asking, for as long as it takes: every load asks PayMongo itself (see
+	// the page's load), so a hard refresh, another tab or a tunnel that is down never leaves the guest stuck. The pace
+	// eases off (3 s, then 5, 10, 30) but it never stops, and it starts over, not from a counter, after a refresh.
+	let polls = $state(0);
+	let checking = $state(false);
+	let now = $state(Date.now());
+	const pollDelay = (n: number) => (n < 10 ? 3000 : n < 20 ? 5000 : n < 40 ? 10_000 : 30_000);
 
 	$effect(() => {
-		if (data.status !== 'pending_payment' || pollCount >= MAX_POLLS) return;
-		const timer = setTimeout(() => {
-			pollCount += 1;
-			invalidate('app:booking-status');
-		}, 3000);
+		if (data.status !== 'pending_payment') return;
+		const timer = setTimeout(async () => {
+			polls += 1;
+			await invalidate('app:booking-status');
+		}, pollDelay(polls));
 		return () => clearTimeout(timer);
 	});
+	$effect(() => {
+		if (data.status !== 'pending_payment') return;
+		const t = setInterval(() => (now = Date.now()), 1000);
+		return () => clearInterval(t);
+	});
+
+	async function checkNow() {
+		if (checking) return;
+		checking = true;
+		try {
+			await invalidate('app:booking-status');
+		} finally {
+			setTimeout(() => (checking = false), 1500);
+		}
+	}
+	const sinceLastCheck = $derived.by(() => {
+		if (!data.tracking.lastCheckedAt) return null;
+		const s = Math.max(0, Math.round((now - new Date(data.tracking.lastCheckedAt).getTime()) / 1000));
+		return s < 5 ? 'just now' : s < 60 ? `${s} seconds ago` : `${Math.floor(s / 60)} min ago`;
+	});
+
+	let copiedRef = $state(false);
+	async function copyRef() {
+		if (!data.paymentRef) return;
+		try {
+			await navigator.clipboard.writeText(data.paymentRef.paymentId);
+			copiedRef = true;
+			setTimeout(() => (copiedRef = false), 2000);
+		} catch {
+			// Clipboard blocked: the reference is still on screen to read.
+		}
+	}
 
 	let copied = $state(false);
 	async function copyCode() {
@@ -190,6 +227,28 @@
 						{/if}
 					</tbody>
 				</table>
+				{#if data.paymentRef}
+					<!-- The guest's proof of payment: PayMongo's own reference, the same ID staff see and a refund is traced by. -->
+					<div class="mt-4 border-t border-[var(--ledger-rule)] pt-3">
+						<p class="ledger-label">Payment reference</p>
+						<div class="mt-1 flex flex-wrap items-center justify-between gap-2">
+							<span class="ledger-data text-sm font-semibold break-all" style="color: var(--hotel-accent-deep)"
+								>{data.paymentRef.paymentId}</span
+							>
+							<button type="button" class="text-xs underline underline-offset-2" onclick={copyRef}>
+								{copiedRef ? 'Copied' : 'Copy'}
+							</button>
+						</div>
+						{#if data.paymentRef.intentId}
+							<p class="ledger-data mt-0.5 text-xs break-all text-[var(--ledger-ink-muted)]">
+								{data.paymentRef.intentId}
+							</p>
+						{/if}
+						<p class="mt-1 text-xs text-[var(--ledger-ink-muted)]">
+							Quote this with your confirmation code if you ever need to ask about this payment.
+						</p>
+					</div>
+				{/if}
 			</div>
 		</div>
 
@@ -297,8 +356,9 @@
 	{:else if data.status === 'pending_payment'}
 		<h1 class="ledger-display text-2xl">Confirming your payment…</h1>
 		<p class="mt-2 max-w-md text-sm text-[var(--ledger-ink-muted)]">
-			PayMongo is finalizing your payment. This page updates on its own — it usually takes just a
-			few seconds. You don't need to refresh or pay again.
+			We are checking with PayMongo. This page updates on its own and usually takes just a few seconds. Your payment
+			is safe: if you already paid, <strong>please do not pay again</strong>. We keep checking automatically, even
+			if you close this page.
 		</p>
 		<div
 			class="mt-6 flex items-center gap-3 rounded-md border border-[var(--ledger-rule)] px-4 py-4 text-sm"
@@ -307,19 +367,36 @@
 			<span class="size-2.5 animate-pulse rounded-full" style="background: var(--hotel-accent);"
 			></span>
 			<span>
-				Waiting for confirmation…
-				<span class="text-[var(--ledger-ink-muted)]">
-					(check {Math.min(pollCount + 1, MAX_POLLS)} of {MAX_POLLS})
-				</span>
+				Waiting for PayMongo to confirm…
+				{#if sinceLastCheck}
+					<span class="text-[var(--ledger-ink-muted)]">(last checked {sinceLastCheck})</span>
+				{/if}
 			</span>
 		</div>
-		{#if pollCount >= MAX_POLLS}
-			<p class="mt-4 max-w-md text-sm text-[var(--ledger-ink-muted)]">
-				This is taking longer than usual. If you were charged, your booking will still be
-				confirmed and you'll get an email — or contact the hotel with this reference:
-				<span class="ledger-data font-medium">{data.order.confirmationCode}</span>.
-			</p>
-		{/if}
+		<div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+			<button
+				type="button"
+				class="text-sm underline underline-offset-2 disabled:opacity-50"
+				onclick={checkNow}
+				disabled={checking}
+			>
+				{checking ? 'Checking…' : 'Check again now'}
+			</button>
+		</div>
+		<dl class="mt-6 max-w-md space-y-1.5 border-t border-[var(--ledger-rule)] pt-4 text-sm">
+			<div class="flex justify-between gap-3">
+				<dt class="ledger-label">Booking code</dt>
+				<dd class="ledger-data font-medium">{data.order.confirmationCode}</dd>
+			</div>
+			<div class="flex justify-between gap-3">
+				<dt class="ledger-label">Payment check code</dt>
+				<dd class="ledger-data font-medium">{data.tracking.code}</dd>
+			</div>
+		</dl>
+		<p class="mt-3 max-w-md text-xs text-[var(--ledger-ink-muted)]">
+			Keep this page's link, or the email we sent you: it always shows where your payment stands, on any device. If it
+			takes long, contact the hotel with these two codes and we will find your payment straight away.
+		</p>
 		<p class="mt-6 max-w-md text-sm text-[var(--ledger-ink-muted)]">
 			Closed the payment page before paying?
 			<a

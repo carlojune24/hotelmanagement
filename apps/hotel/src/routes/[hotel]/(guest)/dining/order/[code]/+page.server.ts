@@ -8,17 +8,44 @@ import {
 	startDiningCheckout
 } from '$lib/server/dining-online';
 import { FinanceError } from '$lib/server/finance/shared';
+import { and, desc, eq } from 'drizzle-orm';
+import { db } from '$lib/server/db/index';
+import { attemptCode, paymentAttempts } from '$lib/server/db/schema/index';
+import { verifyOrderNow } from '$lib/server/paymongo/verify';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, params, url, depends }) => {
 	depends('app:dining-order');
 	const token = url.searchParams.get('t');
 	if (!token) error(404, 'Not found');
-	const order = await getOrderForGuest(locals.hotel!.id, locals.hotel!.timezone, params.code, token);
+	let order = await getOrderForGuest(locals.hotel!.id, locals.hotel!.timezone, params.code, token);
 	if (!order) error(404, 'Not found');
+
+	// Still waiting for payment? Ask PayMongo itself (throttled per order), so a payment whose webhook never reached us
+	// is confirmed the moment the guest looks, and a refresh never loses track of it.
+	if (order.status === 'pending_payment' && order.payMode === 'online') {
+		await verifyOrderNow({ diningOrderId: order.id }).catch(() => null);
+		order = (await getOrderForGuest(locals.hotel!.id, locals.hotel!.timezone, params.code, token)) ?? order;
+	}
+
+	// The guest's proof of payment (PayMongo's own ID) once paid, or the check code while we confirm it.
+	const [paid] = await db
+		.select()
+		.from(paymentAttempts)
+		.where(and(eq(paymentAttempts.diningOrderId, order.id), eq(paymentAttempts.status, 'paid')))
+		.orderBy(desc(paymentAttempts.paidAt))
+		.limit(1);
+	const [open] = await db
+		.select()
+		.from(paymentAttempts)
+		.where(and(eq(paymentAttempts.diningOrderId, order.id), eq(paymentAttempts.status, 'open')))
+		.orderBy(desc(paymentAttempts.createdAt))
+		.limit(1);
 	return {
 		order,
 		token,
+		paymentRef: paid?.paymongoPaymentId ? { paymentId: paid.paymongoPaymentId, intentId: paid.paymentIntentId } : null,
+		tracking: { code: (open ?? paid) ? attemptCode((open ?? paid)!.id) : null, waiting: !!open },
 		// Hints from the PayMongo redirect back to this page.
 		returned: { paid: url.searchParams.has('paid'), cancelled: url.searchParams.has('cancelled'), payError: url.searchParams.has('payerror') }
 	};

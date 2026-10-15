@@ -190,6 +190,12 @@ export class PayMongoClient {
 		return { data: res.data ?? [], hasMore: Boolean(res.has_more) };
 	}
 
+	/** `GET /payments/{id}`: one payment with its fee, net, source and the payout it joined. */
+	async retrievePayment(id: string): Promise<PayMongoPaymentRecord> {
+		const res = await this.request<{ data: PayMongoPaymentRecord }>(`/payments/${id}`);
+		return res.data;
+	}
+
 	/** `GET /refunds`: money back out to guests. */
 	async listRefunds(params: { limit?: number; after?: string } = {}): Promise<{ data: Refund[]; hasMore: boolean }> {
 		const res = await this.request<{ data: Refund[]; has_more?: boolean }>(

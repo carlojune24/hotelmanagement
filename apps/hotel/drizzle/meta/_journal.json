@@ -708,6 +708,20 @@
       "when": 1792066330573,
       "tag": "0100_paymongo_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1792070325888,
+      "tag": "0101_payment_attempts",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1792072348605,
+      "tag": "0102_payment_reconciliation_events",
+      "breakpoints": true
     }
   ]
 }
