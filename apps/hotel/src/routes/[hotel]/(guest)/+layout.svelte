@@ -1,11 +1,14 @@
 <script lang="ts">
 	import './woven-ledger.css';
+	import './storefront.css';
 	import { page } from '$app/state';
 	import { setContext } from 'svelte';
 	import { CartStore } from '$lib/cart.svelte';
 	import FloatingInvoice from '$lib/components/storefront/floating-invoice.svelte';
 	import BookingSummarySidebar from '$lib/components/storefront/booking-summary-sidebar.svelte';
+	import SupportChatWidget from '$lib/components/storefront/support-chat-widget.svelte';
 	import { DEFAULT_DISPLAY_FONT, DISPLAY_FONTS } from '$lib/branding';
+	import { StorefrontTheme } from '$lib/storefront-mode.svelte';
 	import type { LayoutData } from './$types';
 
 	let { data, children }: { data: LayoutData; children: import('svelte').Snippet } = $props();
@@ -13,18 +16,27 @@
 	const cart = new CartStore(data.hotel.slug);
 	setContext('cart', cart);
 
-	/** The 5 real wizard steps. The room detail page (`rooms/[roomTypeId]`) is deliberately
-	    NOT one of these — like the bare homepage, it runs its own Persuade-mode chrome (see
-	    Acacia's own room-detail screenshots: no step tracker, its own right-column content is
-	    Amenities, not a booking summary), reached either before or outside the wizard proper. */
+	// Light/dark for the storefront pages; the nav's toggle flips it (see storefront-mode.svelte.ts).
+	const sfTheme = new StorefrontTheme(data.themeMode);
+	setContext('sf-theme', sfTheme);
+
+	/** The 4 wizard steps. Review & Payment and Confirmation are one step ("Booking
+	    Confirmation": pay, then the ticket), so both routes map to step 4. The room detail page
+	    (`rooms/[roomTypeId]`) is deliberately NOT one of these — like the bare homepage, it runs
+	    its own Persuade-mode chrome (no step tracker, its right-column content is Amenities, not a
+	    booking summary), reached either before or outside the wizard proper. */
 	const STEP_ROUTES = [
-		{ id: '/[hotel]/(guest)/dates', label: 'Dates' },
-		{ id: '/[hotel]/(guest)/rooms', label: 'Select Rooms & Rates' },
-		{ id: '/[hotel]/(guest)/details', label: 'Guest Information' },
-		{ id: '/[hotel]/(guest)/review/[orderId]', label: 'Review & Payment' },
-		{ id: '/[hotel]/(guest)/confirmation/[orderId]', label: 'Confirmation' }
+		{ ids: ['/[hotel]/(guest)/dates'], label: 'Check-in & Check-out Date' },
+		{ ids: ['/[hotel]/(guest)/rooms'], label: 'Select Rooms & Rates' },
+		{ ids: ['/[hotel]/(guest)/details'], label: 'Guest Information' },
+		{
+			ids: ['/[hotel]/(guest)/review/[orderId]', '/[hotel]/(guest)/confirmation/[orderId]'],
+			label: 'Booking Confirmation'
+		}
 	];
-	const currentStepIndex = $derived(STEP_ROUTES.findIndex((s) => s.id === page.route.id));
+	const currentStepIndex = $derived(
+		STEP_ROUTES.findIndex((s) => s.ids.includes(page.route.id ?? ''))
+	);
 	/** The bare search page (and the room detail page) are Persuade mode, own nav/hero/chrome —
 	    the task-flow chrome (compact header, horizontal step tracker) only shows once a guest
 	    has entered the booking wizard proper, starting at the Dates step. */
@@ -33,6 +45,18 @@
 	    sidebar's job) is done once `createOrder` succeeds and clears it; Review already has
 	    its own authoritative, DB-backed itemized bill, and Confirmation shows the ticket. */
 	const showSidebar = $derived(showStepChrome && currentStepIndex >= 1 && currentStepIndex <= 2);
+
+	/** Pages built from the storefront nav/footer ("boutique editorial"), the only ones with a dark mode. */
+	const STOREFRONT_ROUTES = [
+		'/[hotel]/(guest)',
+		'/[hotel]/(guest)/contact',
+		'/[hotel]/(guest)/meetings-events',
+		'/[hotel]/(guest)/rooms/[roomTypeId]'
+	];
+	const isStorefrontPage = $derived.by(() => {
+		const id = page.route.id ?? '';
+		return STOREFRONT_ROUTES.includes(id) || id.startsWith('/[hotel]/(guest)/dining');
+	});
 
 	const fontDisplayFamily = $derived(
 		DISPLAY_FONTS[data.branding.fontDisplay ?? DEFAULT_DISPLAY_FONT].family
@@ -53,7 +77,9 @@
 	<title>{data.hotel.name} — Book your stay</title>
 </svelte:head>
 
-<div class="woven-ledger" style={rootStyle}>
+<!-- Only the storefront pages follow the mode; the booking wizard and the guest self-service pages keep
+     the ruled-ledger light look. -->
+<div class="woven-ledger" style={rootStyle} data-mode={isStorefrontPage ? sfTheme.mode : 'light'}>
 	{#if showStepChrome}
 		<!-- Compact header: shown on every wizard step below the lg breakpoint, the only step
 		     indicator there. -->
@@ -77,7 +103,7 @@
 		     vertical left-rail; same active/done semantics and tokens, new geometry. -->
 		<nav class="ledger-hairline hidden lg:block">
 			<ol class="ledger-stepper-horizontal mx-auto max-w-5xl px-6 py-5">
-				{#each STEP_ROUTES as step, i (step.id)}
+				{#each STEP_ROUTES as step, i (step.label)}
 					<li
 						class="ledger-stepper-node {i === currentStepIndex ? 'is-active' : ''} {i <
 						currentStepIndex
@@ -112,4 +138,9 @@
 		{@render children()}
 	{/if}
 	<FloatingInvoice {cart} hotelSlug={data.hotel.slug} visible={!showStepChrome} />
+	<SupportChatWidget
+		hotelSlug={data.hotel.slug}
+		hotelName={data.hotel.name}
+		lift={showStepChrome || cart.items.length > 0}
+	/>
 </div>

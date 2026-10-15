@@ -176,6 +176,21 @@ the diagram expects and we don't have yet.
 - [x] Schema: `guests`, `orders` (the actual checkout object — `pending_payment | confirmed | cancelled`, one PayMongo session, one guest, one bill), `bookings` (room stays; status `pending_payment | confirmed | checked_in | checked_out | cancelled | no_show`), `booking_rooms`, `booking_status_history`, `order_status_history` — `access_token` guard lives on `orders` now (moved up from `bookings`, since one token covers every line under an order), checked on every guest-facing URL; bill amounts snapshotted at creation, never recomputed live
 - [x] Schema: `payments` (idempotent on `paymongo_event_id`, keyed to `orders.id`) — `folios`/`folio_charges` now built (see Front desk below); `invoices`/`official_receipts` (per-hotel OR series counter) still TODO
 
+### Customer Support live chat + 4-step booking layout (2026-10-15)
+- [x] Booking wizard is now 4 steps (review + confirmation share step 4); Dates step is an inline two-month range calendar with legend, nights counter, special code and a sticky mobile Continue. Sidebar Date/Guests rows now show on Guest Info (they read an empty query string before).
+- [x] Guest Customer Support widget on every guest page: built-in + staff-written FAQ chips, live chat with an available agent, leave-a-message when nobody is online; anonymous visitor cookie (SHA-256 stored), optional booking link taken from the confirmation/manage URL.
+- [x] Staff Support inbox `/{slug}/management/support` (Queued / Mine / All / Closed, canned replies, claim, close, availability switch + 15s heartbeat, sound + sidebar badge) and FAQ editor `/support/faq` (`support:manage`).
+- [x] Realtime: Postgres LISTEN/NOTIFY → SSE (`lib/server/support-realtime.ts`, `sse.ts`); least-busy routing with `max_concurrent`, queue, and a per-minute `support_sweep` job (requeue chats whose agent vanished, close idle chats). Offline messages are answered by email (`email_type` `support_reply`) and close.
+- [x] Migrations `0095_support_chat` (tables + `support:*` backfill for existing front-desk roles) and `0096_support_reply_email`.
+- [ ] Playwright specs written, **not run**: `e2e/booking-flow.spec.ts`, `e2e/support-chat.spec.ts` (set `E2E_HOTEL_SLUG`, e.g. `mmhotel`).
+- [ ] Not built: chat attachments/emoji, typing indicator, staff push notifications outside the inbox page, a per-hotel "support hours" schedule, guest chat transcript email.
+
+### Public storefront overhaul — boutique editorial (2026-10-15)
+- [x] Homepage, Dining, Meetings & Events, Contact and room detail redesigned (shared nav/footer, photo-led rooms, dark amenities section, dining feature, gallery masonry); responsive from 1440px to a 390px phone.
+- [x] Sticky booking bar (hero-docked → strip under nav / phone bottom bar), live rooms for the chosen dates with Reserve, room Quick view sheet. New: `booking-bar`, `room-card`, `room-rates`, `room-quick-view`, `lib/room-line.ts` (shared by the wizard's Rooms step).
+- [ ] Playwright spec written, **not run**: `e2e/storefront.spec.ts`.
+- [ ] Old `.storefront-nav/hero/search-dock/room-card/hall-card/footer…` rules in `woven-ledger.css` are now unused by the storefront and can be pruned (the wizard still uses stepper, summary-sidebar, invoice, glance and cancel-badge rules).
+
 ### Public booking flow `/{slug}/book` — Woven Ledger world (see apps/hotel/DESIGN.md)
 - [x] Search (dates, guests) → results with price breakdown (ruled-row room types, expandable rate plans)
 - [x] Floating invoice/cart (`lib/cart.svelte.ts`, Svelte-context + sessionStorage) — a guest adds one or more room stays and/or function hall reservations before checking out once

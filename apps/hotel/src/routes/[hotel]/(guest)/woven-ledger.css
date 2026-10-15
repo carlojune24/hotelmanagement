@@ -34,6 +34,46 @@
 	min-height: 100vh;
 }
 
+/* Storefront dark mode — black & gold (the hotel's original look). Opt-in: only an element carrying
+   `data-mode="dark"` (explicit choice) or `data-mode="system"` (follow the OS) goes dark, so the booking
+   wizard (always `light`) and the table-ordering app (no attribute) are untouched. The per-hotel values are
+   set INLINE on the same element (layout / portalled sheets), which would beat a plain rule, hence
+   `!important` on those; it is the one place that is warranted. Gold = the hotel's own accent, lightened. */
+.woven-ledger[data-mode='dark'] {
+	color-scheme: dark;
+	--ledger-paper: #0b0a09 !important;
+	--ledger-paper-2: #14120f !important;
+	--ledger-ink: #efe9dc !important;
+	--ledger-ink-muted: oklch(0.76 0.02 85) !important;
+	--ledger-rule: color-mix(in oklch, var(--hotel-accent-light) 30%, #0b0a09) !important;
+	--ledger-danger: oklch(0.72 0.17 25);
+	--hotel-accent: oklch(from var(--hotel-accent-light) 0.78 0.125 h) !important;
+	--hotel-accent-deep: oklch(from var(--hotel-accent-light) 0.86 0.115 h) !important;
+	--sf-night: #000;
+	--sf-night-2: #0a0907;
+	--sf-on-night: #efe9dc;
+	--sf-on-night-muted: oklch(0.76 0.02 85);
+	--sf-night-rule: color-mix(in oklch, var(--hotel-accent-light) 28%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+	.woven-ledger[data-mode='system'] {
+		color-scheme: dark;
+		--ledger-paper: #0b0a09 !important;
+		--ledger-paper-2: #14120f !important;
+		--ledger-ink: #efe9dc !important;
+		--ledger-ink-muted: oklch(0.76 0.02 85) !important;
+		--ledger-rule: color-mix(in oklch, var(--hotel-accent-light) 30%, #0b0a09) !important;
+		--ledger-danger: oklch(0.72 0.17 25);
+		--hotel-accent: oklch(from var(--hotel-accent-light) 0.78 0.125 h) !important;
+		--hotel-accent-deep: oklch(from var(--hotel-accent-light) 0.86 0.115 h) !important;
+		--sf-night: #000;
+		--sf-night-2: #0a0907;
+		--sf-on-night: #efe9dc;
+		--sf-on-night-muted: oklch(0.76 0.02 85);
+		--sf-night-rule: color-mix(in oklch, var(--hotel-accent-light) 28%, transparent);
+	}
+}
+
 .woven-ledger :is(h1, h2, h3, .ledger-display) {
 	font-family: var(--ledger-font-display);
 	font-weight: 500;
@@ -1725,6 +1765,10 @@ button.storefront-menu-photo:focus-visible {
 	bottom: 1.25rem;
 	z-index: 40;
 }
+/* Open: sits above the chat launcher (z 45) so the launcher never floats over the invoice. */
+.storefront-invoice.is-open {
+	z-index: 50;
+}
 .storefront-invoice-pill {
 	display: flex;
 	align-items: center;
@@ -1755,7 +1799,7 @@ button.storefront-menu-photo:focus-visible {
 }
 .storefront-invoice-panel {
 	width: min(22rem, calc(100vw - 2.5rem));
-	max-height: min(28rem, calc(100vh - 2.5rem));
+	max-height: calc(100dvh - 2.5rem);
 	display: flex;
 	flex-direction: column;
 	background: var(--ledger-paper);
@@ -1763,15 +1807,16 @@ button.storefront-menu-photo:focus-visible {
 	border-radius: 10px;
 	overflow: hidden;
 }
+.storefront-invoice-panel > :not(.storefront-invoice-items) {
+	flex-shrink: 0;
+}
 .storefront-invoice-header {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
 	padding: 0.875rem 1rem;
 	border-bottom: 1px solid var(--ledger-rule);
-	background-image: var(--hotel-woven-pattern);
-	background-repeat: repeat;
-	background-size: 20px 20px;
+	color: var(--ledger-ink);
 	background-color: var(--ledger-paper-2);
 }
 .storefront-invoice-close {
@@ -1787,8 +1832,21 @@ button.storefront-menu-photo:focus-visible {
 	color: var(--ledger-ink);
 }
 .storefront-invoice-items {
+	min-height: 0;
 	overflow-y: auto;
 	padding: 0.25rem 1rem;
+}
+.storefront-invoice-due {
+	display: grid;
+	gap: 0.25rem;
+	padding: 0 1rem;
+	font-size: 0.875rem;
+}
+.storefront-invoice-note {
+	padding: 0.5rem 1rem 0;
+	font-size: 0.75rem;
+	line-height: 1.5;
+	color: var(--ledger-ink-muted);
 }
 .storefront-invoice-item {
 	display: flex;
@@ -1826,7 +1884,7 @@ button.storefront-menu-photo:focus-visible {
 .storefront-invoice-cta {
 	display: flex;
 	justify-content: center;
-	margin: 0 1rem 1rem;
+	margin: 1rem 1rem 1rem;
 	border-radius: 4px;
 }
 

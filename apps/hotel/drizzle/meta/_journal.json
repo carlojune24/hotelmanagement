@@ -680,6 +680,20 @@
       "when": 1792029434601,
       "tag": "0096_hotel_sort_order",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1792029434602,
+      "tag": "0097_support_chat",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1792029434603,
+      "tag": "0098_support_reply_email",
+      "breakpoints": true
     }
   ]
 }

@@ -12,7 +12,8 @@
 	import { formatStayDateShort, nightsLabel } from '$lib/stay-dates';
 	import type { BedConfigEntry } from '$lib/server/db/schema/inventory';
 	import type { AmenityHighlight, AvailableRatePlan, AvailableRoomType, CancellationTerms } from '$lib/server/availability';
-	import { MAX_ROOMS_PER_LINE, addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
+	import { MAX_ROOMS_PER_LINE } from '$lib/pricing-utils';
+	import { roomCartItem, roomLinePrice } from '$lib/room-line';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -33,31 +34,19 @@
 		Math.max(1, Math.min(MAX_ROOMS_PER_LINE, rt.availableRooms, n));
 
 	function addRoomToCart(roomType: AvailableRoomType, plan: AvailableRatePlan) {
-		const count = roomCounts[plan.id] ?? 1;
-		let price = scaleRoomPrice(plan.price, count);
-		// Mirrors the real charge `details`'s `createOrder` re-derives server-side —
-		// shown here too so the cart/review total isn't a surprise jump at checkout.
-		if (roomType.extraBedsNeeded > 0 && plan.extraBedFeeCentavos) {
-			price = addFlatFeeCentavos(
-				price,
-				`Extra bed × ${roomType.extraBedsNeeded}`,
-				roomType.extraBedsNeeded * plan.extraBedFeeCentavos,
-				data.hotel.vatRateBps
-			);
-		}
-		cart.addRoom({
-			roomTypeId: roomType.id,
-			ratePlanId: plan.id,
-			roomTypeName: roomType.name,
-			ratePlanName: plan.name,
-			checkIn: data.checkIn,
-			checkOut: data.checkOut,
-			occupancy: data.adults + data.children,
-			roomCount: count,
-			price,
-			downpaymentBps: plan.cancellation?.downpaymentBps ?? null,
-			securityDepositCentavos: plan.securityDepositCentavos
-		});
+		// Same line `details`'s `createOrder` re-derives server-side — shown here too so the
+		// cart/review total isn't a surprise jump at checkout.
+		cart.addRoom(
+			roomCartItem({
+				roomType,
+				plan,
+				checkIn: data.checkIn,
+				checkOut: data.checkOut,
+				occupancy: data.adults + data.children,
+				roomCount: roomCounts[plan.id] ?? 1,
+				vatRateBps: data.hotel.vatRateBps
+			})
+		);
 	}
 
 	const bedConfigText = (entries: BedConfigEntry[]) =>
@@ -66,16 +55,7 @@
 	/** Same scale-then-extra-bed math `addRoomToCart` uses — kept in sync so the displayed
 	 *  row total always matches what actually lands in the cart. */
 	function lineTotalCentavos(roomType: AvailableRoomType, plan: AvailableRatePlan, count: number): number {
-		let price = scaleRoomPrice(plan.price, count);
-		if (roomType.extraBedsNeeded > 0 && plan.extraBedFeeCentavos) {
-			price = addFlatFeeCentavos(
-				price,
-				`Extra bed × ${roomType.extraBedsNeeded}`,
-				roomType.extraBedsNeeded * plan.extraBedFeeCentavos,
-				data.hotel.vatRateBps
-			);
-		}
-		return price.totalCentavos;
+		return roomLinePrice(roomType, plan, count, data.hotel.vatRateBps).totalCentavos;
 	}
 
 	/** "₱4,200.00 × 3 nights" when every night costs the same, otherwise the average — so the
