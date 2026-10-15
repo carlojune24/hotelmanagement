@@ -112,6 +112,33 @@ describe.skipIf(!live)('bonus batches (live DB)', async () => {
 		await expect(B.refreshBatch(org, endId)).rejects.toThrow(/issued/);
 	});
 
+	it('reports each person across mid-year, year-end and final pay for the DOLE sheet', async () => {
+		const r = await B.thirteenthMonthReport(org, 2026);
+		const ana = r.rows.find((x) => x.employeeName === 'Test, Ana')!;
+		expect(ana).toMatchObject({ entitled: 300_000, paidMidYear: 200_000, paidYearEnd: 100_000, paidFinalPay: 0, paid: 300_000, status: 'paid' });
+		const bea = r.rows.find((x) => x.employeeName === 'Test, Bea')!;
+		expect(bea.paidFinalPay).toBeGreaterThan(0);
+		expect(bea.paid).toBe(bea.paidFinalPay);
+		expect(r.totals.paid).toBe(r.rows.reduce((t, x) => t + x.paid, 0));
+	});
+
+	it('lists a leaver whose 13th month went out in final pay even when no batch has a line for them', async () => {
+		const cy = await createTestStaff(est, { employeeNo: 'BN3', firstName: 'Cy', hiredOn: '2025-01-01' });
+		const sep = await S.startSeparation(org, { employeeId: cy, kind: 'resigned', lastDay: '2026-02-28' }, null);
+		await db.insert(separationItems).values({
+			separationId: sep.id, kind: 'credit', label: '13th month pay', amountCentavos: 12_345, source: 'thirteenth_month', sourceYear: 2026
+		});
+		try {
+			const r = await B.thirteenthMonthReport(org, 2026);
+			const row = r.rows.find((x) => x.employeeId === cy)!;
+			expect(row).toMatchObject({ paidFinalPay: 12_345, paid: 12_345, status: 'paid' });
+		} finally {
+			await db.delete(separationItems).where(eq(separationItems.separationId, sep.id));
+			await db.delete(separationClearance).where(eq(separationClearance.separationId, sep.id));
+			await db.delete(separations).where(eq(separations.id, sep.id));
+		}
+	});
+
 	it('creates one-off bonuses with an amount per person, editable until issued', async () => {
 		const out = await B.createBatches(org, { kind: 'other', year: 2026, establishmentId: est, label: 'Christmas bonus', defaultAmount: 500 }, null);
 		otherId = out.created[0]!;
@@ -130,9 +157,14 @@ describe.skipIf(!live)('bonus batches (live DB)', async () => {
 		await B.reopenBatch(org, otherId);
 		let b = await batch(otherId);
 		expect(lineOf(b, 'Ana').overTaxExemption).toBe(false);
+		expect(lineOf(b, 'Ana').taxable).toBe(0);
 		await B.setLineAmount(org, lineOf(b, 'Ana').id, 100_000); // ₱100,000 on top of the 13th month already issued
 		b = await batch(otherId);
 		expect(lineOf(b, 'Ana').overTaxExemption).toBe(true);
+		// Only the part above ₱90,000 is taxable, and never more than this payment.
+		const taxable = lineOf(b, 'Ana').taxable;
+		expect(taxable).toBeGreaterThan(0);
+		expect(taxable).toBeLessThanOrEqual(100_000_00);
 	});
 
 	it('deletes a draft batch but not an issued one', async () => {

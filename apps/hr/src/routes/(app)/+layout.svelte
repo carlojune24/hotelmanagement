@@ -54,6 +54,7 @@ overtime: TimerIcon,
 					show: true
 				}))
 			: [
+			{ seg: 'dashboard', label: 'Dashboard', icon: LayoutDashboardIcon, show: data.nav.dashboard },
 			{ seg: 'establishments', label: 'Establishments', icon: BuildingIcon, show: data.nav.establishments },
 			{ seg: 'approvals', label: 'Approvals', icon: InboxIcon, show: data.nav.approvals },
 			{ seg: 'payroll', label: 'Payroll', icon: WalletIcon, show: data.nav.payroll },
@@ -65,7 +66,9 @@ overtime: TimerIcon,
 			{ seg: 'announcements', label: 'Announcements', icon: MegaphoneIcon, show: data.nav.announcements },
 			{ seg: 'remittances', label: 'Remittances', icon: LandmarkIcon, show: data.nav.remittances },
 			{ seg: 'people', label: 'People', icon: ContactIcon, show: data.nav.people },
+			{ seg: 'contracts', label: 'Contracts', icon: FileTextIcon, show: data.nav.contracts },
 			{ seg: 'users', label: 'Users', icon: UsersIcon, show: data.nav.users },
+			{ seg: 'guide', label: 'Guide', icon: BookOpenIcon, show: data.nav.guide },
 			{ seg: 'settings', label: 'Settings', icon: SettingsIcon, show: data.nav.settings }
 		].filter((i) => i.show)
 	);

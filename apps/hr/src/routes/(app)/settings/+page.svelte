@@ -26,13 +26,15 @@ import PlusIcon from '@lucide/svelte/icons/plus';
 		{ key: 'loans', label: 'Loan types' },
 		{ key: 'remittances', label: 'Employer numbers' },
 		{ key: 'clearance', label: 'Clearance items' },
+		{ key: 'payroll', label: 'Payroll' },
 		{ key: 'costcenters', label: 'Cost centers' },
+		{ key: 'contracts', label: 'Contract templates' },
 		{ key: 'logo', label: 'Company logo' }
 	] as const;
 	type Tab = (typeof TABS)[number]['key'];
 	// The tab lives in the address (?tab=) so a reload or a shared link lands on the same one.
 const tabParam = page.url.searchParams.get('tab');
-	let tab = $state<Tab>(tabParam === 'loans' || tabParam === 'leave' || tabParam === 'remittances' || tabParam === 'clearance' || tabParam === 'logo' || tabParam === 'costcenters'
+	let tab = $state<Tab>(tabParam === 'loans' || tabParam === 'leave' || tabParam === 'remittances' || tabParam === 'clearance' || tabParam === 'logo' || tabParam === 'costcenters' || tabParam === 'payroll' || tabParam === 'contracts'
 			? tabParam
 			: 'establishments');
 	function pick(next: Tab) {
@@ -40,6 +42,16 @@ const tabParam = page.url.searchParams.get('tab');
 		replaceState(`?tab=${next}`, {});
 	}
 
+	// Contract wording: one text per employment type, edited here and saved as a whole.
+	let contractKind = $state<string>('probationary');
+	// svelte-ignore state_referenced_locally
+	let contractDraft = $state<Record<string, string>>({ ...data.contractTemplates });
+	const contractCustomised = $derived(contractDraft[contractKind] !== data.contractDefaults[contractKind as keyof typeof data.contractDefaults]);
+	const contractUnknown = $derived(
+		[...(contractDraft[contractKind] ?? '').matchAll(/\{\{\s*([a-z_]+)\s*\}\}/gi)]
+			.map((m) => m[1]!)
+			.filter((f) => !data.contractFields.some(([k]) => k === f))
+	);
 	let adding = $state(false);
 	// Editable copy of the default clearance checklist; saved as a whole.
 	// svelte-ignore state_referenced_locally
@@ -256,6 +268,62 @@ deletingLeave = null;
 			</div>
 		</form>
 	</div>
+{:else if tab === 'contracts'}
+	<div id="panel-contracts" role="tabpanel" aria-labelledby="tab-contracts" class="panel space-y-5 p-5 md:p-6" aria-label="Contract templates">
+		<div class="max-w-2xl">
+			<h2 class="text-2xl font-light">Contract templates</h2>
+			<p class="mt-1 text-sm text-ink-muted">
+				The wording used when a contract is generated for each employment type. A change applies to contracts issued
+				from now on; a contract already issued keeps the wording it was issued with. The default text is a starting
+				point: have it reviewed by your lawyer before you use it.
+			</p>
+		</div>
+		<div class="flex flex-wrap gap-2" role="group" aria-label="Employment type">
+			{#each data.contractKinds as k (k.value)}
+				<button
+					type="button"
+					aria-pressed={contractKind === k.value}
+					class="rounded-full px-4 py-1.5 text-sm font-medium transition-colors {contractKind === k.value
+						? 'bg-ink text-white'
+						: 'bg-ink/10 text-ink hover:bg-ink/15'}"
+					onclick={() => (contractKind = k.value)}>{k.label}</button
+				>
+			{/each}
+		</div>
+		<form method="POST" action="?/saveContractTemplate" use:enhance={submit} class="space-y-3">
+			<input type="hidden" name="kind" value={contractKind} />
+			<Textarea
+				name="text"
+				rows={22}
+				bind:value={contractDraft[contractKind]}
+				aria-label="Contract wording"
+				class="font-mono text-xs leading-relaxed"
+			/>
+			{#if contractUnknown.length > 0}
+				<p class="text-sm text-danger">Unknown field: {contractUnknown.map((f) => `{{${f}}}`).join(', ')}</p>
+			{/if}
+			<div class="flex flex-wrap items-center gap-2">
+				<Button type="submit" variant="gold" disabled={busy || contractUnknown.length > 0}>Save wording</Button>
+				{#if contractCustomised}
+					<Button
+						type="button"
+						variant="ghost"
+						onclick={() => (contractDraft[contractKind] = data.contractDefaults[contractKind as keyof typeof data.contractDefaults])}
+					>
+						Restore default text
+					</Button>
+				{/if}
+			</div>
+		</form>
+		<div>
+			<p class="text-sm font-medium">Fields you can use</p>
+			<ul class="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+				{#each data.contractFields as [k, label] (k)}
+					<li><code class="rounded bg-ink/10 px-1 text-xs">{`{{${k}}}`}</code> <span class="text-ink-muted">{label}</span></li>
+				{/each}
+			</ul>
+		</div>
+	</div>
 {:else if tab === 'costcenters'}
 	<div id="panel-costcenters" role="tabpanel" aria-labelledby="tab-costcenters" class="panel space-y-5 p-5 md:p-6" aria-label="Cost centers">
 		<div class="max-w-2xl">
@@ -386,6 +454,30 @@ deletingLeave = null;
 				<Button type="button" variant="ghost" onclick={() => (clearance = [...data.clearanceDefaults])}>Restore defaults</Button>
 				<Button type="submit" variant="gold" class="ml-auto" disabled={busy}>Save</Button>
 			</div>
+		</form>
+	</div>
+{:else if tab === 'payroll'}
+	<div id="panel-payroll" role="tabpanel" aria-labelledby="tab-payroll" class="panel space-y-5 p-5 md:p-6" aria-label="Payroll">
+		<div class="max-w-2xl">
+			<h2 class="text-2xl font-light">Working-day factor</h2>
+			<p class="mt-1 text-sm text-ink-muted">
+				Turns a monthly rate into a daily one (rate × 12 ÷ factor), which sets what an absence costs and the hourly
+				rate for overtime. It is a company policy, so there is no default —
+				{#if data.dayFactor}currently <strong class="font-medium text-ink">{data.dayFactor}</strong>.{:else}choose one
+					before creating a payroll run.{/if}
+			</p>
+		</div>
+		<form method="POST" action="?/saveDayFactor" use:enhance={submit} class="flex flex-wrap items-end gap-2">
+			<div class="min-w-64 flex-1">
+				<Label for="dayFactor">Days a year</Label>
+				<select id="dayFactor" name="dayFactor" class={selectClass + ' mt-1'} required>
+					{#if !data.dayFactor}<option value="" disabled selected>Choose…</option>{/if}
+					{#each data.factors as f (f.value)}
+						<option value={f.value} selected={data.dayFactor === f.value}>{f.label}</option>
+					{/each}
+				</select>
+			</div>
+			<Button type="submit" variant="outline" disabled={busy}>Save</Button>
 		</form>
 	</div>
 {:else}

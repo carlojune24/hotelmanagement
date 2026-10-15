@@ -131,7 +131,9 @@
 										<p class="text-xs font-medium text-ink-muted">{REASON[l.excludedReason] ?? l.excludedReason}</p>
 									{/if}
 									{#if l.overTaxExemption}
-										<p class="text-xs font-medium text-danger">Over the ₱90,000 tax exemption this year</p>
+										<p class="text-xs font-medium text-danger">
+											Over the ₱90,000 tax exemption this year{l.taxable > 0 ? ` · taxable portion ${money(l.taxable)}` : ''}
+										</p>
 									{/if}
 								</Table.Cell>
 								{#if thirteenth}
@@ -175,6 +177,14 @@
 							{/if}
 							<Table.Cell class="text-right font-medium tabular-nums">{money(b.total)}</Table.Cell>
 						</Table.Row>
+						{#if b.lines.some((l) => l.taxable > 0)}
+							<Table.Row class="hover:bg-transparent">
+								<Table.Cell class="text-danger" colspan={thirteenth ? 5 : 1}>Taxable portion (over ₱90,000, not withheld)</Table.Cell>
+								<Table.Cell class="text-right font-medium text-danger tabular-nums">
+									{money(b.lines.reduce((t, l) => t + l.taxable, 0))}
+								</Table.Cell>
+							</Table.Row>
+						{/if}
 					</Table.Footer>
 				</Table.Root>
 			</div>

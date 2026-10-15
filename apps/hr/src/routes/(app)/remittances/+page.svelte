@@ -12,6 +12,14 @@
 		Object.values(data.settings.employerIds).every((v) => !v) && Object.values(data.settings.dueDay).every((v) => v == null)
 	);
 	const money = (c: number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(c / 100);
+	const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+	const periodYear = $derived(Number(data.period.slice(0, 4)));
+	const periodMonth = $derived(data.period.slice(5, 7));
+	const thisYear = new Date().getFullYear();
+	const years = $derived(
+		Array.from(new Set([...Array.from({ length: 8 }, (_, k) => thisYear + 1 - k), periodYear])).sort((a, b) => b - a)
+	);
+	const pick = (y: number, m: string) => goto(`?period=${y}-${m}`);
 </script>
 
 <svelte:head><title>Remittances · HR</title></svelte:head>
@@ -27,14 +35,29 @@
 	</div>
 
 	<div>
-		<Label for="period">Month paid</Label>
-		<Input
-			id="period"
-			type="month"
-			value={data.period}
-			class="mt-1 w-48"
-			onchange={(e) => e.currentTarget.value && goto(`?period=${e.currentTarget.value}`)}
-		/>
+		<Label for="period-month">Month paid</Label>
+		<div class="mt-1 flex gap-2">
+			<select
+				id="period-month"
+				aria-label="Month"
+				class="h-10 w-40 rounded-full border border-transparent bg-white px-4 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				value={periodMonth}
+				onchange={(e) => pick(periodYear, e.currentTarget.value)}
+			>
+				{#each MONTHS as name, i (name)}
+					<option value={String(i + 1).padStart(2, '0')}>{name}</option>
+				{/each}
+			</select>
+			<select
+				id="period-year"
+				aria-label="Year"
+				class="h-10 w-28 rounded-full border border-transparent bg-white px-4 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				value={String(periodYear)}
+				onchange={(e) => pick(Number(e.currentTarget.value), periodMonth)}
+			>
+				{#each years as y (y)}<option value={String(y)}>{y}</option>{/each}
+			</select>
+		</div>
 	</div>
 
 	{#if missingSetup}

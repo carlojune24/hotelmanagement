@@ -302,6 +302,12 @@ function computeSplitMetrics(
 	let notWorked: [number, number] | null = null;
 	// Back from lunch but never clocked out: the afternoon cannot be proven, so it is not paid.
 	let afternoonUnproven = false;
+	// A defined break has to be punched. When the stint spans it and a break punch is missing, the half
+	// that cannot be proven is not paid: `absentDay` (neither punch), `morningUnproven` (no break-out)
+	// or `afternoonMissed` (no break-in).
+	let absentDay = false;
+	let morningUnproven = false;
+	let afternoonMissed = false;
 	if (outMs === null) {
 		if (breakOutMs !== null) {
 			if (breakInMs === null) {
@@ -325,13 +331,32 @@ function computeSplitMetrics(
 		worked = minutesBetween(inMs, breakOutMs) + minutesBetween(breakInMs, outMs);
 		notWorked = [breakOutMs, breakInMs];
 	} else {
-		// One or both middle punches are missing, but the clock-out proves they came back:
-		// assume the break ran as scheduled (only the part that fell inside the stint) and say so.
-		if (breakOutMs !== null || breakInMs !== null) {
-			flags.push(breakOutMs === null ? 'missing_break_out' : 'missing_break_in');
+		if (inMs < bs && outMs > be) {
+			if (breakOutMs === null && breakInMs === null) {
+				flags.push('missing_break_out', 'missing_break_in');
+				absentDay = true;
+				worked = 0;
+				notWorked = [inMs, outMs];
+			} else if (breakOutMs === null) {
+				flags.push('missing_break_out');
+				morningUnproven = true;
+				worked = minutesBetween(breakInMs!, outMs);
+				notWorked = [inMs, breakInMs!];
+			} else {
+				flags.push('missing_break_in');
+				afternoonMissed = true;
+				worked = minutesBetween(inMs, breakOutMs);
+				notWorked = [breakOutMs, outMs];
+			}
+		} else {
+			// The stint does not span the break (e.g. only the afternoon was worked): the break is
+			// assumed to have run as scheduled, for the part that fell inside the stint.
+			if (breakOutMs !== null || breakInMs !== null) {
+				flags.push(breakOutMs === null ? 'missing_break_out' : 'missing_break_in');
+			}
+			worked = Math.max(0, minutesBetween(inMs, outMs) - overlapMinutes(inMs, outMs, bs, be));
+			notWorked = [bs, be];
 		}
-		worked = Math.max(0, minutesBetween(inMs, outMs) - overlapMinutes(inMs, outMs, bs, be));
-		notWorked = [bs, be];
 	}
 
 	const lastMs = outMs ?? breakInMs ?? breakOutMs ?? inMs;
@@ -359,12 +384,24 @@ function computeSplitMetrics(
 
 	let undertime = 0;
 	let ot = 0;
+	let tardinessOut = tardiness;
 	if (outMs !== null) {
 		ot = Math.max(0, minutesBetween(schedule.endMs!, outMs));
 		undertime = Math.max(
 			0,
 			minutesBetween(outMs, schedule.endMs!) - overlapMinutes(outMs, schedule.endMs!, bs, be)
 		);
+		if (absentDay) {
+			tardinessOut = 0;
+			undertime = 0;
+			ot = 0;
+		} else if (morningUnproven) {
+			const morning = minutesBetween(schedule.startMs!, bs);
+			const lateInMorning = Math.min(Math.max(0, minutesBetween(schedule.startMs!, inMs)), morning);
+			undertime += morning - lateInMorning;
+		} else if (afternoonMissed) {
+			tardinessOut += Math.max(0, minutesBetween(be, schedule.endMs!) - undertime);
+		}
 	} else if (breakOutMs !== null && breakInMs === null) {
 		// Left at lunch and never came back: the rest of the scheduled day is unworked.
 		undertime = Math.max(0, minutesBetween(breakOutMs, schedule.endMs!) - scheduledBreak);
@@ -377,7 +414,7 @@ function computeSplitMetrics(
 			workedMinutes: worked,
 			otMinutes: ot,
 			nightDiffMinutes: nightDiff,
-			tardinessMinutes: tardiness,
+			tardinessMinutes: tardinessOut,
 			undertimeMinutes: undertime
 		},
 		flags,

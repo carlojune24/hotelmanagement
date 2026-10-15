@@ -5,6 +5,7 @@
 	import { toast } from 'svelte-sonner';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import PlusIcon from '@lucide/svelte/icons/plus';
+	import PrinterIcon from '@lucide/svelte/icons/printer';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
@@ -24,9 +25,6 @@
 	];
 	const STATUS_LABEL = { active: 'Active', paused: 'Paused', paid_off: 'Paid off', cancelled: 'Cancelled' } as const;
 
-	let query = $state('');
-	let filter = $state<Filter>('active');
-	let kind = $state('all');
 	let creating = $state(false);
 	let busy = $state(false);
 
@@ -41,23 +39,24 @@
 	const selectClass =
 		'h-10 w-full rounded-full border border-transparent bg-white px-4 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50';
 
-	const rows = $derived(
-		data.loans.filter((l) => {
-			const q = query.trim().toLowerCase();
-			const inFilter =
-				filter === 'all' ||
-				(filter === 'closed' ? l.status === 'paid_off' || l.status === 'cancelled' : l.status === filter);
-			return (
-				inFilter &&
-				(kind === 'all' || l.kind === kind) &&
-				(!q ||
-					l.employeeName.toLowerCase().includes(q) ||
-					l.employeeNo.toLowerCase().includes(q) ||
-					(l.referenceNo ?? '').toLowerCase().includes(q))
-			);
-		})
+	/** Search, filters and paging live in the address, so the server does the work and a reload keeps your place. */
+	const href = (o: { page?: number; size?: number; status?: Filter; kind?: string; loan?: string } = {}) => {
+		const p = data.params;
+		const sp = new URLSearchParams({
+			page: String(o.page ?? data.page),
+			size: String(o.size ?? data.pageSize),
+			status: o.status ?? p.status,
+			kind: o.kind ?? p.kind
+		});
+		if (p.q) sp.set('q', p.q);
+		if (o.loan) sp.set('loan', o.loan);
+		return `?${sp}`;
+	};
+	/** Prints every loan the current filters match, not just this page. */
+	const printHref = $derived(
+		`/print/loans?${new URLSearchParams({ status: data.params.status, kind: data.params.kind, q: data.params.q })}`
 	);
-	const open = $derived(data.loans.find((l) => l.id === data.openId) ?? null);
+	const open = $derived(data.openLoan);
 	const isClosed = $derived(open ? open.status === 'paid_off' || open.status === 'cancelled' : false);
 	const monthsLeft = (l: { balance: number; amortization: number }) => Math.ceil(l.balance / Math.max(1, l.amortization));
 
@@ -70,7 +69,7 @@
 	});
 
 	const show = (id: string | null) =>
-		goto(id ? `?loan=${id}` : '?', { noScroll: true, keepFocus: true, replaceState: false });
+		goto(href({ loan: id ?? undefined }), { noScroll: true, keepFocus: true, replaceState: false });
 
 	function submitReset() {
 		busy = true;
@@ -104,7 +103,7 @@
 	</div>
 
 	<section class="panel space-y-5 p-5 md:p-6" aria-label="Loans">
-		{#if data.loans.length > 0}
+		{#if data.hasLoans}
 			<div class="space-y-3">
 				<dl class="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
 					<div class="rounded-2xl bg-white/70 px-4 py-3">
@@ -144,37 +143,48 @@
 		{/if}
 
 		<div class="flex items-center gap-3">
-			<div class="relative min-w-0 flex-1">
+			<form method="GET" class="relative min-w-0 flex-1" role="search">
+				<input type="hidden" name="status" value={data.params.status} />
+				<input type="hidden" name="kind" value={data.params.kind} />
+				<input type="hidden" name="size" value={data.pageSize} />
 				<SearchIcon class="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-ink-muted" />
 				<Input
+					name="q"
 					type="search"
-					placeholder="Search by name, number or loan reference"
+					placeholder="Search name, number, reference or loan type — press Enter"
 					aria-label="Search loans"
 					class="pl-10"
-					bind:value={query}
+					value={data.params.q}
 				/>
-			</div>
-			<select class="{selectClass} !w-44 shrink-0" aria-label="Loan type" bind:value={kind}>
+			</form>
+			<select
+				class="{selectClass} !w-44 shrink-0"
+				aria-label="Loan type"
+				value={data.params.kind}
+				onchange={(e) => goto(href({ kind: e.currentTarget.value, page: 1 }), { keepFocus: true })}
+			>
 				<option value="all">All types</option>
 				{#each data.kinds as k (k.value)}<option value={k.value}>{k.label}</option>{/each}
 			</select>
+			<Button variant="outline" class="shrink-0" href={printHref} target="_blank" rel="noopener">
+				<PrinterIcon /> Print
+			</Button>
 			<Button variant="gold" class="shrink-0" onclick={() => (creating = true)}><PlusIcon /> New loan</Button>
 		</div>
 
 		<div class="flex flex-wrap gap-2" role="group" aria-label="Status">
 			{#each FILTERS as f (f.key)}
-				<button
-					type="button"
-					aria-pressed={filter === f.key}
-					class="rounded-full px-4 py-1.5 text-sm font-medium transition-colors {filter === f.key
+				<a
+					href={href({ status: f.key, page: 1 })}
+					aria-current={data.params.status === f.key}
+					class="rounded-full px-4 py-1.5 text-sm font-medium transition-colors {data.params.status === f.key
 						? 'bg-ink text-white'
-						: 'bg-ink/10 text-ink hover:bg-ink/15'}"
-					onclick={() => (filter = f.key)}>{f.label}</button
+						: 'bg-ink/10 text-ink hover:bg-ink/15'}">{f.label}</a
 				>
 			{/each}
 		</div>
 
-		{#if data.loans.length === 0}
+		{#if !data.hasLoans}
 			<div class="hatch rounded-2xl px-6 py-14 text-center">
 				<p class="text-lg">No loans recorded</p>
 				<p class="mx-auto mt-1 max-w-sm text-sm text-ink-muted">
@@ -195,7 +205,7 @@
 					</Table.Row>
 				</Table.Header>
 				<Table.Body>
-					{#each rows as l (l.id)}
+					{#each data.loans as l (l.id)}
 						<Table.Row>
 							<Table.Cell>
 								<p class="font-medium">{l.employeeName}</p>
@@ -255,6 +265,31 @@
 					{/each}
 				</Table.Body>
 			</Table.Root>
+			<div class="flex flex-wrap items-center justify-between gap-3 text-sm text-ink-muted">
+				<label class="flex items-center gap-2">
+					Rows per page
+					<select
+						class="h-9 rounded-full border border-transparent bg-white px-3 text-sm text-ink shadow-sm"
+						value={data.pageSize}
+						onchange={(e) => goto(href({ size: Number(e.currentTarget.value), page: 1 }), { keepFocus: true })}
+					>
+						{#each data.pageSizes as n (n)}<option value={n}>{n}</option>{/each}
+					</select>
+				</label>
+				<div class="flex items-center gap-2">
+					<span class="tabular-nums">Page {data.page} of {data.pageCount} · {data.total} loans</span>
+					{#if data.page <= 1}
+						<Button variant="outline" size="sm" disabled>Previous</Button>
+					{:else}
+						<Button href={href({ page: data.page - 1 })} variant="outline" size="sm">Previous</Button>
+					{/if}
+					{#if data.page >= data.pageCount}
+						<Button variant="outline" size="sm" disabled>Next</Button>
+					{:else}
+						<Button href={href({ page: data.page + 1 })} variant="outline" size="sm">Next</Button>
+					{/if}
+				</div>
+			</div>
 		{/if}
 	</section>
 </div>

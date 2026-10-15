@@ -63,6 +63,8 @@ export interface ScheduleLine {
 	employerContributions: unknown;
 	/** What each loan took on this payslip, with the loan's kind and reference at that time. */
 	loans?: Array<{ kind: string; agency: string | null; referenceNo: string | null; deducted: number }>;
+	/** Tax the year-end settlement paid back to the employee on this payslip, which comes off what is remitted. */
+	taxReturned?: number;
 	/** Snapshot taken when the payslip was generated. */
 	coverage?: { sss?: boolean; philhealth?: boolean; pagibig?: boolean; withholdingExempt?: boolean; note?: string | null };
 }
@@ -94,6 +96,8 @@ export interface Schedule {
 	byEstablishment: Record<string, Totals>;
 	/** Paid something but has no number on file for this agency. */
 	missingId: string[];
+	/** BIR only: tax paid back to employees at year-end, already netted off the figures. */
+	taxReturned: number;
 	/** Left out on purpose — covered-by-nobody / exempt — with Main HR's reason. */
 	notCovered: Array<{ name: string; note: string | null }>;
 }
@@ -116,7 +120,8 @@ function shares(agency: Agency, l: ScheduleLine) {
 		case 'pagibig':
 			return { employee: num(l.deductions, 'pagibig_ee'), employer: num(l.employerContributions, 'pagibig_er'), ec: 0 };
 		case 'bir':
-			return { employee: num(l.deductions, 'withholding_tax'), employer: 0, ec: 0 };
+			// Tax returned to the employee at year-end is paid out of what was withheld, so it is not remitted.
+			return { employee: num(l.deductions, 'withholding_tax') - (l.taxReturned ?? 0), employer: 0, ec: 0 };
 		case 'sss_loan':
 		case 'pagibig_loan':
 			return {
@@ -141,8 +146,10 @@ export function buildSchedule(agency: Agency, lines: ScheduleLine[]): Schedule {
 	const byEstablishment: Record<string, Totals> = {};
 	const totals = emptyTotals();
 	const notCovered = new Map<string, { name: string; note: string | null }>();
+	let taxReturned = 0;
 
 	for (const l of lines) {
+		if (agency === 'bir') taxReturned += l.taxReturned ?? 0;
 		const covered =
 			agency === 'bir'
 				? l.coverage?.withholdingExempt !== true
@@ -189,6 +196,7 @@ export function buildSchedule(agency: Agency, lines: ScheduleLine[]): Schedule {
 		totals,
 		byEstablishment,
 		missingId: rows.filter((r) => !r.idNumber).map((r) => r.name),
+		taxReturned,
 		notCovered: [...notCovered.values()].sort((a, b) => a.name.localeCompare(b.name))
 	};
 }
@@ -305,7 +313,8 @@ export async function monthLines(organizationId: string, period: string) {
 	const scheduleLines: ScheduleLine[] = lines.map(({ detail, lineId, ...l }) => ({
 		...l,
 		loans: loansOf.get(lineId),
-		coverage: (detail as { coverage?: ScheduleLine['coverage'] } | null)?.coverage
+		coverage: (detail as { coverage?: ScheduleLine['coverage'] } | null)?.coverage,
+		taxReturned: Math.max(0, -((detail as { annualTaxAdjustmentCentavos?: number } | null)?.annualTaxAdjustmentCentavos ?? 0))
 	}));
 	return { lines: scheduleLines, draftBatches, runCount: runIds.length };
 }

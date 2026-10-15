@@ -341,7 +341,9 @@ export async function listBatches(organizationId: string, year: number) {
 					amount: l.amountCentavos,
 					excludedReason: l.excludedReason,
 					note: l.note,
-					overTaxExemption: sofar > TAX_EXEMPT_CENTAVOS
+					overTaxExemption: sofar > TAX_EXEMPT_CENTAVOS,
+					/** The part of this payment above the year's ₱90,000 exemption; shown only, never withheld. */
+					taxable: Math.min(l.amountCentavos, Math.max(0, sofar - TAX_EXEMPT_CENTAVOS))
 				};
 			})
 		};
@@ -453,4 +455,148 @@ export async function getBatchView(organizationId: string, id: string) {
 	const view = (await listBatches(organizationId, row.year)).find((b) => b.id === id);
 	if (!view) throw new BonusError('That bonus batch does not exist.');
 	return view;
+}
+
+export interface ThirteenthReportRow {
+	employeeId: string;
+	employeeNo: string;
+	employeeName: string;
+	establishment: string;
+	basicEarned: number;
+	late: number;
+	/** 13th month the year's payslips support (before what was already paid). */
+	entitled: number;
+	paidMidYear: number;
+	paidYearEnd: number;
+	paidFinalPay: number;
+	paid: number;
+	/** In a draft batch: computed but not yet issued. */
+	pending: number;
+	excludedReason: string | null;
+	status: 'paid' | 'pending' | 'excluded' | 'unpaid';
+}
+
+/**
+ * The year's 13th month per person across every establishment, for the DOLE report: what was entitled,
+ * what has actually been issued (mid-year, year-end, final pay) and who is not paid and why.
+ */
+export async function thirteenthMonthReport(organizationId: string, year: number) {
+	const batches = (await listBatches(organizationId, year)).filter(
+		(b) => b.kind === 'thirteenth_mid_year' || b.kind === 'thirteenth_year_end'
+	);
+	const byPerson = new Map<string, ThirteenthReportRow>();
+	for (const b of batches) {
+		for (const l of b.lines) {
+			const r =
+				byPerson.get(l.employeeId) ??
+				({
+					employeeId: l.employeeId,
+					employeeNo: l.employeeNo,
+					employeeName: l.employeeName,
+					establishment: b.establishment,
+					basicEarned: 0,
+					late: 0,
+					entitled: 0,
+					paidMidYear: 0,
+					paidYearEnd: 0,
+					paidFinalPay: 0,
+					paid: 0,
+					pending: 0,
+					excludedReason: null,
+					status: 'unpaid'
+				} satisfies ThirteenthReportRow);
+			// The year-end line carries the full-year figures; the mid-year one only fills in until it exists.
+			if (b.kind === 'thirteenth_year_end' || r.entitled === 0) {
+				r.basicEarned = l.basicEarned;
+				r.late = l.late;
+				r.entitled = l.accrued;
+				r.excludedReason = l.excludedReason;
+				r.establishment = b.establishment;
+			}
+			if (b.status === 'issued') {
+				if (b.kind === 'thirteenth_mid_year') r.paidMidYear += l.amount;
+				else r.paidYearEnd += l.amount;
+			} else {
+				r.pending += l.amount;
+			}
+			byPerson.set(l.employeeId, r);
+		}
+	}
+	// Someone whose 13th month went out in final pay may have no line in any batch; they still belong here.
+	const leavers = await db
+		.select({
+			employeeId: separations.employeeId,
+			no: employees.employeeNo,
+			last: employees.lastName,
+			first: employees.firstName,
+			total: sql<number>`coalesce(sum(${separationItems.amountCentavos}), 0)::bigint`
+		})
+		.from(separationItems)
+		.innerJoin(separations, eq(separations.id, separationItems.separationId))
+		.innerJoin(employees, eq(employees.id, separations.employeeId))
+		.where(
+			and(
+				eq(separations.organizationId, organizationId),
+				eq(separationItems.source, 'thirteenth_month'),
+				eq(separationItems.sourceYear, year),
+				isNull(separationItems.voidedAt)
+			)
+		)
+		.groupBy(separations.employeeId, employees.employeeNo, employees.lastName, employees.firstName);
+	for (const l of leavers) {
+		if (byPerson.has(l.employeeId)) continue;
+		const home = await db
+			.select({ name: establishments.name })
+			.from(employeeAssignments)
+			.innerJoin(establishments, eq(establishments.id, employeeAssignments.establishmentId))
+			.where(eq(employeeAssignments.employeeId, l.employeeId))
+			.orderBy(desc(employeeAssignments.isPrimary), desc(employeeAssignments.startDate))
+			.limit(1)
+			.then((r) => r.at(0));
+		byPerson.set(l.employeeId, {
+			employeeId: l.employeeId,
+			employeeNo: l.no,
+			employeeName: `${l.last}, ${l.first}`,
+			establishment: home?.name ?? '',
+			basicEarned: 0,
+			late: 0,
+			entitled: Number(l.total),
+			paidMidYear: 0,
+			paidYearEnd: 0,
+			paidFinalPay: 0,
+			paid: 0,
+			pending: 0,
+			excludedReason: null,
+			status: 'unpaid'
+		});
+	}
+	const finalPay = (await paidAlready([...byPerson.keys()], year)).finalPay;
+	const rows = [...byPerson.values()].map((r) => {
+		r.paidFinalPay = finalPay.get(r.employeeId) ?? 0;
+		r.paid = r.paidMidYear + r.paidYearEnd + r.paidFinalPay;
+		r.status =
+			r.excludedReason && r.paid === 0 && r.paidFinalPay === 0
+				? 'excluded'
+				: r.paid > 0 && r.pending === 0
+					? 'paid'
+					: r.pending > 0
+						? 'pending'
+						: 'unpaid';
+		return r;
+	});
+	rows.sort((a, b) => a.establishment.localeCompare(b.establishment) || a.employeeName.localeCompare(b.employeeName));
+	const sum = (f: (r: ThirteenthReportRow) => number) => rows.reduce((t, r) => t + f(r), 0);
+	return {
+		year,
+		rows,
+		totals: {
+			people: rows.length,
+			paidPeople: rows.filter((r) => r.paid > 0).length,
+			pendingPeople: rows.filter((r) => r.status === 'pending').length,
+			excludedPeople: rows.filter((r) => r.status === 'excluded').length,
+			paid: sum((r) => r.paid),
+			pending: sum((r) => r.pending),
+			entitled: sum((r) => r.entitled)
+		}
+	};
 }

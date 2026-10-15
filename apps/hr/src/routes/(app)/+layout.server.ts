@@ -22,6 +22,8 @@ export const load: LayoutServerLoad = async ({ locals, url }) => {
 		pendingApprovals: approver ? await pendingApprovalCount() : 0,
 		// Nav items show only for a user who holds the capability somewhere; never as disabled stubs.
 		nav: {
+			contracts: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'employee:write'),
+			dashboard: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			establishments: locals.user.isSystemAdmin || canAnywhere(access, 'establishment:read'),
 			people: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'employee:read'),
 			approvals: approver,
@@ -34,6 +36,7 @@ export const load: LayoutServerLoad = async ({ locals, url }) => {
 			bonuses: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			payItems: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			reports: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
+			guide: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			settings: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			users: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'user:*')
 		}

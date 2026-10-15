@@ -51,6 +51,16 @@ export interface PayrollAdjustments {
 	otherDeductionsCentavos: number;
 	/** When set, replaces the computed withholding tax (e.g. a minimum-wage earner, or a correction). */
 	withholdingOverrideCentavos: number | null;
+	/**
+	 * Part of the allowances and other earnings that is exempt from income tax (de minimis and the like).
+	 * It is paid and in gross, but left out of the taxable income withholding is worked out from.
+	 */
+	nonTaxableEarningsCentavos?: number;
+	/**
+	 * Year-end annualization settlement, signed: positive is extra tax to withhold, negative is tax returned
+	 * to the employee (paid as a non-taxable earning, since a refund is not income).
+	 */
+	annualTaxAdjustmentCentavos?: number;
 }
 
 export const NO_ADJUSTMENTS: PayrollAdjustments = {
@@ -59,7 +69,9 @@ export const NO_ADJUSTMENTS: PayrollAdjustments = {
 	cashAdvanceCentavos: 0,
 	loansCentavos: 0,
 	otherDeductionsCentavos: 0,
-	withholdingOverrideCentavos: null
+	withholdingOverrideCentavos: null,
+	nonTaxableEarningsCentavos: 0,
+	annualTaxAdjustmentCentavos: 0
 };
 
 /** Which agencies this person is charged by; absent = covered by all (the default). */
@@ -118,6 +130,12 @@ export interface ComputedPayrollLine {
 		absentDays: number;
 		monthlyCompensationCentavos: number;
 		taxableCentavos: number;
+		/** Earnings in gross that are exempt from income tax (including a returned annualization refund). */
+		nonTaxableCentavos: number;
+		/** The signed annualization settlement on this line; 0 when none. */
+		annualTaxAdjustmentCentavos: number;
+		/** Withholding before the annualization settlement. */
+		regularWithholdingCentavos: number;
 	};
 }
 
@@ -216,13 +234,16 @@ export function computePayrollLine(input: ComputePayrollLineInput): ComputedPayr
 		basic = r(straightPay);
 	}
 
+	const annual = adj.annualTaxAdjustmentCentavos ?? 0;
+	const refund = Math.max(0, -annual);
 	const earnings = {
 		basic,
 		overtime: otPay,
 		holiday_premium: premiumPay,
 		night_diff: nightPay,
 		allowances: adj.allowancesCentavos,
-		other: adj.otherEarningsCentavos
+		// A refund of tax withheld in excess is returned here; it is not income, so it is also kept out of taxable.
+		other: adj.otherEarningsCentavos + refund
 	};
 	const gross = Object.values(earnings).reduce((a, b) => a + b, 0);
 
@@ -246,13 +267,15 @@ export function computePayrollLine(input: ComputePayrollLineInput): ComputedPayr
 	const phEe = part(ph.employeeShare);
 	const piEe = part(pi.employeeShare);
 
-	const taxable = Math.max(0, gross - sssEe - phEe - piEe);
-	const withholding =
+	const nonTaxable = Math.min(gross, (adj.nonTaxableEarningsCentavos ?? 0) + refund);
+	const taxable = Math.max(0, gross - nonTaxable - sssEe - phEe - piEe);
+	const regularWithholding =
 		adj.withholdingOverrideCentavos !== null
 			? adj.withholdingOverrideCentavos
 			: input.exemptFromWithholding || !pay
 				? 0
 				: computeWithholdingTax(taxable, input.frequency);
+	const withholding = regularWithholding + Math.max(0, annual);
 
 	const deductions = {
 		sss_ee: sssEe,
@@ -292,7 +315,10 @@ export function computePayrollLine(input: ComputePayrollLineInput): ComputedPayr
 			hourlyRateCentavos: hourly,
 			absentDays,
 			monthlyCompensationCentavos: monthly,
-			taxableCentavos: taxable
+			taxableCentavos: taxable,
+			nonTaxableCentavos: nonTaxable,
+			annualTaxAdjustmentCentavos: annual,
+			regularWithholdingCentavos: regularWithholding
 		}
 	};
 }

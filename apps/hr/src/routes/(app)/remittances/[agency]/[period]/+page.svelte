@@ -67,6 +67,12 @@
 			</ul>
 		</section>
 	{/if}
+	{#if isBir && data.schedule.taxReturned > 0}
+		<p class="rounded-lg border border-dashed border-ink/30 px-4 py-3 text-sm">
+			{money(data.schedule.taxReturned)} of tax was returned to employees at year-end. It is already taken off the
+			amounts below, because it is paid out of what was withheld.
+		</p>
+	{/if}
 	{#if data.schedule.missingId.length > 0}
 		<p class="rounded-lg border border-dashed border-ink/30 px-4 py-3 text-sm">
 			No {isBir ? 'TIN' : 'ID number'} on file for: {data.schedule.missingId.join('; ')}.

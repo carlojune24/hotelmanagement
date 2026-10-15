@@ -20,6 +20,7 @@
 			q.set('fromMonth', f.fromMonth);
 			q.set('toMonth', f.toMonth);
 		}
+		if (data.filter === 'year') q.set('year', String(f.year));
 		if (data.filter === 'dateRange') {
 			q.set('from', f.from);
 			q.set('to', f.to);
@@ -31,7 +32,7 @@
 	const apply = () => goto(`?${qs}`, { keepFocus: true, noScroll: true });
 	const key = $derived(page.params.key);
 	const cell = (v: string | number, isMoney: boolean) => (isMoney && typeof v === 'number' ? money(v) : v);
-	const withEst = $derived(data.filter !== 'dateRange' || data.doc.key !== 'turnover');
+	const withEst = $derived(data.filter !== 'year' && (data.filter !== 'dateRange' || data.doc.key !== 'turnover'));
 </script>
 
 <section class="panel space-y-5 p-5 md:p-6" aria-label={data.doc.title}>
@@ -41,6 +42,9 @@
 			<p class="mt-1 text-sm text-ink-muted">{data.doc.period}</p>
 		</div>
 		<div class="flex gap-2">
+			{#if key === '2316'}
+				<Button variant="outline" href="/print/2316?{qs}" target="_blank" rel="noopener"><PrinterIcon /> Print certificates</Button>
+			{/if}
 			<Button variant="outline" href="/print/reports/{key}?{qs}" target="_blank" rel="noopener"><PrinterIcon /> Print</Button>
 			<Button variant="outline" href="/reports/{key}/csv?{qs}" data-sveltekit-reload><DownloadIcon /> CSV</Button>
 		</div>
@@ -60,6 +64,11 @@
 			<div class="space-y-1.5">
 				<Label for="toMonth">To month</Label>
 				<Input id="toMonth" type="month" bind:value={f.toMonth} onchange={apply} class="w-44" />
+			</div>
+		{:else if data.filter === 'year'}
+			<div class="space-y-1.5">
+				<Label for="year">Year</Label>
+				<Input id="year" type="number" min="2000" max="2100" bind:value={f.year} onchange={apply} class="w-32" />
 			</div>
 		{:else}
 			<div class="space-y-1.5">
@@ -114,7 +123,7 @@
 						<thead>
 							<tr class="border-b border-ink/20 text-xs text-ink-muted">
 								{#each sec.head as h, i (i)}
-									<th class="py-2 font-medium whitespace-nowrap {sec.numCols?.includes(i) ? 'text-right' : 'text-left'}">{h}</th>
+									<th class="py-2 pr-3 font-medium whitespace-nowrap {sec.numCols?.includes(i) ? 'text-right' : 'text-left'}">{h}</th>
 								{/each}
 							</tr>
 						</thead>
@@ -122,7 +131,7 @@
 							{#each sec.rows as row, ri (ri)}
 								<tr class="border-b border-dotted border-ink/25">
 									{#each row as v, i (i)}
-										<td class="py-1.5 pr-3 {sec.numCols?.includes(i) ? 'text-right tabular-nums' : ''}">{cell(v, !!sec.moneyCols?.includes(i))}</td>
+										<td class="py-1.5 pr-3 whitespace-nowrap {sec.numCols?.includes(i) ? 'text-right tabular-nums' : ''}">{cell(v, !!sec.moneyCols?.includes(i))}</td>
 									{/each}
 								</tr>
 							{/each}

@@ -564,6 +564,57 @@
 		</div>
 	</section>
 
+	<section class="rounded-xl bg-gold/10 p-4">
+		<div>
+			<p class="text-sm font-semibold text-ink">Tax records</p>
+			<p class="text-xs text-ink-muted">
+				Printed on the BIR 2316 and used at year-end. Fill the previous employer only for someone who joined
+				this year with income already earned elsewhere.
+			</p>
+		</div>
+		<input type="hidden" name="taxSubmitted" value="1" />
+		<div class="mt-3 space-y-3">
+			<div>
+				<Label for="{idPrefix}address">Home address</Label>
+				<Input id="{idPrefix}address" name="address" value={emp?.address ?? ''} maxlength={300} class="mt-1" />
+			</div>
+			<div class="grid grid-cols-2 gap-3">
+				<div>
+					<Label for="{idPrefix}prevEmployerYear">Previous employer · year</Label>
+					<Input id="{idPrefix}prevEmployerYear" name="prevEmployerYear" type="number" min="2000" max="2100" value={emp?.prevEmployerYear ?? ''} class="mt-1" />
+				</div>
+				<div>
+					<Label for="{idPrefix}prevEmployerName">Previous employer · name</Label>
+					<Input id="{idPrefix}prevEmployerName" name="prevEmployerName" value={emp?.prevEmployerName ?? ''} class="mt-1" />
+				</div>
+				<div>
+					<Label for="{idPrefix}prevTaxablePesos">Taxable pay there (₱)</Label>
+					<Input
+						id="{idPrefix}prevTaxablePesos"
+						name="prevTaxablePesos"
+						type="number"
+						step="0.01"
+						min="0"
+						value={emp && emp.prevEmployerYear ? (emp.prevEmployerTaxableCentavos / 100).toString() : ''}
+						class="mt-1"
+					/>
+				</div>
+				<div>
+					<Label for="{idPrefix}prevWithheldPesos">Tax withheld there (₱)</Label>
+					<Input
+						id="{idPrefix}prevWithheldPesos"
+						name="prevWithheldPesos"
+						type="number"
+						step="0.01"
+						min="0"
+						value={emp && emp.prevEmployerYear ? (emp.prevEmployerWithheldCentavos / 100).toString() : ''}
+						class="mt-1"
+					/>
+				</div>
+			</div>
+		</div>
+	</section>
+
 	<section class="rounded-xl bg-ok/5 p-4">
 		<div>
 			<p class="text-sm font-semibold text-ink">Government coverage</p>

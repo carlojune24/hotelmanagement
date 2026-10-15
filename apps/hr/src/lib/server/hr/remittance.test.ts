@@ -23,6 +23,18 @@ describe('buildSchedule', () => {
 		expect(s.byEstablishment.est2!.total).toBe(303_000);
 	});
 
+	it('BIR nets off tax returned to employees at year-end, and says how much', () => {
+		const s = buildSchedule('bir', [
+			line({ employeeId: 'a' }),
+			line({ employeeId: 'b', deductions: { withholding_tax: 2_618_40 }, taxReturned: 37_198_40 })
+		]);
+		expect(s.taxReturned).toBe(37_198_40);
+		expect(s.rows.find((r) => r.employeeId === 'b')!.employee).toBe(2_618_40 - 37_198_40);
+		expect(s.totals.total).toBe(20_000 + 2_618_40 - 37_198_40);
+		// Other agencies are untouched by it.
+		expect(buildSchedule('sss', [line({ employeeId: 'b', taxReturned: 37_198_40 })]).taxReturned).toBe(0);
+	});
+
 	it('BIR is only the withholding tax, filed under the TIN', () => {
 		const s = buildSchedule('bir', [line({ employeeId: 'a' })]);
 		expect(s.rows[0]).toMatchObject({ employee: 20_000, employer: 0, total: 20_000, idNumber: '111-222-333' });

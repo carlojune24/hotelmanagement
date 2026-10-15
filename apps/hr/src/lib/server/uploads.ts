@@ -94,6 +94,37 @@ export async function deleteLoanDocument(storedName: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Signed employment contracts — same rules as loan documents, in their own private directory.
+// ---------------------------------------------------------------------------
+
+const CONTRACT_DIR = path.join(UPLOADS_DIR, '_contracts');
+
+export async function saveContractDocument(file: File): Promise<{ storedName: string; contentType: string; sizeBytes: number }> {
+	if (file.size === 0) throw new UploadValidationError('The file is empty.');
+	if (file.size > MAX_UPLOAD_BYTES) throw new UploadValidationError('Documents must be 8 MB or smaller.');
+	const ext = LOAN_DOC_TYPES[file.type];
+	if (!ext) throw new UploadValidationError('Use a PDF, JPEG, PNG or WebP file.');
+	await mkdir(CONTRACT_DIR, { recursive: true });
+	const storedName = `${ulid()}.${ext}`;
+	await writeFile(path.join(CONTRACT_DIR, storedName), Buffer.from(await file.arrayBuffer()));
+	return { storedName, contentType: file.type, sizeBytes: file.size };
+}
+
+export function contractDocumentPath(storedName: string): string | null {
+	return LOAN_DOC_NAME_RE.test(storedName) ? path.join(CONTRACT_DIR, storedName) : null;
+}
+
+export async function deleteContractDocument(storedName: string): Promise<void> {
+	const p = contractDocumentPath(storedName);
+	if (!p) return;
+	try {
+		await unlink(p);
+	} catch {
+		// Already gone — fine either way.
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Company logo — one public file under `_brand/`, served by /brand/<name> (the sign-in page shows it).
 // SVG is not accepted: it can carry script.
 // ---------------------------------------------------------------------------

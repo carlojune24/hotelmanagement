@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import { businessDateFor } from '$lib/server/time';
@@ -230,8 +230,50 @@ export interface LoanRow extends EmployeeLoan {
 	balanceCentavos: number;
 }
 
-export async function listLoans(organizationId: string): Promise<LoanRow[]> {
-	const rows = await db
+export interface LoanQuery {
+	/** Only these statuses. */
+	statuses?: string[];
+	kind?: string;
+	/** Matches name, employee number or loan reference. */
+	q?: string;
+	/** Loan-type keys whose name matched `q`; a loan of one of these also counts as a match. */
+	qKinds?: string[];
+	id?: string;
+	page?: { size: number; offset: number };
+}
+
+function loansWhere(organizationId: string, o: LoanQuery) {
+	const term = o.q?.trim();
+	const like = term ? `%${term.replace(/[\\%_]/g, '\\$&')}%` : null;
+	return and(
+		eq(employeeLoans.organizationId, organizationId),
+		o.statuses ? inArray(employeeLoans.status, o.statuses) : undefined,
+		o.kind ? eq(employeeLoans.kind, o.kind) : undefined,
+		o.id ? eq(employeeLoans.id, o.id) : undefined,
+		like
+			? or(
+					sql`${employees.lastName} || ', ' || ${employees.firstName} ilike ${like}`,
+					sql`${employees.firstName} || ' ' || ${employees.lastName} ilike ${like}`,
+					sql`${employees.employeeNo} ilike ${like}`,
+					sql`coalesce(${employeeLoans.referenceNo}, '') ilike ${like}`,
+					o.qKinds?.length ? inArray(employeeLoans.kind, o.qKinds) : undefined
+				)
+			: undefined
+	);
+}
+
+export async function countLoans(organizationId: string, o: LoanQuery = {}) {
+	const [row] = await db
+		.select({ n: sql<number>`count(*)::int` })
+		.from(employeeLoans)
+		.innerJoin(employees, eq(employees.id, employeeLoans.employeeId))
+		.where(loansWhere(organizationId, o));
+	return row?.n ?? 0;
+}
+
+/** Newest-by-name first; no options = every loan in the organization. */
+export async function listLoans(organizationId: string, o: LoanQuery = {}): Promise<LoanRow[]> {
+	const query = db
 		.select({
 			loan: employeeLoans,
 			last: employees.lastName,
@@ -242,8 +284,9 @@ export async function listLoans(organizationId: string): Promise<LoanRow[]> {
 		})
 		.from(employeeLoans)
 		.innerJoin(employees, eq(employees.id, employeeLoans.employeeId))
-		.where(eq(employeeLoans.organizationId, organizationId))
-		.orderBy(asc(employees.lastName), asc(employees.firstName), desc(employeeLoans.createdAt));
+		.where(loansWhere(organizationId, o))
+		.orderBy(asc(employees.lastName), asc(employees.firstName), desc(employeeLoans.createdAt), asc(employeeLoans.id));
+	const rows = await (o.page ? query.limit(o.page.size).offset(o.page.offset) : query);
 	const ids = rows.map((r) => r.loan.id);
 	const [deducted, outside] = await Promise.all([deductedByLoan(ids), paidOutsideByLoan(ids)]);
 	return rows.map((r) => {

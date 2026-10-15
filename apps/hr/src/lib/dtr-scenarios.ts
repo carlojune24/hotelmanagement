@@ -72,9 +72,9 @@ export const SCENARIOS: Scenario[] = [
 	// ---- A. split shift ----
 	L('A1', 'split', 'Perfect day', 'split', ['08:00', '12:00', '13:00', '17:00'], { worked: 480 }, 'In, out for lunch, back, out: 4h + 4h.'),
 	L('A2', 'split', 'Late in (8:12) and late back from lunch (1:05)', 'split', ['08:12', '12:00', '13:05', '17:00'], { worked: 463, late: 17 }, 'Lateness is 12 min in the morning plus 5 min after lunch. Both come off the day.'),
-	L('A3', 'split', 'No break-out and no break-in', 'split', ['08:00', '17:00'], { worked: 480 }, 'Nobody tapped for lunch. The scheduled hour is taken as the break, so the day is whole. Nothing to fix.'),
-	L('A4', 'split', 'No break-out (back from lunch only)', 'split', ['08:00', '13:00', '17:00'], { worked: 480, flags: ['missing_break_out'] }, 'The clock-out proves they came back, so the scheduled break is assumed. Flagged "No break-out punch".'),
-	L('A5', 'split', 'No break-in (left for lunch only)', 'split', ['08:00', '12:00', '17:00'], { worked: 480, flags: ['missing_break_in'] }, 'Same rule: break assumed as scheduled, flagged "No break-in punch".'),
+	L('A3', 'split', 'No break-out and no break-in', 'split', ['08:00', '17:00'], { worked: 0, flags: ['missing_break_out', 'missing_break_in'] }, 'The break is defined, so it has to be punched. With neither lunch tap nothing proves either half, and the day is treated as absent until HR adds the taps.'),
+	L('A4', 'split', 'No break-out (back from lunch only)', 'split', ['08:00', '13:00', '17:00'], { worked: 240, under: 240, flags: ['missing_break_out'] }, 'The morning cannot be proven without the break-out, so the whole first part (4h) is undertime. Flagged "No break-out punch". HR can add the tap to restore it.'),
+	L('A5', 'split', 'No break-in (left for lunch only)', 'split', ['08:00', '12:00', '17:00'], { worked: 240, late: 240, flags: ['missing_break_in'] }, 'The afternoon cannot be proven without the break-in, so the whole second part (4h) is counted late. Flagged "No break-in punch". HR can add the tap to restore it.'),
 	L('A6', 'split', 'In only — no other punch', 'split', ['08:00'], { worked: 0, flags: ['single_punch'] }, 'One punch is not a day. Worked 0, never counted late, and the rostered day is treated as absent until a clock-out is added by HR.'),
 	L('A7', 'split', 'Out only — clock-in missing', 'split', ['17:00'], { worked: 0, flags: ['single_punch', 'missing_in'] }, 'A lone punch late in the day is a clock-out with no clock-in. It is not counted 9h late. Worked 0, absent until HR adds the clock-in.'),
 	L('A8', 'split', 'Went to lunch and never came back', 'split', ['08:00', '12:00'], { worked: 240, under: 240, flags: ['no_return'] }, 'Only the morning counts. The afternoon is undertime. Flagged "No return from break".'),
@@ -113,7 +113,7 @@ export const SCENARIOS: Scenario[] = [
 	L('D9', 'overtime', 'Stayed 2h, approved only the second half hour-block', 'split', ['08:00', '12:00', '13:00', '19:00'], { worked: 600, ot: 60, unapprovedOt: 60 }, 'Only the time that falls inside the approved range counts.', { approvedOt: ['17:30-18:30'] }),
 	L('D10', 'overtime', 'Overtime past midnight', 'split', ['08:00', '12:00', '13:00', '01:00+1'], { worked: 960, ot: 480, flags: ['long_shift'] }, 'An approved range of 5:00 PM–1:00 AM is honoured. Flagged because the day is over 16h; check the out punch.', { approvedOt: ['17:00-01:00'] }),
 
-	L('D11', 'overtime', '13-hour day, only in and out taps', 'split', ['08:00', '21:00'], { worked: 720, ot: 240 }, 'A long day with no lunch taps stays one shift (the break is still taken off). The 4h past 5:00 PM is overtime if approved.', { approvedOt: ['17:00-21:00'] }),
+	L('D11', 'overtime', '13-hour day with lunch taps', 'split', ['08:00', '12:00', '13:00', '21:00'], { worked: 720, ot: 240 }, 'A long day stays one shift. The 4h past 5:00 PM is overtime if approved. Without the lunch taps the day would be absent (see A3).', { approvedOt: ['17:00-21:00'] }),
 
 	// ---- E. leave, holiday, memo ----
 	L('E1', 'leave', 'Paid leave, whole day', 'split', [], { worked: 480, leaveCredit: 480 }, 'The shift is credited as paid. No absence.', { leave: { paid: true, halfDay: null } }),

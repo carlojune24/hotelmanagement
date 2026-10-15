@@ -124,25 +124,32 @@ describe('split shift 08:00-12:00 + 13:00-17:00', () => {
 		const r = run(at(8), at(12), at(13, 20), at(17));
 		expect(r.metrics).toMatchObject({ workedMinutes: 460, tardinessMinutes: 20 });
 	});
-	it('forgot to punch in after lunch: break counted as scheduled, flagged', () => {
+	it('no break-in: the afternoon cannot be proven, so the second part is late', () => {
 		const r = run(at(8), at(12), at(17));
 		expect(r.flags).toEqual(['missing_break_in']);
-		expect(r.metrics.workedMinutes).toBe(480);
+		expect(r.metrics).toMatchObject({ workedMinutes: 240, tardinessMinutes: 240, undertimeMinutes: 0 });
 	});
-	it('forgot to punch out for lunch: flagged', () => {
+	it('no break-out: the morning cannot be proven, so the first part is undertime', () => {
 		const r = run(at(8), at(13), at(17));
 		expect(r.flags).toEqual(['missing_break_out']);
-		expect(r.metrics.workedMinutes).toBe(480);
+		expect(r.metrics).toMatchObject({ workedMinutes: 240, tardinessMinutes: 0, undertimeMinutes: 240 });
+	});
+	it('no break punches at all on a defined break: the day is absent', () => {
+		const r = run(at(8), at(17));
+		expect(r.flags).toEqual(['missing_break_out', 'missing_break_in']);
+		expect(r.metrics).toMatchObject({ workedMinutes: 0, tardinessMinutes: 0, undertimeMinutes: 0, otMinutes: 0 });
+	});
+	it('no break-out and a late arrival: the morning is not deducted twice', () => {
+		const r = run(at(9), at(13), at(17));
+		expect(r.metrics).toMatchObject({ workedMinutes: 240, tardinessMinutes: 60, undertimeMinutes: 180 });
 	});
 	it('left at lunch and never came back: only the morning counts', () => {
 		const r = run(at(8), at(12));
 		expect(r.flags).toEqual(['no_return']);
 		expect(r.metrics).toMatchObject({ workedMinutes: 240, undertimeMinutes: 240 });
 	});
-	it('worked straight through: normal day, break deducted', () => {
-		const r = run(at(8), at(17));
-		expect(r.flags).toEqual([]);
-		expect(r.metrics.workedMinutes).toBe(480);
+	it('in and out only, no lunch taps, is absent (covered above); the break is not assumed', () => {
+		expect(run(at(8), at(17)).metrics.workedMinutes).toBe(0);
 	});
 	it('re-tapped lunch punches do not stretch the break', () => {
 		const r = run(at(8), at(12), at(12, 1), at(12, 58), at(13), at(17));

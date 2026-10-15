@@ -5,7 +5,16 @@ import { writeAudit } from '$lib/server/audit';
 import { getOrganization } from '$lib/server/establishments';
 import { loanableEmployees } from '$lib/server/hr/loans';
 import { listRuns } from '$lib/server/hr/payroll';
-import { PayItemError, createPayItems, listPayItems, payItemSchema, voidPayItem } from '$lib/server/hr/pay-items';
+import {
+	PayItemError,
+	archivePayItem,
+	createPayItems,
+	listPayItems,
+	payItemEditSchema,
+	payItemSchema,
+	updatePayItem,
+	voidPayItem
+} from '$lib/server/hr/pay-items';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -26,6 +35,7 @@ export const actions: Actions = {
 			label: fd.get('label'),
 			amount: fd.get('amount'),
 			recurring: fd.get('recurring') === 'on',
+			exempt: fd.get('exempt') === 'on',
 			startDate: fd.get('startDate'),
 			endDate: fd.get('endDate'),
 			note: fd.get('note') ?? ''
@@ -47,6 +57,62 @@ export const actions: Actions = {
 			return {
 				ok: `Added ${n} item${n === 1 ? '' : 's'}.${r.reflected ? ` ${r.reflected} draft payslip${r.reflected === 1 ? '' : 's'} updated.` : ''}`
 			};
+		} catch (e) {
+			if (e instanceof PayItemError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
+	update: async ({ request, locals }) => {
+		requireCap(locals.user, locals.access, 'payroll:*');
+		const fd = await request.formData();
+		const parsed = payItemEditSchema.safeParse({
+			id: fd.get('id'),
+			category: fd.get('category'),
+			label: fd.get('label'),
+			amount: fd.get('amount'),
+			recurring: fd.get('recurring') === 'on',
+			exempt: fd.get('exempt') === 'on',
+			startDate: fd.get('startDate'),
+			endDate: fd.get('endDate'),
+			note: fd.get('note') ?? ''
+		});
+		if (!parsed.success) return fail(400, { error: parsed.error.issues[0]?.message ?? 'Check the form.' });
+		try {
+			const org = await getOrganization();
+			const r = await updatePayItem(org.id, parsed.data);
+			await writeAudit({
+				actor: locals.user,
+				action: 'pay_item.update',
+				entityType: 'pay_item',
+				entityId: r.after.id,
+				before: { label: r.before.label, amountCentavos: r.before.amountCentavos, category: r.before.category, startDate: r.before.startDate, endDate: r.before.endDate, taxable: r.before.taxable },
+				after: { label: r.after.label, amountCentavos: r.after.amountCentavos, category: r.after.category, startDate: r.after.startDate, endDate: r.after.endDate, taxable: r.after.taxable }
+			});
+			return { ok: `Saved.${r.reflected ? ` ${r.reflected} draft payslip${r.reflected === 1 ? '' : 's'} updated.` : ''}` };
+		} catch (e) {
+			if (e instanceof PayItemError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
+	archive: async ({ request, locals }) => {
+		requireCap(locals.user, locals.access, 'payroll:*');
+		const parsed = z
+			.object({ id: z.string().uuid(), restore: z.string().optional() })
+			.safeParse(Object.fromEntries(await request.formData()));
+		if (!parsed.success) return fail(400, { error: 'That item could not be found.' });
+		const restore = parsed.data.restore === '1';
+		try {
+			const org = await getOrganization();
+			await archivePayItem(org.id, parsed.data.id, !restore);
+			await writeAudit({
+				actor: locals.user,
+				action: restore ? 'pay_item.restore' : 'pay_item.archive',
+				entityType: 'pay_item',
+				entityId: parsed.data.id
+			});
+			return { ok: restore ? 'Item restored.' : 'Item archived.' };
 		} catch (e) {
 			if (e instanceof PayItemError) return fail(400, { error: e.message });
 			throw e;

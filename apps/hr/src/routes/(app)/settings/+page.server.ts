@@ -37,6 +37,22 @@ import {
 } from '$lib/server/hr/loans';
 import { getRemittanceSettings, saveRemittanceSettings } from '$lib/server/hr/remittance';
 import {
+	ContractError,
+	DEFAULT_CONTRACT_TEMPLATES,
+	MERGE_FIELDS,
+	getContractTemplates,
+	resetContractTemplate,
+	saveContractTemplate
+} from '$lib/server/hr/contracts';
+import { EMPLOYMENT_TYPES, EMPLOYMENT_TYPE_LABEL } from '$lib/leave';
+import {
+	DAY_FACTORS,
+	FACTOR_LABEL,
+	PayrollError,
+	getDayFactor,
+	saveDayFactor
+} from '$lib/server/hr/payroll';
+import {
 	DEFAULT_CLEARANCE,
 	MAX_CLEARANCE_ITEMS,
 	SeparationError,
@@ -54,6 +70,12 @@ const estTypes = await listEstablishmentTypes(org.id);
 	const remittance = await getRemittanceSettings(org.id);
 	const clearanceItems = await getClearanceTemplate(org.id);
 	return {
+		contractTemplates: await getContractTemplates(org.id),
+		contractDefaults: DEFAULT_CONTRACT_TEMPLATES,
+		contractFields: MERGE_FIELDS,
+		contractKinds: EMPLOYMENT_TYPES.map((k) => ({ value: k, label: EMPLOYMENT_TYPE_LABEL[k] })),
+		dayFactor: await getDayFactor(org.id),
+		factors: DAY_FACTORS.map((f) => ({ value: f, label: FACTOR_LABEL[f]! })),
 		clearanceItems,
 		logoUrl: logoUrlFor(org.config),
 		costCenters: await listCostCenters(org.id),
@@ -107,6 +129,51 @@ const dueDay = z.preprocess(
 const fd = async (request: Request) => Object.fromEntries(await request.formData());
 
 export const actions: Actions = {
+	saveContractTemplate: async ({ request, locals }) => {
+		requireCap(locals.user, locals.access, 'employee:write');
+		const fdata = await request.formData();
+		try {
+			const org = await getOrganization();
+			const saved = await saveContractTemplate(org.id, { kind: fdata.get('kind'), text: fdata.get('text') });
+			await writeAudit({ actor: locals.user, action: 'contract.template', entityType: 'organization', entityId: org.id, after: { kind: saved.kind } });
+			return { ok: `${EMPLOYMENT_TYPE_LABEL[saved.kind]} contract wording saved. It applies to contracts issued from now on.` };
+		} catch (e) {
+			if (e instanceof ContractError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
+	resetContractTemplate: async ({ request, locals }) => {
+		requireCap(locals.user, locals.access, 'employee:write');
+		const kind = z.enum(EMPLOYMENT_TYPES).safeParse((await request.formData()).get('kind'));
+		if (!kind.success) return fail(400, { error: 'Pick an employment type.' });
+		const org = await getOrganization();
+		await resetContractTemplate(org.id, kind.data);
+		await writeAudit({ actor: locals.user, action: 'contract.template_reset', entityType: 'organization', entityId: org.id, after: { kind: kind.data } });
+		return { ok: 'Back to the default wording.' };
+	},
+
+	saveDayFactor: async ({ request, locals }) => {
+		requireCap(locals.user, locals.access, 'payroll:*');
+		const parsed = z.coerce.number().int().safeParse((await request.formData()).get('dayFactor'));
+		if (!parsed.success) return fail(400, { error: 'Choose a working-day factor.' });
+		try {
+			const org = await getOrganization();
+			await saveDayFactor(org.id, parsed.data);
+			await writeAudit({
+				actor: locals.user,
+				action: 'payroll.settings',
+				entityType: 'organization',
+				entityId: org.id,
+				after: { dayFactor: parsed.data }
+			});
+		} catch (e) {
+			if (e instanceof PayrollError) return fail(400, { error: e.message });
+			throw e;
+		}
+		return { ok: 'Saved. Runs created from now on use this factor.' };
+	},
+
 	saveCostCenter: async ({ request, locals }) => {
 		requireCap(locals.user, locals.access, 'payroll:*');
 		const parsed = costCenterSchema.safeParse(Object.fromEntries(await request.formData()));
