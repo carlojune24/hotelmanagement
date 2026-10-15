@@ -13,6 +13,7 @@ import {
 	hallBookings,
 	orders,
 	paymentAllocations,
+	paymentAttempts,
 	payments,
 	receivableEntries,
 	receivables,
@@ -23,6 +24,7 @@ import {
 } from '$lib/server/db/schema/index';
 import { roleCan } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
+import { attemptCode } from '$lib/server/db/schema/payment-attempts';
 import { writeAudit } from '$lib/server/audit';
 import { businessDateFor, FinanceError } from '$lib/server/finance/shared';
 import { recordOrderPayment, refundPayment, voidPayment } from '$lib/server/finance/payments';
@@ -75,6 +77,12 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 	const order = await loadOrder(hotel.id, params.orderId);
 
 	const [guest] = await db.select().from(guests).where(eq(guests.id, order.guestId)).limit(1);
+
+	const attemptRows = await db
+		.select()
+		.from(paymentAttempts)
+		.where(and(eq(paymentAttempts.hotelId, hotel.id), eq(paymentAttempts.orderId, order.id)))
+		.orderBy(desc(paymentAttempts.createdAt));
 
 	const [roomRows, hallRows, ledger, paymentRows, financeSettings, openShift] = await Promise.all([
 		db
@@ -527,6 +535,20 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 				title: l.title,
 				balanceCentavos: l.balanceCentavos
 			})),
+		// Every PayMongo checkout session started for this booking, kept for reconciliation.
+		paymentAttempts: attemptRows.map((a) => ({
+			id: a.id,
+			code: attemptCode(a.id),
+			status: a.status,
+			amountCentavos: a.amountCentavos,
+			sessionId: a.checkoutSessionId,
+			paymentId: a.paymongoPaymentId,
+			intentId: a.paymentIntentId,
+			checks: a.checks,
+			lastCheckedAt: a.lastCheckedAt?.toISOString() ?? null,
+			lastError: a.lastError,
+			createdAt: a.createdAt.toISOString()
+		})),
 		payments: paymentRows.map((p) => ({
 			id: p.id,
 			method: p.method,

@@ -87,12 +87,26 @@
 	]);
 	const reached = $derived(({ pending_payment: -1, pending_acceptance: 0, new: 0, accepted: 0, preparing: 1, ready: 2, served: 3, cancelled: -1 } as Record<string, number>)[o.status] ?? -1);
 
-	// Keep the page current while the order is live.
+	// Keep the page current while the order is live: every few seconds while a payment is still being confirmed (each
+	// load asks PayMongo itself), gently otherwise. It never gives up on a payment.
 	$effect(() => {
 		if (finished && !refundDue && !o.cancelRequested) return;
-		const t = setInterval(() => invalidate('app:dining-order'), 15_000);
+		const waitingForPayment = o.status === 'pending_payment';
+		const t = setInterval(() => invalidate('app:dining-order'), waitingForPayment ? 5_000 : 15_000);
 		return () => clearInterval(t);
 	});
+
+	let copiedRef = $state(false);
+	async function copyRef() {
+		if (!data.paymentRef) return;
+		try {
+			await navigator.clipboard.writeText(data.paymentRef.paymentId);
+			copiedRef = true;
+			setTimeout(() => (copiedRef = false), 2000);
+		} catch {
+			// Clipboard blocked: the reference is still on screen to read.
+		}
+	}
 
 	let copied = $state(false);
 	async function copyCode() {
@@ -195,6 +209,27 @@
 						{#if copied}<CheckIcon class="size-4" aria-hidden="true" /> Copied{:else}<CopyIcon class="size-4" aria-hidden="true" /> Copy code{/if}
 					</button>
 				</div>
+
+				{#if data.paymentRef}
+					<!-- Proof of payment: PayMongo's own reference, the same ID the restaurant sees and a refund is traced by. -->
+					<div class="mt-4 border-t border-[var(--ledger-rule)] pt-3">
+						<p class="ledger-label">Payment reference</p>
+						<div class="mt-1 flex flex-wrap items-center justify-between gap-2">
+							<span class="ledger-data text-sm font-semibold break-all" style="color: var(--hotel-accent-deep)">{data.paymentRef.paymentId}</span>
+							<button type="button" class="no-print text-xs underline underline-offset-2" onclick={copyRef}>{copiedRef ? 'Copied' : 'Copy'}</button>
+						</div>
+						{#if data.paymentRef.intentId}<p class="ledger-data mt-0.5 text-xs break-all text-[var(--ledger-ink-muted)]">{data.paymentRef.intentId}</p>{/if}
+					</div>
+				{:else if data.tracking.waiting && data.tracking.code}
+					<div class="mt-4 border-t border-[var(--ledger-rule)] pt-3 text-sm">
+						<p class="ledger-label">Payment check code</p>
+						<p class="ledger-data mt-1 font-medium">{data.tracking.code}</p>
+						<p class="mt-1 text-xs text-[var(--ledger-ink-muted)]">
+							We are checking your payment with PayMongo and keep checking, even if you close this page. If you already paid,
+							please do not pay again. Quote this code and your order code if you contact the restaurant.
+						</p>
+					</div>
+				{/if}
 
 				<div class="mt-5 border-t border-[var(--ledger-rule)] pt-4">
 					<div class="ledger-display text-lg">{o.guestName ?? 'Guest'}</div>

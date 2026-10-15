@@ -129,6 +129,7 @@ export async function expirePendingOrders(opts?: {
 		.select({
 			id: orders.id,
 			hotelId: orders.hotelId,
+			createdAt: orders.createdAt,
 			checkoutSessionId: orders.paymongoCheckoutSessionId
 		})
 		.from(orders)
@@ -143,6 +144,14 @@ export async function expirePendingOrders(opts?: {
 
 	const expiredOrderIds: string[] = [];
 	for (const candidate of candidates) {
+		// Ask PayMongo before giving the room away: a guest may have paid while our webhook was unreachable. Then the
+		// booking is confirmed instead. If PayMongo cannot be asked, wait (up to a day) rather than release a room that
+		// may already be paid for.
+		const { verifyOrderNow } = await import('./paymongo/verify');
+		const verified = await verifyOrderNow({ orderId: candidate.id }, 0, 'hold_sweep').catch(() => null);
+		if (verified?.paid) continue;
+		if (verified?.unknown && now.getTime() - candidate.createdAt.getTime() < 24 * 60 * 60_000) continue;
+
 		const didExpire = await db.transaction(async (tx) => {
 			const updated = await tx
 				.update(orders)

@@ -1,16 +1,20 @@
 import { error } from '@sveltejs/kit';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { db } from '$lib/server/db/index';
 import {
+	attemptCode,
 	bookingRooms,
 	bookings,
 	functionHalls,
 	guests,
 	hallBookings,
 	orders,
+	paymentAttempts,
+	payments,
 	ratePlans,
 	roomTypes
 } from '$lib/server/db/schema/index';
+import { verifyOrderNow } from '$lib/server/paymongo/verify';
 import { getOrderPaymentSummary } from '$lib/server/order-payment';
 import { getOrderPromo } from '$lib/server/promo-codes';
 import { orderSecurityDepositCentavos } from '$lib/server/security-deposit-lookup';
@@ -22,11 +26,20 @@ export const load: PageServerLoad = async ({ locals, params, url, depends }) => 
 	const token = url.searchParams.get('t');
 	if (!token) error(404, 'Not found');
 
-	const [order] = await db
+	let [order] = await db
 		.select()
 		.from(orders)
 		.where(and(eq(orders.id, params.orderId), eq(orders.hotelId, hotelId)));
 	if (!order || order.accessToken !== token) error(404, 'Not found');
+
+	// Still waiting? Ask PayMongo itself, not just our own records: the guest may have paid while our webhook could not
+	// reach us. This runs on every load (a refresh, a poll, a return from PayMongo), throttled per order, so the page
+	// recovers within seconds of the payment and never depends on a counter that a refresh would reset.
+	if (order.status === 'pending_payment') {
+		await verifyOrderNow({ orderId: order.id }).catch(() => null);
+		const [fresh] = await db.select().from(orders).where(eq(orders.id, order.id));
+		if (fresh) order = fresh;
+	}
 
 	const [guest] = await db.select().from(guests).where(eq(guests.id, order.guestId));
 
@@ -64,7 +77,40 @@ export const load: PageServerLoad = async ({ locals, params, url, depends }) => 
 	// A memo for the guest: refundable, collected at check-in, never part of what was paid.
 	const securityDepositCentavos = await orderSecurityDepositCentavos(hotelId, order.id);
 
+	// Where this payment stands, for the guest: the PayMongo payment ID once paid, and the payment check code while
+	// we are still confirming it.
+	const [paidAttempt] = await db
+		.select()
+		.from(paymentAttempts)
+		.where(and(eq(paymentAttempts.orderId, order.id), eq(paymentAttempts.status, 'paid')))
+		.orderBy(desc(paymentAttempts.paidAt))
+		.limit(1);
+	const [openAttempt] = await db
+		.select()
+		.from(paymentAttempts)
+		.where(and(eq(paymentAttempts.orderId, order.id), eq(paymentAttempts.status, 'open')))
+		.orderBy(desc(paymentAttempts.createdAt))
+		.limit(1);
+	// Older bookings (before attempts were kept): the recorded PayMongo payment row still has the ID.
+	const [paidRow] = paidAttempt
+		? []
+		: await db
+				.select({ paymentId: payments.paymongoPaymentId })
+				.from(payments)
+				.where(and(eq(payments.orderId, order.id), eq(payments.provider, 'paymongo'), eq(payments.status, 'paid')))
+				.orderBy(desc(payments.createdAt))
+				.limit(1);
+	const paymentId = paidAttempt?.paymongoPaymentId ?? paidRow?.paymentId ?? null;
+
 	return {
+		/** Never an error code: the guest only sees "paid", "still checking", or what happened to the booking. */
+		paymentRef: paymentId ? { paymentId, intentId: paidAttempt?.paymentIntentId ?? null } : null,
+		tracking: {
+			code: attemptCode((openAttempt ?? paidAttempt)?.id ?? order.id),
+			waiting: !!openAttempt,
+			checks: openAttempt?.checks ?? 0,
+			lastCheckedAt: openAttempt?.lastCheckedAt?.toISOString() ?? null
+		},
 		status: order.status,
 		// Null for an ordinary pay-in-full order — the page then keeps saying "Total paid".
 		payment,

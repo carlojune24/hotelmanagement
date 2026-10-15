@@ -458,6 +458,37 @@
 				{/if}
 			</section>
 
+			{#if data.paymentAttempts.length > 0}
+				<section>
+					<h2 class="mb-2 text-sm font-semibold text-ink">Online payment attempts</h2>
+					<div class="divide-y divide-border rounded-lg border border-border">
+						{#each data.paymentAttempts as a (a.id)}
+							<div class="px-3 py-2.5 text-sm">
+								<div class="flex flex-wrap items-center gap-1.5">
+									<span class="font-medium text-ink">{peso(a.amountCentavos)}</span>
+									<Badge
+										variant="outline"
+										class={a.status === 'paid'
+											? 'border-transparent bg-success/15 text-success'
+											: 'border-border bg-surface-2 text-ink-muted'}>{a.status}</Badge
+									>
+									<span class="font-mono text-xs text-ink-muted">{a.code}</span>
+								</div>
+								<div class="mt-0.5 font-mono text-xs break-all text-ink-muted">
+									{a.paymentId ?? a.sessionId}{#if a.intentId} · {a.intentId}{/if}
+								</div>
+								<div class="mt-0.5 text-xs text-ink-muted">
+									Started {when(a.createdAt)} · checked {a.checks}× · last {when(a.lastCheckedAt)}
+								</div>
+								{#if a.lastError && a.status === 'open'}
+									<div class="mt-0.5 text-xs text-danger">{a.lastError}</div>
+								{/if}
+							</div>
+						{/each}
+					</div>
+				</section>
+			{/if}
+
 			{#if data.cityLedgerAccount}
 				<section class="rounded-lg border border-border">
 					<h2 class="border-b border-border px-3 py-2.5 text-sm font-semibold text-ink">

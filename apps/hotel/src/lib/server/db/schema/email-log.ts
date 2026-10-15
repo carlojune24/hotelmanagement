@@ -15,7 +15,11 @@ export const emailType = pgEnum('email_type', [
 	'dining_reservation',
 	'dining_order',
 	'dining_order_ready',
-	'support_reply'
+	'support_reply',
+	/** Sent when a guest starts paying: the booking code and a link they can always come back to. */
+	'payment_tracking',
+	/** Sent once if PayMongo has not confirmed a payment after a while: "your payment is safe, do not pay again". */
+	'payment_delayed'
 ]);
 
 /** Delivery outcome as reported by the transport. `sent` means the transport

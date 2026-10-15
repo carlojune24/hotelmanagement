@@ -110,12 +110,16 @@ export interface CheckoutSession {
 	type: 'checkout_session';
 	attributes: {
 		checkout_url: string;
+		/** NB: stays `active` even after the session has been paid. A payment is paid when `payments[]` holds one
+		 *  whose own `status` is `paid`, never judge it by this field. `expired` once it can no longer be paid. */
 		status: string;
 		livemode: boolean;
 		payment_method_used?: string;
 		paid_at: number | null;
 		metadata?: Record<string, string>;
 		payments?: PayMongoPayment[];
+		/** Expanded: the intent the guest paid through (`pi_…`) and its own status (`succeeded` when paid). */
+		payment_intent?: { id: string; attributes?: { status?: string; [key: string]: unknown } } | null;
 		[key: string]: unknown;
 	};
 }

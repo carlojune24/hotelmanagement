@@ -11,6 +11,7 @@ import {
 	guests,
 	hallBookings,
 	orders,
+	paymentAttempts,
 	payments,
 	securityDeposits
 } from './db/schema/index';
@@ -101,7 +102,8 @@ export async function resolveNumber(
 		diningHits,
 		diningPaymentHits,
 		reservationHits,
-		documentHits
+		documentHits,
+		attemptHits
 	] = await Promise.all([
 		looksLikeBookingCode
 			? db
@@ -122,11 +124,12 @@ export async function resolveNumber(
 				paymentId: payments.id,
 				method: payments.method,
 				amount: payments.amountCentavos,
-				ref: payments.referenceNo
+				// A staff-entered reference, or PayMongo's own payment ID (`pay_…`) for an online payment.
+				ref: sql<string>`coalesce(${payments.referenceNo}, ${payments.paymongoPaymentId})`
 			})
 			.from(payments)
 			.innerJoin(orders, eq(orders.id, payments.orderId))
-			.where(and(eq(orders.hotelId, hotelId), ilike(payments.referenceNo, esc)))
+			.where(and(eq(orders.hotelId, hotelId), or(ilike(payments.referenceNo, esc), ilike(payments.paymongoPaymentId, esc))))
 			.limit(10),
 		db
 			.select({
@@ -204,7 +207,32 @@ export async function resolveNumber(
 						: ilike(documents.formattedNo, esc)
 				)
 			)
-			.limit(10)
+			.limit(10),
+		// A payment attempt: the check code the guest was shown ("PC-1A2B3C4D", or just the hex), or PayMongo's checkout
+		// session / payment intent / payment ID.
+		upper.startsWith('PC-') || /^(cs|pi|pay)_/i.test(q)
+			? db
+					.select({
+						id: paymentAttempts.id,
+						orderId: paymentAttempts.orderId,
+						status: paymentAttempts.status,
+						amount: paymentAttempts.amountCentavos,
+						payId: paymentAttempts.paymongoPaymentId
+					})
+					.from(paymentAttempts)
+					.where(
+						and(
+							eq(paymentAttempts.hotelId, hotelId),
+							or(
+								upper.startsWith('PC-') ? sql`${paymentAttempts.id}::text ilike ${likeEscape(q.slice(3)) + '%'}` : undefined,
+								ilike(paymentAttempts.checkoutSessionId, esc),
+								ilike(paymentAttempts.paymentIntentId, esc),
+								ilike(paymentAttempts.paymongoPaymentId, esc)
+							)
+						)
+					)
+					.limit(10)
+			: []
 	]);
 
 	for (const o of bookingHits) {
@@ -281,6 +309,18 @@ export async function resolveNumber(
 			cap: 'dining:read',
 			trailRef: r.code,
 			refs: [{ entityType: 'dining_reservation', entityId: r.id }]
+		});
+	}
+	for (const a of attemptHits) {
+		if (!a.orderId) continue; // a dining attempt is found through its dining order / payment reference
+		add({
+			key: `attempt:${a.id}`,
+			kind: 'payment_ref',
+			title: `Payment attempt PC-${a.id.slice(0, 8).toUpperCase()}`,
+			subtitle: `${a.status} · ${peso(a.amount)}${a.payId ? ` · ${a.payId}` : ''} · booking ${a.orderId.slice(0, 8).toUpperCase()}`,
+			href: `${base}/management/transactions/${a.orderId}`,
+			cap: 'booking:read',
+			refs: [{ entityType: 'order', entityId: a.orderId }]
 		});
 	}
 	for (const d of documentHits) {

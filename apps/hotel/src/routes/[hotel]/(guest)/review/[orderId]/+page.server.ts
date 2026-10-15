@@ -13,6 +13,9 @@ import {
 } from '$lib/server/db/schema/index';
 import { createCheckoutSession, type CheckoutLineItem } from '$lib/server/paymongo/checkout';
 import { PaymentsNotConfiguredError } from '$lib/server/paymongo/client';
+import { recordAttempt, reusableCheckoutUrl, supersedeOpenAttempts } from '$lib/server/paymongo/attempts';
+import { verifyOrderNow } from '$lib/server/paymongo/verify';
+import { sendPaymentStatusEmail } from '$lib/server/email/send-payment-status';
 import type { Actions, PageServerLoad } from './$types';
 
 async function loadGuardedOrder(hotelId: string, orderId: string, token: string | null) {
@@ -118,6 +121,10 @@ export const actions: Actions = {
 			return fail(400, { error: 'This order can no longer be paid.' });
 		}
 
+		// A payment may already have landed (the webhook could not reach us): confirm it instead of starting another.
+		const already = await verifyOrderNow({ orderId: order.id }, 0).catch(() => null);
+		if (already?.paid) redirect(303, `../confirmation/${order.id}?t=${order.accessToken}`);
+
 		const [guest] = await db.select().from(guests).where(eq(guests.id, order.guestId));
 		const { roomLines, hallLines } = await loadOrderLines(order.id);
 
@@ -142,6 +149,19 @@ export const actions: Actions = {
 		const successUrl = `${origin}/${event.locals.hotel!.slug}/confirmation/${order.id}?t=${order.accessToken}`;
 		const cancelUrl = `${origin}/${event.locals.hotel!.slug}/review/${order.id}?t=${order.accessToken}&cancelled=1`;
 
+		// Only meaningful when the order has a downpayment; a pay-in-full order ignores it.
+		const payInFull = (await event.request.formData()).get('option') === 'full';
+		const dueNow = order.amountDueNowCentavos;
+		const amountCentavos =
+			!payInFull && dueNow != null && dueNow > 0 && dueNow < order.totalCentavos ? dueNow : order.totalCentavos;
+
+		// "Continue to payment" returns to the checkout the guest already has, if it is still payable for the same
+		// amount, rather than piling up a second link.
+		const reuse = await reusableCheckoutUrl(hotelId, { orderId: order.id }, amountCentavos).catch(() => null);
+		if (reuse) redirect(303, reuse);
+		// A different amount or an unusable link: close the old ones (kept as history) before starting a new one.
+		await supersedeOpenAttempts(hotelId, { orderId: order.id }).catch(() => undefined);
+
 		let session: Awaited<ReturnType<typeof createCheckoutSession>>;
 		try {
 			session = await createCheckoutSession({
@@ -151,8 +171,7 @@ export const actions: Actions = {
 				items,
 				successUrl,
 				cancelUrl,
-				// Only meaningful when the order has a downpayment; a pay-in-full order ignores it.
-				payInFull: (await event.request.formData()).get('option') === 'full'
+				payInFull
 			});
 		} catch (e) {
 			// The hotel disconnected PayMongo after this order was created.
@@ -169,6 +188,17 @@ export const actions: Actions = {
 			.update(orders)
 			.set({ paymongoCheckoutSessionId: checkoutSessionId, updatedAt: new Date() })
 			.where(eq(orders.id, order.id));
+
+		// Every session is kept: the worker checks it with PayMongo until it is paid or can no longer be, and the
+		// guest gets a link they can always come back to.
+		const attemptId = await recordAttempt({
+			hotelId,
+			scope: 'room',
+			orderId: order.id,
+			sessionId: checkoutSessionId,
+			amountCentavos
+		});
+		void sendPaymentStatusEmail(attemptId, 'tracking');
 
 		redirect(303, checkoutUrl);
 	}
