@@ -179,8 +179,8 @@
 				[`Filing and approval`, `A manager files, and Main HR approves or rejects under Approvals. When Main HR files, it is filed and approved in one step. A manager can withdraw a request still waiting; cancelling an approved one is Main HR's decision.`],
 				[`Effect on the DTR and pay`, `Approved leave covers the scheduled day and wins over absent. A paid leave credits the paid day; an unpaid leave covers the day without crediting it. A half day covers late and undertime up to half the shift.`],
 				[`Overtime applications`, `Overtime is filed for a date and a time range (at most 12 hours) and approved the same way. Only the part of punched overtime inside an approved range is paid.`],
-				[`Memos and holidays`, `Holidays and memos are set per establishment. A holiday or memo credits the day, or a set number of hours, and can waive late and undertime.`],
-				[`Approvals page`, `One queue for submitted leave, overtime, memos and DTR submissions, with a count in the sidebar.`]
+				[`Memos and holidays`, `Holidays and memos are set only by Main HR (Holidays & memos in the sidebar), for the whole company or for chosen establishments. They show on the roster and DTR automatically. A holiday or memo credits the day, or a set number of hours, and can waive late and undertime.`],
+				[`Approvals page`, `One queue for submitted rosters, leave, overtime and DTR submissions, with a count in the sidebar.`]
 			]
 		},
 		{

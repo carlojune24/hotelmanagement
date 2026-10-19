@@ -8,6 +8,7 @@ import {
 	jsonb,
 	doublePrecision,
 	pgTable,
+	primaryKey,
 	text,
 	time,
 	timestamp,
@@ -545,14 +546,19 @@ export const leaveAdjustments = pgTable(
 	(t) => [index('leave_adjustments_employee_year_idx').on(t.employeeId, t.year)]
 );
 
-/** A holiday or memorandum that applies to everyone on that date. */
+/**
+ * A holiday or memorandum — Main HR's alone. It applies to every establishment ('company') or only to those
+ * listed in `calendar_day_establishments` ('selected'), and reaches rosters, DTRs and payroll once saved.
+ */
 export const calendarDays = pgTable(
 	'calendar_days',
 	{
 		id: pk(),
-		establishmentId: uuid('establishment_id')
+		organizationId: uuid('organization_id')
 			.notNull()
-			.references(() => establishments.id, { onDelete: 'cascade' }),
+			.references(() => organizations.id, { onDelete: 'cascade' }),
+		/** 'company' = every establishment (including ones added later); 'selected' = only those in calendar_day_establishments. */
+		scope: text('scope').notNull().default('company'),
 		date: date('date', { mode: 'string' }).notNull(),
 		name: text('name').notNull(),
 		/** 'regular_holiday' | 'special_holiday' | 'local_holiday' | 'memo' */
@@ -561,22 +567,24 @@ export const calendarDays = pgTable(
 		creditMinutes: integer('credit_minutes'),
 		/** Late/undertime are not counted that day (a memo letting staff go early, for instance). */
 		waiveLateness: boolean('waive_lateness').notNull().default(false),
-		/** 'submitted' (a manager's proposal) | 'approved' | 'rejected'. Only 'approved' days affect
-		 *  rosters and DTRs; entries made by Main HR are approved on the spot. */
-		status: text('status').notNull().default('approved'),
-		/** Who sent it for approval and when; who decided and when, with an optional note. Null on
-		 *  rows that predate approvals (they were approved on the spot). */
-		submittedByUserId: uuid('submitted_by_user_id').references(() => users.id, { onDelete: 'set null' }),
-		submittedAt: timestamp('submitted_at', { withTimezone: true }),
-		decidedByUserId: uuid('decided_by_user_id').references(() => users.id, { onDelete: 'set null' }),
-		decidedAt: timestamp('decided_at', { withTimezone: true }),
-decisionNote: text('decision_note'),
-/** Why the establishment is asking — what Main HR reads before deciding. */
-proposalNote: text('proposal_note'),
-createdAt: createdAt(),
-updatedAt: updatedAt()
-},
-(t) => [uniqueIndex('calendar_days_establishment_date_idx').on(t.establishmentId, t.date)]
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [index('calendar_days_org_date_idx').on(t.organizationId, t.date)]
+);
+
+/** The establishments a 'selected' holiday or memo applies to. */
+export const calendarDayEstablishments = pgTable(
+	'calendar_day_establishments',
+	{
+		calendarDayId: uuid('calendar_day_id')
+			.notNull()
+			.references(() => calendarDays.id, { onDelete: 'cascade' }),
+		establishmentId: uuid('establishment_id')
+			.notNull()
+			.references(() => establishments.id, { onDelete: 'cascade' })
+	},
+	(t) => [primaryKey({ columns: [t.calendarDayId, t.establishmentId] })]
 );
 
 // ---------------------------------------------------------------------------

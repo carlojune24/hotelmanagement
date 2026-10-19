@@ -123,7 +123,7 @@ describe.skipIf(!hasDb)('DTR Guide scenarios on real data (live DB)', async () =
 				);
 			}
 			if (sc.memo) {
-				await saveCalendarDay(est, { date, name: `Sample ${sc.id}`, kind: 'memo', creditHours: sc.memo.creditHours, waiveLateness: sc.memo.waiveLateness });
+				await saveCalendarDay(await testOrgId(), { date, name: `Sample ${sc.id}`, kind: 'memo', creditHours: sc.memo.creditHours, waiveLateness: sc.memo.waiveLateness, scope: 'selected', establishmentIds: [est] });
 			}
 		}
 		// One uploaded "file", through the same path the Biometric data page uses.

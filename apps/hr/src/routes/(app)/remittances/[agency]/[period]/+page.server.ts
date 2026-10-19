@@ -2,12 +2,13 @@ import { error, fail } from '@sveltejs/kit';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { getOrganization } from '$lib/server/establishments';
-import { skippedLoansFor } from '$lib/server/hr/loans';
+import { listLoanTypes, skippedLoansFor } from '$lib/server/hr/loans';
 import { db } from '$lib/server/db/index';
 import { establishments } from '$lib/server/db/schema/index';
 import {
-	AGENCY_LABEL,
+	agencyLabel,
 	employerNoFor,
+	isLoanAgency,
 	RemittanceError,
 	agencySchema,
 	getSchedule,
@@ -29,16 +30,16 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 	requireCap(locals.user, locals.access, 'payroll:*');
 	const { agency, period } = parse(params);
 	const org = await getOrganization();
-	const [s, ests] = await Promise.all([
+	const [s, ests, types] = await Promise.all([
 		getSchedule(org.id, agency, period),
-		db.select({ id: establishments.id, name: establishments.name }).from(establishments)
+		db.select({ id: establishments.id, name: establishments.name }).from(establishments),
+		listLoanTypes(org.id)
 	]);
 	const names = new Map(ests.map((e) => [e.id, e.name]));
-	const skipped =
-		agency === 'sss_loan' || agency === 'pagibig_loan' ? await skippedLoansFor(org.id, agency, period) : [];
+	const skipped = isLoanAgency(agency) ? await skippedLoansFor(org.id, agency, period) : [];
 	return {
 		agency,
-		label: AGENCY_LABEL[agency],
+		label: agencyLabel(agency, new Map(types.map((t) => [t.key, t.name]))),
 		period,
 		skipped,
 		schedule: s.schedule,

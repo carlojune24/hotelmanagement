@@ -1,6 +1,8 @@
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, notExists } from 'drizzle-orm';
 import { db } from '$lib/server/db/index';
 import {
+	calendarDayEstablishments,
+	calendarDays,
 	employeeAssignments,
 	employees,
 	establishments,
@@ -87,4 +89,11 @@ export async function cleanupTestEstablishments(ids: string[]) {
 		await db.delete(employees).where(inArray(employees.id, people.map((p) => p.id)));
 	}
 	await db.delete(establishments).where(inArray(establishments.id, live));
+	// A holiday made only for these establishments has nothing left to apply to.
+	await db.delete(calendarDays).where(
+		and(
+			eq(calendarDays.scope, 'selected'),
+			notExists(db.select().from(calendarDayEstablishments).where(eq(calendarDayEstablishments.calendarDayId, calendarDays.id)))
+		)
+	);
 }

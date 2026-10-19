@@ -9,7 +9,6 @@ import {
 } from '@mm/hr-core';
 import { db } from '$lib/server/db/index';
 import {
-	calendarDays,
 	dtrEntries,
 	employeeAssignments,
 	employees,
@@ -22,13 +21,14 @@ import {
 	payrollRuns,
 	schedules
 } from '$lib/server/db/schema/index';
+import { effectiveCalendar } from './calendar';
 import { getHandoff } from './dtr-submissions';
 import { appliesToCutoff, bucketsOf, type LinePayItem } from '$lib/pay-items-core';
 import { costCenterNames } from './cost-centers';
 import { allocate, byPriority, closeSettledLoans, loansDueFor, reopenSettledLoans, type LoanDue } from './loans';
 import { parseNightDiff } from './night-diff';
 import { historiesFor, payTermsFor, type PayTerms } from './salary';
-import { AGENCY_LABEL, remittedAgenciesForBatch } from './remittance';
+import { agencyLabel, remittedAgenciesForBatch } from './remittance';
 
 export class PayrollError extends Error {}
 
@@ -382,17 +382,7 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 	const estIds = [...new Set([est.id, ...assignments.map((a) => a.establishmentId), ...entries.map((e) => e.e.establishmentId)])];
 	const [estRows, holidays] = await Promise.all([
 		db.select().from(establishments).where(inArray(establishments.id, estIds)),
-		db
-			.select()
-			.from(calendarDays)
-			.where(
-				and(
-					inArray(calendarDays.establishmentId, estIds),
-					gte(calendarDays.date, run.cutoffStart),
-					lte(calendarDays.date, run.cutoffEnd),
-					eq(calendarDays.status, 'approved')
-				)
-			)
+		effectiveCalendar(estIds, run.cutoffStart, run.cutoffEnd)
 	]);
 	const estById = new Map(estRows.map((e) => [e.id, e]));
 	const holidayAt = new Map(holidays.map((h) => [`${h.establishmentId}|${h.date}`, h.kind]));
@@ -763,7 +753,7 @@ export async function unlockBatch(batchId: string) {
 	const remitted = await remittedAgenciesForBatch(batchId);
 	if (remitted.length) {
 		throw new PayrollError(
-			`This month's ${remitted.map((a) => AGENCY_LABEL[a]).join(', ')} remittance is already marked as paid, so this batch can't be reopened. Reopen the remittance first.`
+			`This month's ${remitted.map((a) => agencyLabel(a)).join(', ')} remittance is already marked as paid, so this batch can't be reopened. Reopen the remittance first.`
 		);
 	}
 	const [row] = await db

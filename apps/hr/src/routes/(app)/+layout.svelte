@@ -15,6 +15,7 @@
 	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
 	import LayoutDashboardIcon from '@lucide/svelte/icons/layout-dashboard';
 	import CalendarDaysIcon from '@lucide/svelte/icons/calendar-days';
+	import CalendarRangeIcon from '@lucide/svelte/icons/calendar-range';
 	import ClockIcon from '@lucide/svelte/icons/clock';
 	import PalmtreeIcon from '@lucide/svelte/icons/tree-palm';
 	import TimerIcon from '@lucide/svelte/icons/timer';
@@ -38,7 +39,6 @@ import ReceiptIcon from '@lucide/svelte/icons/receipt-text';
 		dtr: ClockIcon,
 		leave: PalmtreeIcon,
 overtime: TimerIcon,
-		memos: FileTextIcon,
 		payslips: ReceiptIcon,
 		guide: BookOpenIcon,
 		settings: SettingsIcon
@@ -64,6 +64,7 @@ overtime: TimerIcon,
 			{ seg: 'reports', label: 'Reports', icon: ChartColumnIcon, show: data.nav.reports },
 			{ seg: 'separations', label: 'Separations', icon: UserRoundXIcon, show: data.nav.separations },
 			{ seg: 'announcements', label: 'Announcements', icon: MegaphoneIcon, show: data.nav.announcements },
+			{ seg: 'holidays', label: 'Holidays & memos', icon: CalendarRangeIcon, show: data.nav.holidays },
 			{ seg: 'remittances', label: 'Remittances', icon: LandmarkIcon, show: data.nav.remittances },
 			{ seg: 'people', label: 'People', icon: ContactIcon, show: data.nav.people },
 			{ seg: 'contracts', label: 'Contracts', icon: FileTextIcon, show: data.nav.contracts },

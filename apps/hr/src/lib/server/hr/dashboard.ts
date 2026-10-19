@@ -3,7 +3,6 @@ import { db } from '$lib/server/db/index';
 import {
 	absenceNotes,
 	biometricPunches,
-	calendarDays,
 	dtrEntries,
 	employeeAssignments,
 	employees,
@@ -17,6 +16,7 @@ import { addDays, monthBounds, mondayOf, weekDates } from '$lib/roster';
 import { normalizeEnrollId } from '$lib/hr-import';
 import { wallTimeToUtcMs } from '$lib/server/time';
 import { getHandoff } from './dtr-submissions';
+import { listCalendar } from './calendar';
 
 export interface AttentionItem {
 	key: string;
@@ -102,7 +102,7 @@ export async function getDashboard(
 		return s ? `${s.last}, ${s.first}` : 'Former employee';
 	};
 
-	const [weekRows, leaveRows, filedLeave, filedOt, pendingMemos, weeks, unapprovedOt, openPunches, unscheduledPunches, nextWeekRows] =
+	const [weekRows, leaveRows, filedLeave, filedOt, weeks, unapprovedOt, openPunches, unscheduledPunches, nextWeekRows] =
 		await Promise.all([
 			db
 				.select({
@@ -147,10 +147,6 @@ export async function getDashboard(
 				.select({ n: sql<number>`count(*)::int` })
 				.from(overtimeRequests)
 				.where(and(eq(overtimeRequests.establishmentId, establishmentId), eq(overtimeRequests.status, 'submitted'))),
-			db
-				.select({ n: sql<number>`count(*)::int` })
-				.from(calendarDays)
-				.where(and(eq(calendarDays.establishmentId, establishmentId), eq(calendarDays.status, 'submitted'))),
 			db
 				.select({ weekStart: schedulePeriods.weekStart, status: schedulePeriods.status })
 				.from(schedulePeriods)
@@ -338,7 +334,7 @@ export async function getDashboard(
 			href: `${base}/schedule`
 		});
 	}
-	const waiting = (filedLeave[0]?.n ?? 0) + (filedOt[0]?.n ?? 0) + (pendingMemos[0]?.n ?? 0);
+	const waiting = (filedLeave[0]?.n ?? 0) + (filedOt[0]?.n ?? 0);
 	if (waiting > 0) {
 		attention.push({
 			key: 'waiting-hr',
@@ -379,16 +375,7 @@ export async function getDashboard(
 					lte(biometricPunches.punchedAt, new Date(dayEnd))
 				)
 			),
-		db
-			.select({ name: calendarDays.name })
-			.from(calendarDays)
-			.where(
-				and(
-					eq(calendarDays.establishmentId, establishmentId),
-					eq(calendarDays.date, today),
-					eq(calendarDays.status, 'approved')
-				)
-			),
+		listCalendar(establishmentId, today, today),
 		db
 			.select({ employeeId: dtrEntries.employeeId })
 			.from(dtrEntries)

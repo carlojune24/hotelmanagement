@@ -8,16 +8,15 @@ export type Role = OrgRole | EstablishmentRole;
 export const ORG_ROLES: OrgRole[] = ['main_hr', 'owner_readonly'];
 export const ESTABLISHMENT_ROLES: EstablishmentRole[] = ['business_manager', 'hr_clerk'];
 
-// A manager/clerk builds and submits the roster, files leave and overtime and proposes memos —
-// Main HR (`*`) decides them. `approval:*` is deliberately in no manager bundle.
+// A manager/clerk builds and submits the roster and files leave and overtime —
+// Main HR (`*`) decides them. Holidays and memos are Main HR's alone. `approval:*` is deliberately in no manager bundle.
 const MANAGER_CAPS = [
 	'establishment:read',
 	'employee:read',
 	'schedule:*',
 	'dtr:*',
 	'leave:file',
-	'overtime:file',
-	'memo:propose'
+	'overtime:file'
 ];
 // Pay is more sensitive than the roster: only the manager reads released payslips, not the clerk.
 const MANAGER_ONLY_CAPS = [...MANAGER_CAPS, 'payslip:read'];
@@ -59,7 +58,6 @@ export const ABILITY_ROWS: Array<{ label: string; cap: string }> = [
 	{ label: 'Build and submit the roster', cap: 'schedule:write' },
 	{ label: 'Import biometrics, edit and send the DTR', cap: 'dtr:write' },
 	{ label: 'File leave and overtime (Main HR approves)', cap: 'leave:file' },
-	{ label: 'Propose memos (Main HR approves)', cap: 'memo:propose' },
 	{ label: 'Read released payslips', cap: 'payslip:read' },
 	{ label: 'Approve or reject filings', cap: 'approval:decide' },
 	{ label: 'Register employees and assign them', cap: 'employee:write' },

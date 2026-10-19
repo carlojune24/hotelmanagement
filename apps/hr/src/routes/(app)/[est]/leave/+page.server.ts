@@ -5,7 +5,6 @@ import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { businessDateFor } from '$lib/server/time';
 import { listEmployees } from '$lib/server/hr/employees';
-import { CalendarError, calendarFormSchema, proposeCalendarDay } from '$lib/server/hr/calendar';
 import {
 	LeaveError,
 	cancelLeave,
@@ -69,7 +68,7 @@ function parseForm(fd: FormData) {
 }
 
 function failure(e: unknown) {
-	if (e instanceof LeaveError || e instanceof CalendarError) return fail(400, { error: e.message });
+	if (e instanceof LeaveError) return fail(400, { error: e.message });
 	throw e;
 }
 

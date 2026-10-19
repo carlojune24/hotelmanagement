@@ -17,7 +17,7 @@
 
 	const money = (c: number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(c / 100);
 	const isBir = $derived(data.agency === 'bir');
-	const isLoan = $derived(data.agency === 'sss_loan' || data.agency === 'pagibig_loan');
+	const isLoan = $derived(data.agency === 'sss_loan' || data.agency === 'pagibig_loan' || data.agency.startsWith('loan:'));
 	/** Contribution schedules have an employer share; tax and loan collections do not. */
 	const hasEmployer = $derived(!isBir && !isLoan);
 	const hasEc = $derived(data.agency === 'sss');

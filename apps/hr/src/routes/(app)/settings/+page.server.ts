@@ -109,6 +109,7 @@ leaveTypes: leaveTypeRows.map((t) => ({
 		})),
 		loanTypes: types.map((t) => ({
 			id: t.id,
+			key: t.key,
 			name: t.name,
 			remitTo: t.remitTo,
 			active: t.active,
@@ -264,6 +265,7 @@ export const actions: Actions = {
 
 	saveRemittance: async ({ request, locals }) => {
 		requireCap(locals.user, locals.access, 'payroll:*');
+		const form = await fd(request);
 		const parsed = z
 			.object({
 				sssNo: z.string().trim().max(40),
@@ -276,11 +278,19 @@ export const actions: Actions = {
 				dueSssLoan: dueDay,
 				duePagibigLoan: dueDay
 			})
-			.safeParse(await fd(request));
+			.safeParse(form);
 		if (!parsed.success) return fail(400, { error: 'Due days are 1–31 (or leave blank).' });
 		const p = parsed.data;
 		const org = await getOrganization();
+		// A deadline per bank / coop / lender loan type, sent as dueLoan_<type key>.
+		const lenderDays: Record<string, number | null> = {};
+		for (const t of (await listLoanTypes(org.id)).filter((t) => t.remitTo === 'lender')) {
+			const day = dueDay.safeParse(form[`dueLoan_${t.key}`]);
+			if (!day.success) return fail(400, { error: 'Due days are 1–31 (or leave blank).' });
+			lenderDays[t.key] = day.data;
+		}
 		const days = {
+			loans: lenderDays,
 			sss: p.dueSss,
 			philhealth: p.duePhilhealth,
 			pagibig: p.duePagibig,

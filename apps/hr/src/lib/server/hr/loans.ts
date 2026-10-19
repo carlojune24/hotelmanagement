@@ -24,15 +24,17 @@ export class LoanError extends Error {}
 // Types — Main HR's list (HR → Settings); the six below are only the starting set
 // ---------------------------------------------------------------------------
 
-export type RemitTo = 'sss' | 'pagibig' | 'none';
+export type RemitTo = 'sss' | 'pagibig' | 'lender' | 'none';
 export const REMIT_TO_LABEL: Record<RemitTo, string> = {
 	sss: 'SSS loans schedule',
 	pagibig: 'Pag-IBIG loans schedule',
+	lender: 'Bank, coop or other lender (its own schedule)',
 	none: 'Not remitted (company-side)'
 };
-export type LoanAgency = 'sss_loan' | 'pagibig_loan';
-export const agencyOfRemit = (r: string): LoanAgency | null =>
-	r === 'sss' ? 'sss_loan' : r === 'pagibig' ? 'pagibig_loan' : null;
+/** 'sss_loan' | 'pagibig_loan', or `loan:<type key>` for a lender that gets its own schedule. */
+export type LoanAgency = string;
+export const agencyOfRemit = (r: string, key: string): LoanAgency | null =>
+	r === 'sss' ? 'sss_loan' : r === 'pagibig' ? 'pagibig_loan' : r === 'lender' ? `loan:${key}` : null;
 
 const DEFAULT_TYPES: Array<{ key: string; name: string; remitTo: RemitTo }> = [
 	{ key: 'sss_salary', name: 'SSS salary loan', remitTo: 'sss' },
@@ -44,7 +46,7 @@ const DEFAULT_TYPES: Array<{ key: string; name: string; remitTo: RemitTo }> = [
 ];
 
 /** Government loans are taken out of pay before others when pay falls short; ties fall back to the id. */
-const rankOf = (agency: string | null) => (agency ? 0 : 1);
+const rankOf = (agency: string | null) => (!agency ? 2 : agency.startsWith('loan:') ? 1 : 0);
 export const byPriority = (
 	a: { agency: string | null; loanId: string },
 	b: { agency: string | null; loanId: string }
@@ -72,7 +74,7 @@ export async function listLoanTypes(organizationId: string) {
 
 export const loanTypeSchema = z.object({
 	name: z.string().trim().min(2, 'Give the loan type a name.').max(80),
-	remitTo: z.enum(['sss', 'pagibig', 'none'])
+	remitTo: z.enum(['sss', 'pagibig', 'lender', 'none'])
 });
 
 const keyOf = (name: string) =>
@@ -547,7 +549,7 @@ export async function removeSkip(organizationId: string, skipId: string) {
 
 /** Loans on an agency's schedule that were skipped for a pay month — nothing was deducted or remitted for them. */
 export async function skippedLoansFor(organizationId: string, agency: LoanAgency, period: string) {
-	const keys = (await listLoanTypes(organizationId)).filter((t) => agencyOfRemit(t.remitTo) === agency).map((t) => t.key);
+	const keys = (await listLoanTypes(organizationId)).filter((t) => agencyOfRemit(t.remitTo, t.key) === agency).map((t) => t.key);
 	if (keys.length === 0) return [];
 	const rows = await db
 		.select({
@@ -664,7 +666,7 @@ export async function loansDueFor(
 			loanId: l.id,
 			kind: l.kind,
 			label: type?.name ?? l.kind,
-			agency: agencyOfRemit(type?.remitTo ?? 'none'),
+			agency: agencyOfRemit(type?.remitTo ?? 'none', l.kind),
 			referenceNo: l.referenceNo,
 			due
 		});

@@ -23,8 +23,6 @@ describe.skipIf(!hasDb)('approvals (live DB)', async () => {
 	const { LeaveError, cancelLeave, decideLeave, fileLeave, leaveBalances, listLeaveDays, listLeaveTypes } =
 		await import('./leave');
 	const { OvertimeError, decideOvertime, fileOvertime, listApprovedOvertime } = await import('./overtime');
-	const { calendarFormSchema, decideCalendarDay, listCalendar, proposeCalendarDay, CalendarError } =
-		await import('./calendar');
 	const { PeriodError, decideWeek, getWeek, submitWeek } = await import('./schedule-periods');
 	const { applyShiftToCells, clearCells } = await import('./schedules');
 	const { listPendingApprovals } = await import('./approvals');
@@ -140,29 +138,6 @@ describe.skipIf(!hasDb)('approvals (live DB)', async () => {
 				fileOvertime(est, { employeeId: ana, date: '2026-03-04', startTime: '17:30', endTime: '18:30', reason: '' }, null, false)
 			).rejects.toThrow(OvertimeError);
 			await expect(decideOvertime(r.id, 'rejected', '', null)).rejects.toThrow(OvertimeError);
-		});
-	});
-
-	describe('memos', () => {
-		const input = calendarFormSchema.parse({
-			date: '2026-03-12',
-			name: 'Fiesta early release',
-			kind: 'memo',
-			creditHours: '',
-			waiveLateness: true
-		});
-		let id = '';
-		it('a proposal affects nothing until approved', async () => {
-			const row = await proposeCalendarDay(est, input, null);
-			id = row.id;
-			expect(row.status).toBe('submitted');
-			expect(await listCalendar(est, '2026-03-01', '2026-03-31')).toHaveLength(0);
-			expect(await listCalendar(est, '2026-03-01', '2026-03-31', { includePending: true })).toHaveLength(1);
-			await decideCalendarDay(id, 'approved', '', null);
-			expect(await listCalendar(est, '2026-03-01', '2026-03-31')).toHaveLength(1);
-		});
-		it('does not allow a second entry for the same date', async () => {
-			await expect(proposeCalendarDay(est, input, null)).rejects.toThrow(CalendarError);
 		});
 	});
 

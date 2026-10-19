@@ -259,6 +259,12 @@ deletingLeave = null;
 					<Label for="duePagibigLoan">Pag-IBIG loans due day</Label>
 					<Input id="duePagibigLoan" name="duePagibigLoan" type="number" min="1" max="31" value={data.remittance.dueDay.pagibig_loan ?? ''} class="mt-1" />
 				</div>
+				{#each data.loanTypes.filter((t) => t.remitTo === 'lender' && t.active) as t (t.id)}
+					<div>
+						<Label for="dueLoan_{t.key}">{t.name} due day</Label>
+						<Input id="dueLoan_{t.key}" name="dueLoan_{t.key}" type="number" min="1" max="31" value={data.remittance.dueDay.loans?.[t.key] ?? ''} class="mt-1" />
+					</div>
+				{/each}
 				<div>
 					<Label for="dueBir">BIR due day</Label>
 					<Input id="dueBir" name="dueBir" type="number" min="1" max="31" value={data.remittance.dueDay.bir ?? ''} class="mt-1" />

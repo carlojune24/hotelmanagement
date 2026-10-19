@@ -12,7 +12,7 @@ web
 
 Staff only — no public or guest surface.
 
-- **Main HR** (company-wide): registers employees across the company, assigns them to businesses, approves schedules / leave / overtime / memos, receives each business's DTR, runs payroll and releases payslips.
+- **Main HR** (company-wide): registers employees across the company, assigns them to businesses, approves schedules / leave / overtime, sets the company's holidays and memos, receives each business's DTR, runs payroll and releases payslips.
 - **Business managers and HR clerks** (per establishment, hotel or not): submit the roster, file leave and overtime, upload biometric data and generate the DTR, view only their assigned staff, and download released payslips.
 
 ## Product Purpose
@@ -26,7 +26,7 @@ Not part of the hotel booking product. HR-only: no POS, Finance or Dining. Busin
 ## Capabilities and Constraints
 
 - Built: sign-in, shell, establishments registry (phase 1); employees, roster + shift templates, leave policy/requests/balances, holiday calendar, overtime, biometric import and DTR with printable DTR/roster, night-differential settings (phase 2, moved from the hotel app with parity behaviour). People are company-wide with dated assignments to establishments (phase 3); DTR hand-off (phase 5) and payroll with payslips (phase 8), government coverage, remittances and a loans ledger (SSS / Pag-IBIG / company, auto-deducted per cutoff) are built; a manager or clerk's sidebar is their establishment's menu (with a switcher if they have several), opening on a Dashboard — today's roster, who is on leave, what needs attention, and announcements Main HR posts under Announcements; statutory rates must be confirmed by a person each run (`docs/HR_PLAN.md` §10).
-- Approvals (phase 4): managers submit rosters and file leave, overtime and memo proposals; Main HR decides them from the Approvals inbox. Main HR filing is approved on the spot. Only approved items affect rosters, DTRs and balances. A manager sends each month's saved DTR to Main HR, which locks it until received or returned. Employee writes and leave policy stay with Main HR.
+- Approvals (phase 4): managers submit rosters and file leave and overtime; Main HR decides them from the Approvals inbox. Holidays and memos are Main HR's alone (Holidays & memos): one entry applies to the whole company or to chosen establishments and reaches their rosters, DTRs and payroll without any filing. Main HR filing is approved on the spot. Only approved items affect rosters, DTRs and balances. A manager sends each month's saved DTR to Main HR, which locks it until received or returned. Employee writes and leave policy stay with Main HR.
 - Hotel and HR are authorities for different things: HR for people, hotel for logins. HR never grants hotel access. A hotel reads HR through one read-only endpoint with a per-establishment key Main HR issues (Settings → Hotel connection); it receives name, post, email and status only.
 - Payroll is computed from received DTRs, one run per company cutoff and one batch per establishment. The statutory tables are encoded from published schedules but **not verified against current circulars** — Main HR confirms them each run.
 

@@ -1,7 +1,6 @@
 import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db/index';
 import {
-	calendarDays,
 	employeeAssignments,
 	employees,
 	establishments,
@@ -14,6 +13,7 @@ import {
 import { addDays } from '$lib/roster';
 import { pendingApprovalCount } from './approvals';
 import { listBatches } from './bonuses';
+import { effectiveCalendar } from './calendar';
 import { getHandoff } from './dtr-submissions';
 import { listLoans, monthsAfter, scheduleStatus, skipMonthsByLoan } from './loans';
 import { getDayFactor } from './payroll';
@@ -304,19 +304,13 @@ export async function getCompanyDashboard(
 	}
 
 	// ---- holidays in the next 30 days
-	const holidays = await db
-		.selectDistinct({ date: calendarDays.date, name: calendarDays.name })
-		.from(calendarDays)
-		.where(
-			and(
-				eq(calendarDays.status, 'approved'),
-				inArray(calendarDays.kind, ['regular_holiday', 'special_holiday', 'local_holiday']),
-				gte(calendarDays.date, today),
-				lte(calendarDays.date, horizon),
-				estIds.length ? inArray(calendarDays.establishmentId, estIds) : sql`false`
-			)
-		)
-		.orderBy(asc(calendarDays.date));
+	const holidays = [
+		...new Map(
+			(await effectiveCalendar(estIds, today, horizon))
+				.filter((d) => ['regular_holiday', 'special_holiday', 'local_holiday'].includes(d.kind))
+				.map((d) => [`${d.date}|${d.name}`, { date: d.date, name: d.name }])
+		).values()
+	];
 	for (const h of holidays) upcoming.push({ date: h.date, label: `Holiday · ${h.name}`, href: '/reports/attendance' });
 	upcoming.sort((a, b) => a.date.localeCompare(b.date));
 

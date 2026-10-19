@@ -1,36 +1,15 @@
-import { fail } from '@sveltejs/kit';
-import { z } from 'zod';
 import { canAt } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
-import { writeAudit } from '$lib/server/audit';
-import { businessDateFor } from '$lib/server/time';
-import {
-	CalendarError,
-	calendarFormSchema,
-	deleteCalendarDay,
-	listCalendar,
-	saveCalendarDay
-} from '$lib/server/hr/calendar';
 import { listLeaveTypes } from '$lib/server/hr/leave';
-import type { Actions, PageServerLoad } from './$types';
+import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ locals, url }) => {
-	// Anyone who can see the establishment may read its leave rules and holiday calendar; only
-	// Main HR (leave:*) changes them — every action below still requires that.
+export const load: PageServerLoad = async ({ locals }) => {
+	// Anyone who can see the establishment may read the leave rules; only Main HR (leave:*) changes them.
 	requireCap(locals.user, locals.access, 'establishment:read', locals.establishment!.id);
 	const establishment = locals.establishment!;
 	const canEdit = locals.user!.isSystemAdmin || canAt(locals.access!, 'leave:*', establishment.id);
-	const yearParam = Number(url.searchParams.get('year'));
-	const year =
-		Number.isInteger(yearParam) && yearParam >= 2000 && yearParam <= 2100
-			? yearParam
-			: Number(businessDateFor(establishment.timezone).slice(0, 4));
-	const [types, calendar] = await Promise.all([
-		listLeaveTypes(establishment.id),
-		listCalendar(establishment.id, `${year}-01-01`, `${year}-12-31`, { includePending: true })
-	]);
+	const types = await listLeaveTypes(establishment.id);
 	return {
-		year,
 		canEdit,
 		/** Leave types are company-wide; the right to change them is Main HR's, whichever establishment is open. */
 		canEditTypes: canEdit,
@@ -51,62 +30,6 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			cashConvertible: t.cashConvertible,
 			requiresDocument: t.requiresDocument,
 			active: t.active
-		})),
-		calendar: calendar.map((c) => ({
-			id: c.id,
-			date: c.date,
-			name: c.name,
-			kind: c.kind,
-			creditMinutes: c.creditMinutes,
-			waiveLateness: c.waiveLateness
 		}))
 	};
-};
-
-export const actions: Actions = {
-	saveDay: async (event) => {
-		requireCap(event.locals.user, event.locals.access, 'leave:*', event.locals.establishment!.id);
-		try {
-			const establishmentId = event.locals.establishment!.id;
-			const fd = await event.request.formData();
-			const parsed = calendarFormSchema.safeParse({
-				date: fd.get('date'),
-				name: fd.get('name'),
-				kind: fd.get('kind'),
-				creditHours: fd.get('creditHours'),
-				waiveLateness: fd.get('waiveLateness') === 'on'
-			});
-			if (!parsed.success) return fail(400, { error: parsed.error.issues[0]!.message });
-			const id = fd.get('id');
-			const row = await saveCalendarDay(establishmentId, parsed.data, typeof id === 'string' && id ? id : undefined);
-			await writeAudit({
-				establishmentId,
-				actor: event.locals.user,
-				action: id ? 'calendar.update' : 'calendar.create',
-				entityType: 'calendar_day',
-				entityId: row.id,
-				after: row
-			});
-			return { ok: `${row.name} saved. Save the month's DTR again to carry it over.` };
-		} catch (e) {
-			if (e instanceof CalendarError) return fail(400, { error: e.message });
-			throw e;
-		}
-	},
-
-	deleteDay: async (event) => {
-		requireCap(event.locals.user, event.locals.access, 'leave:*', event.locals.establishment!.id);
-		const establishmentId = event.locals.establishment!.id;
-		const id = z.string().uuid().safeParse((await event.request.formData()).get('id'));
-		if (!id.success) return fail(400, { error: 'Missing day.' });
-		await deleteCalendarDay(establishmentId, id.data);
-		await writeAudit({
-			establishmentId,
-			actor: event.locals.user,
-			action: 'calendar.delete',
-			entityType: 'calendar_day',
-			entityId: id.data
-		});
-		return { ok: 'Removed from the calendar.' };
-	}
 };

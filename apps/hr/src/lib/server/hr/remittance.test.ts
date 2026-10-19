@@ -1,5 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildSchedule, dueDateFor, toCsv, type ScheduleLine } from './remittance';
+import {
+	agencyLabel,
+	agencySchema,
+	buildSchedule,
+	dueDateFor,
+	dueDayOf,
+	isLoanAgency,
+	isRemittable,
+	toCsv,
+	type ScheduleLine
+} from './remittance';
 import { cleanupTestEstablishments, createTestStaff, testOrgId } from './test-helpers';
 
 const line = (o: Partial<ScheduleLine> & { employeeId: string }): ScheduleLine => ({
@@ -53,6 +63,47 @@ describe('buildSchedule', () => {
 		expect(s.missingId).toEqual(['noid']);
 		expect(s.rows.map((r) => r.employeeId)).toEqual(['noid']);
 		expect(s.notCovered).toEqual([{ name: 'mwe', note: 'covered elsewhere' }]);
+	});
+});
+
+describe('loan schedules per loan type', () => {
+	const loans = [
+		{ kind: 'custom_bdo', agency: 'loan:custom_bdo', referenceNo: 'B-1', deducted: 150_000 },
+		{ kind: 'custom_coop', agency: 'loan:custom_coop', referenceNo: 'C-9', deducted: 40_000 },
+		{ kind: 'company', agency: null, referenceNo: null, deducted: 25_000 }
+	];
+	it('puts each lender on its own schedule, with no government ID and no missing-ID warning', () => {
+		const lines = [line({ employeeId: 'a', loans }), line({ employeeId: 'b', loans: [loans[1]!] })];
+		const bdo = buildSchedule('loan:custom_bdo', lines);
+		expect(bdo.totals.total).toBe(150_000);
+		expect(bdo.rows).toHaveLength(1);
+		expect(bdo.rows[0]).toMatchObject({ reference: 'B-1', idNumber: null });
+		expect(bdo.missingId).toEqual([]);
+		expect(buildSchedule('loan:custom_coop', lines).totals.total).toBe(80_000);
+	});
+	it('shows a company-side loan on its own list, matched by loan type', () => {
+		const s = buildSchedule('kept:company', [line({ employeeId: 'a', loans })]);
+		expect(s.totals.total).toBe(25_000);
+		expect(buildSchedule('sss_loan', [line({ employeeId: 'a', loans })]).rows).toHaveLength(0);
+	});
+	it('is empty, not absent, for a lender with nothing this month', () => {
+		const s = buildSchedule('loan:custom_bdo', [line({ employeeId: 'a' })]);
+		expect(s.rows).toHaveLength(0);
+		expect(s.totals.total).toBe(0);
+	});
+	it('names, routes and deadlines', () => {
+		expect(agencyLabel('loan:custom_bdo', new Map([['custom_bdo', 'BDO personal loan']]))).toBe('BDO personal loan');
+		expect(agencyLabel('sss')).toBe('SSS');
+		expect(isLoanAgency('loan:x')).toBe(true);
+		expect(isRemittable('kept:x')).toBe(false);
+		expect(isRemittable('loan:x')).toBe(true);
+		expect(agencySchema.safeParse('loan:custom_bdo').success).toBe(true);
+		expect(agencySchema.safeParse('kept:company').success).toBe(false);
+		expect(agencySchema.safeParse('nonsense').success).toBe(false);
+		const settings = { dueDay: { sss: 10, loans: { custom_bdo: 20 } } };
+		expect(dueDayOf(settings, 'loan:custom_bdo')).toBe(20);
+		expect(dueDayOf(settings, 'sss')).toBe(10);
+		expect(dueDayOf(settings, 'kept:company')).toBeNull();
 	});
 });
 

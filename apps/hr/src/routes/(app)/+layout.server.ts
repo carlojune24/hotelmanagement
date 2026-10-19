@@ -30,6 +30,8 @@ export const load: LayoutServerLoad = async ({ locals, url }) => {
 			payroll: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			// Filed by whoever runs payroll, but a section of its own.
 			announcements: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'announcement:*'),
+			// Holidays and memos are Main HR's alone; they reach every establishment's roster, DTR and payroll.
+			holidays: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'leave:*'),
 			remittances: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			loans: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			separations: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),

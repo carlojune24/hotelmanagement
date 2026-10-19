@@ -2,7 +2,8 @@ import { error } from '@sveltejs/kit';
 import { requireCap, requireUser } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { getOrganization } from '$lib/server/establishments';
-import { AGENCY_LABEL, agencySchema, employerNoFor, getSchedule, periodSchema } from '$lib/server/hr/remittance';
+import { listLoanTypes } from '$lib/server/hr/loans';
+import { agencyLabel, agencySchema, employerNoFor, getSchedule, periodSchema } from '$lib/server/hr/remittance';
 import type { PageServerLoad } from './$types';
 
 /** The printable schedule for one agency and month — Main HR only, and every print is audited. */
@@ -14,7 +15,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 	if (!agency.success || !period.success) error(404, 'Not found');
 
 	const org = await getOrganization();
-	const s = await getSchedule(org.id, agency.data, period.data);
+	const [s, types] = await Promise.all([getSchedule(org.id, agency.data, period.data), listLoanTypes(org.id)]);
 	await writeAudit({
 		actor: locals.user,
 		action: 'remittance.print',
@@ -23,7 +24,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 	});
 	return {
 		agency: agency.data,
-		label: AGENCY_LABEL[agency.data],
+		label: agencyLabel(agency.data, new Map(types.map((t) => [t.key, t.name]))),
 		period: period.data,
 		employer: s.settings.employer,
 		employerNo: employerNoFor(agency.data, s.settings),
