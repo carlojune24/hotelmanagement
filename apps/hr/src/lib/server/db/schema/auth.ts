@@ -57,4 +57,23 @@ export const loginChallenges = pgTable(
 	(t) => [index('login_challenges_user_idx').on(t.userId)]
 );
 
+/**
+ * Single-use recovery codes: a way past the emailed sign-in code when the mailbox is down. Only a hash is
+ * kept (bound to the user), so a database copy cannot reveal a usable code. A user holds up to 8; generating
+ * a new set replaces the old one.
+ */
+export const recoveryCodes = pgTable(
+	'recovery_codes',
+	{
+		id: pk(),
+		userId: uuid('user_id')
+			.notNull()
+			.references(() => users.id, { onDelete: 'cascade' }),
+		codeHash: text('code_hash').notNull(),
+		usedAt: timestamp('used_at', { withTimezone: true }),
+		createdAt: createdAt()
+	},
+	(t) => [index('recovery_codes_user_idx').on(t.userId)]
+);
+
 export type User = typeof users.$inferSelect;

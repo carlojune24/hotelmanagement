@@ -24,7 +24,8 @@
 		codeEmail = '',
 		codeMinutes = 10,
 		sendsLeft = 0,
-		info = null
+		info = null,
+		mailFailed = false
 	}: {
 		brandName: string;
 		logoUrl?: string | null;
@@ -44,6 +45,8 @@
 		codeMinutes?: number;
 		sendsLeft?: number;
 		info?: string | null;
+		/** The code could not be emailed; a recovery code is the way in. */
+		mailFailed?: boolean;
 	} = $props();
 
 	let busy = $state(false);
@@ -78,7 +81,12 @@
 			{#if step === 'code'}
 				<h2>Check your email</h2>
 				<p class="lead">
-					We sent a 6-digit code to <strong>{codeEmail}</strong>. It works for {codeMinutes} minutes.
+					{#if mailFailed}
+						We could not email a code to <strong>{codeEmail}</strong>. Enter one of your recovery codes below, or try
+						sending a new code.
+					{:else}
+						We sent a 6-digit code to <strong>{codeEmail}</strong>. It works for {codeMinutes} minutes.
+					{/if}
 				</p>
 				<form
 					method="POST"
@@ -97,12 +105,14 @@
 							name="code"
 							inputmode="numeric"
 							autocomplete="one-time-code"
-							pattern="[0-9 ]*"
-							maxlength="7"
+							maxlength="12"
 							placeholder="000 000"
+							autocapitalize="characters"
+							spellcheck="false"
 							required
 						/>
 					</label>
+					<p class="hint">Can't get the email? Enter one of your recovery codes instead.</p>
 					{#if error}<p role="alert" class="error">{error}</p>{/if}
 					{#if info && !error}<p role="status" class="info">{info}</p>{/if}
 					<button type="submit" disabled={busy}>{busy ? 'Checking…' : 'Sign in'}</button>
@@ -318,6 +328,11 @@
 	.error {
 		font-size: 0.875rem;
 		color: oklch(0.78 0.15 25);
+	}
+	.hint {
+		margin-top: -0.5rem;
+		font-size: 0.8125rem;
+		color: var(--muted);
 	}
 	.lead {
 		margin-top: 0.75rem;

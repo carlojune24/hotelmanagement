@@ -210,7 +210,14 @@ Main HR can require an emailed 6-digit code after the password (Settings → Sig
   saves it and a test email arrives; the code requirement cannot be switched on before that.
 - **Migration `0030_email_signin_code`** (two new tables). Deploy with `pnpm deploy:hr --migrate`.
 
-If the mailbox stops working while the code is required, nobody can get past the code screen. From `apps/hr` on the server:
+**Recovery codes.** Each person can create 8 single-use recovery codes on their Account page (the password is asked
+again). A recovery code works on the code screen in place of the emailed code, so a mailbox outage does not lock them
+out: if the email cannot be sent the sign-in is kept, the screen says so, and a recovery code signs in. Codes are
+stored only as hashes, shown once, and creating a new set replaces the old one. Main HR should create theirs as soon as
+the requirement is switched on and keep them printed. Migration `0031_recovery_codes`.
+
+If the mailbox stops working while the code is required and nobody has a recovery code, nobody can get past the code
+screen. From `apps/hr` on the server:
 
 ```bash
 pnpm exec tsx --env-file=.env scripts/disable-signin-code.ts

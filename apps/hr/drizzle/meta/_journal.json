@@ -218,6 +218,13 @@
       "when": 1792388884589,
       "tag": "0030_email_signin_code",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1792391213059,
+      "tag": "0031_recovery_codes",
+      "breakpoints": true
     }
   ]
 }

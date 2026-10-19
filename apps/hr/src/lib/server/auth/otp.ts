@@ -6,6 +6,7 @@ import { getMailer } from '$lib/server/email/mailer';
 import { renderSigninCodeEmail } from '$lib/server/email/signin-code';
 import { hashOpaqueToken } from '$lib/server/crypto';
 import { generateSessionToken } from './session';
+import { consumeRecoveryCode } from './recovery';
 
 /**
  * The emailed sign-in code. After a correct password the user has no session yet, only a challenge:
@@ -79,7 +80,7 @@ export async function startChallenge(input: {
 	next: string | null;
 	organizationId: string;
 	orgName: string;
-}): Promise<string> {
+}): Promise<{ token: string; emailed: boolean }> {
 	const token = generateSessionToken();
 	const id = hashOpaqueToken(token);
 	const code = generateCode();
@@ -93,13 +94,16 @@ export async function startChallenge(input: {
 		next: input.next,
 		expiresAt: new Date(Date.now() + CODE_MINUTES * 60_000)
 	});
+	// If the email cannot be sent the sign-in is kept anyway: the person still gets the code screen, where a
+	// recovery code works without any email, and "Send a new code" can try the mailbox again.
+	let emailed = true;
 	try {
 		await emailCode(input.organizationId, input.orgName, input.user.email, code);
 	} catch (e) {
-		await db.delete(loginChallenges).where(eq(loginChallenges.id, id));
-		throw e;
+		if (!(e instanceof OtpError)) throw e;
+		emailed = false;
 	}
-	return token;
+	return { token, emailed };
 }
 
 /** The live challenge behind a cookie token, with the address the code went to; null when there is none. */
@@ -124,7 +128,7 @@ export async function challengeFor(token: string | undefined) {
 }
 
 export type VerifyResult =
-	| { ok: true; userId: string; next: string | null }
+	| { ok: true; userId: string; next: string | null; /** A recovery code stood in for the emailed code. */ recovery: boolean }
 	| { ok: false; reason: 'missing' | 'expired' | 'locked' }
 	| { ok: false; reason: 'wrong'; attemptsLeft: number };
 
@@ -143,9 +147,12 @@ export async function verifyChallenge(token: string | undefined, typed: string):
 		await db.delete(loginChallenges).where(eq(loginChallenges.id, id));
 		return { ok: false, reason: old.expiresAt <= new Date() ? 'expired' : 'locked' };
 	}
-	if (codeMatches(id, row.codeHash, typed)) {
+	// The emailed code, or one of the user's recovery codes. Either way this try was already counted above.
+	const byEmail = codeMatches(id, row.codeHash, typed);
+	const byRecovery = !byEmail && (await consumeRecoveryCode(row.userId, typed));
+	if (byEmail || byRecovery) {
 		await db.delete(loginChallenges).where(eq(loginChallenges.id, id));
-		return { ok: true, userId: row.userId, next: row.next };
+		return { ok: true, userId: row.userId, next: row.next, recovery: byRecovery };
 	}
 	if (row.attempts >= MAX_ATTEMPTS) {
 		await db.delete(loginChallenges).where(eq(loginChallenges.id, id));

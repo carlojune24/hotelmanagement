@@ -25,6 +25,7 @@
 	codeMinutes={data.minutes}
 	sendsLeft={data.sendsLeft}
 	info={form && 'info' in form ? form.info : null}
+	mailFailed={data.mailFailed}
 	error={form && 'error' in form ? form.error : null}
 	backHref={null}
 />

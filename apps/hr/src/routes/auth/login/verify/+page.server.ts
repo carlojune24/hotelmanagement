@@ -21,7 +21,7 @@ import { users } from '$lib/server/db/schema/index';
 import { eq } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ locals, cookies }) => {
+export const load: PageServerLoad = async ({ locals, cookies, url }) => {
 	if (locals.user) redirect(302, '/');
 	const challenge = await challengeFor(cookies.get(OTP_COOKIE));
 	// No sign-in waiting for a code (never started, expired, or already used): back to the start.
@@ -31,12 +31,14 @@ export const load: PageServerLoad = async ({ locals, cookies }) => {
 		email: maskEmail(challenge.email),
 		minutes: CODE_MINUTES,
 		sendsLeft: Math.max(0, MAX_SENDS - challenge.sends),
+		/** The sign-in was kept but the email could not be sent: say so, and a recovery code still works. */
+		mailFailed: url.searchParams.get('sent') === '0',
 		logoUrl: logoUrlFor(org?.config),
 		orgName: org?.name ?? 'HR'
 	};
 };
 
-const codeForm = z.object({ code: z.string().min(1) });
+const codeForm = z.object({ code: z.string().trim().min(1).max(40) });
 
 export const actions: Actions = {
 	verify: async (event) => {
@@ -45,7 +47,7 @@ export const actions: Actions = {
 		if (!challenge) redirect(303, '/auth/login?code=expired');
 
 		const parsed = codeForm.safeParse(Object.fromEntries(await event.request.formData()));
-		if (!parsed.success) return fail(400, { error: 'Enter the 6-digit code from your email.' });
+		if (!parsed.success) return fail(400, { error: 'Enter the 6-digit code from your email, or a recovery code.' });
 
 		const ip = event.getClientAddress();
 		const wait = loginRetryAfter(ip, challenge.email);
@@ -70,6 +72,16 @@ export const actions: Actions = {
 				});
 			}
 			redirect(303, `/auth/login?code=${result.reason === 'locked' ? 'locked' : 'expired'}`);
+		}
+
+		if (result.recovery) {
+			await writeAudit({
+				actor: null,
+				action: 'signin_code.recovery_used',
+				entityType: 'user',
+				entityId: result.userId,
+				after: { ip }
+			});
 		}
 
 		// Someone could have been disabled between the password and the code.

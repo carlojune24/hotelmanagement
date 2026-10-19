@@ -42,6 +42,15 @@ describe('sign-in code, pure parts', () => {
 	});
 });
 
+describe('account page actions', () => {
+	it('uses only named actions (password and recovery codes live on one page)', async () => {
+		const { actions } = await import('../../../routes/(app)/account/+page.server');
+		const names = Object.keys(actions as object);
+		expect(names).toEqual(expect.arrayContaining(['password', 'recovery']));
+		expect(names).not.toContain('default');
+	});
+});
+
 describe('verify page actions', () => {
 	// SvelteKit refuses a page that has both a default action and named ones (a 500 at run time).
 	it('uses only named actions, so the Resend button can sit beside Verify', async () => {
@@ -77,7 +86,8 @@ describe.skipIf(!hasDb)('sign-in code, the whole flow (live DB, local mail sink)
 	const email = `otp-${Math.random().toString(36).slice(2, 8)}@example.test`;
 	let sink: Awaited<ReturnType<typeof startSmtpSink>>;
 
-	const start = () => O.startChallenge({ user: { id: userId, email }, next: '/payroll', organizationId: org, orgName: 'OTP test' });
+	const startFull = () => O.startChallenge({ user: { id: userId, email }, next: '/payroll', organizationId: org, orgName: 'OTP test' });
+	const start = async () => (await startFull()).token;
 	const idOf = (token: string) => hashOpaqueToken(token);
 
 	beforeAll(async () => {
@@ -126,7 +136,7 @@ describe.skipIf(!hasDb)('sign-in code, the whole flow (live DB, local mail sink)
 		expect((await O.challengeFor(token))?.email).toBe(email);
 		const wrong = code === '000000' ? '000001' : '000000';
 		expect(await O.verifyChallenge(token, wrong)).toEqual({ ok: false, reason: 'wrong', attemptsLeft: 4 });
-		expect(await O.verifyChallenge(token, ` ${code.slice(0, 3)} ${code.slice(3)} `)).toEqual({ ok: true, userId, next: '/payroll' });
+		expect(await O.verifyChallenge(token, ` ${code.slice(0, 3)} ${code.slice(3)} `)).toEqual({ ok: true, userId, next: '/payroll', recovery: false });
 		// Used once: the same code is gone.
 		expect(await O.verifyChallenge(token, code)).toEqual({ ok: false, reason: 'missing' });
 	});
@@ -172,15 +182,62 @@ describe.skipIf(!hasDb)('sign-in code, the whole flow (live DB, local mail sink)
 		expect(await O.verifyChallenge(token, second)).toMatchObject({ ok: true, userId });
 	});
 
-	it('a newer sign-in replaces an unfinished one, and a down mailbox starts nothing', async () => {
+	it('lets a recovery code stand in for the emailed code, once', async () => {
+		const R = await import('./recovery');
+		const codes = await R.issueRecoveryCodes(userId);
+		expect(codes).toHaveLength(8);
+		expect(await R.recoverySummary(userId)).toEqual({ unused: 8, total: 8 });
+
+		const token = await start();
+		// Typed in lower case without the dash, as someone reading it off paper might.
+		const typed = codes[0]!.replace('-', '').toLowerCase();
+		expect(await O.verifyChallenge(token, typed)).toEqual({ ok: true, userId, next: '/payroll', recovery: true });
+		expect(await R.recoverySummary(userId)).toEqual({ unused: 7, total: 8 });
+
+		// The same code does not work a second time, and counts as a wrong try.
+		const again = await start();
+		expect(await O.verifyChallenge(again, codes[0]!)).toMatchObject({ ok: false, reason: 'wrong', attemptsLeft: 4 });
+		// Another unused code still works.
+		expect(await O.verifyChallenge(again, codes[1]!)).toMatchObject({ ok: true, recovery: true });
+	});
+
+	it('a recovery code is only good for its own owner, and a new set replaces the old', async () => {
+		const R = await import('./recovery');
+		const [other] = await db.insert(users).values({ email: `other-${email}`, name: 'Other', passwordHash: 'x' }).returning({ id: users.id });
+		try {
+			const mine = await R.issueRecoveryCodes(userId);
+			expect(await R.consumeRecoveryCode(other!.id, mine[2]!)).toBe(false);
+			const fresh = await R.issueRecoveryCodes(userId);
+			expect(await R.consumeRecoveryCode(userId, mine[2]!)).toBe(false);
+			expect(await R.consumeRecoveryCode(userId, fresh[2]!)).toBe(true);
+			expect(await R.consumeRecoveryCode(userId, fresh[2]!)).toBe(false);
+		} finally {
+			await db.delete(users).where(eq(users.id, other!.id));
+		}
+	});
+
+	it('counts recovery guesses against the same 5 tries, so they cannot be brute-forced', async () => {
+		const token = await start();
+		const results = [];
+		for (let i = 0; i < 5; i++) results.push(await O.verifyChallenge(token, 'ZZZZ-ZZZZ'));
+		expect(results.map((r) => (r.ok ? 'ok' : r.reason))).toEqual(['wrong', 'wrong', 'wrong', 'wrong', 'locked']);
+	});
+
+	it('a newer sign-in replaces an unfinished one', async () => {
 		const older = await start();
 		const newer = await start();
 		expect(await O.challengeFor(older)).toBeNull();
 		expect(await O.challengeFor(newer)).not.toBeNull();
+	});
 
+	it('keeps the sign-in alive when the mailbox is down, so a recovery code still gets the person in', async () => {
+		const R = await import('./recovery');
+		const codes = await R.issueRecoveryCodes(userId);
 		await db.update(emailSettings).set({ port: 1 }).where(eq(emailSettings.organizationId, org));
-		await expect(start()).rejects.toThrow(/could not be emailed/);
-		// Nothing is left waiting for a code nobody received.
-		expect(await db.select().from(loginChallenges).where(eq(loginChallenges.userId, userId))).toHaveLength(0);
+		const { token, emailed } = await startFull();
+		expect(emailed).toBe(false);
+		expect(await O.challengeFor(token)).not.toBeNull();
+		// No email arrived, but the recovery code works and signs in.
+		expect(await O.verifyChallenge(token, codes[3]!)).toMatchObject({ ok: true, userId, recovery: true });
 	});
 });

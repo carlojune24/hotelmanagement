@@ -9,7 +9,7 @@ import {
 } from '$lib/server/auth/rate-limit';
 import { safeNext } from '$lib/server/auth/redirect';
 import { createSession, generateSessionToken, setSessionCookie } from '$lib/server/auth/session';
-import { CODE_MINUTES, OTP_COOKIE, OtpError, signinCodeRequired, startChallenge } from '$lib/server/auth/otp';
+import { CODE_MINUTES, OTP_COOKIE, signinCodeRequired, startChallenge } from '$lib/server/auth/otp';
 import { getOrganization } from '$lib/server/establishments';
 import { logoUrlFor } from '$lib/server/brand';
 import type { Actions, PageServerLoad } from './$types';
@@ -54,27 +54,21 @@ export const actions: Actions = {
 		// With the emailed code switched on there is no session yet: email the code and ask for it.
 		const org = await getOrganization();
 		if (await signinCodeRequired(org.id)) {
-			try {
-				const challenge = await startChallenge({
-					user: { id: user.id, email: user.email },
-					next: safeNext(next, '/'),
-					organizationId: org.id,
-					orgName: org.name
-				});
-				event.cookies.set(OTP_COOKIE, challenge, {
-					path: '/',
-					httpOnly: true,
-					sameSite: 'lax',
-					secure: !event.url.hostname.includes('localhost'),
-					maxAge: CODE_MINUTES * 60
-				});
-			} catch (e) {
-				if (e instanceof OtpError) {
-					return fail(503, { error: 'We could not email your sign-in code. Try again in a moment, or ask Main HR.' });
-				}
-				throw e;
-			}
-			redirect(303, '/auth/login/verify');
+			const { token: challenge, emailed } = await startChallenge({
+				user: { id: user.id, email: user.email },
+				next: safeNext(next, '/'),
+				organizationId: org.id,
+				orgName: org.name
+			});
+			event.cookies.set(OTP_COOKIE, challenge, {
+				path: '/',
+				httpOnly: true,
+				sameSite: 'lax',
+				secure: !event.url.hostname.includes('localhost'),
+				maxAge: CODE_MINUTES * 60
+			});
+			// When the email could not be sent the code screen says so, and a recovery code still works there.
+			redirect(303, emailed ? '/auth/login/verify' : '/auth/login/verify?sent=0');
 		}
 
 		const token = generateSessionToken();
