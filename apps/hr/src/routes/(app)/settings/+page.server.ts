@@ -37,6 +37,14 @@ import {
 } from '$lib/server/hr/loans';
 import { getRemittanceSettings, saveRemittanceSettings } from '$lib/server/hr/remittance';
 import {
+	EmailSettingsError,
+	getEmailSettingsView,
+	saveEmailSettings,
+	sendTestEmail,
+	setSigninCodeRequired
+} from '$lib/server/email/settings';
+import { SecretsError } from '$lib/server/secrets';
+import {
 	ContractError,
 	DEFAULT_CONTRACT_TEMPLATES,
 	MERGE_FIELDS,
@@ -69,7 +77,11 @@ const estTypes = await listEstablishmentTypes(org.id);
 	const leaveTypeRows = await listLeaveTypesForOrg(org.id);
 	const remittance = await getRemittanceSettings(org.id);
 	const clearanceItems = await getClearanceTemplate(org.id);
+	const email = await getEmailSettingsView(org.id);
 	return {
+		email,
+		/** The address the test email goes to: the person doing the setup, so they see it arrive. */
+		myEmail: locals.user!.email,
 		contractTemplates: await getContractTemplates(org.id),
 		contractDefaults: DEFAULT_CONTRACT_TEMPLATES,
 		contractFields: MERGE_FIELDS,
@@ -259,6 +271,76 @@ export const actions: Actions = {
 			return { ok: 'Clearance checklist saved.' };
 		} catch (e) {
 			if (e instanceof SeparationError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
+	saveEmail: async ({ request, locals }) => {
+		requireCap(locals.user, locals.access, 'payroll:*');
+		const fdata = await request.formData();
+		const parsed = z
+			.object({
+				host: z.string().trim().min(1, 'Enter the mail server address, e.g. smtp.gmail.com.').max(200),
+				port: z.coerce.number().int().min(1, 'Enter the mail server port, e.g. 587.').max(65535),
+				username: z.string().trim().max(200),
+				password: z.string().max(500),
+				fromName: z.string().trim().max(120),
+				fromAddress: z.string().trim().email('Enter the address the codes are sent from.'),
+				replyTo: z.union([z.literal(''), z.string().trim().email('The reply-to address is not valid.')])
+			})
+			.safeParse({
+				host: fdata.get('host') ?? '',
+				port: fdata.get('port') ?? '',
+				username: fdata.get('username') ?? '',
+				password: fdata.get('password') ?? '',
+				fromName: fdata.get('fromName') ?? '',
+				fromAddress: fdata.get('fromAddress') ?? '',
+				replyTo: fdata.get('replyTo') ?? ''
+			});
+		if (!parsed.success) return fail(400, { error: parsed.error.issues[0]!.message });
+		try {
+			const org = await getOrganization();
+			const p = parsed.data;
+			await saveEmailSettings(
+				org.id,
+				{
+					host: p.host,
+					port: p.port,
+					secure: fdata.get('secure') === 'on',
+					username: p.username || null,
+					password: p.password || null,
+					fromName: p.fromName || null,
+					fromAddress: p.fromAddress,
+					replyTo: p.replyTo || null
+				},
+				locals.user
+			);
+			return { ok: 'Mailbox saved. Send a test email next.' };
+		} catch (e) {
+			if (e instanceof EmailSettingsError) return fail(400, { error: e.message });
+			// The password cannot be stored without the server's encryption key.
+			if (e instanceof SecretsError) return fail(500, { error: `The password could not be stored securely. ${e.message}` });
+			throw e;
+		}
+	},
+
+	testEmail: async ({ locals }) => {
+		requireCap(locals.user, locals.access, 'payroll:*');
+		const org = await getOrganization();
+		const result = await sendTestEmail(org.id, org.name, locals.user!.email);
+		if (!result.ok) return fail(400, { error: `The test email did not go through: ${result.error}` });
+		return { ok: `Test email sent to ${locals.user!.email}. Check that it arrived, then you can switch the sign-in code on.` };
+	},
+
+	setSigninCode: async ({ request, locals }) => {
+		requireCap(locals.user, locals.access, 'payroll:*');
+		const on = (await request.formData()).get('on') === 'on';
+		try {
+			const org = await getOrganization();
+			await setSigninCodeRequired(org.id, on, locals.user);
+			return { ok: on ? 'Everyone now enters an emailed code after their password.' : 'The emailed sign-in code is off.' };
+		} catch (e) {
+			if (e instanceof EmailSettingsError) return fail(400, { error: e.message });
 			throw e;
 		}
 	},

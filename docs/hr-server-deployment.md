@@ -198,8 +198,31 @@ pnpm deploy:hr --migrate    # also run DB migrations before the restart
 
 `apps/hr/scripts/deploy.sh` does Step 4 plus the pm2 restart. It never overwrites the server `.env`, and it deploys the working tree, committed or not. Override `HR_DEPLOY_HOST`, `HR_DEPLOY_DIR`, `HR_DEPLOY_PM2` if the target changes. There is no rollback: fix and redeploy.
 
+## Sign-in code by email
+
+Main HR can require an emailed 6-digit code after the password (Settings → Sign-in & email). What it needs on the server:
+
+- **`APP_ENCRYPTION_KEY` in `apps/hr/.env`** (32 bytes, base64). It encrypts the mailbox password saved in Settings. Generate once:
+  `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` and add the line, then restart `mm-hr`
+  (`pm2 restart mm-hr --update-env`). Keep a copy somewhere safe: if it is lost or changed, the saved mailbox password
+  cannot be read and has to be entered again. Without the key, saving a mailbox that has a password fails with a clear message.
+- **A mailbox that allows SMTP sending** (for Gmail: smtp.gmail.com, port 587, an app password). Nothing is sent until Main HR
+  saves it and a test email arrives; the code requirement cannot be switched on before that.
+- **Migration `0030_email_signin_code`** (two new tables). Deploy with `pnpm deploy:hr --migrate`.
+
+If the mailbox stops working while the code is required, nobody can get past the code screen. From `apps/hr` on the server:
+
+```bash
+pnpm exec tsx --env-file=.env scripts/disable-signin-code.ts
+```
+
+It switches the requirement off and clears waiting sign-ins. Main HR can switch it back on in Settings.
+
+The code step lives at `/auth/login/verify`, so the Cloudflare login rate-limit rule (path contains `login`) covers it too.
+
 ## Known gaps
 
+- **Cloudflare settings** (SSL, DNSSEC, WAF, bot and login rate limiting) are recorded in `cloudflare-security.md`.
 - **No access gate in front of the app.** The URL is public and protected only by the app's own login. For payroll data, put Cloudflare Access (allow-listed emails) on `hr.mmgroupcompanies.com` in Zero Trust → Access → Applications. It needs no server change. Check nothing posts to the app from outside a browser first, since Access would block it.
 - **Database contains test data** from the laptop copy (mock hotels, the DTR sample hotel, test staff). Clean it before real use; `apps/hr/scripts/remove-dtr-sample.sql` removes the DTR sample.
 - **No backups.** Nothing dumps `mm_hr` on a schedule. Add a nightly `pg_dump` cron job before relying on this data.

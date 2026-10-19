@@ -25,6 +25,7 @@ import PlusIcon from '@lucide/svelte/icons/plus';
 { key: 'leave', label: 'Leave types' },
 		{ key: 'loans', label: 'Loan types' },
 		{ key: 'remittances', label: 'Employer numbers' },
+		{ key: 'signin', label: 'Sign-in & email' },
 		{ key: 'clearance', label: 'Clearance items' },
 		{ key: 'payroll', label: 'Payroll' },
 		{ key: 'costcenters', label: 'Cost centers' },
@@ -34,7 +35,7 @@ import PlusIcon from '@lucide/svelte/icons/plus';
 	type Tab = (typeof TABS)[number]['key'];
 	// The tab lives in the address (?tab=) so a reload or a shared link lands on the same one.
 const tabParam = page.url.searchParams.get('tab');
-	let tab = $state<Tab>(tabParam === 'loans' || tabParam === 'leave' || tabParam === 'remittances' || tabParam === 'clearance' || tabParam === 'logo' || tabParam === 'costcenters' || tabParam === 'payroll' || tabParam === 'contracts'
+	let tab = $state<Tab>(tabParam === 'loans' || tabParam === 'leave' || tabParam === 'remittances' || tabParam === 'signin' || tabParam === 'clearance' || tabParam === 'logo' || tabParam === 'costcenters' || tabParam === 'payroll' || tabParam === 'contracts'
 			? tabParam
 			: 'establishments');
 	function pick(next: Tab) {
@@ -217,6 +218,116 @@ deletingLeave = null;
 			</Table.Body>
 		</Table.Root>
 </div>
+{:else if tab === 'signin'}
+	<div id="panel-signin" role="tabpanel" aria-labelledby="tab-signin" class="panel space-y-6 p-5 md:p-6" aria-label="Sign-in and email">
+		<div class="max-w-2xl">
+			<h2 class="text-2xl font-light">Sign-in code by email</h2>
+			<p class="mt-1 text-sm text-ink-muted">
+				When this is on, everyone enters a 6-digit code emailed to them after their password. The code works once,
+				for 10 minutes and 5 tries. It needs a mailbox the system can send from, set up below.
+			</p>
+		</div>
+
+		<form method="POST" action="?/saveEmail" use:enhance={submit} class="grid gap-3 sm:grid-cols-2">
+			<div class="sm:col-span-2">
+				<h3 class="text-lg font-light">Mailbox</h3>
+				<p class="text-sm text-ink-muted">
+					Any email account that allows SMTP sending. For Gmail use smtp.gmail.com, port 587, and an app password
+					(not the normal password). The password is stored encrypted and is never shown again.
+				</p>
+			</div>
+			<div>
+				<Label for="mailHost">Mail server (SMTP)</Label>
+				<Input id="mailHost" name="host" value={data.email?.host ?? ''} placeholder="smtp.gmail.com" class="mt-1" required />
+			</div>
+			<div>
+				<Label for="mailPort">Port</Label>
+				<Input id="mailPort" name="port" type="number" min="1" max="65535" value={data.email?.port ?? 587} class="mt-1" required />
+			</div>
+			<div>
+				<Label for="mailUser">Username</Label>
+				<Input id="mailUser" name="username" value={data.email?.username ?? ''} autocomplete="off" class="mt-1" />
+			</div>
+			<div>
+				<Label for="mailPass">Password</Label>
+				<Input
+					id="mailPass"
+					name="password"
+					type="password"
+					autocomplete="new-password"
+					placeholder={data.email?.passwordHint ? `Saved (${data.email.passwordHint}). Leave blank to keep it.` : ''}
+					class="mt-1"
+				/>
+			</div>
+			<div>
+				<Label for="mailFrom">Send from (address)</Label>
+				<Input id="mailFrom" name="fromAddress" type="email" value={data.email?.fromAddress ?? ''} placeholder="hr@yourcompany.com" class="mt-1" required />
+			</div>
+			<div>
+				<Label for="mailFromName">Sender name</Label>
+				<Input id="mailFromName" name="fromName" value={data.email?.fromName ?? ''} placeholder="Defaults to the company name" class="mt-1" />
+			</div>
+			<div>
+				<Label for="mailReply">Reply-to (optional)</Label>
+				<Input id="mailReply" name="replyTo" type="email" value={data.email?.replyTo ?? ''} class="mt-1" />
+			</div>
+			<label class="flex items-center gap-2 self-end pb-2 text-sm">
+				<input type="checkbox" name="secure" checked={data.email?.secure ?? false} class="size-4" />
+				Use a secure connection from the start (port 465)
+			</label>
+			<div class="sm:col-span-2 flex flex-wrap items-center gap-3">
+				<Button type="submit" variant="outline" disabled={busy}>Save mailbox</Button>
+				{#if data.email}<span class="text-xs text-ink-muted">Saving again switches the sign-in code off until a new test email arrives.</span>{/if}
+			</div>
+		</form>
+
+		{#if data.email}
+			<div class="space-y-3 border-t border-dotted border-ink/25 pt-5">
+				<h3 class="text-lg font-light">Test</h3>
+				<p class="text-sm">
+					{#if data.email.lastTestOk === true}
+						<Badge variant="secondary">Test email sent</Badge>
+						<span class="ml-2 text-ink-muted">{new Date(data.email.lastTestAt!).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+					{:else if data.email.lastTestOk === false}
+						<Badge variant="destructive">Test failed</Badge>
+						<span class="ml-2 text-ink-muted">{data.email.lastTestError}</span>
+					{:else}
+						<Badge variant="outline">Not tested yet</Badge>
+					{/if}
+				</p>
+				<form method="POST" action="?/testEmail" use:enhance={submit}>
+					<Button type="submit" variant="outline" disabled={busy}>Send a test email to {data.myEmail}</Button>
+				</form>
+			</div>
+
+			<div class="space-y-3 border-t border-dotted border-ink/25 pt-5">
+				<h3 class="text-lg font-light">Require the code at sign-in</h3>
+				<form method="POST" action="?/setSigninCode" use:enhance={submit} class="space-y-3">
+					<label class="flex items-start gap-2 text-sm">
+						<input
+							type="checkbox"
+							name="on"
+							checked={data.email.signinCodeRequired}
+							disabled={data.email.lastTestOk !== true}
+							class="mt-0.5 size-4"
+						/>
+						<span>
+							Everyone, including Main HR, must enter an emailed code after their password.
+							{#if data.email.lastTestOk !== true}
+								<span class="block text-ink-muted">Available once a test email has arrived.</span>
+							{/if}
+						</span>
+					</label>
+					<Button type="submit" disabled={busy || data.email.lastTestOk !== true}>Save</Button>
+				</form>
+				<p class="max-w-2xl text-xs text-ink-muted">
+					If the mailbox stops working, nobody can sign in while this is on. Someone with access to the server can
+					switch it off with <span class="font-mono">pnpm exec tsx scripts/disable-signin-code.ts</span> in the
+					HR app folder.
+				</p>
+			</div>
+		{/if}
+	</div>
 {:else if tab === 'remittances'}
 	<div id="panel-remittances" role="tabpanel" aria-labelledby="tab-remittances" class="panel space-y-5 p-5 md:p-6" aria-label="Employer numbers and deadlines">
 		<div class="max-w-2xl">

@@ -6,7 +6,7 @@
 	/**
 	 * The sign-in screen shared by the hotel platform login, each hotel's staff login and the HR app:
 	 * dark black-and-gold over a photo, same world as the public landing page. Copy is passed in.
-	 * (Kept as an identical copy in apps/hotel and apps/hr; edit both.)
+	 * (Kept as a copy in apps/hotel and apps/hr; edit both. Only the HR copy has the emailed-code step.)
 	 */
 	let {
 		brandName,
@@ -19,7 +19,12 @@
 		next = '',
 		error = null,
 		backHref = null,
-		backLabel = 'Back'
+		backLabel = 'Back',
+		step = 'password',
+		codeEmail = '',
+		codeMinutes = 10,
+		sendsLeft = 0,
+		info = null
 	}: {
 		brandName: string;
 		logoUrl?: string | null;
@@ -32,6 +37,13 @@
 		error?: string | null;
 		backHref?: string | null;
 		backLabel?: string;
+		/** 'code' = the emailed 6-digit code, asked for after a correct password. */
+		step?: 'password' | 'code';
+		/** Masked address the code was sent to. */
+		codeEmail?: string;
+		codeMinutes?: number;
+		sendsLeft?: number;
+		info?: string | null;
 	} = $props();
 
 	let busy = $state(false);
@@ -63,29 +75,69 @@
 		</section>
 
 		<div class="card">
-			<h2>Sign in</h2>
-			<form
-				method="POST"
-				use:enhance={() => {
-					busy = true;
-					return async ({ update }) => {
-						await update({ reset: false });
-						busy = false;
-					};
-				}}
-			>
-				<input type="hidden" name="next" value={next} />
-				<label>
-					<span>Email</span>
-					<input name="email" type="email" autocomplete="username" required />
-				</label>
-				<label>
-					<span>Password</span>
-					<input name="password" type="password" autocomplete="current-password" required />
-				</label>
-				{#if error}<p role="alert" class="error">{error}</p>{/if}
-				<button type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
-			</form>
+			{#if step === 'code'}
+				<h2>Check your email</h2>
+				<p class="lead">
+					We sent a 6-digit code to <strong>{codeEmail}</strong>. It works for {codeMinutes} minutes.
+				</p>
+				<form
+					method="POST"
+					action="?/verify"
+					use:enhance={() => {
+						busy = true;
+						return async ({ update }) => {
+							await update({ reset: false });
+							busy = false;
+						};
+					}}
+				>
+					<label>
+						<span>Sign-in code</span>
+						<input
+							name="code"
+							inputmode="numeric"
+							autocomplete="one-time-code"
+							pattern="[0-9 ]*"
+							maxlength="7"
+							placeholder="000 000"
+							required
+						/>
+					</label>
+					{#if error}<p role="alert" class="error">{error}</p>{/if}
+					{#if info && !error}<p role="status" class="info">{info}</p>{/if}
+					<button type="submit" disabled={busy}>{busy ? 'Checking…' : 'Sign in'}</button>
+					{#if sendsLeft > 0}
+						<button type="submit" formaction="?/resend" formnovalidate class="secondary" disabled={busy}>
+							Send a new code
+						</button>
+					{/if}
+				</form>
+				<a class="again" href="/auth/login">Use a different account</a>
+			{:else}
+				<h2>Sign in</h2>
+				<form
+					method="POST"
+					use:enhance={() => {
+						busy = true;
+						return async ({ update }) => {
+							await update({ reset: false });
+							busy = false;
+						};
+					}}
+				>
+					<input type="hidden" name="next" value={next} />
+					<label>
+						<span>Email</span>
+						<input name="email" type="email" autocomplete="username" required />
+					</label>
+					<label>
+						<span>Password</span>
+						<input name="password" type="password" autocomplete="current-password" required />
+					</label>
+					{#if error}<p role="alert" class="error">{error}</p>{/if}
+					<button type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+				</form>
+			{/if}
 		</div>
 
 		<div class="foot">
@@ -239,7 +291,8 @@
 		color: var(--muted);
 	}
 	input[name='email'],
-	input[name='password'] {
+	input[name='password'],
+	input[name='code'] {
 		height: 3rem;
 		padding-inline: 1.1rem;
 		border: 1px solid oklch(1 0 0 / 0.2);
@@ -250,14 +303,46 @@
 		outline: none;
 		transition: border-color 0.2s, box-shadow 0.2s;
 	}
+	input[name='code'] {
+		font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+		font-size: 1.25rem;
+		letter-spacing: 0.3em;
+		text-align: center;
+	}
 	input[name='email']:focus-visible,
-	input[name='password']:focus-visible {
+	input[name='password']:focus-visible,
+	input[name='code']:focus-visible {
 		border-color: var(--gold);
 		box-shadow: 0 0 0 3px oklch(0.82 0.13 88 / 0.25);
 	}
 	.error {
 		font-size: 0.875rem;
 		color: oklch(0.78 0.15 25);
+	}
+	.lead {
+		margin-top: 0.75rem;
+		font-size: 0.9375rem;
+		line-height: 1.5;
+		color: oklch(0.9 0.01 85);
+	}
+	.info {
+		font-size: 0.875rem;
+		color: var(--gold);
+	}
+	button.secondary {
+		border: 1px solid oklch(1 0 0 / 0.25);
+		background: transparent;
+		color: var(--ink);
+	}
+	button.secondary:hover:not(:disabled),
+	button.secondary:focus-visible {
+		background: oklch(1 0 0 / 0.08);
+	}
+	.again {
+		display: inline-block;
+		margin-top: 1.25rem;
+		font-size: 0.875rem;
+		color: var(--gold);
 	}
 	button {
 		min-height: 3rem;
@@ -302,6 +387,7 @@
 		}
 		input[name='email'],
 		input[name='password'],
+		input[name='code'],
 		button {
 			height: 2.75rem;
 			min-height: 2.75rem;
