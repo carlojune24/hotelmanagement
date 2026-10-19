@@ -37,7 +37,9 @@ export async function listDtrEntries(establishmentId: string, from: string, to: 
 			undertimeMinutes: dtrEntries.undertimeMinutes,
 			isAbsent: dtrEntries.isAbsent,
 			remarks: dtrEntries.remarks,
-			source: dtrEntries.source
+			source: dtrEntries.source,
+			leaveMinutes: dtrEntries.leaveMinutes,
+			leaveRequestId: dtrEntries.leaveRequestId
 		})
 		.from(dtrEntries)
 		.innerJoin(employees, eq(employees.id, dtrEntries.employeeId))

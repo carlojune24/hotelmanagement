@@ -19,6 +19,10 @@ export type DtrDay = {
 	workedMinutes: number;
 	lateMinutes: number;
 	undertimeMinutes: number;
+	/** Approved overtime minutes; they are part of `workedMinutes`. */
+	otMinutes: number;
+	/** The day is covered by approved leave, whether or not there are punches. */
+	hasLeave: boolean;
 	remarks: string;
 	/** work = has times; leave / holiday = covered without punches; absent / rest = that state; empty = nothing rostered or not yet happened. */
 	kind: 'work' | 'absent' | 'rest' | 'empty' | 'leave' | 'holiday';
@@ -30,6 +34,7 @@ export type DtrTotals = {
 	workedMinutes: number;
 	lateMinutes: number;
 	undertimeMinutes: number;
+	otMinutes: number;
 	absentDays: number;
 	workedDays: number;
 	/** Days with a working shift on the roster — the only days an absence can be counted against. */
@@ -47,6 +52,8 @@ export type DayRecord = {
 	workedMinutes: number;
 	tardinessMinutes: number;
 	undertimeMinutes: number;
+	otMinutes: number;
+	hasLeave: boolean;
 	isAbsent: boolean;
 	remarks: string;
 	manual: boolean;
@@ -66,6 +73,8 @@ export function recordFromGenerated(r: GeneratedRecord): DayRecord {
 		workedMinutes: r.workedMinutes,
 		tardinessMinutes: r.tardinessMinutes,
 		undertimeMinutes: r.undertimeMinutes,
+		otMinutes: r.otMinutes,
+		hasLeave: r.leave !== null,
 		isAbsent: r.isAbsent,
 		remarks: recordRemarks(r),
 		manual: r.manualPunch,
@@ -82,6 +91,8 @@ export function recordFromSaved(e: SavedEntry): DayRecord {
 		workedMinutes: e.workedMinutes,
 		tardinessMinutes: e.tardinessMinutes,
 		undertimeMinutes: e.undertimeMinutes,
+		otMinutes: e.otMinutes,
+		hasLeave: e.source === 'leave' || e.leaveRequestId !== null || e.leaveMinutes > 0,
 		isAbsent: e.isAbsent,
 		remarks: e.isAbsent ? 'Absent' : (e.remarks ?? (e.source === 'manual' ? 'Entered by staff' : '')),
 		manual: e.source === 'manual',
@@ -142,6 +153,8 @@ export function buildDtrDays(opts: {
 				workedMinutes: 0,
 				lateMinutes: 0,
 				undertimeMinutes: 0,
+				otMinutes: 0,
+				hasLeave: rec.hasLeave,
 				remarks: rec.remarks || 'Absent',
 				kind: 'absent' as const,
 				manual: rec.manual
@@ -157,6 +170,8 @@ export function buildDtrDays(opts: {
 				workedMinutes: rec.workedMinutes,
 				lateMinutes: 0,
 				undertimeMinutes: 0,
+				otMinutes: 0,
+				hasLeave: rec.hasLeave || rec.credit === 'leave',
 				remarks: rec.remarks,
 				kind: rec.credit,
 				manual: false
@@ -172,6 +187,8 @@ export function buildDtrDays(opts: {
 				workedMinutes: rec.workedMinutes,
 				lateMinutes: rec.tardinessMinutes,
 				undertimeMinutes: rec.undertimeMinutes,
+				otMinutes: rec.otMinutes,
+				hasLeave: rec.hasLeave,
 				remarks: rec.remarks,
 				kind: 'work' as const,
 				manual: rec.manual
@@ -186,6 +203,8 @@ export function buildDtrDays(opts: {
 			workedMinutes: 0,
 			lateMinutes: 0,
 			undertimeMinutes: 0,
+			otMinutes: 0,
+			hasLeave: false,
 			remarks: '',
 			kind: s?.isRestDay ? ('rest' as const) : ('empty' as const),
 			manual: false
@@ -198,6 +217,7 @@ export function buildDtrDays(opts: {
 			workedMinutes: days.reduce((n, d) => n + d.workedMinutes, 0),
 			lateMinutes: days.reduce((n, d) => n + d.lateMinutes, 0),
 			undertimeMinutes: days.reduce((n, d) => n + d.undertimeMinutes, 0),
+			otMinutes: days.reduce((n, d) => n + d.otMinutes, 0),
 			absentDays: days.filter((d) => d.kind === 'absent').length,
 			workedDays: days.filter((d) => d.kind === 'work').length,
 			scheduledDays: [...sched.values()].filter((s) => !s.isRestDay && s.startTime).length,
