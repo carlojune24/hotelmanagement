@@ -1092,9 +1092,15 @@ export const actions: Actions = {
 		const raw = await event.request.formData();
 		const hallBookingId = raw.get('hallBookingId');
 		if (typeof hallBookingId !== 'string') return fail(400, { error: 'Missing hall booking.' });
+		// When the event really ended, on the hotel's own clock — the desk may be clearing it hours later.
+		const endedAt = raw.get('endedAt');
+		if (endedAt != null && typeof endedAt !== 'string') return fail(400, { error: 'Bad end time.' });
+		if (endedAt && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(endedAt)) {
+			return fail(400, { error: 'Enter the end time as a date and time.' });
+		}
 
 		try {
-			const r = await checkOutHallBooking(hotel.id, hallBookingId, event.locals.user);
+			const r = await checkOutHallBooking(hotel.id, hallBookingId, event.locals.user, endedAt || undefined);
 			return {
 				ok:
 					r.overtimeHours > 0

@@ -226,6 +226,17 @@
 		}
 	});
 
+	/** The open hall detail's row on today's grid, which is where the scheduled end and the hall's
+	 *  extra-hour rate live. Null for an event that is not on the grid — overtime only matters for a
+	 *  checked-in one, and that is always on it. */
+	const hallDetailGridEvent = $derived(
+		formHallBookingDetail
+			? (data.hallGrid
+					.flatMap((hall) => hall.events.map((e) => ({ e, hall })))
+					.find((x) => x.e.hallBookingId === formHallBookingDetail.hallBooking.id) ?? null)
+			: null
+	);
+
 	/** Room and hall share the one rail, so picking a room closes the hall detail. */
 	function selectRoom(roomId: string) {
 		selectedRoomId = roomId;
@@ -243,21 +254,50 @@
 	};
 	let hallCheckout = $state<HallCheckoutTarget | null>(null);
 	let hallCheckoutAt = $state(0);
+	let hallCheckoutEndedAt = $state('');
 	let hallCheckoutOpen = $state(false);
 	function openHallCheckout(target: HallCheckoutTarget) {
 		hallCheckout = target;
 		hallCheckoutAt = Date.now();
+		hallCheckoutEndedAt = toHotelDateTimeLocal(hallCheckoutAt);
 		hallCheckoutOpen = true;
 	}
-	const hallCheckoutOvertime = $derived(
-		hallCheckout
-			? hallOvertimeAmount(
-					hallOvertimeHours(Date.parse(hallCheckout.scheduledEndIso), hallCheckoutAt),
-					hallCheckout.extraHourFeeCentavos,
-					hallCheckout.vatRateBps
-				)
-			: null
-	);
+	/** Ms → "YYYY-MM-DDTHH:MM" on the hotel's clock, the value a `datetime-local` input wants. */
+	function toHotelDateTimeLocal(ms: number): string {
+		const p = Object.fromEntries(
+			new Intl.DateTimeFormat('en-CA', {
+				timeZone: data.timezone,
+				year: 'numeric',
+				month: '2-digit',
+				day: '2-digit',
+				hour: '2-digit',
+				minute: '2-digit',
+				hour12: false
+			})
+				.formatToParts(new Date(ms))
+				.map((x) => [x.type, x.value])
+		);
+		return `${p.year}-${p.month}-${p.day}T${p.hour === '24' ? '00' : p.hour}:${p.minute}`;
+	}
+	/** "YYYY-MM-DDTHH:MM" parsed as if it were the staff device's own clock. Only ever used to subtract
+	 *  one such value from another, so whatever the device's offset is, it cancels — which lets the
+	 *  preview compare two hotel wall times without needing a wall-time→zone conversion in the browser. */
+	const wallMs = (v: string) => Date.parse(`${v}:00`);
+	/** Overtime for the end time the desk has typed, clamped to now exactly as the server clamps it,
+	 *  so the preview and the charge that gets posted never disagree. */
+	const hallCheckoutOvertime = $derived.by(() => {
+		if (!hallCheckout) return null;
+		const nowWall = wallMs(toHotelDateTimeLocal(hallCheckoutAt));
+		const bookedEndWall = wallMs(toHotelDateTimeLocal(Date.parse(hallCheckout.scheduledEndIso)));
+		const typed = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(hallCheckoutEndedAt)
+			? wallMs(hallCheckoutEndedAt)
+			: nowWall;
+		return hallOvertimeAmount(
+			hallOvertimeHours(bookedEndWall, Math.min(typed, nowWall)),
+			hallCheckout.extraHourFeeCentavos,
+			hallCheckout.vatRateBps
+		);
+	});
 	const hallTime = (iso: string) =>
 		new Date(iso).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit', timeZone: data.timezone });
 	/** What still blocks Close on a checked-out event, in words. */
@@ -1646,6 +1686,7 @@
 																<Button type="submit" size="sm">Check in</Button>
 															</form>
 														{:else if e.status === 'checked_in'}
+															{@render hallRunningOver(e.scheduledEndIso, hall.extraHourFeeCentavos, hall.vatRateBps)}
 															<Button
 																size="sm"
 																onclick={() =>
@@ -3383,7 +3424,7 @@
 </Sheet.Root>
 
 {#snippet hallDetailPanel()}
-	<div class="p-4">
+	<div class="p-4" data-testid="hall-detail">
 		{#if formHallBookingDetail}
 			<button
 				type="button"
@@ -3433,6 +3474,15 @@
 							<div class="text-ink">{formHallBookingDetail.hallBooking.guestCount}</div>
 						</div>
 					</div>
+					{#if hallDetailGridEvent}
+						<div class="mt-2">
+							{@render hallRunningOver(
+								hallDetailGridEvent.e.scheduledEndIso,
+								hallDetailGridEvent.hall.extraHourFeeCentavos,
+								hallDetailGridEvent.hall.vatRateBps
+							)}
+						</div>
+					{/if}
 				</div>
 
 				{#if formHallPendingDamage && formHallPendingDamage.length > 0}
@@ -3662,6 +3712,21 @@
 	</div>
 {/snippet}
 
+<!-- Overtime as it accrues, for an event still checked in. A preview off the page's own one-minute
+     clock — nothing is posted until check-out, which recomputes it server-side. -->
+{#snippet hallRunningOver(scheduledEndIso: string, extraHourFeeCentavos: number, vatRateBps: number)}
+	{@const ot = hallOvertimeAmount(
+		hallOvertimeHours(Date.parse(scheduledEndIso), nowMs),
+		extraHourFeeCentavos,
+		vatRateBps
+	)}
+	{#if ot.hours > 0}
+		<span class="text-xs font-semibold text-warning">
+			Running {ot.hours}h over · {peso(ot.totalCentavos)} so far
+		</span>
+	{/if}
+{/snippet}
+
 <Dialog.Root bind:open={hallCheckoutOpen}>
 	<Dialog.Content class="sm:max-w-md">
 		{#if hallCheckout && hallCheckoutOvertime}
@@ -3671,6 +3736,19 @@
 					The event was booked to end at {hallTime(hallCheckout.scheduledEndIso)}. It is now {hallTime(new Date(hallCheckoutAt).toISOString())}.
 				</Dialog.Description>
 			</Dialog.Header>
+			<div class="space-y-1">
+				<Label for="hallEndedAt">The event actually ended at</Label>
+				<Input
+					id="hallEndedAt"
+					type="datetime-local"
+					bind:value={hallCheckoutEndedAt}
+					max={toHotelDateTimeLocal(hallCheckoutAt)}
+				/>
+				<p class="text-xs text-ink-muted">
+					Hotel time. Set it back to when the event really finished if you are clearing it later — the
+					overtime below is charged from this time, not from now.
+				</p>
+			</div>
 			{#if hallCheckoutOvertime.hours > 0}
 				<div class="rounded-lg border border-border p-4 text-sm">
 					<div class="flex justify-between">
@@ -3719,6 +3797,7 @@
 					}}
 				>
 					<input type="hidden" name="hallBookingId" value={hallCheckout.hallBookingId} />
+					<input type="hidden" name="endedAt" value={hallCheckoutEndedAt} />
 					<Button type="submit">
 						{hallCheckoutOvertime.hours > 0 ? `Check out and charge ${peso(hallCheckoutOvertime.totalCentavos)}` : 'Check out'}
 					</Button>
