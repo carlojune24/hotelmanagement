@@ -63,6 +63,12 @@ export function cancellationLabel(c: CancellationTerms | null): { text: string; 
 				: `Free cancellation up to ${c.freeCancelHours}h before check-in`;
 		return { text, free: true };
 	}
+	if (c?.graceHoursAfterPayment != null && c.graceFeeBps != null) {
+		return {
+			text: `Cancel within ${c.graceHoursAfterPayment}h of payment for a ${c.graceFeeBps / 100}% fee; non-refundable after`,
+			free: false
+		};
+	}
 	return { text: 'Non-refundable', free: false };
 }
 

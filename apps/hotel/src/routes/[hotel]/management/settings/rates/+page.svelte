@@ -98,10 +98,14 @@
 	let editPolicyPenaltyPct = $state('');
 	let editPolicyPenaltyValueBps = $state('');
 	let editPolicyDownpaymentPct = $state('');
+	let editPolicyGraceHours = $state('');
+	let editPolicyGraceFeePct = $state('');
 
 	function openEditPolicy(c: (typeof data.cancellationPolicies)[number]) {
 		editPolicyId = c.id;
 		editPolicyName = c.name;
+		editPolicyGraceHours = c.graceHoursAfterPayment != null ? String(c.graceHoursAfterPayment) : '';
+		editPolicyGraceFeePct = c.graceFeeBps != null ? String(c.graceFeeBps / 100) : '';
 		editPolicyFreeCancelHours = c.freeCancelHours != null ? String(c.freeCancelHours) : '';
 		editPolicyPenaltyType = c.penaltyType;
 		editPolicyPenaltyValueBps = c.penaltyValueBps != null ? String(c.penaltyValueBps) : '';
@@ -438,7 +442,9 @@
 									<div class="text-xs text-ink-muted">
 										{c.freeCancelHours != null
 											? `Free up to ${c.freeCancelHours}h before check-in`
-											: 'No free cancellation'} · {penaltyLabel[c.penaltyType]} · {c.downpaymentBps !=
+											: 'No free cancellation'}{c.graceHoursAfterPayment != null
+											? ` · ${c.graceFeeBps! / 100}% fee within ${c.graceHoursAfterPayment}h of payment`
+											: ''} · {penaltyLabel[c.penaltyType]} · {c.downpaymentBps !=
 										null
 											? `${c.downpaymentBps / 100}% due at booking`
 											: 'Paid in full at booking'}
@@ -653,6 +659,19 @@
 					class="mt-1"
 				/>
 			</div>
+			<div class="grid grid-cols-2 items-end gap-3">
+				<div>
+					<Label for="createGraceHours">Grace period after payment (hours)</Label>
+					<Input id="createGraceHours" name="graceHoursAfterPayment" type="number" min="1" placeholder="Blank = none" class="mt-1" />
+				</div>
+				<div>
+					<Label for="createGraceFeePct">Fee inside grace period (%)</Label>
+					<Input id="createGraceFeePct" name="graceFeePct" type="number" min="0" max="100" step="0.01" class="mt-1" />
+				</div>
+			</div>
+			<p class="-mt-1 text-xs text-ink-muted">
+				Cancelling inside the grace period (and before check-in) keeps this share of the total. After it, the penalty below applies.
+			</p>
 			<div>
 				<Label for="penaltyType">Penalty</Label>
 				<Select.Root type="single" name="penaltyType" bind:value={policyPenaltyType}>
@@ -737,6 +756,19 @@
 					class="mt-1"
 				/>
 			</div>
+			<div class="grid grid-cols-2 items-end gap-3">
+				<div>
+					<Label for="editGraceHours">Grace period after payment (hours)</Label>
+					<Input id="editGraceHours" name="graceHoursAfterPayment" type="number" min="1" placeholder="Blank = none" bind:value={editPolicyGraceHours} class="mt-1" />
+				</div>
+				<div>
+					<Label for="editGraceFeePct">Fee inside grace period (%)</Label>
+					<Input id="editGraceFeePct" name="graceFeePct" type="number" min="0" max="100" step="0.01" bind:value={editPolicyGraceFeePct} class="mt-1" />
+				</div>
+			</div>
+			<p class="-mt-1 text-xs text-ink-muted">
+				Cancelling inside the grace period (and before check-in) keeps this share of the total. After it, the penalty below applies.
+			</p>
 			<div>
 				<Label for="editPenaltyType">Penalty</Label>
 				<Select.Root type="single" name="penaltyType" bind:value={editPolicyPenaltyType}>

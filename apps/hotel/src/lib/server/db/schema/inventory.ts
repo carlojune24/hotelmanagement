@@ -165,6 +165,11 @@ export const cancellationPolicies = pgTable(
 		penaltyType: cancellationPenaltyType('penalty_type').notNull().default('full_amount'),
 		/** Basis points of the booking total; only used when penaltyType = 'percentage_of_total'. */
 		penaltyValueBps: integer('penalty_value_bps'),
+		/** Hours after the first payment during which `graceFeeBps` is charged instead of the
+		 *  main penalty (ends at check-in at the latest). Null = no grace tier. */
+		graceHoursAfterPayment: integer('grace_hours_after_payment'),
+		/** Basis points of the booking total kept when cancelling inside the grace window. */
+		graceFeeBps: integer('grace_fee_bps'),
 		/**
 		 * Share of the booking total (basis points) the guest pays online to confirm — the rest is
 		 * collected at the hotel. Null or 10000 = pay in full. Not the `taxes_fees` "reservation
