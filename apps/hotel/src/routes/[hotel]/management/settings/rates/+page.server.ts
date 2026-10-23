@@ -98,7 +98,11 @@ export const load: PageServerLoad = async ({ locals }) => {
 const createPolicySchema = z.object({
 	name: z.string().min(2).max(120),
 	description: z.string().max(2000).optional(),
-	freeCancelHours: z.coerce.number().int().min(0).max(8760).optional(),
+	// A blank field posts "", which z.coerce would turn into 0 ("free until check-in"), not "none".
+	freeCancelHours: z.preprocess(
+		(v) => (v === '' || v == null ? undefined : v),
+		z.coerce.number().int().min(0).max(8760).optional()
+	),
 	penaltyType: z.enum(cancellationPenaltyType.enumValues),
 	penaltyValueBps: z.coerce.number().int().min(0).max(10000).optional(),
 	/** Grace tier: hours after first payment, and the percent kept in that window; both or neither. */
