@@ -4,6 +4,7 @@ import { env } from '$env/dynamic/private';
 import { db } from '../db/index';
 import { hotels, paymongoSettings } from '../db/schema/index';
 import { decryptSecret, encryptSecret, maskSecret } from '../secrets';
+import { clearPaymongoMirror } from '../finance/paymongo-sync';
 import { writeAudit } from '../audit';
 import { forgetPaymongoClient } from './client';
 import { pickReusableWebhook } from './webhook-reuse';
@@ -190,6 +191,9 @@ export async function connectPaymongo(
 		}
 	}
 
+	// A different key means a different PayMongo account or mode, so the mirrored money belongs to someone else.
+	if (previous?.secretKeyHint !== maskSecret(secretKey)) await clearPaymongoMirror(hotelId);
+
 	const saved = await saveConnection(hotelId, secretKey, hook, actor);
 	await writeAudit({
 		hotelId,
@@ -249,6 +253,7 @@ export async function disconnectPaymongo(
 		}
 	}
 	await db.delete(paymongoSettings).where(eq(paymongoSettings.hotelId, hotelId));
+	await clearPaymongoMirror(hotelId);
 	forgetPaymongoClient(hotelId);
 	await writeAudit({
 		hotelId,

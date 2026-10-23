@@ -229,6 +229,31 @@ function friendlyError(e: unknown): string {
 	return e instanceof Error ? e.message : 'Could not reach PayMongo.';
 }
 
+/**
+ * Throws out anything mirrored under the other mode. PayMongo stamps every payment and refund with `livemode`, so
+ * a live key's mirror must never keep a test record (and the other way round) — money that was never real would
+ * otherwise sit in the totals forever, since the sync only ever upserts. Rows PayMongo sends with no flag (payouts)
+ * are left alone.
+ */
+async function dropWrongModeRows(hotelId: string): Promise<void> {
+	const [settings] = await db
+		.select({ mode: paymongoSettings.mode })
+		.from(paymongoSettings)
+		.where(eq(paymongoSettings.hotelId, hotelId))
+		.limit(1);
+	if (!settings) return;
+	const live = settings.mode === 'live';
+	await db
+		.delete(paymongoLedger)
+		.where(
+			and(
+				eq(paymongoLedger.hotelId, hotelId),
+				sql`(${paymongoLedger.raw} -> 'attributes' ->> 'livemode') is not null`,
+				sql`((${paymongoLedger.raw} -> 'attributes' ->> 'livemode')::boolean) is distinct from ${live}`
+			)
+		);
+}
+
 const running = new Map<string, Promise<SyncResult>>();
 
 export interface SyncResult {
@@ -260,6 +285,7 @@ async function doSync(hotelId: string): Promise<SyncResult> {
 	const result: SyncResult = { ok: false, error: null, payments: 0, refunds: 0, payouts: 0 };
 	try {
 		const client = await getPaymongoClient(hotelId);
+		await dropWrongModeRows(hotelId);
 		const [state] = await db.select().from(paymongoSyncState).where(eq(paymongoSyncState.hotelId, hotelId)).limit(1);
 		const backfill = !state?.backfilledAt;
 		const cutoff = Date.now() - WINDOW_DAYS * 86_400_000;
@@ -361,6 +387,16 @@ export async function syncPaymongoIfStale(hotelId: string, maxAgeMs: number): Pr
 	if (state?.lastSyncedAt && Date.now() - state.lastSyncedAt.getTime() < maxAgeMs) return false;
 	await syncPaymongo(hotelId);
 	return true;
+}
+
+/**
+ * Drops the whole mirror for a hotel. The ledger holds whatever account the saved key pointed at, so when that key
+ * is replaced by one for a different account or mode (test → live), the old rows are another account's money and
+ * must go; the next sync refills from the new key.
+ */
+export async function clearPaymongoMirror(hotelId: string): Promise<void> {
+	await db.delete(paymongoLedger).where(eq(paymongoLedger.hotelId, hotelId));
+	await db.delete(paymongoSyncState).where(eq(paymongoSyncState.hotelId, hotelId));
 }
 
 /** Every hotel with PayMongo connected, for the background job. */
