@@ -74,11 +74,43 @@ export async function checkHallAvailability(params: {
 		.limit(1);
 	if (!hall) return false;
 
-	const overlapping = await db
-		.select({ id: hallBookings.id })
+	return (await listHallConflicts(params)).length === 0;
+}
+
+export interface HallConflict {
+	startTime: string;
+	endTime: string;
+	status: string;
+	guestName: string;
+}
+
+/**
+ * The events already holding this hall over the requested slot — what `checkHallAvailability`
+ * refuses on, said out loud. A closed event still holds its slot (the hall was physically in
+ * use), and since the front desk board drops a closed event the moment it closes, a refusal
+ * that only said "already booked" left nothing on screen to explain it.
+ */
+export async function listHallConflicts(params: {
+	hotelId: string;
+	functionHallId: string;
+	eventDate: string;
+	startTime: string;
+	endTime: string;
+}): Promise<HallConflict[]> {
+	const { hotelId, functionHallId, eventDate, startTime, endTime } = params;
+	return db
+		.select({
+			startTime: hallBookings.startTime,
+			endTime: hallBookings.endTime,
+			status: hallBookings.status,
+			guestName: guests.fullName
+		})
 		.from(hallBookings)
+		.innerJoin(orders, eq(orders.id, hallBookings.orderId))
+		.innerJoin(guests, eq(guests.id, orders.guestId))
 		.where(
 			and(
+				eq(orders.hotelId, hotelId),
 				eq(hallBookings.functionHallId, functionHallId),
 				eq(hallBookings.eventDate, eventDate),
 				inArray(hallBookings.status, [...ACTIVE_HALL_BOOKING_STATUSES]),
@@ -86,9 +118,7 @@ export async function checkHallAvailability(params: {
 				gt(hallBookings.endTime, startTime)
 			)
 		)
-		.limit(1);
-
-	return overlapping.length === 0;
+		.orderBy(asc(hallBookings.startTime));
 }
 
 export interface HallAvailabilityEvent {

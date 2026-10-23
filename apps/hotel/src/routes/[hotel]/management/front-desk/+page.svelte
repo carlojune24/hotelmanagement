@@ -1167,10 +1167,22 @@
 					'Could not price that booking.';
 				return;
 			}
-			const result = (await res.json()) as { available: boolean; price?: HallPriceBreakdown };
+			const result = (await res.json()) as {
+				available: boolean;
+				price?: HallPriceBreakdown;
+				conflicts?: { startTime: string; endTime: string; status: string; guestName: string }[];
+			};
 			if (!result.available) {
 				hallQuote = null;
-				hallQuoteError = 'This hall is already booked for that time — pick a different slot.';
+				const clash = (result.conflicts ?? [])
+					.map(
+						(c) =>
+							`${c.startTime.slice(0, 5)}–${c.endTime.slice(0, 5)} (${c.guestName}, ${humanize(c.status)})`
+					)
+					.join('; ');
+				hallQuoteError = clash
+					? `Taken by ${clash} — pick a slot outside that.`
+					: 'This hall is already booked for that time — pick a different slot.';
 				return;
 			}
 			hallQuote = result.price ?? null;

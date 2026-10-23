@@ -1,7 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { requireCap } from '$lib/server/auth/rbac';
-import { checkHallAvailability } from '$lib/server/hall-availability';
+import { listHallConflicts } from '$lib/server/hall-availability';
 import { priceEventHall } from '$lib/server/pricing';
 import type { RequestHandler } from './$types';
 
@@ -29,8 +29,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const { functionHallId, eventDate, startTime, endTime } = parsed.data;
 	if (startTime >= endTime) error(400, 'End time must be after start time.');
 
-	const available = await checkHallAvailability({ hotelId, functionHallId, eventDate, startTime, endTime });
-	if (!available) return json({ available: false });
+	// Name what is holding the slot: a closed event still blocks it but no longer shows on the board.
+	const conflicts = await listHallConflicts({ hotelId, functionHallId, eventDate, startTime, endTime });
+	if (conflicts.length > 0) return json({ available: false, conflicts });
 
 	try {
 		const price = await priceEventHall({ hotelId, functionHallId, startTime, endTime });
