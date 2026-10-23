@@ -145,10 +145,11 @@ export function computeCancellationFee(input: CancellationFeeInput): Cancellatio
 }
 
 /** Convert a wall-clock `date` + `time` in `timeZone` to a UTC epoch (ms). PH has no DST;
- *  a single offset pass is exact there and close enough everywhere else this app runs. */
+ *  a single offset pass is exact there and close enough everywhere else this app runs.
+ *  `time` may be "HH:MM" as well as Postgres' own "HH:MM:SS" — a missing part is zero, not NaN. */
 export function wallTimeToUtcMs(dateStr: string, timeStr: string, timeZone: string): number {
 	const [y, mo, d] = dateStr.split('-').map(Number);
-	const [h, mi, s] = timeStr.split(':').map((n) => Number(n) || 0);
+	const [h = 0, mi = 0, s = 0] = timeStr.split(':').map((n) => Number(n) || 0);
 	const guess = Date.UTC(y!, mo! - 1, d!, h!, mi!, s!);
 	const parts = new Intl.DateTimeFormat('en-US', {
 		timeZone,
