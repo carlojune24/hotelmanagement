@@ -217,6 +217,9 @@ html:has(.woven-ledger) {
 .woven-ledger .sf-nav-link {
 	position: relative;
 	padding-block: 0.5rem;
+	/* Two-word labels ("Rooms & Rates") wrapped at narrow desktop widths, leaving the row ragged.
+	   The brand shrinks to its ellipsis instead — it already has min-width: 0. */
+	white-space: nowrap;
 	font-size: 0.875rem;
 	font-weight: 500;
 	letter-spacing: 0.02em;
