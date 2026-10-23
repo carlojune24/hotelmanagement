@@ -2,6 +2,7 @@ import { relations, sql } from 'drizzle-orm';
 import {
 	bigint,
 	boolean,
+	check,
 	date,
 	index,
 	integer,
@@ -525,6 +526,11 @@ export const securityDeposits = pgTable(
 			.notNull()
 			.references(() => hotels.id, { onDelete: 'cascade' }),
 		bookingId: uuid('booking_id').references(() => bookings.id, { onDelete: 'set null' }),
+		/** A function hall takes a damage deposit the same way a room does; exactly one of the two
+		 *  targets is ever set, the same shape `folios` uses. */
+		hallBookingId: uuid('hall_booking_id').references(() => hallBookings.id, {
+			onDelete: 'set null'
+		}),
 		/** Snapshot reference, not a live FK — like `receivables.bookingId`'s own convention;
 		 *  a policy edited/deleted later must never retroactively change a past hold's record. */
 		securityDepositPolicyId: uuid('security_deposit_policy_id'),
@@ -554,10 +560,19 @@ export const securityDeposits = pgTable(
 	(t) => [
 		index('security_deposits_hotel_idx').on(t.hotelId),
 		index('security_deposits_booking_idx').on(t.bookingId),
+		index('security_deposits_hall_booking_idx').on(t.hallBookingId),
 		// One active hold per booking at a time.
 		uniqueIndex('security_deposits_one_held_per_booking_idx')
 			.on(t.bookingId)
-			.where(sql`${t.status} = 'held'`)
+			.where(sql`${t.status} = 'held'`),
+		uniqueIndex('security_deposits_one_held_per_hall_idx')
+			.on(t.hallBookingId)
+			.where(sql`${t.status} = 'held'`),
+		// Collateral belongs to exactly one stay or one event, never both and never neither.
+		check(
+			'security_deposits_exactly_one_target',
+			sql`(${t.bookingId} is not null) <> (${t.hallBookingId} is not null)`
+		)
 	]
 );
 

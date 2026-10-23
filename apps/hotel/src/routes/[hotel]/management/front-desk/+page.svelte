@@ -115,6 +115,7 @@
 		form && 'hallBookingDetail' in form ? form.hallBookingDetail : undefined
 	);
 	const formHallFolio = $derived(form && 'hallFolio' in form ? form.hallFolio : undefined);
+	const formHallDeposit = $derived(form && 'hallDeposit' in form ? form.hallDeposit : undefined);
 	const formHallPendingDamage = $derived(
 		form && 'hallPendingDamage' in form ? form.hallPendingDamage : undefined
 	);
@@ -311,9 +312,11 @@
 			);
 		}
 		if (close.balanceCentavos > 0) out.push(`${peso(close.balanceCentavos)} still owed on the bill`);
+		if (close.heldDepositCentavos > 0) {
+			out.push(`the ${peso(close.heldDepositCentavos)} security deposit is still held (settle it in Full details)`);
+		}
 		return out;
 	}
-	const hallStatusLabel = (status: string) => (status === 'completed' ? 'Closed' : humanize(status));
 
 	// --- Room-type detail dialog (click a room's name to view its full spec/gallery) ---
 	let roomTypeDetailOpen = $state(false);
@@ -1180,8 +1183,7 @@
 	}
 
 	function statusPillClassGeneric(status: string): string {
-		if (status === 'confirmed' || status === 'completed')
-			return 'border-transparent bg-ok/15 text-ok';
+		if (status === 'confirmed') return 'border-transparent bg-ok/15 text-ok';
 		if (status === 'checked_in') return 'border-transparent bg-brand/15 text-brand';
 		if (status === 'checked_out') return 'border-transparent bg-warning/15 text-warning';
 		if (status === 'cancelled') return 'border-transparent bg-danger/15 text-danger';
@@ -1678,7 +1680,7 @@
 													</div>
 													<div class="flex items-center gap-2">
 														<Badge variant="outline" class={statusPillClassGeneric(e.status)}>
-															{hallStatusLabel(e.status)}
+															{humanize(e.status)}
 														</Badge>
 														{#if e.status === 'confirmed'}
 															<form method="POST" action="?/checkInHall" use:enhance>
@@ -3482,6 +3484,78 @@
 								hallDetailGridEvent.hall.vatRateBps
 							)}
 						</div>
+					{/if}
+				</div>
+
+				<div class="rounded-lg border border-border p-4">
+					<div class="mb-2 flex items-center justify-between">
+						<h3 class="text-sm font-semibold text-ink">Security deposit</h3>
+						{#if formHallDeposit}
+							<Badge
+								variant="outline"
+								class={formHallDeposit.status === 'held'
+									? 'border-transparent bg-warning/15 text-warning'
+									: 'border-transparent bg-surface-2 text-ink-muted'}
+							>
+								{formHallDeposit.status === 'held' ? 'Held' : humanize(formHallDeposit.status)}
+							</Badge>
+						{/if}
+					</div>
+
+					{#if formHallDeposit?.status === 'held'}
+						<p class="text-sm text-ink">
+							{peso(formHallDeposit.amountCentavos)} held · {humanize(formHallDeposit.method)}
+						</p>
+						<p class="mt-1 text-xs text-ink-muted">
+							Settling applies any unpaid damage from the hold and refunds the rest. The event cannot
+							be closed while it is still held.
+						</p>
+						<form method="POST" action="?/settleHallDeposit" use:enhance class="mt-2">
+							<input type="hidden" name="hallBookingId" value={formHallBookingDetail.hallBooking.id} />
+							<Button type="submit" size="sm" class="w-full">Settle deposit</Button>
+						</form>
+					{:else if formHallDeposit}
+						<p class="text-sm text-ink-muted">
+							{peso(formHallDeposit.amountCentavos)} settled —
+							{peso(formHallDeposit.forfeitedCentavos ?? 0)} kept for damage,
+							{peso(formHallDeposit.refundedCentavos ?? 0)} refunded.
+						</p>
+					{:else if formHallBookingDetail.hallBooking.status !== 'completed'}
+						<p class="mb-2 text-xs text-ink-muted">
+							A refundable hold against damage. It is collateral, not revenue — it never counts
+							toward the bill.
+						</p>
+						<form
+							method="POST"
+							action="?/collectHallDeposit"
+							use:enhance
+							class="flex flex-wrap items-end gap-2"
+						>
+							<input type="hidden" name="hallBookingId" value={formHallBookingDetail.hallBooking.id} />
+							<Input
+								name="amountPhp"
+								type="number"
+								min="0.01"
+								step="0.01"
+								required
+								placeholder="₱ amount"
+								class="w-32"
+							/>
+							<select
+								name="method"
+								class="h-9 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm"
+							>
+								<option value="cash">Cash</option>
+								<option value="card">Card</option>
+								<option value="gcash">GCash</option>
+								<option value="maya">Maya</option>
+								<option value="bank_transfer">Bank transfer</option>
+								<option value="cheque">Cheque</option>
+							</select>
+							<Button type="submit" size="sm">Collect</Button>
+						</form>
+					{:else}
+						<p class="text-sm text-ink-muted">No deposit was collected for this event.</p>
 					{/if}
 				</div>
 

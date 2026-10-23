@@ -15,6 +15,7 @@ const STATUS: Record<BookingTransactionExportRow['status'], string> = {
 	confirmed: 'Confirmed',
 	in_house: 'In house',
 	checked_out: 'Checked out',
+	closed: 'Closed',
 	cancelled: 'Cancelled'
 };
 

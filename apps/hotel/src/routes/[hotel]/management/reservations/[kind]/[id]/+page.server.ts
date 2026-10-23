@@ -42,7 +42,7 @@ import { saveUpload } from '$lib/server/uploads';
 import {
 	SecurityDepositError,
 	collectSecurityDeposit,
-	getSecurityDepositForBooking,
+	getSecurityDepositForTarget,
 	getSecurityDepositPolicy
 } from '$lib/server/security-deposits';
 import {
@@ -107,7 +107,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 				detail.ratePlan.securityDepositPolicyId
 					? getSecurityDepositPolicy(hotelId, detail.ratePlan.securityDepositPolicyId)
 					: null,
-				getSecurityDepositForBooking(hotelId, params.id),
+				getSecurityDepositForTarget(hotelId, { kind: 'room', bookingId: params.id }),
 				getActiveScPwdClaim(hotelId, params.id)
 			]);
 		await markThreadReadByStaff(detail.order.id);
@@ -224,7 +224,7 @@ export const actions: Actions = {
 				try {
 					await collectSecurityDeposit({
 						hotelId,
-						bookingId: event.params.id,
+						target: { kind: 'room', bookingId: event.params.id },
 						securityDepositPolicyId: (raw.get('securityDepositPolicyId') as string) || null,
 						amountCentavos: Math.round(Number(depositAmountPhp) * 100),
 						method: depositMethod as PaymentMethod,

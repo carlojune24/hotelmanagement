@@ -63,11 +63,12 @@
 		confirmed: 'Confirmed',
 		in_house: 'In house',
 		checked_out: 'Checked out',
+		closed: 'Closed',
 		cancelled: 'Cancelled'
 	};
 	function statusClass(s: string): string {
 		if (s === 'cancelled') return 'border-transparent bg-danger/15 text-danger';
-		if (s === 'checked_out') return 'border-border bg-surface-2 text-ink-muted';
+		if (s === 'checked_out' || s === 'closed') return 'border-border bg-surface-2 text-ink-muted';
 		return 'border-transparent bg-ok/15 text-ok';
 	}
 	const PAY_CLASS: Record<BookingPaymentState, string> = {

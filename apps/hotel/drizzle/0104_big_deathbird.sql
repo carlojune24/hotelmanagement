@@ -1,0 +1,5 @@
+ALTER TABLE "security_deposits" ADD COLUMN "hall_booking_id" uuid;--> statement-breakpoint
+ALTER TABLE "security_deposits" ADD CONSTRAINT "security_deposits_hall_booking_id_hall_bookings_id_fk" FOREIGN KEY ("hall_booking_id") REFERENCES "public"."hall_bookings"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "security_deposits_hall_booking_idx" ON "security_deposits" USING btree ("hall_booking_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "security_deposits_one_held_per_hall_idx" ON "security_deposits" USING btree ("hall_booking_id") WHERE "security_deposits"."status" = 'held';--> statement-breakpoint
+ALTER TABLE "security_deposits" ADD CONSTRAINT "security_deposits_exactly_one_target" CHECK (("security_deposits"."booking_id" is not null) <> ("security_deposits"."hall_booking_id" is not null));

@@ -715,6 +715,17 @@ export async function addHallOvertimeCharge(
 		})
 		.returning({ id: folioCharges.id, totalCentavos: folioCharges.totalCentavos });
 	if (!charge) throw new FolioError('Could not post the overtime charge.');
+
+	// Inside the caller's transaction, so the charge and its trail land together or not at all.
+	await writeAudit({
+		tx,
+		hotelId,
+		actor,
+		action: 'folio.add_hall_overtime',
+		entityType: 'hall_booking',
+		entityId: hallBookingId,
+		after: { chargeId: charge.id, hours, extraHourFeeCentavos, totalCentavos: charge.totalCentavos }
+	});
 	return { chargeId: charge.id, totalCentavos: charge.totalCentavos };
 }
 

@@ -25,7 +25,7 @@ import { FolioError, addHallOvertimeCharge, closeFolio, closeHallFolio, getFolio
 import { planInRoomOrder } from '$lib/allocation';
 import { splitRoomLine } from '$lib/room-split';
 import { lineBalances } from './order-balances';
-import { getSecurityDepositForBooking } from './security-deposits';
+import { getSecurityDepositForTarget } from './security-deposits';
 import { recordWalkInPayment, resolvePaymentAccount, type PaymentMethod } from './finance/payments';
 import { openReceivable } from './finance/receivables';
 import { getBirSettings, issueInvoice } from './finance/documents';
@@ -1168,7 +1168,7 @@ export async function checkOutBooking(
 	// A held deposit must be explicitly settled (released or applied to damage) before
 	// checkout — never silently left open, and never routable to the city ledger, since
 	// it's collateral the hotel is holding, not a charge the guest still owes.
-	const securityDeposit = await getSecurityDepositForBooking(hotelId, bookingId);
+	const securityDeposit = await getSecurityDepositForTarget(hotelId, { kind: 'room', bookingId });
 	if (securityDeposit?.status === 'held') {
 		throw new CheckOutError(
 			`Settle the ₱${(securityDeposit.amountCentavos / 100).toFixed(2)} security deposit before checking out.`
@@ -1313,6 +1313,8 @@ export interface HallGridEvent {
 		housekeeping: 'dirty' | 'in_progress' | 'clean';
 		pendingDamageCount: number;
 		balanceCentavos: number;
+		/** A deposit still held on the event; it must be settled before Close, never city-ledgered. */
+		heldDepositCentavos: number;
 	} | null;
 }
 
@@ -1374,9 +1376,11 @@ export async function getHallStatusBoard(
 			and(
 				eq(orders.hotelId, hotelId),
 				or(
+					// A closed event leaves the board at once, the way a checked-out room does; it lives on
+					// in Transactions and in Reservations' Past tab.
 					and(
 						eq(hallBookings.eventDate, businessDate),
-						inArray(hallBookings.status, ['confirmed', 'checked_in', 'checked_out', 'completed'])
+						inArray(hallBookings.status, ['confirmed', 'checked_in', 'checked_out'])
 					),
 					// An event from an earlier day that was never checked out or closed stays on the board until it is.
 					and(lt(hallBookings.eventDate, businessDate), inArray(hallBookings.status, ['checked_in', 'checked_out']))
@@ -1403,7 +1407,13 @@ export async function getHallStatusBoard(
 	for (const r of eventRows.filter((e) => e.status === 'checked_out')) {
 		const gate = await getHallCloseGate(hotelId, r.functionHallId, r.hallBookingId);
 		const folio = await getFolioDetail(hotelId, { kind: 'hall', hallBookingId: r.hallBookingId });
-		closeByEvent.set(r.hallBookingId, { housekeeping: gate.status, pendingDamageCount: gate.pendingDamageCount, balanceCentavos: folio.balanceCentavos });
+		const deposit = await getSecurityDepositForTarget(hotelId, { kind: 'hall', hallBookingId: r.hallBookingId });
+		closeByEvent.set(r.hallBookingId, {
+			housekeeping: gate.status,
+			pendingDamageCount: gate.pendingDamageCount,
+			balanceCentavos: folio.balanceCentavos,
+			heldDepositCentavos: deposit?.status === 'held' ? deposit.amountCentavos : 0
+		});
 	}
 
 	const eventsByHall = new Map<string, HallGridEvent[]>();
@@ -1765,30 +1775,20 @@ export async function completeHallBooking(
 		if (e instanceof FolioError) throw new HallCompleteError(e.message);
 		throw e;
 	}
+	// Collateral, not a charge: it must be settled outright and can never go to the city ledger,
+	// exactly as at a room checkout.
+	const deposit = await getSecurityDepositForTarget(hotelId, { kind: 'hall', hallBookingId });
 	const owes = folio.balanceCentavos > 0 && !cityLedger;
 	const blockers: string[] = [];
+	if (deposit?.status === 'held') {
+		blockers.push(`the ₱${(deposit.amountCentavos / 100).toFixed(2)} security deposit is still held`);
+	}
 	if (gate.status !== 'clean') blockers.push(gate.status === 'dirty' ? 'housekeeping has not cleaned the hall yet' : 'housekeeping is still cleaning the hall');
 	if (gate.pendingDamageCount > 0) {
 		blockers.push(`${gate.pendingDamageCount} damage report${gate.pendingDamageCount === 1 ? ' is' : 's are'} waiting to be charged or dismissed`);
 	}
 	if (owes) blockers.push(`₱${(folio.balanceCentavos / 100).toFixed(2)} is still owed on the bill`);
 	if (blockers.length) throw new HallCompleteError(`Can't close yet: ${blockers.join('; ')}.`);
-
-	if (folio.balanceCentavos > 0 && cityLedger) {
-		try {
-			await openReceivable({
-				hotelId,
-				target: { kind: 'hall', hallBookingId },
-				billToName: cityLedger.billToName,
-				billToCompany: cityLedger.billToCompany ?? null,
-				referenceNo: cityLedger.referenceNo ?? null,
-				notes: cityLedger.notes ?? null,
-				actor
-			});
-		} catch (e) {
-			throw new HallCompleteError(e instanceof Error ? e.message : 'Could not move the balance to the city ledger.');
-		}
-	}
 
 	await db.transaction(async (tx) => {
 		const locked = await loadHallEventForUpdate(tx, hotelId, hallBookingId);
@@ -1810,6 +1810,29 @@ export async function completeHallBooking(
 			after: { functionHallId: locked.functionHallId, balanceCentavos: folio.balanceCentavos, cityLedger: !!cityLedger && folio.balanceCentavos > 0 }
 		});
 	});
+
+	// Only once the event is really closed. `openReceivable` squares the folio with a `house_use`
+	// payment, so opening it first and then failing the close would leave a settled-looking folio
+	// on an event still open — a phantom claim. This way a failure here leaves a closed event with
+	// a visible balance instead, which the desk can still move to the city ledger from Transactions.
+	// shortcut: the receivable is not in the close's own transaction, because `openReceivable` opens
+	// its own and reads through `db`; threading a `tx` through it and `getFolioDetail` is the proper
+	// fix, and the room checkout path needs the same treatment.
+	if (folio.balanceCentavos > 0 && cityLedger) {
+		try {
+			await openReceivable({
+				hotelId,
+				target: { kind: 'hall', hallBookingId },
+				billToName: cityLedger.billToName,
+				billToCompany: cityLedger.billToCompany ?? null,
+				referenceNo: cityLedger.referenceNo ?? null,
+				notes: cityLedger.notes ?? null,
+				actor
+			});
+		} catch (e) {
+			throw new HallCompleteError(e instanceof Error ? e.message : 'The event was closed, but the balance could not be moved to the city ledger. Move it from Transactions.');
+		}
+	}
 
 	await closeHallFolio(hotelId, hallBookingId);
 
