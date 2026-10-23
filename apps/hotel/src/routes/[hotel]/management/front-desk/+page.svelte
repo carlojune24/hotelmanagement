@@ -218,10 +218,19 @@
 	let shiftFloat = $state('');
 	let shiftDrawer = $state('');
 
-	let hallDetailDialogOpen = $state(false);
+	let hallDetailOpen = $state(false);
 	$effect(() => {
-		if (formHallBookingDetail) hallDetailDialogOpen = true;
+		if (formHallBookingDetail) {
+			hallDetailOpen = true;
+			selectedRoomId = null;
+		}
 	});
+
+	/** Room and hall share the one rail, so picking a room closes the hall detail. */
+	function selectRoom(roomId: string) {
+		selectedRoomId = roomId;
+		hallDetailOpen = false;
+	}
 
 	// Hall check-out: the dialog previews the overtime for the moment it was opened. The server
 	// works the real figure out again from its own clock when the button is pressed.
@@ -1363,7 +1372,7 @@
 							<li>
 								<button
 									type="button"
-									onclick={() => (selectedRoomId = row.roomId)}
+									onclick={() => selectRoom(row.roomId)}
 									class="group flex min-h-12 w-full items-center gap-3 px-4 py-3 text-left text-sm transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
 								>
 									<TriangleAlertIcon class="size-4 shrink-0 text-danger" />
@@ -1479,7 +1488,7 @@
 									aria-label="Room {c.roomNumber}, {c.roomTypeName}, {statusLabel[c.status] ??
 										c.status}{c.status === 'departing' ? ', departing today' : ''}"
 									aria-pressed={picked || (!pickMode && selectedRoomId === c.roomId)}
-									onclick={() => (pickMode ? toggleTilePick(c) : (selectedRoomId = c.roomId))}
+									onclick={() => (pickMode ? toggleTilePick(c) : selectRoom(c.roomId))}
 									class="relative rounded-xl border p-3 text-left transition {statusCardClass(
 										c
 									)} {pickDisabled
@@ -1684,7 +1693,7 @@
 		</div>
 
 		<div
-			class="{pickMode || selectedRoomId
+			class="{pickMode || selectedRoomId || hallDetailOpen
 				? 'fixed inset-0 z-40 bg-background'
 				: 'hidden'} overflow-y-auto lg:static lg:z-auto lg:block lg:w-120 lg:shrink-0 lg:border-l lg:border-border lg:bg-transparent"
 		>
@@ -1819,6 +1828,8 @@
 						</form>
 					{/if}
 				</div>
+			{:else if hallDetailOpen && formHallBookingDetail}
+				{@render hallDetailPanel()}
 			{:else if selectedRoom}
 				<div class="p-4">
 					<button
@@ -3371,15 +3382,22 @@
 	</Sheet.Content>
 </Sheet.Root>
 
-<Dialog.Root bind:open={hallDetailDialogOpen}>
-	<Dialog.Content class="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+{#snippet hallDetailPanel()}
+	<div class="p-4">
 		{#if formHallBookingDetail}
-			<Dialog.Header>
-				<Dialog.Title
-					>{formHallBookingDetail.hall.name} — {formHallBookingDetail.guest.fullName}</Dialog.Title
-				>
-				<Dialog.Description>{formHallBookingDetail.hallBooking.eventType}</Dialog.Description>
-			</Dialog.Header>
+			<button
+				type="button"
+				onclick={() => (hallDetailOpen = false)}
+				class="mb-3 flex items-center gap-1 text-xs font-semibold text-ink-muted hover:text-ink"
+			>
+				<ChevronLeftIcon class="size-3.5" />
+				Back to today's list
+			</button>
+			<p class="text-[11px] font-semibold tracking-wide text-ink-muted uppercase">Function hall</p>
+			<div class="mb-1 text-lg font-bold text-ink">{formHallBookingDetail.hall.name}</div>
+			<p class="mb-3 text-sm text-ink-muted">
+				{formHallBookingDetail.guest.fullName} · {formHallBookingDetail.hallBooking.eventType}
+			</p>
 
 			<div class="space-y-4">
 				<div class="rounded-lg border border-border p-4">
@@ -3641,8 +3659,8 @@
 				</div>
 			</div>
 		{/if}
-	</Dialog.Content>
-</Dialog.Root>
+	</div>
+{/snippet}
 
 <Dialog.Root bind:open={hallCheckoutOpen}>
 	<Dialog.Content class="sm:max-w-md">
