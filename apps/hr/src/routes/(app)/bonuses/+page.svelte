@@ -56,9 +56,29 @@
 			<Button variant="outline" size="sm" href="?year={data.year - 1}">← {data.year - 1}</Button>
 			<span class="px-2 text-lg tabular-nums">{data.year}</span>
 			<Button variant="outline" size="sm" href="?year={data.year + 1}">{data.year + 1} →</Button>
+			<Button variant="outline" size="sm" href="/reports/13th-month?year={data.year}">
+				13th-month report
+			</Button>
 			<Button variant="gold" onclick={() => (creating = true)}><PlusIcon /> New batch</Button>
 		</div>
 	</div>
+
+	{#if data.thirteenth.pending.length > 0 && (data.thirteenth.overdue || data.thirteenth.daysLeft <= 60)}
+		<p
+			class="rounded-2xl border border-dashed px-4 py-3 text-sm {data.thirteenth.overdue
+				? 'border-danger/50 text-danger'
+				: 'border-ink/30'}"
+			role="status"
+		>
+			{#if data.thirteenth.overdue}
+				<strong class="font-medium">13th month was due {dayLabel(data.thirteenth.due)}.</strong>
+			{:else}
+				<strong class="font-medium">13th month is due {dayLabel(data.thirteenth.due)}</strong>
+				({data.thirteenth.daysLeft} {data.thirteenth.daysLeft === 1 ? 'day' : 'days'} left).
+			{/if}
+			Year-end batch not issued for: {data.thirteenth.pending.join(', ')}.
+		</p>
+	{/if}
 
 	{#if data.batches.length === 0}
 		<section class="panel p-6">

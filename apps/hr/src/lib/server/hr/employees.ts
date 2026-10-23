@@ -42,6 +42,13 @@ export const employeeFormSchema = z.object({
 	philhealth: z.string().trim().max(40).optional(),
 	pagibig: z.string().trim().max(40).optional(),
 	tin: z.string().trim().max(40).optional(),
+	/** Present when the tax-record fields were on the submitted form (kept as stored otherwise). */
+	taxSubmitted: z.string().optional(),
+	address: z.string().trim().max(300).optional(),
+	prevEmployerYear: blankToUndefined(z.coerce.number().int().min(2000).max(2100).optional()),
+	prevEmployerName: z.string().trim().max(160).optional(),
+	prevTaxablePesos: blankToUndefined(z.coerce.number().min(0).max(1_000_000_000).optional()),
+	prevWithheldPesos: blankToUndefined(z.coerce.number().min(0).max(1_000_000_000).optional()),
 	/** Present when the coverage section was on the submitted form (an unticked box isn't posted). */
 	coverageSubmitted: z.string().optional(),
 	sssCovered: z.string().optional(),
@@ -87,6 +94,19 @@ function toCoverageValues(input: EmployeeFormInput) {
 	return values;
 }
 
+/** Address and previous-employer figures for the BIR 2316 and annualization; empty when not submitted. */
+function toTaxRecordValues(input: EmployeeFormInput) {
+	if (!input.taxSubmitted) return {};
+	const hasPrev = input.prevEmployerYear !== undefined;
+	return {
+		address: input.address || null,
+		prevEmployerYear: input.prevEmployerYear ?? null,
+		prevEmployerName: hasPrev ? input.prevEmployerName || null : null,
+		prevEmployerTaxableCentavos: hasPrev ? Math.round((input.prevTaxablePesos ?? 0) * 100) : 0,
+		prevEmployerWithheldCentavos: hasPrev ? Math.round((input.prevWithheldPesos ?? 0) * 100) : 0
+	};
+}
+
 /** The person-level fields. Where they work (post, department, device ID) is the assignment. */
 function toEmployeeValues(input: EmployeeFormInput) {
 	return {
@@ -111,6 +131,7 @@ function toEmployeeValues(input: EmployeeFormInput) {
 			tin: input.tin || undefined
 		},
 		...toCoverageValues(input),
+		...toTaxRecordValues(input),
 		disbursement: {
 			method: input.disbursementMethod,
 			bank_code: input.bankCode || undefined,

@@ -28,9 +28,9 @@ describe('DTR scenarios', () => {
 	}
 
 	it('a scheduled shift is always fully accounted for: worked + late + undertime = the paid day', () => {
-		// Only for plain punched days with no overtime, leave or memo, where the identity must hold.
+		// Only for plain punched days with no overtime, leave or memo, where the identity must hold (an absent day is deducted whole).
 		for (const sc of SCENARIOS.filter(
-			(s) => (s.group === 'split' || s.group === 'plain') && s.punches.length > 1 && !s.expect.flags?.includes('single_punch')
+			(s) => (s.group === 'split' || s.group === 'plain') && s.punches.length > 1 && !s.expect.flags?.includes('single_punch') && s.expect.worked !== 0
 		)) {
 			const g = evaluate(sc);
 			expect(g.worked + g.late + g.under, sc.id).toBe(480);

@@ -14,6 +14,8 @@ export interface PayItemLike {
 	kind: string;
 	category: string;
 	amountCentavos: number;
+	/** Absent = taxable. An exempt earning (de minimis and the like) is left out of taxable income. */
+	taxable?: boolean;
 }
 
 /** The four engine inputs the payroll line already knows how to price. */
@@ -22,12 +24,21 @@ export interface Buckets {
 	otherEarningsCentavos: number;
 	cashAdvanceCentavos: number;
 	otherDeductionsCentavos: number;
+	/** The part of the earnings above that is exempt from income tax. */
+	nonTaxableEarningsCentavos: number;
 }
 
 export function bucketsOf(items: PayItemLike[]): Buckets {
-	const b: Buckets = { allowancesCentavos: 0, otherEarningsCentavos: 0, cashAdvanceCentavos: 0, otherDeductionsCentavos: 0 };
+	const b: Buckets = {
+		allowancesCentavos: 0,
+		otherEarningsCentavos: 0,
+		cashAdvanceCentavos: 0,
+		otherDeductionsCentavos: 0,
+		nonTaxableEarningsCentavos: 0
+	};
 	for (const i of items) {
 		if (i.kind === 'earning') {
+			if (i.taxable === false) b.nonTaxableEarningsCentavos += i.amountCentavos;
 			if (i.category === 'allowance') b.allowancesCentavos += i.amountCentavos;
 			else b.otherEarningsCentavos += i.amountCentavos; // incentive and other earnings
 		} else if (i.category === 'cash_advance') b.cashAdvanceCentavos += i.amountCentavos;
@@ -51,6 +62,7 @@ export interface LinePayItem {
 	category: string;
 	label: string;
 	amountCentavos: number;
+	taxable?: boolean;
 }
 
 /**

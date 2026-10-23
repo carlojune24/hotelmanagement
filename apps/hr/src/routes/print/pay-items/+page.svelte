@@ -9,7 +9,7 @@
 		new Date(`${d}T00:00:00`).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' });
 	const when = (i: { startDate: string; endDate: string | null }) =>
 		i.endDate === i.startDate ? `Cutoff of ${day(i.startDate)}` : `${day(i.startDate)} to ${i.endDate ? day(i.endDate) : 'until voided'}`;
-	const STATUS = { pending: 'Waiting', draft: 'Draft payslip', locked: 'Locked', voided: 'Voided' } as const;
+	const STATUS = { pending: 'Waiting', draft: 'Draft payslip', locked: 'Locked', voided: 'Voided', archived: 'Archived' } as const;
 	const printed = new Date().toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' });
 </script>
 

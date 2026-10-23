@@ -46,6 +46,8 @@ export interface CancellationPolicyView {
 	freeCancelHours: number | null;
 	penaltyType: PenaltyType;
 	penaltyValueBps: number | null;
+	graceHoursAfterPayment?: number | null;
+	graceFeeBps?: number | null;
 }
 
 export interface CancellationFeeInput {
@@ -57,6 +59,8 @@ export interface CancellationFeeInput {
 	nights: number;
 	/** Whole hours between "now" and the check-in moment; negative once check-in has passed. */
 	hoursUntilCheckIn: number;
+	/** Whole hours since the booking's first paid payment; null/omitted when nothing is paid yet. */
+	hoursSincePayment?: number | null;
 }
 
 export interface CancellationFeeResult {
@@ -118,6 +122,25 @@ export function computeCancellationFee(input: CancellationFeeInput): Cancellatio
 			refundCentavos: cap,
 			policyLabel: windowLabel,
 			basisLabel: 'Inside the free-cancellation window'
+		};
+	}
+
+	// Grace tier: a reduced fee shortly after paying, but never once check-in time has passed.
+	const { graceHoursAfterPayment: graceHours, graceFeeBps } = policy;
+	if (
+		graceHours != null &&
+		graceFeeBps != null &&
+		input.hoursSincePayment != null &&
+		input.hoursSincePayment <= graceHours &&
+		hoursUntilCheckIn > 0
+	) {
+		const feeCentavos = Math.min(cap, Math.round((lineTotalCentavos * graceFeeBps) / 10000));
+		return {
+			freeCancellation: false,
+			feeCentavos,
+			refundCentavos: cap - feeCentavos,
+			policyLabel: `${policy.name} — ${graceHours}h grace after payment (still open)`,
+			basisLabel: `Grace fee: ${graceFeeBps / 100}% of the booking total`
 		};
 	}
 
@@ -246,15 +269,31 @@ export async function getCancellationQuote(
 		const hoursUntilCheckIn =
 			(wallTimeToUtcMs(row.booking.checkIn, hotel.checkInTime, hotel.timezone) - now) / 3_600_000;
 
+		// Grace clock starts at the order's first real payment (refund rows are negative).
+		const [firstPaid] = await db
+			.select({ at: sql<Date | null>`min(${payments.paidAt})` })
+			.from(payments)
+			.where(
+				and(
+					eq(payments.orderId, row.order.id),
+					eq(payments.status, 'paid'),
+					sql`${payments.amountCentavos} > 0`
+				)
+			);
+		const hoursSincePayment = firstPaid?.at ? (now - new Date(firstPaid.at).getTime()) / 3_600_000 : null;
+
 		const fee = computeCancellationFee({
 			policy: row.policy
 				? {
 						name: row.policy.name,
 						freeCancelHours: row.policy.freeCancelHours,
 						penaltyType: row.policy.penaltyType,
-						penaltyValueBps: row.policy.penaltyValueBps
+						penaltyValueBps: row.policy.penaltyValueBps,
+						graceHoursAfterPayment: row.policy.graceHoursAfterPayment,
+						graceFeeBps: row.policy.graceFeeBps
 					}
 				: null,
+			hoursSincePayment,
 			lineTotalCentavos: row.booking.totalCentavos,
 			paidCentavos: paid,
 			nights,

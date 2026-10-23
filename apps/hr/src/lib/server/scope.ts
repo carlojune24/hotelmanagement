@@ -14,7 +14,6 @@ const ITEMS: Array<{ seg: string; label: string; cap: string | null }> = [
 	{ seg: 'dtr', label: 'DTR', cap: 'dtr:*' },
 	{ seg: 'leave', label: 'Leave', cap: 'leave:file' },
 { seg: 'overtime', label: 'Overtime', cap: 'overtime:file' },
-	{ seg: 'memos', label: 'Memos', cap: 'memo:propose' },
 	{ seg: 'payslips', label: 'Payslips', cap: 'payslip:read' },
 	{ seg: 'guide', label: 'Guide', cap: 'dtr:*' },
 	{ seg: 'settings', label: 'Settings', cap: 'schedule:*' }

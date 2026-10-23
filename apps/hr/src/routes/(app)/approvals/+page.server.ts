@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { listPendingApprovals } from '$lib/server/hr/approvals';
-import { CalendarError, decideCalendarDay } from '$lib/server/hr/calendar';
 import { LeaveError, decideLeave } from '$lib/server/hr/leave';
 import { OvertimeError, decideOvertime } from '$lib/server/hr/overtime';
 import { PeriodError, decideWeek } from '$lib/server/hr/schedule-periods';
@@ -39,7 +38,6 @@ function failure(e: unknown) {
 	if (
 		e instanceof LeaveError ||
 		e instanceof OvertimeError ||
-		e instanceof CalendarError ||
 		e instanceof PeriodError ||
 		e instanceof DtrSubmissionError
 	) {
@@ -87,26 +85,6 @@ export const actions: Actions = {
 			return failure(e);
 		}
 		return { ok: parsed.data.decision === 'approved' ? 'Overtime approved.' : 'Overtime rejected.' };
-	},
-
-	decideMemo: async ({ request, locals }) => {
-		requireCap(locals.user, locals.access, 'approval:*');
-		const parsed = decisionForm.safeParse(await fd(request));
-		if (!parsed.success) return fail(400, { message: 'Choose approve or reject.' });
-		try {
-			const row = await decideCalendarDay(parsed.data.id, parsed.data.decision, parsed.data.note, locals.user!.id);
-			await writeAudit({
-				actor: locals.user,
-				establishmentId: row.establishmentId,
-				action: `calendar.${parsed.data.decision}`,
-				entityType: 'calendar_day',
-				entityId: row.id,
-				after: { note: parsed.data.note }
-			});
-		} catch (e) {
-			return failure(e);
-		}
-		return { ok: parsed.data.decision === 'approved' ? 'Memo approved.' : 'Memo rejected.' };
 	},
 
 	decideWeek: async ({ request, locals }) => {

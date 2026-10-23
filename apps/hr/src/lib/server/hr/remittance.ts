@@ -1,6 +1,7 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
+import { agencyOfRemit, listLoanTypes } from './loans';
 import {
 	organizations,
 	payrollBatches,
@@ -13,10 +14,15 @@ import {
 
 export class RemittanceError extends Error {}
 
-/** `sss_loan` / `pagibig_loan` are the loan collections — paid separately from the contributions. */
+/** The fixed schedules. `sss_loan` / `pagibig_loan` are the government loan collections, paid apart from contributions. */
 export const AGENCIES = ['sss', 'philhealth', 'pagibig', 'bir', 'sss_loan', 'pagibig_loan'] as const;
-export type Agency = (typeof AGENCIES)[number];
-export const AGENCY_LABEL: Record<Agency, string> = {
+export type BaseAgency = (typeof AGENCIES)[number];
+/**
+ * A schedule key: a fixed agency, `loan:<loan type key>` (a bank, coop or other lender paid from its own
+ * schedule), or `kept:<loan type key>` (a company-side loan — deducted, remitted to no one, listed for visibility).
+ */
+export type Agency = BaseAgency | `loan:${string}` | `kept:${string}`;
+export const AGENCY_LABEL: Record<BaseAgency, string> = {
 	sss: 'SSS',
 	philhealth: 'PhilHealth',
 	pagibig: 'Pag-IBIG',
@@ -24,9 +30,18 @@ export const AGENCY_LABEL: Record<Agency, string> = {
 	sss_loan: 'SSS loans',
 	pagibig_loan: 'Pag-IBIG loans'
 };
-export const isLoanAgency = (a: Agency): boolean => a === 'sss_loan' || a === 'pagibig_loan';
-/** Which key of a person's government IDs each agency is filed under. */
-const ID_KEY: Record<Agency, 'sss' | 'philhealth' | 'pagibig' | 'tin'> = {
+export const isLoanAgency = (a: Agency): boolean =>
+	a === 'sss_loan' || a === 'pagibig_loan' || a.startsWith('loan:') || a.startsWith('kept:');
+/** A schedule that can be filed and marked remitted — everything but a company-side loan. */
+export const isRemittable = (a: Agency): boolean => !a.startsWith('kept:');
+/** The label for a schedule; a lender's is its loan type's name (`names`: loan type key → name). */
+export function agencyLabel(agency: Agency, names: ReadonlyMap<string, string> = new Map()): string {
+	if (agency in AGENCY_LABEL) return AGENCY_LABEL[agency as BaseAgency];
+	const key = agency.slice(agency.indexOf(':') + 1);
+	return names.get(key) ?? key;
+}
+/** Which key of a person's government IDs each schedule is filed under (a lender has none). */
+const ID_KEY: Record<BaseAgency, 'sss' | 'philhealth' | 'pagibig' | 'tin'> = {
 	sss: 'sss',
 	philhealth: 'philhealth',
 	pagibig: 'pagibig',
@@ -34,6 +49,7 @@ const ID_KEY: Record<Agency, 'sss' | 'philhealth' | 'pagibig' | 'tin'> = {
 	sss_loan: 'sss',
 	pagibig_loan: 'pagibig'
 };
+const idKeyOf = (agency: Agency) => (agency in ID_KEY ? ID_KEY[agency as BaseAgency] : null);
 
 /** The employer number an agency's schedule is filed under (loans use the contribution number). */
 export function employerNoFor(
@@ -43,11 +59,16 @@ export function employerNoFor(
 	if (agency === 'bir') return settings.employer.tin;
 	if (agency === 'sss_loan') return settings.employerIds.sss;
 	if (agency === 'pagibig_loan') return settings.employerIds.pagibig;
-	return settings.employerIds[agency];
+	if (!(agency in ID_KEY)) return null;
+	return settings.employerIds[agency as 'sss' | 'philhealth' | 'pagibig'];
 }
 
 export const periodSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Pick a month.');
-export const agencySchema = z.enum(AGENCIES);
+/** A schedule that can be opened, exported and filed: a fixed agency or a lender (never a company-side loan). */
+export const agencySchema = z
+	.string()
+	.refine((a) => (AGENCIES as readonly string[]).includes(a) || /^loan:[a-z0-9_]+$/.test(a), 'Unknown remittance.')
+	.transform((a) => a as Agency);
 
 // ---------------------------------------------------------------------------
 // Pure: payroll lines → one agency's monthly schedule
@@ -63,6 +84,8 @@ export interface ScheduleLine {
 	employerContributions: unknown;
 	/** What each loan took on this payslip, with the loan's kind and reference at that time. */
 	loans?: Array<{ kind: string; agency: string | null; referenceNo: string | null; deducted: number }>;
+	/** Tax the year-end settlement paid back to the employee on this payslip, which comes off what is remitted. */
+	taxReturned?: number;
 	/** Snapshot taken when the payslip was generated. */
 	coverage?: { sss?: boolean; philhealth?: boolean; pagibig?: boolean; withholdingExempt?: boolean; note?: string | null };
 }
@@ -94,6 +117,8 @@ export interface Schedule {
 	byEstablishment: Record<string, Totals>;
 	/** Paid something but has no number on file for this agency. */
 	missingId: string[];
+	/** BIR only: tax paid back to employees at year-end, already netted off the figures. */
+	taxReturned: number;
 	/** Left out on purpose — covered-by-nobody / exempt — with Main HR's reason. */
 	notCovered: Array<{ name: string; note: string | null }>;
 }
@@ -116,14 +141,14 @@ function shares(agency: Agency, l: ScheduleLine) {
 		case 'pagibig':
 			return { employee: num(l.deductions, 'pagibig_ee'), employer: num(l.employerContributions, 'pagibig_er'), ec: 0 };
 		case 'bir':
-			return { employee: num(l.deductions, 'withholding_tax'), employer: 0, ec: 0 };
-		case 'sss_loan':
-		case 'pagibig_loan':
-			return {
-				employee: (l.loans ?? []).filter((x) => x.agency === agency).reduce((a, x) => a + x.deducted, 0),
-				employer: 0,
-				ec: 0
-			};
+			// Tax returned to the employee at year-end is paid out of what was withheld, so it is not remitted.
+			return { employee: num(l.deductions, 'withholding_tax') - (l.taxReturned ?? 0), employer: 0, ec: 0 };
+		default: {
+			// A loan schedule: a lender's own, or a company-side loan (no agency on the snapshot, matched by type).
+			const kept = agency.startsWith('kept:') ? agency.slice(5) : null;
+			const mine = (l.loans ?? []).filter((x) => (kept ? x.agency === null && x.kind === kept : x.agency === agency));
+			return { employee: mine.reduce((a, x) => a + x.deducted, 0), employer: 0, ec: 0 };
+		}
 	}
 }
 
@@ -141,8 +166,10 @@ export function buildSchedule(agency: Agency, lines: ScheduleLine[]): Schedule {
 	const byEstablishment: Record<string, Totals> = {};
 	const totals = emptyTotals();
 	const notCovered = new Map<string, { name: string; note: string | null }>();
+	let taxReturned = 0;
 
 	for (const l of lines) {
+		if (agency === 'bir') taxReturned += l.taxReturned ?? 0;
 		const covered =
 			agency === 'bir'
 				? l.coverage?.withholdingExempt !== true
@@ -159,7 +186,10 @@ export function buildSchedule(agency: Agency, lines: ScheduleLine[]): Schedule {
 				employeeId: l.employeeId,
 				name: l.employeeName,
 				employeeNo: l.employeeNo,
-				idNumber: str(l.govIds, ID_KEY[agency]),
+				idNumber: (() => {
+					const k = idKeyOf(agency);
+					return k ? str(l.govIds, k) : null;
+				})(),
 				reference: null,
 				employee: 0,
 				employer: 0,
@@ -167,8 +197,9 @@ export function buildSchedule(agency: Agency, lines: ScheduleLine[]): Schedule {
 				total: 0
 			} satisfies ScheduleRow);
 		if (isLoanAgency(agency)) {
+			const kept = agency.startsWith('kept:') ? agency.slice(5) : null;
 			const refs = (l.loans ?? [])
-				.filter((x) => x.agency === agency && x.deducted > 0 && x.referenceNo)
+				.filter((x) => (kept ? x.agency === null && x.kind === kept : x.agency === agency) && x.deducted > 0 && x.referenceNo)
 				.map((x) => x.referenceNo!);
 			const all = new Set([...(row.reference ? row.reference.split(', ') : []), ...refs]);
 			row.reference = all.size ? [...all].join(', ') : null;
@@ -188,7 +219,8 @@ export function buildSchedule(agency: Agency, lines: ScheduleLine[]): Schedule {
 		rows,
 		totals,
 		byEstablishment,
-		missingId: rows.filter((r) => !r.idNumber).map((r) => r.name),
+		missingId: idKeyOf(agency) ? rows.filter((r) => !r.idNumber).map((r) => r.name) : [],
+		taxReturned,
 		notCovered: [...notCovered.values()].sort((a, b) => a.name.localeCompare(b.name))
 	};
 }
@@ -216,7 +248,9 @@ const settingsSchema = z.object({
 			pagibig: z.number().int().min(1).max(31).nullable().optional(),
 bir: z.number().int().min(1).max(31).nullable().optional(),
 			sss_loan: z.number().int().min(1).max(31).nullable().optional(),
-			pagibig_loan: z.number().int().min(1).max(31).nullable().optional()
+			pagibig_loan: z.number().int().min(1).max(31).nullable().optional(),
+			/** Lender loan types' deadlines, by loan type key. */
+			loans: z.record(z.string(), z.number().int().min(1).max(31).nullable()).optional()
 		})
 		.default({})
 });
@@ -305,7 +339,8 @@ export async function monthLines(organizationId: string, period: string) {
 	const scheduleLines: ScheduleLine[] = lines.map(({ detail, lineId, ...l }) => ({
 		...l,
 		loans: loansOf.get(lineId),
-		coverage: (detail as { coverage?: ScheduleLine['coverage'] } | null)?.coverage
+		coverage: (detail as { coverage?: ScheduleLine['coverage'] } | null)?.coverage,
+		taxReturned: Math.max(0, -((detail as { annualTaxAdjustmentCentavos?: number } | null)?.annualTaxAdjustmentCentavos ?? 0))
 	}));
 	return { lines: scheduleLines, draftBatches, runCount: runIds.length };
 }
@@ -329,44 +364,90 @@ export async function getSchedule(organizationId: string, agency: Agency, period
 		record,
 		draftBatches,
 		runCount,
-		dueDate: record?.dueDate ?? dueDateFor(period, settings.dueDay[agency]),
+		dueDate: record?.dueDate ?? dueDateFor(period, dueDayOf(settings, agency)),
 		settings
 	};
 }
 
-/** The four agencies for a month: amount, people, status and due date. */
+export type OverviewKind = 'agency' | 'lender' | 'kept';
+export interface OverviewItem {
+	agency: Agency;
+	kind: OverviewKind;
+	label: string;
+	people: number;
+	amount: number;
+	/** 'kept' = a company-side loan: deducted from pay, remitted to no one. */
+	status: 'open' | 'remitted' | 'kept';
+	dueDate: string | null;
+	overdue: boolean;
+	warnings: number;
+	/** Who is in it, for the list on the overview — the full schedule is one click away. */
+	lines: Array<{ employeeId: string; name: string; employeeNo: string; reference: string | null; amount: number }>;
+}
+
+/** A deadline is "day N of the next month", per agency or per lender loan type. */
+export function dueDayOf(settings: Pick<RemittanceSettings, 'dueDay'>, agency: Agency): number | null | undefined {
+	if (agency.startsWith('loan:')) return settings.dueDay.loans?.[agency.slice(5)];
+	if (agency.startsWith('kept:')) return null;
+	return settings.dueDay[agency as BaseAgency];
+}
+
+/**
+ * Everything the company may owe for a month, always listed — a zero is information too. Contributions first,
+ * then every loan type: SSS and Pag-IBIG loans (one payment each), one schedule per bank/coop/lender loan type,
+ * and company-side loans shown as "no remittance".
+ */
 export async function getOverview(organizationId: string, period: string, today: string) {
-	const [{ lines, draftBatches, runCount }, settings, records] = await Promise.all([
+	const [{ lines, draftBatches, runCount }, settings, records, types] = await Promise.all([
 		monthLines(organizationId, period),
 		getRemittanceSettings(organizationId),
 		db
 			.select()
 			.from(remittances)
-			.where(and(eq(remittances.organizationId, organizationId), eq(remittances.period, period)))
+			.where(and(eq(remittances.organizationId, organizationId), eq(remittances.period, period))),
+		listLoanTypes(organizationId)
 	]);
 	const byAgency = new Map(records.map((r) => [r.agency, r]));
-	return {
-		draftBatches,
-		runCount,
-		agencies: AGENCIES.flatMap((agency) => {
-			const s = buildSchedule(agency, lines);
-			const record = byAgency.get(agency) ?? null;
-			const due = record?.dueDate ?? dueDateFor(period, settings.dueDay[agency]);
-			const remitted = record?.status === 'remitted';
-// A loan collection only appears once there is a loan deduction (or a filed record) to show.
-			if (isLoanAgency(agency) && s.rows.length === 0 && !record) return [];
-			return [{
-				agency,
-				label: AGENCY_LABEL[agency],
-				people: s.rows.length,
-				amount: remitted ? (record!.amountCentavos ?? s.totals.total) : s.totals.total,
-				status: (remitted ? 'remitted' : 'open') as 'remitted' | 'open',
-				dueDate: due,
-				overdue: !remitted && s.totals.total > 0 && due !== null && due < today,
-warnings: s.missingId.length
-			}];
-		})
+	const names = new Map(types.map((t) => [t.key, t.name]));
+
+	const item = (agency: Agency, kind: OverviewKind): OverviewItem => {
+		const s = buildSchedule(agency, lines);
+		const record = byAgency.get(agency) ?? null;
+		const due = kind === 'kept' ? null : (record?.dueDate ?? dueDateFor(period, dueDayOf(settings, agency)));
+		const remitted = record?.status === 'remitted';
+		return {
+			agency,
+			kind,
+			label: agencyLabel(agency, names),
+			people: s.rows.length,
+			amount: remitted ? (record!.amountCentavos ?? s.totals.total) : s.totals.total,
+			status: kind === 'kept' ? 'kept' : remitted ? 'remitted' : 'open',
+			dueDate: due,
+			overdue: kind !== 'kept' && !remitted && s.totals.total > 0 && due !== null && due < today,
+			warnings: s.missingId.length,
+			lines: s.rows.map((r) => ({
+				employeeId: r.employeeId,
+				name: r.name,
+				employeeNo: r.employeeNo,
+				reference: r.reference,
+				amount: r.total
+			}))
+		};
 	};
+
+	const contributions = (['sss', 'philhealth', 'pagibig', 'bir'] as const).map((a) => item(a, 'agency'));
+	const loans: OverviewItem[] = [item('sss_loan', 'agency'), item('pagibig_loan', 'agency')];
+	for (const t of types) {
+		// A type that is switched off still shows if it took money this month or was filed.
+		const kind = agencyOfRemit(t.remitTo, t.key)?.startsWith('loan:') ? 'lender' : t.remitTo === 'none' ? 'kept' : null;
+		if (!kind) continue;
+		const agency = (kind === 'lender' ? `loan:${t.key}` : `kept:${t.key}`) as Agency;
+		const row = item(agency, kind);
+		if (t.active || row.people > 0 || byAgency.has(agency)) loans.push(row);
+	}
+	// What can actually be filed — the callers that watch deadlines and amounts due read this, not the whole list.
+	const agencies = [...contributions, ...loans.filter((l) => l.kind !== 'kept')];
+	return { draftBatches, runCount, contributions, loans, agencies };
 }
 
 // ---------------------------------------------------------------------------

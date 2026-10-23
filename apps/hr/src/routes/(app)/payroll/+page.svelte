@@ -1,8 +1,11 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
+	import PlusIcon from '@lucide/svelte/icons/plus';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
@@ -10,10 +13,14 @@
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
+	let creating = $state(false);
+
 	$effect(() => {
 		if (form?.error) toast.error(form.error);
-		else if (form && 'ok' in form && form.ok) toast.success(form.ok);
 	});
+
+	const pageHref = (page: number, size = data.pageSize) =>
+		`?page=${page}&size=${size}${data.q ? `&q=${encodeURIComponent(data.q)}` : ''}`;
 
 	const selectClass =
 		'h-10 w-full rounded-full border border-transparent bg-white px-4 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50';
@@ -22,63 +29,22 @@
 <svelte:head><title>Payroll · HR</title></svelte:head>
 
 <div class="mx-auto max-w-5xl space-y-6">
-	<h1 class="text-5xl font-light tracking-tight">Payroll</h1>
-
-	<section class="panel space-y-4 p-5 md:p-6" aria-label="Payroll settings">
-		<div>
-			<h2 class="text-xl font-light">Working-day factor</h2>
-			<p class="mt-1 text-sm text-ink-muted">
-				Turns a monthly rate into a daily one (rate × 12 ÷ factor), which sets what an absence costs
-				and the hourly rate for overtime. It is a company policy, so there is no default —
-				{#if data.dayFactor}currently <strong class="font-medium text-ink">{data.dayFactor}</strong>.{:else}choose
-					one before creating a run.{/if}
-			</p>
+	<div class="flex flex-wrap items-end justify-between gap-3">
+		<h1 class="text-5xl font-light tracking-tight">Payroll</h1>
+		<div class="flex items-center gap-2">
+			<Button variant="outline" href="/payroll/annualization">Year-end tax</Button>
+			<Button variant="gold" disabled={!data.dayFactor} onclick={() => (creating = true)}><PlusIcon /> New run</Button>
 		</div>
-		<form method="POST" action="?/saveSettings" use:enhance class="flex flex-wrap items-end gap-2">
-			<div class="min-w-64 flex-1">
-				<Label for="dayFactor">Days a year</Label>
-				<select id="dayFactor" name="dayFactor" class={selectClass + ' mt-1'} required>
-					{#if !data.dayFactor}<option value="" disabled selected>Choose…</option>{/if}
-					{#each data.factors as f (f.value)}
-						<option value={f.value} selected={data.dayFactor === f.value}>{f.label}</option>
-					{/each}
-				</select>
-			</div>
-			<Button type="submit" variant="outline">Save</Button>
-		</form>
-	</section>
+	</div>
 
-	<section class="panel space-y-4 p-5 md:p-6" aria-label="New payroll run">
-		<h2 class="text-xl font-light">New run</h2>
-		<form method="POST" action="?/create" use:enhance class="grid gap-3 sm:grid-cols-5 sm:items-end">
-			<div class="space-y-1.5">
-				<Label for="cutoffStart">Cutoff from</Label>
-				<Input id="cutoffStart" name="cutoffStart" type="date" required />
-			</div>
-			<div class="space-y-1.5">
-				<Label for="cutoffEnd">to</Label>
-				<Input id="cutoffEnd" name="cutoffEnd" type="date" required />
-			</div>
-			<div class="space-y-1.5">
-				<Label for="payDate">Pay date</Label>
-				<Input id="payDate" name="payDate" type="date" required />
-			</div>
-			<div class="space-y-1.5">
-				<Label for="frequency">Paid</Label>
-				<select id="frequency" name="frequency" class={selectClass}>
-					<option value="semi_monthly">Twice a month</option>
-					<option value="monthly">Monthly</option>
-				</select>
-			</div>
-			<Button type="submit" variant="gold" disabled={!data.dayFactor}>Create run</Button>
-		</form>
-		{#if !data.dayFactor}
-			<p class="text-sm text-ink-muted">Choose the working-day factor above first.</p>
-		{/if}
-	</section>
+	{#if !data.dayFactor}
+		<p class="panel p-4 text-sm text-ink-muted">
+			Choose the working-day factor in <a href="/settings?tab=payroll" class="underline">Settings → Payroll</a> before creating a run.
+		</p>
+	{/if}
 
 	<section class="panel p-5 md:p-6" aria-label="Runs">
-		{#if data.runs.length === 0}
+		{#if data.total === 0 && !data.q}
 			<div class="hatch rounded-2xl px-6 py-14 text-center">
 				<p class="text-lg">No payroll runs yet</p>
 				<p class="mx-auto mt-1 max-w-sm text-sm text-ink-muted">
@@ -86,6 +52,24 @@
 				</p>
 			</div>
 		{:else}
+			<form method="GET" class="mb-4 flex flex-wrap items-center gap-2" role="search">
+				<input type="hidden" name="size" value={data.pageSize} />
+				<Input
+					name="q"
+					type="search"
+					value={data.q}
+					placeholder="Search by date (2026-08, 2026-08-16) or Monthly"
+					aria-label="Search payroll runs"
+					class="min-w-64 flex-1"
+				/>
+				<Button type="submit" variant="outline">Search</Button>
+				{#if data.q}<Button href="?size={data.pageSize}" variant="ghost">Clear</Button>{/if}
+			</form>
+			{#if data.runs.length === 0}
+				<p class="rounded-lg border border-dashed border-ink/30 px-4 py-6 text-center text-sm text-ink-muted">
+					No runs match "{data.q}".
+				</p>
+			{:else}
 			<Table.Root>
 				<Table.Header>
 					<Table.Row class="hover:bg-transparent">
@@ -115,6 +99,68 @@
 					{/each}
 				</Table.Body>
 			</Table.Root>
+			{/if}
+			<div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-ink-muted">
+				<label class="flex items-center gap-2">
+					Rows per page
+					<select
+						class="h-9 rounded-full border border-transparent bg-white px-3 text-sm text-ink shadow-sm"
+						value={data.pageSize}
+						onchange={(e) => goto(pageHref(1, Number(e.currentTarget.value)), { keepFocus: true })}
+					>
+						{#each data.pageSizes as n (n)}<option value={n}>{n}</option>{/each}
+					</select>
+				</label>
+				<div class="flex items-center gap-2">
+					<span class="tabular-nums">Page {data.page} of {data.pageCount} · {data.total} runs</span>
+					{#if data.page <= 1}
+						<Button variant="outline" size="sm" disabled>Previous</Button>
+					{:else}
+						<Button href={pageHref(data.page - 1)} variant="outline" size="sm">Previous</Button>
+					{/if}
+					{#if data.page >= data.pageCount}
+						<Button variant="outline" size="sm" disabled>Next</Button>
+					{:else}
+						<Button href={pageHref(data.page + 1)} variant="outline" size="sm">Next</Button>
+					{/if}
+				</div>
+			</div>
 		{/if}
 	</section>
 </div>
+
+<Dialog.Root open={creating} onOpenChange={(o) => (creating = o)}>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title class="font-display text-2xl font-light">New payroll run</Dialog.Title>
+			<Dialog.Description>One run covers every establishment's received DTR for the cutoff.</Dialog.Description>
+		</Dialog.Header>
+		<form method="POST" action="?/create" use:enhance class="space-y-3">
+			<div class="grid gap-3 sm:grid-cols-2">
+				<div class="space-y-1.5">
+					<Label for="cutoffStart">Cutoff from</Label>
+					<Input id="cutoffStart" name="cutoffStart" type="date" required />
+				</div>
+				<div class="space-y-1.5">
+					<Label for="cutoffEnd">to</Label>
+					<Input id="cutoffEnd" name="cutoffEnd" type="date" required />
+				</div>
+				<div class="space-y-1.5">
+					<Label for="payDate">Pay date</Label>
+					<Input id="payDate" name="payDate" type="date" required />
+				</div>
+				<div class="space-y-1.5">
+					<Label for="frequency">Paid</Label>
+					<select id="frequency" name="frequency" class={selectClass}>
+						<option value="semi_monthly">Twice a month</option>
+						<option value="monthly">Monthly</option>
+					</select>
+				</div>
+			</div>
+			<Dialog.Footer class="gap-2 pt-1">
+				<Button type="button" variant="outline" onclick={() => (creating = false)}>Cancel</Button>
+				<Button type="submit" variant="gold">Create run</Button>
+			</Dialog.Footer>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>

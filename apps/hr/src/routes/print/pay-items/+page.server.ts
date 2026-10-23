@@ -13,7 +13,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const items = (await listPayItems(org.id)).filter((i) => {
 		if (q && !`${i.employeeName} ${i.employeeNo} ${i.label}`.toLowerCase().includes(q)) return false;
 		if (filter === 'voided') return i.status === 'voided';
-		if (i.status === 'voided') return false;
+		if (filter === 'archived') return i.status === 'archived';
+		if (i.status === 'voided' || i.status === 'archived') return false;
 		return filter === 'all' || i.kind === filter;
 	});
 	const total = (kind: 'earning' | 'deduction') =>
@@ -23,8 +24,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		items,
 		earnings: total('earning'),
 		deductions: total('deduction'),
-		title: { all: 'Pay items', earning: 'Pay items: earnings', deduction: 'Pay items: deductions', voided: 'Pay items: voided' }[
-			filter as 'all' | 'earning' | 'deduction' | 'voided'
+		title: { all: 'Pay items', earning: 'Pay items: earnings', deduction: 'Pay items: deductions', voided: 'Pay items: voided', archived: 'Pay items: archived' }[
+			filter as 'all' | 'earning' | 'deduction' | 'voided' | 'archived'
 		] ?? 'Pay items',
 		query: q
 	};

@@ -12,8 +12,7 @@
 		data.pending.dtr.length +
 			data.pending.weeks.length +
 			data.pending.leave.length +
-			data.pending.overtime.length +
-			data.pending.memos.length
+			data.pending.overtime.length
 	);
 
 	const range = (a: string, b: string) => (a === b ? a : `${a} → ${b}`);
@@ -141,27 +140,6 @@
 		</section>
 	{/if}
 
-	{#if data.pending.memos.length}
-		<section class="panel space-y-3 p-5" aria-label="Memos and holidays">
-			<h2 class="text-xl font-light">Memos &amp; holidays</h2>
-			{#each data.pending.memos as m (m.id)}
-				<div class="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/70 p-3">
-					<div>
-						<p class="font-medium">{m.name}</p>
-						<p class="text-sm text-ink-muted">
-							{m.establishmentName} · {m.date} · {m.kind.replace('_', ' ')}{m.creditMinutes !== null
-								? ` · ${hours(m.creditMinutes)} credited`
-								: ''}{m.waiveLateness ? ' · lateness waived' : ''}
-						</p>
-{#if m.note}<p class="mt-1 max-w-2xl text-sm whitespace-pre-line">{m.note}</p>{/if}
-<p class="text-xs text-ink-muted">Sent by {m.submittedBy ?? 'unknown'} · {when(m.submittedAt)}</p>
-					</div>
-					{@render decide('decideMemo', { id: m.id }, 'Approve', 'Reject')}
-				</div>
-			{/each}
-		</section>
-	{/if}
-
 	<section class="panel space-y-3 p-5" aria-label="DTR hand-off by month">
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<h2 class="text-xl font-light">DTR hand-off</h2>
@@ -207,7 +185,7 @@
 		<div class="hatch rounded-3xl px-6 py-16 text-center">
 			<p class="text-lg">All caught up</p>
 			<p class="mx-auto mt-1 max-w-sm text-sm text-ink-muted">
-				Rosters, leave, overtime and memos sent by managers will appear here.
+				Rosters, leave and overtime sent by managers will appear here.
 			</p>
 		</div>
 	{/if}

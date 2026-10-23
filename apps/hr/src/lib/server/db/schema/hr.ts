@@ -8,6 +8,7 @@ import {
 	jsonb,
 	doublePrecision,
 	pgTable,
+	primaryKey,
 	text,
 	time,
 	timestamp,
@@ -78,6 +79,16 @@ export const employees = pgTable(
 		philhealthCovered: boolean('philhealth_covered').notNull().default(true),
 		pagibigCovered: boolean('pagibig_covered').notNull().default(true),
 		withholdingExempt: boolean('withholding_exempt').notNull().default(false),
+		/** Home address, printed on the BIR 2316. */
+		address: text('address'),
+		/**
+		 * Income and tax withheld by a previous employer in `prev_employer_year`, from the person's BIR 2316
+		 * of that employer. Added to this year's annualization; only meaningful for the year it names.
+		 */
+		prevEmployerYear: integer('prev_employer_year'),
+		prevEmployerName: text('prev_employer_name'),
+		prevEmployerTaxableCentavos: bigint('prev_employer_taxable_centavos', { mode: 'number' }).notNull().default(0),
+		prevEmployerWithheldCentavos: bigint('prev_employer_withheld_centavos', { mode: 'number' }).notNull().default(0),
 		/** Why they're not covered / exempt, or why a base is overridden. */
 		coverageNote: text('coverage_note'),
 		/** `{ sss_msc?, philhealth_base?, pagibig_base? }` centavos — replaces the salary base, not the rate. */
@@ -535,14 +546,19 @@ export const leaveAdjustments = pgTable(
 	(t) => [index('leave_adjustments_employee_year_idx').on(t.employeeId, t.year)]
 );
 
-/** A holiday or memorandum that applies to everyone on that date. */
+/**
+ * A holiday or memorandum — Main HR's alone. It applies to every establishment ('company') or only to those
+ * listed in `calendar_day_establishments` ('selected'), and reaches rosters, DTRs and payroll once saved.
+ */
 export const calendarDays = pgTable(
 	'calendar_days',
 	{
 		id: pk(),
-		establishmentId: uuid('establishment_id')
+		organizationId: uuid('organization_id')
 			.notNull()
-			.references(() => establishments.id, { onDelete: 'cascade' }),
+			.references(() => organizations.id, { onDelete: 'cascade' }),
+		/** 'company' = every establishment (including ones added later); 'selected' = only those in calendar_day_establishments. */
+		scope: text('scope').notNull().default('company'),
 		date: date('date', { mode: 'string' }).notNull(),
 		name: text('name').notNull(),
 		/** 'regular_holiday' | 'special_holiday' | 'local_holiday' | 'memo' */
@@ -551,22 +567,24 @@ export const calendarDays = pgTable(
 		creditMinutes: integer('credit_minutes'),
 		/** Late/undertime are not counted that day (a memo letting staff go early, for instance). */
 		waiveLateness: boolean('waive_lateness').notNull().default(false),
-		/** 'submitted' (a manager's proposal) | 'approved' | 'rejected'. Only 'approved' days affect
-		 *  rosters and DTRs; entries made by Main HR are approved on the spot. */
-		status: text('status').notNull().default('approved'),
-		/** Who sent it for approval and when; who decided and when, with an optional note. Null on
-		 *  rows that predate approvals (they were approved on the spot). */
-		submittedByUserId: uuid('submitted_by_user_id').references(() => users.id, { onDelete: 'set null' }),
-		submittedAt: timestamp('submitted_at', { withTimezone: true }),
-		decidedByUserId: uuid('decided_by_user_id').references(() => users.id, { onDelete: 'set null' }),
-		decidedAt: timestamp('decided_at', { withTimezone: true }),
-decisionNote: text('decision_note'),
-/** Why the establishment is asking — what Main HR reads before deciding. */
-proposalNote: text('proposal_note'),
-createdAt: createdAt(),
-updatedAt: updatedAt()
-},
-(t) => [uniqueIndex('calendar_days_establishment_date_idx').on(t.establishmentId, t.date)]
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [index('calendar_days_org_date_idx').on(t.organizationId, t.date)]
+);
+
+/** The establishments a 'selected' holiday or memo applies to. */
+export const calendarDayEstablishments = pgTable(
+	'calendar_day_establishments',
+	{
+		calendarDayId: uuid('calendar_day_id')
+			.notNull()
+			.references(() => calendarDays.id, { onDelete: 'cascade' }),
+		establishmentId: uuid('establishment_id')
+			.notNull()
+			.references(() => establishments.id, { onDelete: 'cascade' })
+	},
+	(t) => [primaryKey({ columns: [t.calendarDayId, t.establishmentId] })]
 );
 
 // ---------------------------------------------------------------------------
@@ -1063,6 +1081,52 @@ export const employeeLoanDocuments = pgTable(
 );
 
 /**
+ * An employment contract generated from a template: the wording is frozen at issue (`body`) together with the
+ * position and pay it stated, so a later raise or template edit never rewrites what was signed. `end_date` is the
+ * end of the term, or the end of probation for a probationary contract; null means no end.
+ */
+export const employeeContracts = pgTable(
+	'employee_contracts',
+	{
+		id: pk(),
+		organizationId: uuid('organization_id')
+			.notNull()
+			.references(() => organizations.id, { onDelete: 'restrict' }),
+		employeeId: uuid('employee_id')
+			.notNull()
+			.references(() => employees.id, { onDelete: 'restrict' }),
+		establishmentId: uuid('establishment_id').references(() => establishments.id, { onDelete: 'set null' }),
+		/** The employment type the contract is for. */
+		kind: text('kind').notNull(),
+		position: text('position').notNull(),
+		payBasis: text('pay_basis').notNull(),
+		baseRateCentavos: bigint('base_rate_centavos', { mode: 'number' }).notNull(),
+		startDate: date('start_date', { mode: 'string' }).notNull(),
+		endDate: date('end_date', { mode: 'string' }),
+		body: text('body').notNull(),
+		/** 'issued' | 'signed' | 'void' */
+		status: text('status').notNull().default('issued'),
+		issuedOn: date('issued_on', { mode: 'string' }).notNull(),
+		signedOn: date('signed_on', { mode: 'string' }),
+		storedName: text('stored_name'),
+		originalName: text('original_name'),
+		contentType: text('content_type'),
+		sizeBytes: integer('size_bytes'),
+		voidReason: text('void_reason'),
+		/** Unguessable code printed as a QR on the contract; the public verify page looks the contract up by it. */
+		verifyCode: text('verify_code'),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(t) => [
+		uniqueIndex('employee_contracts_verify_idx').on(t.verifyCode),
+		index('employee_contracts_employee_idx').on(t.employeeId),
+		index('employee_contracts_org_end_idx').on(t.organizationId, t.endDate)
+	]
+);
+
+/**
  * A pay month (`YYYY-MM`, by pay date) in which a loan is not deducted. The loan simply takes one month
  * longer per skip; nothing is carried as a shortfall.
  */
@@ -1150,6 +1214,11 @@ export const payItems = pgTable(
 		/** earning: 'allowance' | 'incentive' | 'other'; deduction: 'cash_advance' | 'other' */
 		category: text('category').notNull(),
 		label: text('label').notNull(),
+		/**
+		 * An earning that is exempt from income tax (de minimis benefits and the like). It still adds to gross
+		 * pay but is left out of the taxable income withholding and the annualization work from.
+		 */
+		taxable: boolean('taxable').notNull().default(true),
 		/** Per cutoff it applies to. */
 		amountCentavos: bigint('amount_centavos', { mode: 'number' }).notNull(),
 		startDate: date('start_date', { mode: 'string' }).notNull(),
@@ -1159,6 +1228,8 @@ export const payItems = pgTable(
 		appliedLineId: uuid('applied_line_id').references(() => payrollRunLines.id, { onDelete: 'set null' }),
 		voidedAt: timestamp('voided_at', { withTimezone: true }),
 		voidReason: text('void_reason'),
+		/** Finished with, not mistaken: no longer picked up by payroll, kept in the list for the record. */
+		archivedAt: timestamp('archived_at', { withTimezone: true }),
 		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
 		createdAt: createdAt(),
 		updatedAt: updatedAt()

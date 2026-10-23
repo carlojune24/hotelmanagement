@@ -21,6 +21,6 @@
 	points={POINTS}
 	note="Staff access only. Ask Main HR if you need an account."
 	next={data.next}
-	error={form?.error ?? null}
+	error={form?.error ?? data.notice}
 	backHref={null}
 />

@@ -15,6 +15,7 @@ import {
 	createLoan,
 	editLoan,
 	listDocuments,
+	countLoans,
 	listLoans,
 	listPayments,
 	listSkips,
@@ -40,12 +41,42 @@ import { UploadValidationError } from '$lib/server/uploads';
 import type { Actions, PageServerLoad } from './$types';
 
 const TZ = 'Asia/Manila';
+const PAGE_SIZES = [10, 25, 50, 100];
+const STATUS_FILTERS = {
+	active: ['active'],
+	paused: ['paused'],
+	closed: ['paid_off', 'cancelled'],
+	all: undefined
+} as const;
 
 export const load: PageServerLoad = async ({ locals, url }) => {
 	requireCap(locals.user, locals.access, 'payroll:*');
 	const org = await getOrganization();
 	const thisMonth = businessDateFor(TZ).slice(0, 7);
-	const [loans, people, types] = await Promise.all([listLoans(org.id), loanableEmployees(org.id), listLoanTypes(org.id)]);
+	const sp = url.searchParams;
+	const status = (Object.keys(STATUS_FILTERS) as Array<keyof typeof STATUS_FILTERS>).find((k) => k === sp.get('status')) ?? 'active';
+	const types = await listLoanTypes(org.id);
+	const kind = types.find((t) => t.key === sp.get('kind'))?.key ?? 'all';
+	const q = (sp.get('q') ?? '').trim().slice(0, 60);
+	const size = Number(sp.get('size'));
+	const pageSize = PAGE_SIZES.includes(size) ? size : 10;
+	const statuses = STATUS_FILTERS[status];
+	const qLower = q.toLowerCase();
+	const qKinds = q ? types.filter((t) => t.name.toLowerCase().includes(qLower)).map((t) => t.key) : [];
+	const filter = { statuses: statuses ? [...statuses] : undefined, kind: kind === 'all' ? undefined : kind, q, qKinds };
+	const [total, orgTotal] = await Promise.all([countLoans(org.id, filter), countLoans(org.id)]);
+	const pageCount = Math.max(1, Math.ceil(total / pageSize));
+	const page = Math.min(Math.max(1, Math.trunc(Number(sp.get('page'))) || 1), pageCount);
+	const openId = sp.get('loan');
+	const [pageLoans, live, people, openRows] = await Promise.all([
+		listLoans(org.id, { ...filter, page: { size: pageSize, offset: (page - 1) * pageSize } }),
+		// The summary only concerns loans still being deducted, so closed history is never loaded in full.
+		listLoans(org.id, { statuses: ['active', 'paused'] }),
+		loanableEmployees(org.id),
+		openId ? listLoans(org.id, { id: openId }) : Promise.resolve([])
+	]);
+	const openLoan = openRows[0] ?? null;
+	const loans = [...new Map([...pageLoans, ...live, ...(openLoan ? [openLoan] : [])].map((l) => [l.id, l])).values()];
 	const ids = loans.map((l) => l.id);
 	const sepRows = await db
 		.select({ id: separations.id, employeeId: separations.employeeId })
@@ -71,14 +102,12 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		])
 	);
 	const typeByKey = new Map(types.map((t) => [t.key, t]));
-	const openId = url.searchParams.get('loan');
-	const isOpen = !!openId && loans.some((l) => l.id === openId);
+	const isOpen = !!openId && !!openLoan;
 	const history = isOpen ? await loanHistory(openId) : [];
 	const skips = isOpen ? await listSkips(openId) : [];
 	const payments = isOpen ? await listPayments(openId) : [];
 	const documents = isOpen ? await listDocuments(openId) : [];
 
-	const live = loans.filter((l) => l.status === 'active' || l.status === 'paused');
 	const soon = monthsAfter(thisMonth, 2);
 	const byType = new Map<string, { label: string; count: number; outstanding: number }>();
 	for (const l of live) {
@@ -103,34 +132,43 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		separatedCount: separated.length,
 		separatedOwed: separated.reduce((t, l) => t + l.balanceCentavos, 0)
 	};
+	const toRow = (l: (typeof loans)[number]) => ({
+		id: l.id,
+		employeeName: l.employeeName,
+		employeeNo: l.employeeNo,
+		kind: l.kind,
+		kindLabel: typeByKey.get(l.kind)?.name ?? l.kind,
+		remitted: (typeByKey.get(l.kind)?.remitTo ?? 'none') !== 'none',
+		referenceNo: l.referenceNo,
+		principal: l.principalCentavos,
+		amortization: l.amortizationCentavos,
+		startPeriod: l.startPeriod,
+		status: l.status as 'active' | 'paused' | 'paid_off' | 'cancelled',
+		statusNote: l.statusNote,
+		note: l.note,
+		alreadyPaid: l.alreadyPaidCentavos,
+		paidOutside: l.paidOutsideCentavos,
+		deducted: l.deductedCentavos,
+		balance: l.balanceCentavos,
+		releasedOn: l.releasedOn,
+		termMonths: l.termMonths,
+		employeeStatus: l.employeeStatus,
+		separationId: sepOf.get(l.employeeId) ?? null,
+		separatedOn: l.separatedOn,
+		behind: schedule.get(l.id)?.behind ?? 0,
+		expectedEnd: schedule.get(l.id)?.expectedEnd ?? null,
+		upcomingSkips: upcoming.get(l.id) ?? []
+	});
 	return {
-		loans: loans.map((l) => ({
-			id: l.id,
-			employeeName: l.employeeName,
-			employeeNo: l.employeeNo,
-			kind: l.kind,
-			kindLabel: typeByKey.get(l.kind)?.name ?? l.kind,
-			remitted: (typeByKey.get(l.kind)?.remitTo ?? 'none') !== 'none',
-			referenceNo: l.referenceNo,
-			principal: l.principalCentavos,
-			amortization: l.amortizationCentavos,
-			startPeriod: l.startPeriod,
-			status: l.status as 'active' | 'paused' | 'paid_off' | 'cancelled',
-			statusNote: l.statusNote,
-			note: l.note,
-			alreadyPaid: l.alreadyPaidCentavos,
-			paidOutside: l.paidOutsideCentavos,
-			deducted: l.deductedCentavos,
-			balance: l.balanceCentavos,
-			releasedOn: l.releasedOn,
-			termMonths: l.termMonths,
-			employeeStatus: l.employeeStatus,
-			separationId: sepOf.get(l.employeeId) ?? null,
-			separatedOn: l.separatedOn,
-			behind: schedule.get(l.id)?.behind ?? 0,
-			expectedEnd: schedule.get(l.id)?.expectedEnd ?? null,
-			upcomingSkips: upcoming.get(l.id) ?? []
-		})),
+		loans: pageLoans.map(toRow),
+		openLoan: openLoan ? toRow(openLoan) : null,
+		hasLoans: orgTotal > 0,
+		params: { q, status, kind },
+		page,
+		pageCount,
+		pageSize,
+		pageSizes: PAGE_SIZES,
+		total,
 		people,
 		/** Everything, for the filter. */
 		kinds: types.map((t) => ({ value: t.key, label: t.active ? t.name : `${t.name} (retired)` })),

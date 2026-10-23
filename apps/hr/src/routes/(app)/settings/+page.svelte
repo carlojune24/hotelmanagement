@@ -25,14 +25,17 @@ import PlusIcon from '@lucide/svelte/icons/plus';
 { key: 'leave', label: 'Leave types' },
 		{ key: 'loans', label: 'Loan types' },
 		{ key: 'remittances', label: 'Employer numbers' },
+		{ key: 'signin', label: 'Sign-in & email' },
 		{ key: 'clearance', label: 'Clearance items' },
+		{ key: 'payroll', label: 'Payroll' },
 		{ key: 'costcenters', label: 'Cost centers' },
+		{ key: 'contracts', label: 'Contract templates' },
 		{ key: 'logo', label: 'Company logo' }
 	] as const;
 	type Tab = (typeof TABS)[number]['key'];
 	// The tab lives in the address (?tab=) so a reload or a shared link lands on the same one.
 const tabParam = page.url.searchParams.get('tab');
-	let tab = $state<Tab>(tabParam === 'loans' || tabParam === 'leave' || tabParam === 'remittances' || tabParam === 'clearance' || tabParam === 'logo' || tabParam === 'costcenters'
+	let tab = $state<Tab>(tabParam === 'loans' || tabParam === 'leave' || tabParam === 'remittances' || tabParam === 'signin' || tabParam === 'clearance' || tabParam === 'logo' || tabParam === 'costcenters' || tabParam === 'payroll' || tabParam === 'contracts'
 			? tabParam
 			: 'establishments');
 	function pick(next: Tab) {
@@ -40,6 +43,16 @@ const tabParam = page.url.searchParams.get('tab');
 		replaceState(`?tab=${next}`, {});
 	}
 
+	// Contract wording: one text per employment type, edited here and saved as a whole.
+	let contractKind = $state<string>('probationary');
+	// svelte-ignore state_referenced_locally
+	let contractDraft = $state<Record<string, string>>({ ...data.contractTemplates });
+	const contractCustomised = $derived(contractDraft[contractKind] !== data.contractDefaults[contractKind as keyof typeof data.contractDefaults]);
+	const contractUnknown = $derived(
+		[...(contractDraft[contractKind] ?? '').matchAll(/\{\{\s*([a-z_]+)\s*\}\}/gi)]
+			.map((m) => m[1]!)
+			.filter((f) => !data.contractFields.some(([k]) => k === f))
+	);
 	let adding = $state(false);
 	// Editable copy of the default clearance checklist; saved as a whole.
 	// svelte-ignore state_referenced_locally
@@ -205,6 +218,116 @@ deletingLeave = null;
 			</Table.Body>
 		</Table.Root>
 </div>
+{:else if tab === 'signin'}
+	<div id="panel-signin" role="tabpanel" aria-labelledby="tab-signin" class="panel space-y-6 p-5 md:p-6" aria-label="Sign-in and email">
+		<div class="max-w-2xl">
+			<h2 class="text-2xl font-light">Sign-in code by email</h2>
+			<p class="mt-1 text-sm text-ink-muted">
+				When this is on, everyone enters a 6-digit code emailed to them after their password. The code works once,
+				for 10 minutes and 5 tries. It needs a mailbox the system can send from, set up below.
+			</p>
+		</div>
+
+		<form method="POST" action="?/saveEmail" use:enhance={submit} class="grid gap-3 sm:grid-cols-2">
+			<div class="sm:col-span-2">
+				<h3 class="text-lg font-light">Mailbox</h3>
+				<p class="text-sm text-ink-muted">
+					Any email account that allows SMTP sending. For Gmail use smtp.gmail.com, port 587, and an app password
+					(not the normal password). The password is stored encrypted and is never shown again.
+				</p>
+			</div>
+			<div>
+				<Label for="mailHost">Mail server (SMTP)</Label>
+				<Input id="mailHost" name="host" value={data.email?.host ?? ''} placeholder="smtp.gmail.com" class="mt-1" required />
+			</div>
+			<div>
+				<Label for="mailPort">Port</Label>
+				<Input id="mailPort" name="port" type="number" min="1" max="65535" value={data.email?.port ?? 587} class="mt-1" required />
+			</div>
+			<div>
+				<Label for="mailUser">Username</Label>
+				<Input id="mailUser" name="username" value={data.email?.username ?? ''} autocomplete="off" class="mt-1" />
+			</div>
+			<div>
+				<Label for="mailPass">Password</Label>
+				<Input
+					id="mailPass"
+					name="password"
+					type="password"
+					autocomplete="new-password"
+					placeholder={data.email?.passwordHint ? `Saved (${data.email.passwordHint}). Leave blank to keep it.` : ''}
+					class="mt-1"
+				/>
+			</div>
+			<div>
+				<Label for="mailFrom">Send from (address)</Label>
+				<Input id="mailFrom" name="fromAddress" type="email" value={data.email?.fromAddress ?? ''} placeholder="hr@yourcompany.com" class="mt-1" required />
+			</div>
+			<div>
+				<Label for="mailFromName">Sender name</Label>
+				<Input id="mailFromName" name="fromName" value={data.email?.fromName ?? ''} placeholder="Defaults to the company name" class="mt-1" />
+			</div>
+			<div>
+				<Label for="mailReply">Reply-to (optional)</Label>
+				<Input id="mailReply" name="replyTo" type="email" value={data.email?.replyTo ?? ''} class="mt-1" />
+			</div>
+			<label class="flex items-center gap-2 self-end pb-2 text-sm">
+				<input type="checkbox" name="secure" checked={data.email?.secure ?? false} class="size-4" />
+				Use a secure connection from the start (port 465)
+			</label>
+			<div class="sm:col-span-2 flex flex-wrap items-center gap-3">
+				<Button type="submit" variant="outline" disabled={busy}>Save mailbox</Button>
+				{#if data.email}<span class="text-xs text-ink-muted">Saving again switches the sign-in code off until a new test email arrives.</span>{/if}
+			</div>
+		</form>
+
+		{#if data.email}
+			<div class="space-y-3 border-t border-dotted border-ink/25 pt-5">
+				<h3 class="text-lg font-light">Test</h3>
+				<p class="text-sm">
+					{#if data.email.lastTestOk === true}
+						<Badge variant="secondary">Test email sent</Badge>
+						<span class="ml-2 text-ink-muted">{new Date(data.email.lastTestAt!).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+					{:else if data.email.lastTestOk === false}
+						<Badge variant="destructive">Test failed</Badge>
+						<span class="ml-2 text-ink-muted">{data.email.lastTestError}</span>
+					{:else}
+						<Badge variant="outline">Not tested yet</Badge>
+					{/if}
+				</p>
+				<form method="POST" action="?/testEmail" use:enhance={submit}>
+					<Button type="submit" variant="outline" disabled={busy}>Send a test email to {data.myEmail}</Button>
+				</form>
+			</div>
+
+			<div class="space-y-3 border-t border-dotted border-ink/25 pt-5">
+				<h3 class="text-lg font-light">Require the code at sign-in</h3>
+				<form method="POST" action="?/setSigninCode" use:enhance={submit} class="space-y-3">
+					<label class="flex items-start gap-2 text-sm">
+						<input
+							type="checkbox"
+							name="on"
+							checked={data.email.signinCodeRequired}
+							disabled={data.email.lastTestOk !== true}
+							class="mt-0.5 size-4"
+						/>
+						<span>
+							Everyone, including Main HR, must enter an emailed code after their password.
+							{#if data.email.lastTestOk !== true}
+								<span class="block text-ink-muted">Available once a test email has arrived.</span>
+							{/if}
+						</span>
+					</label>
+					<Button type="submit" disabled={busy || data.email.lastTestOk !== true}>Save</Button>
+				</form>
+				<p class="max-w-2xl text-xs text-ink-muted">
+					If the mailbox stops working, nobody can sign in while this is on. Someone with access to the server can
+					switch it off with <span class="font-mono">pnpm exec tsx scripts/disable-signin-code.ts</span> in the
+					HR app folder.
+				</p>
+			</div>
+		{/if}
+	</div>
 {:else if tab === 'remittances'}
 	<div id="panel-remittances" role="tabpanel" aria-labelledby="tab-remittances" class="panel space-y-5 p-5 md:p-6" aria-label="Employer numbers and deadlines">
 		<div class="max-w-2xl">
@@ -247,6 +370,12 @@ deletingLeave = null;
 					<Label for="duePagibigLoan">Pag-IBIG loans due day</Label>
 					<Input id="duePagibigLoan" name="duePagibigLoan" type="number" min="1" max="31" value={data.remittance.dueDay.pagibig_loan ?? ''} class="mt-1" />
 				</div>
+				{#each data.loanTypes.filter((t) => t.remitTo === 'lender' && t.active) as t (t.id)}
+					<div>
+						<Label for="dueLoan_{t.key}">{t.name} due day</Label>
+						<Input id="dueLoan_{t.key}" name="dueLoan_{t.key}" type="number" min="1" max="31" value={data.remittance.dueDay.loans?.[t.key] ?? ''} class="mt-1" />
+					</div>
+				{/each}
 				<div>
 					<Label for="dueBir">BIR due day</Label>
 					<Input id="dueBir" name="dueBir" type="number" min="1" max="31" value={data.remittance.dueDay.bir ?? ''} class="mt-1" />
@@ -255,6 +384,62 @@ deletingLeave = null;
 				<Button type="submit" variant="outline" disabled={busy}>Save</Button>
 			</div>
 		</form>
+	</div>
+{:else if tab === 'contracts'}
+	<div id="panel-contracts" role="tabpanel" aria-labelledby="tab-contracts" class="panel space-y-5 p-5 md:p-6" aria-label="Contract templates">
+		<div class="max-w-2xl">
+			<h2 class="text-2xl font-light">Contract templates</h2>
+			<p class="mt-1 text-sm text-ink-muted">
+				The wording used when a contract is generated for each employment type. A change applies to contracts issued
+				from now on; a contract already issued keeps the wording it was issued with. The default text is a starting
+				point: have it reviewed by your lawyer before you use it.
+			</p>
+		</div>
+		<div class="flex flex-wrap gap-2" role="group" aria-label="Employment type">
+			{#each data.contractKinds as k (k.value)}
+				<button
+					type="button"
+					aria-pressed={contractKind === k.value}
+					class="rounded-full px-4 py-1.5 text-sm font-medium transition-colors {contractKind === k.value
+						? 'bg-ink text-white'
+						: 'bg-ink/10 text-ink hover:bg-ink/15'}"
+					onclick={() => (contractKind = k.value)}>{k.label}</button
+				>
+			{/each}
+		</div>
+		<form method="POST" action="?/saveContractTemplate" use:enhance={submit} class="space-y-3">
+			<input type="hidden" name="kind" value={contractKind} />
+			<Textarea
+				name="text"
+				rows={22}
+				bind:value={contractDraft[contractKind]}
+				aria-label="Contract wording"
+				class="font-mono text-xs leading-relaxed"
+			/>
+			{#if contractUnknown.length > 0}
+				<p class="text-sm text-danger">Unknown field: {contractUnknown.map((f) => `{{${f}}}`).join(', ')}</p>
+			{/if}
+			<div class="flex flex-wrap items-center gap-2">
+				<Button type="submit" variant="gold" disabled={busy || contractUnknown.length > 0}>Save wording</Button>
+				{#if contractCustomised}
+					<Button
+						type="button"
+						variant="ghost"
+						onclick={() => (contractDraft[contractKind] = data.contractDefaults[contractKind as keyof typeof data.contractDefaults])}
+					>
+						Restore default text
+					</Button>
+				{/if}
+			</div>
+		</form>
+		<div>
+			<p class="text-sm font-medium">Fields you can use</p>
+			<ul class="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+				{#each data.contractFields as [k, label] (k)}
+					<li><code class="rounded bg-ink/10 px-1 text-xs">{`{{${k}}}`}</code> <span class="text-ink-muted">{label}</span></li>
+				{/each}
+			</ul>
+		</div>
 	</div>
 {:else if tab === 'costcenters'}
 	<div id="panel-costcenters" role="tabpanel" aria-labelledby="tab-costcenters" class="panel space-y-5 p-5 md:p-6" aria-label="Cost centers">
@@ -386,6 +571,30 @@ deletingLeave = null;
 				<Button type="button" variant="ghost" onclick={() => (clearance = [...data.clearanceDefaults])}>Restore defaults</Button>
 				<Button type="submit" variant="gold" class="ml-auto" disabled={busy}>Save</Button>
 			</div>
+		</form>
+	</div>
+{:else if tab === 'payroll'}
+	<div id="panel-payroll" role="tabpanel" aria-labelledby="tab-payroll" class="panel space-y-5 p-5 md:p-6" aria-label="Payroll">
+		<div class="max-w-2xl">
+			<h2 class="text-2xl font-light">Working-day factor</h2>
+			<p class="mt-1 text-sm text-ink-muted">
+				Turns a monthly rate into a daily one (rate × 12 ÷ factor), which sets what an absence costs and the hourly
+				rate for overtime. It is a company policy, so there is no default —
+				{#if data.dayFactor}currently <strong class="font-medium text-ink">{data.dayFactor}</strong>.{:else}choose one
+					before creating a payroll run.{/if}
+			</p>
+		</div>
+		<form method="POST" action="?/saveDayFactor" use:enhance={submit} class="flex flex-wrap items-end gap-2">
+			<div class="min-w-64 flex-1">
+				<Label for="dayFactor">Days a year</Label>
+				<select id="dayFactor" name="dayFactor" class={selectClass + ' mt-1'} required>
+					{#if !data.dayFactor}<option value="" disabled selected>Choose…</option>{/if}
+					{#each data.factors as f (f.value)}
+						<option value={f.value} selected={data.dayFactor === f.value}>{f.label}</option>
+					{/each}
+				</select>
+			</div>
+			<Button type="submit" variant="outline" disabled={busy}>Save</Button>
 		</form>
 	</div>
 {:else}

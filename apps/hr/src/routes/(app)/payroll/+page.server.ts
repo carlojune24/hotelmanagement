@@ -1,25 +1,39 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { z } from 'zod';
 import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { getOrganization } from '$lib/server/establishments';
 import {
-	DAY_FACTORS,
-	FACTOR_LABEL,
 	PayrollError,
+	countRuns,
 	createRun,
 	getDayFactor,
 	listRuns,
-	runFormSchema,
-	saveDayFactor
+	runFormSchema
 } from '$lib/server/hr/payroll';
 import type { Actions, PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ locals }) => {
+const PAGE_SIZES = [10, 25, 50, 100];
+
+export const load: PageServerLoad = async ({ locals, url }) => {
 	requireCap(locals.user, locals.access, 'payroll:*');
 	const org = await getOrganization();
-	const [runs, dayFactor] = await Promise.all([listRuns(org.id), getDayFactor(org.id)]);
+	const size = Number(url.searchParams.get('size'));
+	const pageSize = PAGE_SIZES.includes(size) ? size : 10;
+	const q = (url.searchParams.get('q') ?? '').trim().slice(0, 40);
+	const total = await countRuns(org.id, q);
+	const pageCount = Math.max(1, Math.ceil(total / pageSize));
+	const page = Math.min(Math.max(1, Math.trunc(Number(url.searchParams.get('page'))) || 1), pageCount);
+	const [runs, dayFactor] = await Promise.all([
+		listRuns(org.id, { size: pageSize, offset: (page - 1) * pageSize }, q),
+		getDayFactor(org.id)
+	]);
 	return {
+		q,
+		page,
+		pageSize,
+		pageCount,
+		pageSizes: PAGE_SIZES,
+		total,
 		runs: runs.map((r) => ({
 			id: r.id,
 			cutoffStart: r.cutoffStart,
@@ -30,33 +44,11 @@ export const load: PageServerLoad = async ({ locals }) => {
 			locked: r.locked,
 			released: r.released
 		})),
-		dayFactor,
-		factors: DAY_FACTORS.map((f) => ({ value: f, label: FACTOR_LABEL[f]! }))
+		dayFactor
 	};
 };
 
 export const actions: Actions = {
-	saveSettings: async ({ request, locals }) => {
-		requireCap(locals.user, locals.access, 'payroll:*');
-		const parsed = z.coerce.number().int().safeParse((await request.formData()).get('dayFactor'));
-		if (!parsed.success) return fail(400, { error: 'Choose a working-day factor.' });
-		try {
-			const org = await getOrganization();
-			await saveDayFactor(org.id, parsed.data);
-			await writeAudit({
-				actor: locals.user,
-				action: 'payroll.settings',
-				entityType: 'organization',
-				entityId: org.id,
-				after: { dayFactor: parsed.data }
-			});
-		} catch (e) {
-			if (e instanceof PayrollError) return fail(400, { error: e.message });
-			throw e;
-		}
-		return { ok: 'Saved. Runs created from now on use this factor.' };
-	},
-
 	create: async ({ request, locals }) => {
 		requireCap(locals.user, locals.access, 'payroll:*');
 		const parsed = runFormSchema.safeParse(Object.fromEntries(await request.formData()));

@@ -1,7 +1,6 @@
 import { asc, eq, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db/index';
 import {
-	calendarDays,
 	employees,
 	establishments,
 	leaveRequests,
@@ -43,20 +42,6 @@ export interface PendingOvertime {
 	submittedAt: Date | null;
 }
 
-export interface PendingMemo {
-	id: string;
-	establishmentId: string;
-	establishmentName: string;
-	date: string;
-	name: string;
-	kind: string;
-	creditMinutes: number | null;
-	waiveLateness: boolean;
-	submittedBy: string | null;
-	submittedAt: Date | null;
-	note: string | null;
-}
-
 export interface PendingWeek {
 	establishmentId: string;
 	establishmentName: string;
@@ -72,14 +57,13 @@ export interface PendingApprovals {
 	weeks: PendingWeek[];
 	leave: PendingLeave[];
 	overtime: PendingOvertime[];
-	memos: PendingMemo[];
 }
 
 const submitter = users.name;
 
 /** Everything waiting on Main HR across the company, oldest first. */
 export async function listPendingApprovals(): Promise<PendingApprovals> {
-	const [dtr, weeks, leave, overtime, memos] = await Promise.all([
+	const [dtr, weeks, leave, overtime] = await Promise.all([
 		listSubmittedDtr(),
 		db
 			.select({
@@ -136,51 +120,30 @@ export async function listPendingApprovals(): Promise<PendingApprovals> {
 			.innerJoin(employees, eq(employees.id, overtimeRequests.employeeId))
 			.leftJoin(users, eq(users.id, overtimeRequests.submittedByUserId))
 			.where(eq(overtimeRequests.status, 'submitted'))
-			.orderBy(asc(overtimeRequests.submittedAt)),
-		db
-			.select({
-				id: calendarDays.id,
-				establishmentId: calendarDays.establishmentId,
-				establishmentName: establishments.name,
-				date: calendarDays.date,
-				name: calendarDays.name,
-				kind: calendarDays.kind,
-				creditMinutes: calendarDays.creditMinutes,
-waiveLateness: calendarDays.waiveLateness,
-note: calendarDays.proposalNote,
-				submittedBy: submitter,
-				submittedAt: calendarDays.submittedAt
-			})
-			.from(calendarDays)
-			.innerJoin(establishments, eq(establishments.id, calendarDays.establishmentId))
-			.leftJoin(users, eq(users.id, calendarDays.submittedByUserId))
-			.where(eq(calendarDays.status, 'submitted'))
-			.orderBy(asc(calendarDays.submittedAt))
+			.orderBy(asc(overtimeRequests.submittedAt))
 	]);
 	return {
 		dtr,
 		weeks: weeks.map((w) => ({ ...w, weekEnd: addDays(w.weekStart, 6) })),
 		leave,
-		overtime,
-		memos
+		overtime
 	};
 }
 
 /** Cheap total for the sidebar badge. */
 export async function pendingApprovalCount(): Promise<number> {
-	const count = async (table: typeof leaveRequests | typeof overtimeRequests | typeof calendarDays | typeof schedulePeriods | typeof dtrSubmissions) => {
+	const count = async (table: typeof leaveRequests | typeof overtimeRequests | typeof schedulePeriods | typeof dtrSubmissions) => {
 		const [r] = await db
 			.select({ n: sql<number>`count(*)::int` })
 			.from(table)
 			.where(eq(table.status, 'submitted'));
 		return r?.n ?? 0;
 	};
-	const [a, b, c, d, e] = await Promise.all([
+	const [a, b, c, d] = await Promise.all([
 		count(leaveRequests),
 		count(overtimeRequests),
-		count(calendarDays),
 		count(schedulePeriods),
 		count(dtrSubmissions)
 	]);
-	return a + b + c + d + e;
+	return a + b + c + d;
 }

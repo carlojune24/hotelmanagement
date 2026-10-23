@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { deserialize, enhance } from '$app/forms';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -232,7 +233,14 @@ let cancelling = $state<{ id: string; label: string } | null>(null);
 								<p class="mt-1 text-xs text-ink-muted">{r.decisionNote}</p>
 							{/if}
 						</Table.Cell>
-						<Table.Cell class="text-right">
+						<Table.Cell class="text-right whitespace-nowrap">
+							<Button
+								variant="ghost"
+								size="sm"
+								href="/print/{page.params.est}/leave-form/{r.id}"
+								target="_blank"
+								rel="noopener">Print</Button
+							>
 							{#if r.status === 'submitted' || (r.status === 'approved' && data.canApprove)}
 								<Button
 									variant="ghost"

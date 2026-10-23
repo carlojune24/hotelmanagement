@@ -13,7 +13,9 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 	requireUser(locals.user, url.pathname);
 	requireCap(locals.user, locals.access, 'payroll:*');
 	const org = await getOrganization();
-	const loan = (await listLoans(org.id)).find((l) => l.id === params.loanId);
+	// A malformed id would be a Postgres uuid error, not a 404.
+	if (!/^[0-9a-f-]{36}$/i.test(params.loanId)) error(404, 'Not found');
+	const loan = (await listLoans(org.id, { id: params.loanId }))[0];
 	if (!loan) error(404, 'Not found');
 	const [types, history, payments] = await Promise.all([listLoanTypes(org.id), loanHistory(loan.id), listPayments(loan.id)]);
 

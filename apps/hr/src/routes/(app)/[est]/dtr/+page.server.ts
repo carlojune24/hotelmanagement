@@ -26,7 +26,7 @@ import type { Actions, PageServerLoad } from './$types';
 /** Cheap check that what was saved still matches what the punches say now. */
 function sameDays(a: DtrDay[], b: DtrDay[]): boolean {
 	const sig = (d: DtrDay) =>
-		[d.kind, d.timeIn?.t24, d.breakOut?.t24, d.breakIn?.t24, d.timeOut?.t24, d.lateMinutes, d.undertimeMinutes].join('|');
+		[d.kind, d.timeIn?.t24, d.breakOut?.t24, d.breakIn?.t24, d.timeOut?.t24, d.lateMinutes, d.undertimeMinutes, d.otMinutes, d.hasLeave].join('|');
 	return a.length === b.length && a.every((d, i) => sig(d) === sig(b[i]!));
 }
 

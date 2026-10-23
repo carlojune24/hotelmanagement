@@ -199,11 +199,11 @@ describe.skipIf(!hasDb)('DTR with leave, holidays and biometric punches (live DB
 	});
 
 	it('a holiday credits everyone scheduled and waives lateness when set', async () => {
-		await saveCalendarDay(establishment, { date: '2026-03-03', name: 'Test Memo', kind: 'memo', creditHours: null, waiveLateness: true });
+		await saveCalendarDay(testOrg, { date: '2026-03-03', name: 'Test Memo', kind: 'memo', creditHours: null, waiveLateness: true, scope: 'selected', establishmentIds: [establishment] });
 		const r = await annRec('2026-03-03'); // Ann was 20 min late that day
 		expect(r?.tardinessMinutes).toBe(0);
 		expect(r?.calendar?.name).toBe('Test Memo');
-		await saveCalendarDay(establishment, { date: '2026-03-10', name: 'Half memo', kind: 'memo', creditHours: 4, waiveLateness: false });
+		await saveCalendarDay(testOrg, { date: '2026-03-10', name: 'Half memo', kind: 'memo', creditHours: 4, waiveLateness: false, scope: 'selected', establishmentIds: [establishment] });
 		const half = await annRec('2026-03-10'); // rostered, no punches
 		expect(half).toMatchObject({ isAbsent: false, workedMinutes: 240 });
 	});

@@ -72,6 +72,7 @@
 					<td class="py-2 pr-2">
 						<span class="font-medium">{l.employeeName}</span>
 						<span class="block text-ink-muted">#{l.employeeNo}{l.position ? ` · ${l.position}` : ''}</span>
+						{#if l.taxable > 0}<span class="block font-medium">Taxable portion {money(l.taxable)}</span>{/if}
 					</td>
 					{#if thirteenth}
 						<td class="text-right tabular-nums">{money(l.basicEarned)}</td>
@@ -110,5 +111,8 @@
 			? '13th month pay under Presidential Decree 851: one twelfth of basic salary earned in the year, excluding overtime, premiums and allowances.'
 			: ''}
 		The 13th month and other benefits are exempt from income tax up to ₱90,000 a year; any excess is taxable.
+		{#if data.lines.some((l) => l.taxable > 0)}
+			Taxable portion on this register: {money(data.lines.reduce((t, l) => t + l.taxable, 0))}. It is not withheld here.
+		{/if}
 	</p>
 </article>

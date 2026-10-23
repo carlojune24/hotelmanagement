@@ -22,18 +22,23 @@ export const load: LayoutServerLoad = async ({ locals, url }) => {
 		pendingApprovals: approver ? await pendingApprovalCount() : 0,
 		// Nav items show only for a user who holds the capability somewhere; never as disabled stubs.
 		nav: {
+			contracts: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'employee:write'),
+			dashboard: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			establishments: locals.user.isSystemAdmin || canAnywhere(access, 'establishment:read'),
 			people: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'employee:read'),
 			approvals: approver,
 			payroll: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			// Filed by whoever runs payroll, but a section of its own.
 			announcements: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'announcement:*'),
+			// Holidays and memos are Main HR's alone; they reach every establishment's roster, DTR and payroll.
+			holidays: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'leave:*'),
 			remittances: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			loans: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			separations: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			bonuses: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			payItems: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			reports: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
+			guide: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			settings: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'payroll:*'),
 			users: locals.user.isSystemAdmin || roleCan(access.orgCaps, 'user:*')
 		}

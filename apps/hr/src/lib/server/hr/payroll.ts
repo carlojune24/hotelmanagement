@@ -9,7 +9,6 @@ import {
 } from '@mm/hr-core';
 import { db } from '$lib/server/db/index';
 import {
-	calendarDays,
 	dtrEntries,
 	employeeAssignments,
 	employees,
@@ -22,13 +21,14 @@ import {
 	payrollRuns,
 	schedules
 } from '$lib/server/db/schema/index';
+import { effectiveCalendar } from './calendar';
 import { getHandoff } from './dtr-submissions';
 import { appliesToCutoff, bucketsOf, type LinePayItem } from '$lib/pay-items-core';
 import { costCenterNames } from './cost-centers';
 import { allocate, byPriority, closeSettledLoans, loansDueFor, reopenSettledLoans, type LoanDue } from './loans';
 import { parseNightDiff } from './night-diff';
 import { historiesFor, payTermsFor, type PayTerms } from './salary';
-import { AGENCY_LABEL, remittedAgenciesForBatch } from './remittance';
+import { agencyLabel, remittedAgenciesForBatch } from './remittance';
 
 export class PayrollError extends Error {}
 
@@ -141,12 +141,39 @@ export async function ensureBatches(runId: string, organizationId: string) {
 	}
 }
 
-export async function listRuns(organizationId: string) {
-	const runs = await db
+/** Org's runs, optionally narrowed by `q`: matches a cutoff/pay date as typed (2026-08, 2026-08-16) or the frequency. */
+function runsWhere(organizationId: string, q?: string) {
+	const term = q?.trim();
+	if (!term) return eq(payrollRuns.organizationId, organizationId);
+	const like = `%${term.replace(/[\\%_]/g, '\\$&')}%`;
+	const freq = /month/i.test(term) ? (/twice|semi/i.test(term) ? 'semi_monthly' : 'monthly') : null;
+	return and(
+		eq(payrollRuns.organizationId, organizationId),
+		or(
+			sql`${payrollRuns.cutoffStart}::text like ${like}`,
+			sql`${payrollRuns.cutoffEnd}::text like ${like}`,
+			sql`${payrollRuns.payDate}::text like ${like}`,
+			freq ? eq(payrollRuns.frequency, freq) : undefined
+		)
+	);
+}
+
+export async function countRuns(organizationId: string, q?: string) {
+	const [row] = await db
+		.select({ n: sql<number>`count(*)::int` })
+		.from(payrollRuns)
+		.where(runsWhere(organizationId, q));
+	return row?.n ?? 0;
+}
+
+/** All runs, newest first; pass `page` to get one page of `size` instead. */
+export async function listRuns(organizationId: string, page?: { size: number; offset: number }, q?: string) {
+	const query = db
 		.select()
 		.from(payrollRuns)
-		.where(eq(payrollRuns.organizationId, organizationId))
-		.orderBy(desc(payrollRuns.cutoffStart));
+		.where(runsWhere(organizationId, q))
+		.orderBy(desc(payrollRuns.cutoffStart), desc(payrollRuns.id));
+	const runs = await (page ? query.limit(page.size).offset(page.offset) : query);
 	if (runs.length === 0) return [];
 	const batches = await db
 		.select({ runId: payrollBatches.runId, status: payrollBatches.status })
@@ -253,7 +280,9 @@ const adjustmentsOf = (raw: unknown): PayrollAdjustments => {
 		cashAdvanceCentavos: a.cashAdvanceCentavos ?? 0,
 		loansCentavos: a.loansCentavos ?? 0,
 		otherDeductionsCentavos: a.otherDeductionsCentavos ?? 0,
-		withholdingOverrideCentavos: a.withholdingOverrideCentavos ?? null
+		withholdingOverrideCentavos: a.withholdingOverrideCentavos ?? null,
+		nonTaxableEarningsCentavos: a.nonTaxableEarningsCentavos ?? 0,
+		annualTaxAdjustmentCentavos: a.annualTaxAdjustmentCentavos ?? 0
 	};
 };
 
@@ -353,17 +382,7 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 	const estIds = [...new Set([est.id, ...assignments.map((a) => a.establishmentId), ...entries.map((e) => e.e.establishmentId)])];
 	const [estRows, holidays] = await Promise.all([
 		db.select().from(establishments).where(inArray(establishments.id, estIds)),
-		db
-			.select()
-			.from(calendarDays)
-			.where(
-				and(
-					inArray(calendarDays.establishmentId, estIds),
-					gte(calendarDays.date, run.cutoffStart),
-					lte(calendarDays.date, run.cutoffEnd),
-					eq(calendarDays.status, 'approved')
-				)
-			)
+		effectiveCalendar(estIds, run.cutoffStart, run.cutoffEnd)
 	]);
 	const estById = new Map(estRows.map((e) => [e.id, e]));
 	const holidayAt = new Map(holidays.map((h) => [`${h.establishmentId}|${h.date}`, h.kind]));
@@ -371,12 +390,15 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 	// Earnings and deductions come from the pay items filed for the cutoff and loans from the ledger; only a
 	// withholding override Main HR typed on the line is kept.
 	const itemRows = (
-		await db.select().from(payItems).where(and(inArray(payItems.employeeId, candidateIds), isNull(payItems.voidedAt)))
+		await db
+			.select()
+			.from(payItems)
+			.where(and(inArray(payItems.employeeId, candidateIds), isNull(payItems.voidedAt), isNull(payItems.archivedAt)))
 	).filter((i) => appliesToCutoff(i, run.cutoffStart, run.cutoffEnd));
 	const itemsOf = (employeeId: string): LinePayItem[] =>
 		itemRows
 			.filter((i) => i.employeeId === employeeId)
-			.map((i) => ({ id: i.id, kind: i.kind, category: i.category, label: i.label, amountCentavos: i.amountCentavos }));
+			.map((i) => ({ id: i.id, kind: i.kind, category: i.category, label: i.label, amountCentavos: i.amountCentavos, taxable: i.taxable }));
 	const adjustmentsFor = (employeeId: string): PayrollAdjustments => ({
 		...adjustmentsOf(keptAdjustments.get(employeeId)),
 		...bucketsOf(itemsOf(employeeId)),
@@ -596,6 +618,10 @@ export const adjustmentSchema = z.object({
 	otherEarnings: z.coerce.number().min(0).max(10_000_000).optional(),
 	cashAdvance: z.coerce.number().min(0).max(10_000_000).optional(),
 	otherDeductions: z.coerce.number().min(0).max(10_000_000).optional(),
+	/** The exempt part of the earnings above; comes from the person's pay items. */
+	nonTaxableEarnings: z.coerce.number().min(0).max(10_000_000).optional(),
+	/** Year-end annualization settlement in pesos: positive withholds more, negative returns tax. */
+	annualTaxAdjustment: z.coerce.number().min(-10_000_000).max(10_000_000).optional(),
 	/** Blank = use the computed tax. */
 	withholdingOverride: z.preprocess(
 		(v) => (v === '' || v === null || v === undefined ? null : v),
@@ -626,25 +652,32 @@ export async function adjustLine(input: z.infer<typeof adjustmentSchema>) {
 		cashAdvanceCentavos: pick(input.cashAdvance, kept.cashAdvanceCentavos),
 		loansCentavos: 0,
 		otherDeductionsCentavos: pick(input.otherDeductions, kept.otherDeductionsCentavos),
-		withholdingOverrideCentavos: input.withholdingOverride === null ? null : centavos(input.withholdingOverride)
+		withholdingOverrideCentavos: input.withholdingOverride === null ? null : centavos(input.withholdingOverride),
+		nonTaxableEarningsCentavos: pick(input.nonTaxableEarnings, kept.nonTaxableEarningsCentavos ?? 0),
+		annualTaxAdjustmentCentavos: pick(input.annualTaxAdjustment, kept.annualTaxAdjustmentCentavos ?? 0)
 	};
+	// A refund of over-withheld tax is paid back as an exempt earning, never as income.
+	const annual = adjustments.annualTaxAdjustmentCentavos ?? 0;
+	const refund = Math.max(0, -annual);
 	// Adjustments only touch their own lines; recompute the totals from the stored components.
 	const l = row.line;
 	const earnings = {
 		...(l.earnings as Record<string, number>),
 		allowances: adjustments.allowancesCentavos,
-		other: adjustments.otherEarningsCentavos
+		other: adjustments.otherEarningsCentavos + refund
 	};
 	const gross = Object.values(earnings).reduce((a, b) => a + b, 0);
 	const stored = l.deductions as Record<string, number>;
 	const detail = l.detail as { taxableCentavos?: number };
 	// Taxable moves with gross: recompute withholding unless an override was given.
 	const fixedEe = (stored.sss_ee ?? 0) + (stored.philhealth_ee ?? 0) + (stored.pagibig_ee ?? 0);
-	const taxable = Math.max(0, gross - fixedEe);
-	const withholding =
+	const nonTaxable = Math.min(gross, (adjustments.nonTaxableEarningsCentavos ?? 0) + refund);
+	const taxable = Math.max(0, gross - nonTaxable - fixedEe);
+	const regularWithholding =
 		adjustments.withholdingOverrideCentavos !== null
 			? adjustments.withholdingOverrideCentavos
 			: computeWithholdingTax(taxable, row.run.frequency as 'semi_monthly' | 'monthly');
+	const withholding = regularWithholding + Math.max(0, annual);
 	// Loans are fixed by the ledger at generate time, but a changed gross or deduction can leave less pay to
 	// take them from — re-fill them from what is left, in the same order.
 	const loanRows = (await db.select().from(payrollLoanDeductions).where(eq(payrollLoanDeductions.lineId, l.id))).sort(byPriority);
@@ -673,6 +706,9 @@ export async function adjustLine(input: z.infer<typeof adjustmentSchema>) {
 				detail: {
 					...detail,
 					taxableCentavos: taxable,
+					nonTaxableCentavos: nonTaxable,
+					annualTaxAdjustmentCentavos: annual,
+					regularWithholdingCentavos: regularWithholding,
 					...(loanDetail ? { loans: loanDetail.map((d) => ({ ...d, deducted: takenByLoan.get(d.loanId) ?? 0 })) } : {})
 				},
 				updatedAt: new Date()
@@ -717,7 +753,7 @@ export async function unlockBatch(batchId: string) {
 	const remitted = await remittedAgenciesForBatch(batchId);
 	if (remitted.length) {
 		throw new PayrollError(
-			`This month's ${remitted.map((a) => AGENCY_LABEL[a]).join(', ')} remittance is already marked as paid, so this batch can't be reopened. Reopen the remittance first.`
+			`This month's ${remitted.map((a) => agencyLabel(a)).join(', ')} remittance is already marked as paid, so this batch can't be reopened. Reopen the remittance first.`
 		);
 	}
 	const [row] = await db
@@ -807,7 +843,7 @@ export async function applyPayItemsToLine(lineId: string): Promise<boolean> {
 		await db
 			.select()
 			.from(payItems)
-			.where(and(eq(payItems.employeeId, row.line.employeeId), isNull(payItems.voidedAt)))
+			.where(and(eq(payItems.employeeId, row.line.employeeId), isNull(payItems.voidedAt), isNull(payItems.archivedAt)))
 	).filter((i) => appliesToCutoff(i, row.run.cutoffStart, row.run.cutoffEnd));
 	const b = bucketsOf(items);
 	const kept = adjustmentsOf(row.line.adjustments);
@@ -817,12 +853,13 @@ export async function applyPayItemsToLine(lineId: string): Promise<boolean> {
 		otherEarnings: b.otherEarningsCentavos / 100,
 		cashAdvance: b.cashAdvanceCentavos / 100,
 		otherDeductions: b.otherDeductionsCentavos / 100,
+		nonTaxableEarnings: b.nonTaxableEarningsCentavos / 100,
 		withholdingOverride: kept.withholdingOverrideCentavos === null ? null : kept.withholdingOverrideCentavos / 100
 	});
 	const fresh = await db.select({ detail: payrollRunLines.detail }).from(payrollRunLines).where(eq(payrollRunLines.id, lineId)).then((r) => r.at(0));
 	const detail = { ...((fresh?.detail ?? {}) as Record<string, unknown>) };
 	if (items.length) {
-		detail.payItems = items.map((i) => ({ id: i.id, kind: i.kind, category: i.category, label: i.label, amountCentavos: i.amountCentavos }));
+		detail.payItems = items.map((i) => ({ id: i.id, kind: i.kind, category: i.category, label: i.label, amountCentavos: i.amountCentavos, taxable: i.taxable }));
 	} else delete detail.payItems;
 	await db.update(payrollRunLines).set({ detail }).where(eq(payrollRunLines.id, lineId));
 	await db.update(payItems).set({ appliedLineId: null }).where(eq(payItems.appliedLineId, lineId));

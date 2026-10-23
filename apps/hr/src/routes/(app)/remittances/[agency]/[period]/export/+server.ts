@@ -21,7 +21,7 @@ export const GET: RequestHandler = async ({ locals, params }) => {
 	return new Response(toCsv(schedule), {
 		headers: {
 			'content-type': 'text/csv; charset=utf-8',
-			'content-disposition': `attachment; filename="remittance-${agency.data}-${period.data}.csv"`,
+			'content-disposition': `attachment; filename="remittance-${agency.data.replace(':', '-')}-${period.data}.csv"`,
 			'cache-control': 'no-store'
 		}
 	});

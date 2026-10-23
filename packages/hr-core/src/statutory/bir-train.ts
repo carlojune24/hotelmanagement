@@ -64,3 +64,19 @@ export function computeWithholdingTax(taxableIncomeCentavos: number, frequency: 
 	if (bracket.rate === 0) return 0;
 	return Math.round((bracket.base + bracket.rate * (pesos - bracket.over)) * 100);
 }
+
+/**
+ * The year's income tax on an annual taxable compensation (TRAIN annual table), in centavos. This is the
+ * figure year-end annualization settles the per-period withholding against.
+ */
+export function annualTaxDue(annualTaxableCentavos: number): number {
+	const income = Math.max(0, annualTaxableCentavos) / 100;
+	let tax = 0;
+	let lower = 0;
+	for (const { upTo, rate } of ANNUAL) {
+		if (income > lower) tax += rate * (Math.min(income, upTo) - lower);
+		if (income <= upTo) break;
+		lower = upTo;
+	}
+	return Math.round(tax * 100);
+}

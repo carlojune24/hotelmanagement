@@ -10,6 +10,8 @@
 		workedMinutes: number;
 		lateMinutes: number;
 		undertimeMinutes: number;
+		otMinutes: number;
+		hasLeave: boolean;
 		remarks: string;
 		kind: 'work' | 'absent' | 'rest' | 'empty' | 'leave' | 'holiday';
 	};
@@ -20,6 +22,7 @@
 			workedMinutes: number;
 			lateMinutes: number;
 			undertimeMinutes: number;
+			otMinutes: number;
 			absentDays: number;
 			workedDays: number;
 		};
@@ -61,17 +64,18 @@
 							<th rowspan="2">Departure</th>
 							<th rowspan="2">Arrival</th>
 							<th rowspan="2">Departure</th>
-							<th colspan="3">Remarks</th>
+							<th colspan="4">Remarks</th>
 						</tr>
 						<tr>
 							<th>TD</th>
 							<th>UT</th>
+							<th>OT</th>
 							<th>Total</th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each sheet.days as d (d.date)}
-							<tr class:dp-off={d.kind === 'rest' || d.kind === 'absent'} class:dp-credit={d.kind === 'leave' || d.kind === 'holiday'}>
+							<tr class:dp-off={d.kind === 'rest' || d.kind === 'absent'} class:dp-credit={d.kind === 'leave' || d.kind === 'holiday'} class:dp-bold={d.otMinutes > 0 || d.hasLeave}>
 								<td class="dp-day">{dayNum(d.date)} {d.weekday.toUpperCase()}</td>
 								{#if d.kind === 'work'}
 									<td>{d.timeIn?.t24 ?? ''}</td>
@@ -91,6 +95,7 @@
 								{/if}
 								<td>{hasHours(d.kind) ? hours(d.lateMinutes) : ''}</td>
 								<td>{hasHours(d.kind) ? hours(d.undertimeMinutes) : ''}</td>
+								<td>{hasHours(d.kind) ? hours(d.otMinutes) : ''}</td>
 								<td>{hasHours(d.kind) ? hours(d.workedMinutes) : ''}</td>
 							</tr>
 						{/each}
@@ -100,6 +105,7 @@
 							<td colspan="5" class="dp-total">TOTAL</td>
 							<td>{hours(sheet.totals.lateMinutes)}</td>
 							<td>{hours(sheet.totals.undertimeMinutes)}</td>
+							<td>{hours(sheet.totals.otMinutes)}</td>
 							<td>{hours(sheet.totals.workedMinutes)}</td>
 						</tr>
 					</tfoot>
@@ -216,6 +222,9 @@
 		white-space: normal;
 		font-size: 5.5pt;
 		line-height: 1.1;
+	}
+	.dp-bold td {
+		font-weight: 700;
 	}
 	.dp-off td:not(.dp-day) {
 		background: #f4f4f2;

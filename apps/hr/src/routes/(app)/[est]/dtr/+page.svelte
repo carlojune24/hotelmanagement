@@ -363,6 +363,7 @@ Return for correction
 						<Badge variant="outline">
 							Undertime {view.totals.undertimeMinutes ? hm(view.totals.undertimeMinutes) : '—'}
 						</Badge>
+						<Badge variant="outline">OT {view.totals.otMinutes ? hm(view.totals.otMinutes) : '—'}</Badge>
 					</div>
 				{/if}
 			</div>
@@ -374,16 +375,18 @@ Return for correction
 			{:else if view}
 				<div class="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
 				{#each view.days as d (d.date)}
+					{@const emph = d.otMinutes > 0 || d.hasLeave}
 					<article class="overflow-hidden rounded-lg border border-border bg-surface">
 						<header class="flex items-center justify-between gap-2 bg-primary/10 px-3 py-2">
 							<div class="flex flex-wrap items-center gap-2">
-								<h3 class="text-sm font-medium text-ink">{dayTitle(d.date)}</h3>
+								<h3 class="text-sm {emph ? 'font-bold' : 'font-medium'} text-ink">{dayTitle(d.date)}</h3>
 								{#if d.shift && d.kind !== 'rest'}
 									<span class="text-xs text-ink-muted">{d.shift}</span>
 								{/if}
 								{#if d.kind === 'rest'}<Badge variant="secondary">Day off</Badge>{/if}
 								{#if d.kind === 'absent'}<Badge variant="destructive">Absent</Badge>{/if}
-								{#if d.kind === 'leave'}<Badge>Leave</Badge>{/if}
+								{#if d.kind === 'leave' || (d.kind === 'work' && d.hasLeave)}<Badge>Leave</Badge>{/if}
+								{#if d.otMinutes > 0}<Badge>OT {hm(d.otMinutes)}</Badge>{/if}
 								{#if d.kind === 'holiday'}<Badge>Holiday / memo</Badge>{/if}
 								{#if d.manual}<Badge variant="outline">Staff-added</Badge>{/if}
 							</div>
@@ -404,23 +407,23 @@ Return for correction
 								{#each [['In', d.timeIn], ['Break out', d.breakOut], ['Break in', d.breakIn], ['Out', d.timeOut]] as const as [label, c] (label)}
 									<div>
 										<p class="text-xs font-medium text-ink-muted">{label}</p>
-										<p class="text-sm font-medium tabular-nums {c ? 'text-ink' : 'text-ink-muted'}">
+										<p class="text-sm {emph ? 'font-bold' : 'font-medium'} tabular-nums {c ? 'text-ink' : 'text-ink-muted'}">
 											{c?.t12 ?? '—'}
 										</p>
 									</div>
 								{/each}
 							</div>
-							{#if d.lateMinutes || d.undertimeMinutes || d.remarks}
-								<div class="flex flex-wrap items-center gap-1.5 border-t border-border px-3 py-2 text-xs">
+							<div class="flex flex-wrap items-center gap-1.5 border-t border-border px-3 py-2 text-xs {emph ? 'font-bold' : ''}">
+									<span class="text-ink">Total {hm(d.workedMinutes)}</span>
+									<span class="text-ink">OT {hm(d.otMinutes)}</span>
 									{#if d.lateMinutes}<Badge variant="outline">Late {hm(d.lateMinutes)}</Badge>{/if}
 									{#if d.undertimeMinutes}<Badge variant="outline">Undertime {hm(d.undertimeMinutes)}</Badge>{/if}
 									{#if d.remarks}<span class="text-warning">{d.remarks}</span>{/if}
-								</div>
-							{/if}
+							</div>
 						{:else if d.kind === 'rest'}
 							<p class="px-3 py-3 text-sm font-medium text-ink-muted">Day off</p>
 						{:else if d.kind === 'leave' || d.kind === 'holiday'}
-							<p class="px-3 py-3 text-sm text-ink">
+							<p class="px-3 py-3 text-sm text-ink {emph ? 'font-bold' : ''}">
 								{d.remarks}
 								<span class="text-ink-muted">
 									· {d.workedMinutes ? `${hm(d.workedMinutes)} credited` : 'unpaid'}

@@ -30,9 +30,10 @@ describe('loan rules', () => {
 	});
 
 	it('routes a loan type to its schedule; "not remitted" goes to none', () => {
-		expect(agencyOfRemit('sss')).toBe('sss_loan');
-		expect(agencyOfRemit('pagibig')).toBe('pagibig_loan');
-		expect(agencyOfRemit('none')).toBeNull();
+		expect(agencyOfRemit('sss', 'x')).toBe('sss_loan');
+		expect(agencyOfRemit('pagibig', 'x')).toBe('pagibig_loan');
+		expect(agencyOfRemit('lender', 'custom_bdo')).toBe('loan:custom_bdo');
+		expect(agencyOfRemit('none', 'x')).toBeNull();
 	});
 });
 
@@ -252,8 +253,9 @@ describe.skipIf(!hasDb)('loans through payroll (live DB)', async () => {
 		expect(sss.schedule.rows[0]!.reference).toBe('L-1');
 		expect((await R.getSchedule(org, 'pagibig_loan', '2026-04')).schedule.rows).toHaveLength(0);
 		const overview = await R.getOverview(org, '2026-04', '2026-04-30');
-		expect(overview.agencies.map((a) => a.agency)).toContain('sss_loan');
-		expect(overview.agencies.map((a) => a.agency)).not.toContain('pagibig_loan');
+		// Every loan schedule is listed, even one with nothing on it this month.
+		expect(overview.loans.find((a) => a.agency === 'sss_loan')!.people).toBe(1);
+		expect(overview.loans.find((a) => a.agency === 'pagibig_loan')!.people).toBe(0);
 	});
 
 	it('carries the shortfall into the next cutoff, capped at the balance', async () => {

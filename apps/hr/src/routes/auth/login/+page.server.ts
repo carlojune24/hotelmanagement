@@ -9,6 +9,7 @@ import {
 } from '$lib/server/auth/rate-limit';
 import { safeNext } from '$lib/server/auth/redirect';
 import { createSession, generateSessionToken, setSessionCookie } from '$lib/server/auth/session';
+import { CODE_MINUTES, OTP_COOKIE, signinCodeRequired, startChallenge } from '$lib/server/auth/otp';
 import { getOrganization } from '$lib/server/establishments';
 import { logoUrlFor } from '$lib/server/brand';
 import type { Actions, PageServerLoad } from './$types';
@@ -22,7 +23,14 @@ const schema = z.object({
 export const load: PageServerLoad = async ({ locals, url }) => {
 	if (locals.user) redirect(302, safeNext(url.searchParams.get('next'), '/'));
 	const org = await getOrganization().catch(() => null);
-	return { next: url.searchParams.get('next') ?? '', logoUrl: logoUrlFor(org?.config), orgName: org?.name ?? 'HR' };
+	// Why the person was sent back here from the code step, if they were.
+	const notice =
+		url.searchParams.get('code') === 'expired'
+			? 'That code expired. Sign in again to get a new one.'
+			: url.searchParams.get('code') === 'locked'
+				? 'Too many wrong codes. Sign in again to get a new one.'
+				: null;
+	return { next: url.searchParams.get('next') ?? '', logoUrl: logoUrlFor(org?.config), orgName: org?.name ?? 'HR', notice };
 };
 
 export const actions: Actions = {
@@ -42,6 +50,26 @@ export const actions: Actions = {
 			return fail(400, { error: 'Incorrect email or password.' });
 		}
 		loginSucceeded(ip, email);
+
+		// With the emailed code switched on there is no session yet: email the code and ask for it.
+		const org = await getOrganization();
+		if (await signinCodeRequired(org.id)) {
+			const { token: challenge, emailed } = await startChallenge({
+				user: { id: user.id, email: user.email },
+				next: safeNext(next, '/'),
+				organizationId: org.id,
+				orgName: org.name
+			});
+			event.cookies.set(OTP_COOKIE, challenge, {
+				path: '/',
+				httpOnly: true,
+				sameSite: 'lax',
+				secure: !event.url.hostname.includes('localhost'),
+				maxAge: CODE_MINUTES * 60
+			});
+			// When the email could not be sent the code screen says so, and a recovery code still works there.
+			redirect(303, emailed ? '/auth/login/verify' : '/auth/login/verify?sent=0');
+		}
 
 		const token = generateSessionToken();
 		const session = await createSession(token, user.id);

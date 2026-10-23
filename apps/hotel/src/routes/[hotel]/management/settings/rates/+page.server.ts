@@ -98,9 +98,22 @@ export const load: PageServerLoad = async ({ locals }) => {
 const createPolicySchema = z.object({
 	name: z.string().min(2).max(120),
 	description: z.string().max(2000).optional(),
-	freeCancelHours: z.coerce.number().int().min(0).max(8760).optional(),
+	// A blank field posts "", which z.coerce would turn into 0 ("free until check-in"), not "none".
+	freeCancelHours: z.preprocess(
+		(v) => (v === '' || v == null ? undefined : v),
+		z.coerce.number().int().min(0).max(8760).optional()
+	),
 	penaltyType: z.enum(cancellationPenaltyType.enumValues),
 	penaltyValueBps: z.coerce.number().int().min(0).max(10000).optional(),
+	/** Grace tier: hours after first payment, and the percent kept in that window; both or neither. */
+	graceHoursAfterPayment: z.preprocess(
+		(v) => (v === '' || v == null ? undefined : v),
+		z.coerce.number().int().min(1).max(8760).optional()
+	),
+	graceFeePct: z.preprocess(
+		(v) => (v === '' || v == null ? undefined : v),
+		z.coerce.number().min(0).max(100).optional()
+	),
 	/** Percent of the total the guest pays online to confirm (1–100); blank or 100 = pay in full. */
 	downpaymentPct: z.preprocess(
 		(v) => (v === '' || v == null ? undefined : v),
@@ -111,6 +124,11 @@ const createPolicySchema = z.object({
 const downpaymentBpsFrom = (pct: number | undefined) =>
 	pct == null || pct >= 100 ? null : Math.round(pct * 100);
 const updatePolicySchema = createPolicySchema.extend({ id: z.string().uuid() });
+const graceFields = (d: z.infer<typeof createPolicySchema>) => ({
+	graceHoursAfterPayment: d.graceFeePct == null ? null : (d.graceHoursAfterPayment ?? null),
+	graceFeeBps:
+		d.graceHoursAfterPayment == null || d.graceFeePct == null ? null : Math.round(d.graceFeePct * 100)
+});
 
 const createDepositPolicySchema = z.object({
 	name: z.string().min(2).max(120),
@@ -206,6 +224,7 @@ export const actions: Actions = {
 				freeCancelHours: parsed.data.freeCancelHours ?? null,
 				penaltyType: parsed.data.penaltyType,
 				penaltyValueBps: parsed.data.penaltyValueBps ?? null,
+				...graceFields(parsed.data),
 				downpaymentBps: downpaymentBpsFrom(parsed.data.downpaymentPct)
 			})
 			.returning({ id: cancellationPolicies.id });
@@ -248,6 +267,7 @@ export const actions: Actions = {
 				freeCancelHours: parsed.data.freeCancelHours ?? null,
 				penaltyType: parsed.data.penaltyType,
 				penaltyValueBps: parsed.data.penaltyValueBps ?? null,
+				...graceFields(parsed.data),
 				downpaymentBps: downpaymentBpsFrom(parsed.data.downpaymentPct)
 			})
 			.where(eq(cancellationPolicies.id, parsed.data.id));

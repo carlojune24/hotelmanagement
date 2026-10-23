@@ -24,7 +24,18 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			.where(and(eq(establishments.organizationId, org.id), isNull(establishments.deletedAt), eq(establishments.status, 'active')))
 			.orderBy(asc(establishments.name))
 	]);
+	// The 13th month is due on or before December 24: who has no issued year-end batch yet, and how long is left.
+	const due = `${year}-12-24`;
+	const issuedEst = new Set(batches.filter((b) => b.kind === 'thirteenth_year_end' && b.status === 'issued').map((b) => b.establishmentId));
+	const msPerDay = 86_400_000;
+	const daysLeft = Math.round((Date.parse(`${due}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / msPerDay);
 	return {
+		thirteenth: {
+			due,
+			daysLeft,
+			overdue: daysLeft < 0,
+			pending: ests.filter((e) => !issuedEst.has(e.id)).map((e) => e.name)
+		},
 		year,
 		today,
 		batches,

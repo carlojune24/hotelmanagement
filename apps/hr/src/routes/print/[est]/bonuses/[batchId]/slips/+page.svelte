@@ -69,6 +69,9 @@
 						{/if}
 					{/if}
 					<tr class="font-semibold"><td class="py-2">Amount received</td><td class="text-right tabular-nums">{money(l.amount)}</td></tr>
+					{#if l.taxable > 0}
+						<tr><td class="py-1 text-ink-muted">Of which taxable (over ₱90,000 this year, not withheld)</td><td class="text-right tabular-nums">{money(l.taxable)}</td></tr>
+					{/if}
 				</tbody>
 			</table>
 

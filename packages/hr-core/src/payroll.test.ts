@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+	NO_ADJUSTMENTS,
+	annualTaxDue,
 	computePagibig2026,
 	computePayrollLine,
 	computePhilhealth2026,
@@ -434,5 +436,147 @@ describe('a rate that changes inside the cutoff is split by day', () => {
 			days: [day({ date: '2026-10-05', workedMinutes: 0 })]
 		});
 		expect(one.line).toEqual(none.line);
+	});
+});
+
+describe('annual tax and year-end settlement', () => {
+	it('annual table: nothing to ₱250,000, then 15% / 20% / 25% / 30% / 35% of each slice', () => {
+		expect(annualTaxDue(peso(250_000))).toBe(0);
+		expect(annualTaxDue(peso(400_000))).toBe(peso(22_500));
+		expect(annualTaxDue(peso(800_000))).toBe(peso(102_500));
+		expect(annualTaxDue(peso(2_000_000))).toBe(peso(402_500));
+		expect(annualTaxDue(peso(8_000_000))).toBe(peso(2_202_500));
+		expect(annualTaxDue(peso(9_000_000))).toBe(peso(2_552_500));
+		expect(annualTaxDue(-5)).toBe(0);
+	});
+
+	it('an exempt earning is paid and in gross but left out of taxable income', () => {
+		const days = Array.from({ length: 13 }, () => day());
+		const plain = computePayrollLine({
+			...base,
+			payBasis: 'monthly',
+			baseRateCentavos: peso(40_000),
+			days,
+			adjustments: { ...NO_ADJUSTMENTS, allowancesCentavos: peso(2_000) }
+		});
+		const exempt = computePayrollLine({
+			...base,
+			payBasis: 'monthly',
+			baseRateCentavos: peso(40_000),
+			days,
+			adjustments: { ...NO_ADJUSTMENTS, allowancesCentavos: peso(2_000), nonTaxableEarningsCentavos: peso(2_000) }
+		});
+		expect(exempt.line.gross).toBe(plain.line.gross);
+		expect(exempt.detail.taxableCentavos).toBe(plain.detail.taxableCentavos - peso(2_000));
+		expect(exempt.line.deductions.withholding_tax).toBeLessThan(plain.line.deductions.withholding_tax);
+		expect(exempt.detail.nonTaxableCentavos).toBe(peso(2_000));
+	});
+
+	it('a positive settlement adds to withholding; a negative one is paid back as an exempt earning', () => {
+		const days = Array.from({ length: 13 }, () => day());
+		const none = computePayrollLine({ ...base, payBasis: 'monthly', baseRateCentavos: peso(40_000), days });
+		const more = computePayrollLine({
+			...base,
+			payBasis: 'monthly',
+			baseRateCentavos: peso(40_000),
+			days,
+			adjustments: { ...NO_ADJUSTMENTS, annualTaxAdjustmentCentavos: peso(1_500) }
+		});
+		expect(more.line.deductions.withholding_tax).toBe(none.line.deductions.withholding_tax + peso(1_500));
+		expect(more.line.net_pay).toBe(none.line.net_pay - peso(1_500));
+		expect(more.detail.regularWithholdingCentavos).toBe(none.line.deductions.withholding_tax);
+
+		const back = computePayrollLine({
+			...base,
+			payBasis: 'monthly',
+			baseRateCentavos: peso(40_000),
+			days,
+			adjustments: { ...NO_ADJUSTMENTS, annualTaxAdjustmentCentavos: -peso(800) }
+		});
+		// The refund is income-free: gross rises by it, taxable and withholding do not move.
+		expect(back.line.earnings.other).toBe(peso(800));
+		expect(back.line.gross).toBe(none.line.gross + peso(800));
+		expect(back.line.deductions.withholding_tax).toBe(none.line.deductions.withholding_tax);
+		expect(back.detail.taxableCentavos).toBe(none.detail.taxableCentavos);
+		expect(back.line.net_pay).toBe(none.line.net_pay + peso(800));
+	});
+});
+
+describe('annual settlement edge cases', () => {
+	const days = () => Array.from({ length: 13 }, () => day());
+	const line = (over: Record<string, unknown> = {}) =>
+		computePayrollLine({ ...base, payBasis: 'monthly', baseRateCentavos: peso(40_000), days: days(), ...over });
+
+	it('a typed withholding override replaces the regular tax but the settlement still applies on top', () => {
+		const r = line({ adjustments: { ...NO_ADJUSTMENTS, withholdingOverrideCentavos: peso(500), annualTaxAdjustmentCentavos: peso(250) } });
+		expect(r.line.deductions.withholding_tax).toBe(peso(750));
+		expect(r.detail.regularWithholdingCentavos).toBe(peso(500));
+	});
+
+	it('an exempt-from-withholding person has no regular tax and a refund still comes back as an earning', () => {
+		const r = line({ exemptFromWithholding: true, adjustments: { ...NO_ADJUSTMENTS, annualTaxAdjustmentCentavos: -peso(1_000) } });
+		expect(r.line.deductions.withholding_tax).toBe(0);
+		expect(r.line.earnings.other).toBe(peso(1_000));
+	});
+
+	it('an exempt amount larger than the pay is capped at gross, so taxable never goes negative', () => {
+		const r = line({ adjustments: { ...NO_ADJUSTMENTS, nonTaxableEarningsCentavos: peso(10_000_000) } });
+		expect(r.detail.taxableCentavos).toBe(0);
+		expect(r.line.deductions.withholding_tax).toBe(0);
+		expect(r.detail.nonTaxableCentavos).toBe(r.line.gross);
+	});
+
+	it('a refund and an exempt allowance together are both kept out of taxable income', () => {
+		const plain = line({ adjustments: { ...NO_ADJUSTMENTS, allowancesCentavos: peso(3_000) } });
+		const both = line({
+			adjustments: { ...NO_ADJUSTMENTS, allowancesCentavos: peso(3_000), nonTaxableEarningsCentavos: peso(3_000), annualTaxAdjustmentCentavos: -peso(600) }
+		});
+		expect(both.detail.taxableCentavos).toBe(plain.detail.taxableCentavos - peso(3_000));
+		expect(both.detail.nonTaxableCentavos).toBe(peso(3_600));
+		expect(both.line.gross).toBe(plain.line.gross + peso(600));
+	});
+
+	it('works the same on a monthly run, and for daily and hourly staff', () => {
+		const monthly = computePayrollLine({
+			...base,
+			frequency: 'monthly',
+			payBasis: 'monthly',
+			baseRateCentavos: peso(40_000),
+			days: Array.from({ length: 26 }, () => day()),
+			adjustments: { ...NO_ADJUSTMENTS, annualTaxAdjustmentCentavos: peso(2_000) }
+		});
+		expect(monthly.line.deductions.withholding_tax).toBe(monthly.detail.regularWithholdingCentavos + peso(2_000));
+		for (const payBasis of ['daily', 'hourly'] as const) {
+			const r = computePayrollLine({
+				...base,
+				payBasis,
+				baseRateCentavos: payBasis === 'daily' ? peso(800) : peso(100),
+				days: days(),
+				adjustments: { ...NO_ADJUSTMENTS, annualTaxAdjustmentCentavos: -peso(300) }
+			});
+			expect(r.line.earnings.other).toBe(peso(300));
+			expect(r.line.net_pay).toBe(r.line.gross - Object.values(r.line.deductions).reduce((a, b) => a + b, 0));
+		}
+	});
+
+	it('a settlement never touches the contributions or the 13th-month accrual', () => {
+		const a = line();
+		const b = line({ adjustments: { ...NO_ADJUSTMENTS, annualTaxAdjustmentCentavos: -peso(900), nonTaxableEarningsCentavos: peso(500) } });
+		expect(b.line.deductions.sss_ee).toBe(a.line.deductions.sss_ee);
+		expect(b.line.deductions.philhealth_ee).toBe(a.line.deductions.philhealth_ee);
+		expect(b.line.deductions.pagibig_ee).toBe(a.line.deductions.pagibig_ee);
+		expect(b.line.employer_contributions).toEqual(a.line.employer_contributions);
+		expect(b.line.thirteenth_month_accrual).toBe(a.line.thirteenth_month_accrual);
+	});
+
+	it('annualTaxDue steps exactly at each bound and is monotonic', () => {
+		let prev = -1;
+		for (const pesos of [0, 249_999, 250_000, 250_001, 399_999, 400_000, 400_001, 799_999, 800_000, 800_001, 1_999_999, 2_000_000, 2_000_001, 7_999_999, 8_000_000, 8_000_001]) {
+			const t = annualTaxDue(peso(pesos));
+			expect(t).toBeGreaterThanOrEqual(prev);
+			prev = t;
+		}
+		expect(annualTaxDue(peso(400_001))).toBe(peso(22_500) + 20);
+		expect(annualTaxDue(peso(800_001))).toBe(peso(102_500) + 25);
 	});
 });

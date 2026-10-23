@@ -45,6 +45,8 @@ export interface AmenityDetail {
 export interface CancellationTerms {
 	freeCancelHours: number | null;
 	penaltyType: 'percentage_of_total' | 'first_night' | 'full_amount';
+	graceHoursAfterPayment: number | null;
+	graceFeeBps: number | null;
 	/** Basis points due online at booking; null = pay in full. Only ever a partial value here
 	 *  (1–9999) — a policy that pays in full is normalised to null. */
 	downpaymentBps: number | null;
@@ -325,6 +327,8 @@ export async function searchAvailability(params: {
 				ratePlanId: ratePlans.id,
 				freeCancelHours: cancellationPolicies.freeCancelHours,
 				penaltyType: cancellationPolicies.penaltyType,
+				graceHoursAfterPayment: cancellationPolicies.graceHoursAfterPayment,
+				graceFeeBps: cancellationPolicies.graceFeeBps,
 				downpaymentBps: cancellationPolicies.downpaymentBps
 			})
 			.from(ratePlans)
@@ -366,6 +370,8 @@ export async function searchAvailability(params: {
 					? {
 							freeCancelHours: cancellation.freeCancelHours,
 							penaltyType: cancellation.penaltyType,
+							graceHoursAfterPayment: cancellation.graceHoursAfterPayment,
+							graceFeeBps: cancellation.graceFeeBps,
 							downpaymentBps: isPartialDownpayment(cancellation.downpaymentBps)
 								? cancellation.downpaymentBps
 								: null
