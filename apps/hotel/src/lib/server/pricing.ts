@@ -1,5 +1,6 @@
 import { and, eq, gte, lte, lt } from 'drizzle-orm';
 import { db } from './db/index';
+import type { Tx } from './finance/shared';
 import {
 	dailyRates,
 	functionHalls,
@@ -139,19 +140,24 @@ export function computeFeesAndVat(params: {
  *  Per-room (not scaled by room count) — an extra-bed charge, being per-line rather than
  *  per-room, is added separately after `scaleRoomPrice`; see `pricing-utils.ts`'s
  *  `addFlatFeeCentavos`. */
-export async function priceStay(params: {
-	hotelId: string;
-	ratePlanId: string;
-	checkIn: string;
-	checkOut: string;
-}): Promise<PriceBreakdown> {
+export async function priceStay(
+	params: {
+		hotelId: string;
+		ratePlanId: string;
+		checkIn: string;
+		checkOut: string;
+	},
+	/** The caller's transaction when pricing inside one — see `priceEventHall`. */
+	tx?: Tx
+): Promise<PriceBreakdown> {
+	const conn = tx ?? db;
 	const { hotelId, ratePlanId, checkIn, checkOut } = params;
 	if (checkIn >= checkOut) throw new Error('checkOut must be after checkIn');
 
-	const [hotel] = await db.select().from(hotels).where(eq(hotels.id, hotelId)).limit(1);
+	const [hotel] = await conn.select().from(hotels).where(eq(hotels.id, hotelId)).limit(1);
 	if (!hotel) throw new Error('Hotel not found');
 
-	const [ratePlan] = await db
+	const [ratePlan] = await conn
 		.select()
 		.from(ratePlans)
 		.where(and(eq(ratePlans.id, ratePlanId), eq(ratePlans.hotelId, hotelId)))
@@ -161,7 +167,7 @@ export async function priceStay(params: {
 	const nightDates = nightsBetween(checkIn, checkOut);
 	const lastNight = nightDates[nightDates.length - 1]!;
 
-	const overrides = await db
+	const overrides = await conn
 		.select({ date: dailyRates.date, priceCentavos: dailyRates.priceCentavos })
 		.from(dailyRates)
 		.where(
@@ -177,7 +183,7 @@ export async function priceStay(params: {
 	const overrideByDate = new Map(overrides.map((o) => [o.date, o.priceCentavos]));
 
 	// Any seasonal range that overlaps [checkIn, lastNight].
-	const seasons = await db
+	const seasons = await conn
 		.select({
 			startDate: seasonalRates.startDate,
 			endDate: seasonalRates.endDate,
@@ -207,7 +213,7 @@ export async function priceStay(params: {
 	);
 	const subtotalCentavos = nights.reduce((sum, n) => sum + n.priceCentavos, 0);
 
-	const activeFees = await db
+	const activeFees = await conn
 		.select()
 		.from(taxesFees)
 		.where(and(eq(taxesFees.hotelId, hotelId), eq(taxesFees.isActive, true)));
@@ -246,20 +252,26 @@ export interface HallPriceBreakdown {
  * Zod-validate their format before calling; this function only checks that
  * the resulting duration is positive.
  */
-export async function priceEventHall(params: {
-	hotelId: string;
-	functionHallId: string;
-	startTime: string;
-	endTime: string;
-}): Promise<HallPriceBreakdown> {
+export async function priceEventHall(
+	params: {
+		hotelId: string;
+		functionHallId: string;
+		startTime: string;
+		endTime: string;
+	},
+	/** Pass the caller's transaction when pricing inside one: without it these reads take a second
+	 *  pooled connection while the first is still held, which deadlocks the pool under load. */
+	tx?: Tx
+): Promise<HallPriceBreakdown> {
 	const { hotelId, functionHallId, startTime, endTime } = params;
 	const hours = (toMinutes(endTime) - toMinutes(startTime)) / 60;
 	if (!(hours > 0)) throw new Error('endTime must be after startTime');
 
-	const [hotel] = await db.select().from(hotels).where(eq(hotels.id, hotelId)).limit(1);
+	const conn = tx ?? db;
+	const [hotel] = await conn.select().from(hotels).where(eq(hotels.id, hotelId)).limit(1);
 	if (!hotel) throw new Error('Hotel not found');
 
-	const [hall] = await db
+	const [hall] = await conn
 		.select()
 		.from(functionHalls)
 		.where(and(eq(functionHalls.id, functionHallId), eq(functionHalls.hotelId, hotelId)))
@@ -270,7 +282,7 @@ export async function priceEventHall(params: {
 	const extraHoursCostCentavos = Math.round(extraHours * hall.extraHourFeeCentavos);
 	const subtotalCentavos = hall.basePriceCentavos + extraHoursCostCentavos;
 
-	const activeFees = await db
+	const activeFees = await conn
 		.select()
 		.from(taxesFees)
 		.where(and(eq(taxesFees.hotelId, hotelId), eq(taxesFees.isActive, true)));

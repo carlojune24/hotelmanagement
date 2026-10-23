@@ -894,14 +894,19 @@ export async function createWalkInBooking(params: {
 		// lock — never trust client-supplied amounts, same posture as the
 		// single-line version this loop replaces.
 		for (const item of roomItems) {
-			const available = await getAvailableRoomType({
-				hotelId,
-				checkIn: item.checkIn,
-				checkOut: item.checkOut,
-				occupancy: item.occupancy,
-				roomCount: item.roomCount,
-				roomTypeId: item.roomTypeId
-			});
+			// On `tx`, not `db`: this runs inside the advisory-locked transaction, and a read on a
+			// second pooled connection here deadlocks the pool once enough walk-ins land at once.
+			const available = await getAvailableRoomType(
+				{
+					hotelId,
+					checkIn: item.checkIn,
+					checkOut: item.checkOut,
+					occupancy: item.occupancy,
+					roomCount: item.roomCount,
+					roomTypeId: item.roomTypeId
+				},
+				tx
+			);
 			const plan = available?.ratePlans.find((p) => p.id === item.ratePlanId);
 			if (!available || !plan) {
 				throw new WalkInError('One of the selected rooms is no longer available for these dates.');
@@ -1486,16 +1491,16 @@ export async function createWalkInHallBooking(params: {
 			sql`select pg_advisory_xact_lock(hashtext(${hotelId}), hashtext(${'hall:' + functionHallId + ':' + eventDate}))`
 		);
 
-		const available = await checkHallAvailability({
-			hotelId,
-			functionHallId,
-			eventDate,
-			startTime,
-			endTime
-		});
+		// Both of these run on `tx` on purpose: a read on `db` here would take a second pooled
+		// connection while this transaction still holds the first, and enough concurrent walk-ins
+		// then deadlock the whole pool.
+		const available = await checkHallAvailability(
+			{ hotelId, functionHallId, eventDate, startTime, endTime },
+			tx
+		);
 		if (!available) throw new HallWalkInError('That function hall slot is no longer available.');
 
-		const price = await priceEventHall({ hotelId, functionHallId, startTime, endTime });
+		const price = await priceEventHall({ hotelId, functionHallId, startTime, endTime }, tx);
 		const lineFees = price.fees.reduce((sum, f) => sum + f.amountCentavos, 0);
 
 		const [guestRow] = await tx

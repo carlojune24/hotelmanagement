@@ -1,6 +1,7 @@
 import { and, asc, eq, gt, gte, inArray, lt, lte } from 'drizzle-orm';
 import { db } from './db/index';
 import { functionHalls, guests, hallBookings, orders, type RoomPhoto } from './db/schema/index';
+import type { Tx } from './finance/shared';
 
 export interface FunctionHallSummary {
 	id: string;
@@ -58,10 +59,10 @@ export async function checkHallAvailability(params: {
 	eventDate: string;
 	startTime: string;
 	endTime: string;
-}): Promise<boolean> {
+}, tx?: Tx): Promise<boolean> {
 	const { hotelId, functionHallId, eventDate, startTime, endTime } = params;
 
-	const [hall] = await db
+	const [hall] = await (tx ?? db)
 		.select({ id: functionHalls.id })
 		.from(functionHalls)
 		.where(
@@ -74,7 +75,7 @@ export async function checkHallAvailability(params: {
 		.limit(1);
 	if (!hall) return false;
 
-	return (await listHallConflicts(params)).length === 0;
+	return (await listHallConflicts(params, tx)).length === 0;
 }
 
 export interface HallConflict {
@@ -96,9 +97,9 @@ export async function listHallConflicts(params: {
 	eventDate: string;
 	startTime: string;
 	endTime: string;
-}): Promise<HallConflict[]> {
+}, tx?: Tx): Promise<HallConflict[]> {
 	const { hotelId, functionHallId, eventDate, startTime, endTime } = params;
-	return db
+	return (tx ?? db)
 		.select({
 			startTime: hallBookings.startTime,
 			endTime: hallBookings.endTime,
