@@ -1651,15 +1651,34 @@ export async function checkInHallBooking(
 }
 
 /**
+ * A `<input type="datetime-local">` value ("YYYY-MM-DDTHH:MM") read on the hotel's own wall clock, as ms.
+ * Returns undefined for anything malformed, so a junk value falls back to the current clock rather than
+ * silently billing from epoch.
+ */
+function parseWallDateTime(value: string | undefined, timezone: string): number | undefined {
+	if (!value) return undefined;
+	const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(value);
+	if (!m?.[1] || !m[2]) return undefined;
+	const ms = wallTimeToUtcMs(m[1], m[2], timezone);
+	return Number.isFinite(ms) ? ms : undefined;
+}
+
+/**
  * The event is over: `checked_in` → `checked_out`. If it ran past its booked end, the overtime is worked out
- * here from the clock (per started hour, no grace) at the hall's extra-hour rate and posted to the event's
- * bill once. The hall is flagged dirty in the same transaction, so housekeeping always has something to
- * clear before Close. Leaving early earns no credit: the booked price stands.
+ * here (per started hour, no grace) at the hall's extra-hour rate and posted to the event's bill once. The
+ * hall is flagged dirty in the same transaction, so housekeeping always has something to clear before Close.
+ * Leaving early earns no credit: the booked price stands.
+ *
+ * `endedAtWall` is when the event actually ended, as the front desk states it — "YYYY-MM-DDTHH:MM" in the
+ * hotel's own timezone, the same wall clock `endTime` is read on. Without it the current clock is used, which
+ * is only right when the desk checks out promptly; a desk that clears the event hours later would otherwise
+ * bill every hour since.
  */
 export async function checkOutHallBooking(
 	hotelId: string,
 	hallBookingId: string,
 	actor: SessionUser | null,
+	endedAtWall?: string,
 	now: Date = new Date()
 ): Promise<{ overtimeHours: number; overtimeCentavos: number }> {
 	return db.transaction(async (tx) => {
@@ -1672,8 +1691,13 @@ export async function checkOutHallBooking(
 			.from(functionHalls)
 			.where(eq(functionHalls.id, row.functionHallId))
 			.limit(1);
-		const scheduledEnd = wallTimeToUtcMs(row.eventDate, row.endTime, hotel?.timezone ?? 'Asia/Manila');
-		const hours = hallOvertimeHours(scheduledEnd, now.getTime());
+		const timezone = hotel?.timezone ?? 'Asia/Manila';
+		const scheduledEnd = wallTimeToUtcMs(row.eventDate, row.endTime, timezone);
+		// Never past the real clock, so a mistyped future end time cannot inflate the bill. One before the
+		// booked end needs no guard — `hallOvertimeHours` already returns 0 for it.
+		const endedAt = parseWallDateTime(endedAtWall, timezone);
+		const effectiveEnd = Math.min(endedAt ?? now.getTime(), now.getTime());
+		const hours = hallOvertimeHours(scheduledEnd, effectiveEnd);
 		const rate = hall?.extraHourFeeCentavos ?? 0;
 		const vatRateBps = hotel?.vatRateBps ?? 0;
 
@@ -1697,7 +1721,8 @@ export async function checkOutHallBooking(
 			after: {
 				functionHallId: row.functionHallId,
 				scheduledEnd: new Date(scheduledEnd).toISOString(),
-				actualEnd: now.toISOString(),
+				actualEnd: new Date(effectiveEnd).toISOString(),
+				checkedOutAt: now.toISOString(),
 				overtimeHours: hours,
 				overtimeRateCentavos: rate,
 				overtimeCentavos: posted?.totalCentavos ?? 0
