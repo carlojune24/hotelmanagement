@@ -68,7 +68,8 @@ export const actions: Actions = {
 			.object({
 				tin: nullableStr(40),
 				isVatRegistered: z
-					.union([z.literal('on'), z.literal('true'), z.literal('false'), z.undefined()])
+					.union([z.literal('on'), z.literal('true'), z.literal('false')])
+					.optional()
 					.transform((v) => v === 'on' || v === 'true'),
 				registeredAddress: nullableStr(300),
 				birPermitNo: nullableStr(80),
@@ -81,10 +82,12 @@ export const actions: Actions = {
 				orPrefix: z.string().trim().max(12).default('OR'),
 				serialPadWidth: z.coerce.number().int().min(1).max(12).default(6),
 				autoIssueInvoiceOnCheckout: z
-					.union([z.literal('on'), z.undefined()])
+					.literal('on')
+					.optional()
 					.transform((v) => v === 'on'),
 				autoIssueReceiptOnPayment: z
-					.union([z.literal('on'), z.undefined()])
+					.literal('on')
+					.optional()
 					.transform((v) => v === 'on'),
 				footerNote: nullableStr(400),
 				thermalPaperWidthMm: z.coerce.number().int().refine((v) => v === 58 || v === 80).default(80)

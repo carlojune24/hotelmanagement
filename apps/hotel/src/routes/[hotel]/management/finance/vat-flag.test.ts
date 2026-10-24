@@ -28,6 +28,7 @@ describe.skipIf(!hasDb)('VAT-registered flag drives the VAT rate (live DB)', asy
 	const { addAdHocCharge } = await import('$lib/server/folio');
 	const { hallOvertimeAmount } = await import('$lib/hall-overtime');
 	const settingsPage = await import('./settings/+page.server');
+	const birPage = await import('./bir/setup/+page.server');
 
 	const tag = `vatflag-${Math.random().toString(36).slice(2, 10)}`;
 	const hotelIds: string[] = [];
@@ -137,6 +138,41 @@ describe.skipIf(!hasDb)('VAT-registered flag drives the VAT rate (live DB)', asy
 			await upsertBirSettings(h.id, bir(false), null);
 			await upsertBirSettings(h.id, bir(false), null);
 			expect(await rateOf(h.id)).toBe(0);
+		});
+	});
+
+	describe('BIR setup form action (as the browser posts it)', () => {
+		const birForm = (checked: { vat: boolean; auto: boolean }) => {
+			const fd = new FormData();
+			for (const k of ['tin', 'registeredAddress', 'birPermitNo', 'permitDateIssued', 'accreditedPrinterName', 'accreditedPrinterTin', 'accreditedPrinterAccreditationNo', 'printerAccreditationDate', 'footerNote']) fd.set(k, '');
+			fd.set('invoicePrefix', 'INV');
+			fd.set('orPrefix', 'OR');
+			fd.set('serialPadWidth', '6');
+			fd.set('thermalPaperWidthMm', '80');
+			// An unchecked checkbox is absent from the post, not "false".
+			if (checked.vat) fd.set('isVatRegistered', 'on');
+			if (checked.auto) {
+				fd.set('autoIssueInvoiceOnCheckout', 'on');
+				fd.set('autoIssueReceiptOnPayment', 'on');
+			}
+			return new Request('http://localhost/x', { method: 'POST', body: fd });
+		};
+
+		it('saves with VAT-registered and the auto-issue boxes all unchecked, and the rate goes to 0', async () => {
+			const h = await mkHotel('i1');
+			const res = await birPage.actions.save!({ locals: asAdmin(h), request: birForm({ vat: false, auto: false }) } as never);
+			expect(res).toMatchObject({ ok: 'BIR setup saved.' });
+			const row = await getBirSettings(h.id);
+			expect(row).toMatchObject({ isVatRegistered: false, autoIssueInvoiceOnCheckout: false, autoIssueReceiptOnPayment: false });
+			expect(await rateOf(h.id)).toBe(0);
+		});
+
+		it('still saves when everything is checked', async () => {
+			const h = await mkHotel('i2');
+			const res = await birPage.actions.save!({ locals: asAdmin(h), request: birForm({ vat: true, auto: true }) } as never);
+			expect(res).toMatchObject({ ok: 'BIR setup saved.' });
+			expect((await getBirSettings(h.id))?.isVatRegistered).toBe(true);
+			expect(await rateOf(h.id)).toBe(1200);
 		});
 	});
 
