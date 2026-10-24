@@ -119,7 +119,9 @@ export const COA_SEED: CoaSeedAccount[] = [
 	{ code: '5990', name: 'Cash Over/Short', type: 'expense', subtype: 'cash_over_short', normalBalance: 'debit' }
 ];
 
-/** `cash_accounts.kind` -> seeded COA `code`. */
+/** `cash_accounts.kind` -> seeded COA `code`. The seeded account of each kind keeps this
+ *  code; a second one (a dining till, a bar drawer) gets its own leaf in the same decade —
+ *  see `nextCoaCodeInDecade` and `createCashAccount`. */
 export const CASH_ACCOUNT_KIND_TO_COA_CODE: Record<string, string> = {
 	cash_drawer: '1010',
 	petty_cash: '1011',
@@ -127,6 +129,30 @@ export const CASH_ACCOUNT_KIND_TO_COA_CODE: Record<string, string> = {
 	e_wallet: '1030',
 	undeposited: '1090'
 };
+
+/**
+ * A free COA code for another account of `kind`, inside that kind's decade — drawers live in
+ * 1010‑1019, banks in 1020‑1029, and so on. Each till being its own leaf is what lets the
+ * balance sheet show them apart; they would otherwise all post to the seeded account's line.
+ * Returns null when the decade is full (ten accounts of one kind is already unusual).
+ */
+export function nextCoaCodeInDecade(kind: string, takenCodes: Iterable<string>): string | null {
+	const base = CASH_ACCOUNT_KIND_TO_COA_CODE[kind];
+	if (!base) return null;
+	const taken = new Set(takenCodes);
+	const start = Math.floor(Number(base) / 10) * 10;
+	for (let n = start; n < start + 10; n++) {
+		const code = String(n);
+		if (!taken.has(code)) return code;
+	}
+	return null;
+}
+
+/** The seed entry a minted leaf copies its type/subtype/normal balance from. */
+export function coaTemplateForKind(kind: string): CoaSeedAccount | undefined {
+	const code = CASH_ACCOUNT_KIND_TO_COA_CODE[kind];
+	return code ? COA_SEED.find((a) => a.code === code) : undefined;
+}
 
 /** `cash_movements.category` -> seeded COA `code`. `transfer_in`/`transfer_out`/
  *  `bank_deposit` all point at the clearing account (1091) — see

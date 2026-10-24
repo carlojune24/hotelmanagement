@@ -1,0 +1,2 @@
+ALTER TABLE "finance_settings" ADD COLUMN "dining_drawer_account_id" uuid;--> statement-breakpoint
+ALTER TABLE "finance_settings" ADD CONSTRAINT "finance_settings_dining_drawer_account_id_cash_accounts_id_fk" FOREIGN KEY ("dining_drawer_account_id") REFERENCES "public"."cash_accounts"("id") ON DELETE set null ON UPDATE no action;

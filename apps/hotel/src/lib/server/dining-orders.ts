@@ -28,7 +28,7 @@ import type { SessionUser } from './auth/session';
 import { FinanceError, businessDateFor } from './finance/shared';
 import { changeFor } from './finance/calc';
 import { recordCashMovement, voidCashMovement } from './finance/cash';
-import { resolvePaymentAccount, type PaymentMethod } from './finance/payments';
+import { diningDrawerId, resolvePaymentAccount, type PaymentMethod } from './finance/payments';
 import {
 	cancelDiningReceipt,
 	getBirSettings,
@@ -757,7 +757,11 @@ export async function payDiningOrder(args: {
 		change = changeFor(tendered, order.totalCentavos);
 	}
 
-	const { cashAccountId, shiftId } = await resolvePaymentAccount(args.hotelId, args.method);
+	const { cashAccountId, shiftId } = await resolvePaymentAccount(
+		args.hotelId,
+		args.method,
+		await diningDrawerId(args.hotelId)
+	);
 
 	await db.transaction(async (tx) => {
 		const locked = await loadOrderForUpdate(tx, args.hotelId, args.orderId);

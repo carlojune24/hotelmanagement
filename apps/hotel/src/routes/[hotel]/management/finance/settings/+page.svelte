@@ -26,6 +26,25 @@
 	let showVendor = $state(false);
 	let showApiKey = $state(false);
 	const kindLabel = (k: string) => k.replace(/_/g, ' ');
+
+	// The two tills, bound so each picker can drop whatever the other one holds — one drawer
+	// serving both would put dining's cash straight back in the front desk's shift.
+	let frontDrawer = $state(data.settings.defaultDrawerAccountId ?? '');
+	let diningDrawer = $state(data.settings.diningDrawerAccountId ?? '');
+	$effect(() => {
+		frontDrawer = data.settings.defaultDrawerAccountId ?? '';
+		diningDrawer = data.settings.diningDrawerAccountId ?? '';
+	});
+	const drawers = $derived(data.accounts.filter((a) => a.kind === 'cash_drawer'));
+
+	/** Names held by more than one account — a double-submitted "Add account", almost always. */
+	const duplicateNames = $derived(
+		new Set(
+			data.accounts
+				.map((a) => a.name.trim().toLowerCase())
+				.filter((n, i, all) => all.indexOf(n) !== i)
+		)
+	);
 </script>
 
 <div class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
@@ -87,13 +106,27 @@
 		<form method="POST" action="?/updateSettings" use:enhance class="space-y-3">
 			<div class="grid gap-3 sm:grid-cols-3">
 				<div>
-					<Label class="text-xs">Default drawer</Label>
-					<select name="defaultDrawerAccountId" class="mt-1 w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-sm">
+					<Label class="text-xs">Front desk drawer</Label>
+					<select name="defaultDrawerAccountId" bind:value={frontDrawer} class="mt-1 w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-sm">
 						<option value="">— none —</option>
-						{#each data.accounts.filter((a) => a.kind === 'cash_drawer') as a (a.id)}
-							<option value={a.id} selected={data.settings.defaultDrawerAccountId === a.id}>{a.name}</option>
+						{#each drawers.filter((a) => a.id !== diningDrawer) as a (a.id)}
+							<option value={a.id}>{a.name}</option>
 						{/each}
 					</select>
+					<p class="mt-1 text-xs text-ink-muted">
+						The hotel's default till — every register without one of its own. Already set; only
+						change this if the front desk's drawer itself changed.
+					</p>
+				</div>
+				<div>
+					<Label class="text-xs">Dining drawer</Label>
+					<select name="diningDrawerAccountId" bind:value={diningDrawer} class="mt-1 w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-sm">
+						<option value="">— none —</option>
+						{#each drawers.filter((a) => a.id !== frontDrawer) as a (a.id)}
+							<option value={a.id}>{a.name}</option>
+						{/each}
+					</select>
+					<p class="mt-1 text-xs text-ink-muted">Dining's own till, with its own shift. Leave empty to keep dining cash in the front desk drawer.</p>
 				</div>
 				<div>
 					<Label class="text-xs">Default bank / e-wallet</Label>
@@ -174,6 +207,7 @@
 						<span class="text-ink">{a.name}</span>
 						<Badge variant="outline" class="ml-1.5 border-border bg-surface-2 text-ink-muted">{kindLabel(a.kind)}</Badge>
 						{#if a.isSystem}<Badge variant="outline" class="ml-1 border-border bg-surface-2 text-ink-muted">system</Badge>{/if}
+						{#if duplicateNames.has(a.name.trim().toLowerCase())}<Badge variant="outline" class="ml-1 border-warning/40 bg-warning/10 text-warning">duplicate name</Badge>{/if}
 						{#if !a.isActive}<span class="ml-1.5 text-xs text-danger">inactive</span>{/if}
 						<span class="ml-2 text-ink-muted tabular-nums">{peso(a.currentBalanceCentavos)}</span>
 					</div>

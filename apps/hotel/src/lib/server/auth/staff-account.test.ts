@@ -160,7 +160,7 @@ describe.skipIf(!hasDb)('kitchen and dining accounts (live DB)', async () => {
 		const synced = await ensureDiningAccount(db, opts(email, { syncCapabilities: true }));
 		expect(synced.capabilitiesAdded).toEqual(['dining:manage']);
 		const caps = (await db.select({ c: s.rolePermissions.capability }).from(s.rolePermissions).where(eq(s.rolePermissions.roleId, member!.roleId))).map((c) => c.c).sort();
-		expect(caps).toEqual(['dining:manage', 'dining:read', 'dining:write', 'reports:read']); // the admin's extra stays
+		expect(caps).toEqual(['dining:manage', 'dining:read', 'dining:shift', 'dining:write', 'reports:read']); // the admin's extra stays
 
 		expect((await ensureDiningAccount(db, opts(email, { syncCapabilities: true }))).capabilitiesAdded).toEqual([]);
 		// The role is shared by everyone with it at this hotel, so put it back for the tests that follow.
@@ -177,7 +177,7 @@ describe.skipIf(!hasDb)('kitchen and dining accounts (live DB)', async () => {
 			.from(s.rolePermissions)
 			.innerJoin(s.memberships, eq(s.memberships.roleId, s.rolePermissions.roleId))
 			.where(eq(s.memberships.userId, r.userId));
-		expect(caps.map((c) => c.c).sort()).toEqual(['dining:manage', 'dining:read', 'dining:write']);
+		expect(caps.map((c) => c.c).sort()).toEqual(['dining:manage', 'dining:read', 'dining:shift', 'dining:write']);
 
 		// A kitchen account is not silently turned into a dining one, or the other way round.
 		await expect(ensureKitchenAccount(db, opts(email))).rejects.toThrow(/different role/);

@@ -19,6 +19,8 @@ export const load: LayoutServerLoad = async ({ locals, depends }) => {
 	return {
 		canManageMenu: can('dining:manage') || can('hotel:admin'),
 		canEditSettings: can('hotel:admin'),
+		/** Dining's own till: its own `dining:shift`, or the hotel-wide `shift:write`. */
+		canRunDrawer: can('dining:shift') || can('shift:write'),
 		/** Table-QR orders waiting for a waiter, shown as a badge on the Orders tab. */
 		awaitingAcceptance: alerts.qrWaiting.length,
 		/** Guest messages nobody has opened yet, shown as a badge on the Messages tab. */

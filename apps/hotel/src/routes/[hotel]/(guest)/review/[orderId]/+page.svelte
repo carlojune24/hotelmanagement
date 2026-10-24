@@ -6,7 +6,7 @@
 	import BedIcon from '@lucide/svelte/icons/bed';
 	import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
 	import LockIcon from '@lucide/svelte/icons/lock';
-	import { formatStayDate, nightsLabel, stayNights } from '$lib/stay-dates';
+	import { formatClockTime, formatStayDate, nightsLabel, stayNights } from '$lib/stay-dates';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -98,7 +98,7 @@
 						<div class="mt-1 text-sm">
 							<span class="ledger-data">{formatStayDate(h.eventDate)}</span>
 							<span class="ledger-data text-[var(--ledger-ink-muted)]">
-								· {h.startTime.slice(0, 5)}–{h.endTime.slice(0, 5)}</span
+								· {formatClockTime(h.startTime)}–{formatClockTime(h.endTime)}</span
 							>
 						</div>
 						<div class="text-xs text-[var(--ledger-ink-muted)]">

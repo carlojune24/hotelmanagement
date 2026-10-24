@@ -4,6 +4,7 @@
 	import { enhance } from '$app/forms';
 	import { toast } from 'svelte-sonner';
 	import { hallOvertimeAmount, hallOvertimeHours } from '$lib/hall-overtime';
+	import { formatClockTime } from '$lib/stay-dates';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -217,7 +218,6 @@
 			: 0;
 	let depositOverrideConfirming = $state(false);
 	let shiftFloat = $state('');
-	let shiftDrawer = $state('');
 
 	let hallDetailOpen = $state(false);
 	$effect(() => {
@@ -1177,7 +1177,7 @@
 				const clash = (result.conflicts ?? [])
 					.map(
 						(c) =>
-							`${c.startTime.slice(0, 5)}–${c.endTime.slice(0, 5)} (${c.guestName}, ${humanize(c.status)})`
+							`${formatClockTime(c.startTime)}–${formatClockTime(c.endTime)} (${c.guestName}, ${humanize(c.status)})`
 					)
 					.join('; ');
 				hallQuoteError = clash
@@ -1285,20 +1285,7 @@
 				</a>
 			{:else if data.cashier.hasDrawerAccount}
 				<form method="POST" action="?/openShift" use:enhance class="flex items-center gap-1.5">
-					{#if data.cashier.drawers.length > 1}
-						<select
-							name="cashAccountId"
-							bind:value={shiftDrawer}
-							class="rounded-md border border-input bg-transparent px-2 py-1.5 text-xs"
-						>
-							<option value="" disabled selected>Drawer…</option>
-							{#each data.cashier.drawers as d (d.id)}
-								<option value={d.id}>{d.name}</option>
-							{/each}
-						</select>
-					{:else if data.cashier.drawers[0]}
-						<input type="hidden" name="cashAccountId" value={data.cashier.drawers[0].id} />
-					{/if}
+					<span class="text-xs text-ink-muted">{data.cashier.drawer?.name}</span>
 					<input
 						name="openingFloat"
 						type="number"
@@ -1686,7 +1673,7 @@
 															{e.guestName} · {e.eventType}
 														</div>
 														<div class="text-xs text-ink-muted">
-															{#if e.eventDate !== data.businessDate}<span class="font-medium text-warning">{e.eventDate} · </span>{/if}{e.startTime.slice(0, 5)}–{e.endTime.slice(0, 5)} · {e.guestCount} guests
+															{#if e.eventDate !== data.businessDate}<span class="font-medium text-warning">{e.eventDate} · </span>{/if}{formatClockTime(e.startTime)}–{formatClockTime(e.endTime)} · {e.guestCount} guests
 															· {channelLabel(e.channel)} · {peso(e.totalCentavos)}
 														</div>
 													</div>
@@ -2139,7 +2126,7 @@
 						{/if}
 						{#if selectedRoom.status === 'departing' && o.checkOut < data.businessDate}
 							<p class="mb-3 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
-								<strong>Overdue</strong> — was due out {o.checkOut} at {data.checkOutTime.slice(0, 5)} and
+								<strong>Overdue</strong> — was due out {o.checkOut} at {formatClockTime(data.checkOutTime)} and
 								never checked out. The room stays blocked until you check this guest out.
 								{#if data.lateCheckoutFeePerHourCentavos > 0}
 									Add the late checkout fee ({peso(data.lateCheckoutFeePerHourCentavos)}/hour) to the
@@ -2148,7 +2135,7 @@
 							</p>
 						{:else if selectedRoom.status === 'departing' && data.lateCheckoutFeePerHourCentavos > 0}
 							<p class="mb-3 rounded-md bg-surface-2 px-3 py-2 text-xs text-ink-muted">
-								Wants to keep the room past {data.checkOutTime.slice(0, 5)}? Late checkout fee:
+								Wants to keep the room past {formatClockTime(data.checkOutTime)}? Late checkout fee:
 								<strong class="text-ink">{peso(data.lateCheckoutFeePerHourCentavos)}/hour</strong> — add
 								it to the folio below before checking out.
 							</p>
@@ -2956,7 +2943,7 @@
 											</div>
 										</div>
 										<Badge variant="outline" class="shrink-0 border-transparent bg-ok/15 text-ok">
-											from {data.checkInTime.slice(0, 5)}
+											from {formatClockTime(data.checkInTime)}
 										</Badge>
 									</div>
 									<div class="flex gap-2">
@@ -2988,7 +2975,7 @@
 						</p>
 						{#if data.earlyCheckInFeePerHourCentavos > 0}
 							<p class="mb-4 rounded-md bg-surface-2 px-3 py-2 text-xs text-ink-muted">
-								Wants to move in before {data.checkInTime.slice(0, 5)}? Early check-in fee:
+								Wants to move in before {formatClockTime(data.checkInTime)}? Early check-in fee:
 								<strong class="text-ink">{peso(data.earlyCheckInFeePerHourCentavos)}/hour</strong> — add
 								it to the folio once they've checked in.
 							</p>
@@ -3056,7 +3043,7 @@
 												</div>
 											</div>
 											<Badge variant="outline" class="shrink-0 border-transparent bg-ok/15 text-ok">
-												from {data.checkInTime.slice(0, 5)}
+												from {formatClockTime(data.checkInTime)}
 											</Badge>
 										</div>
 										<div class="flex gap-2">
@@ -3108,7 +3095,7 @@
 											? 'bg-danger/15 text-danger'
 											: 'bg-ok/15 text-ok'}"
 									>
-										{d.overdue ? 'Overdue' : `by ${data.checkOutTime.slice(0, 5)}`}
+										{d.overdue ? 'Overdue' : `by ${formatClockTime(data.checkOutTime)}`}
 									</Badge>
 								</button>
 							{/each}

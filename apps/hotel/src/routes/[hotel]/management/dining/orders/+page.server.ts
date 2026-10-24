@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import { diningItems, diningOrders, diningTables } from '$lib/server/db/schema/index';
 import { roleCan } from '$lib/authz';
-import { requireCap } from '$lib/server/auth/rbac';
+import { requireAnyCap, requireCap } from '$lib/server/auth/rbac';
 import { recordId } from '$lib/rate-validation';
 import { loadVenueMenu } from '$lib/server/dining-menu';
 import {
@@ -36,12 +36,22 @@ import { listOpenChecks } from '$lib/server/dining-checks';
 import { chargeDiningOrderToRoom, listInHouseGuests, undoDiningRoomCharge } from '$lib/server/dining-room-charge';
 import { DocumentError, issueDiningDocument, listDiningDocumentsForOrders } from '$lib/server/finance/documents';
 import { FinanceError } from '$lib/server/finance/shared';
-import { getDefaultOpenShift } from '$lib/server/finance/shifts';
+import { diningDrawerId } from '$lib/server/finance/payments';
+import { listCashAccounts } from '$lib/server/finance/accounts';
+import {
+	closeShift,
+	getDefaultOpenShift,
+	getOpenShiftForDrawer,
+	getShiftReconciliation,
+	openShift as openShiftFn
+} from '$lib/server/finance/shifts';
 import { zonedToUtc, localParts } from '$lib/dining-slots';
 import { toPayDocuments } from '$lib/print-batch';
 import type { Actions, PageServerLoad } from './$types';
 
 const PAYMENT_METHODS = ['cash', 'card', 'gcash', 'maya'] as const;
+/** Dining's own till, or the hotel-wide drawer capability finance and the front desk hold. */
+const DRAWER_CAPS = ['dining:shift', 'shift:write'];
 
 export const load: PageServerLoad = async ({ locals, url, depends }) => {
 	depends('app:dining-orders');
@@ -87,7 +97,16 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 
 	const can = (cap: string) =>
 		!!locals.user?.isPlatformAdmin || (!!locals.role && roleCan(locals.role.capabilities, cap));
-	const shift = await getDefaultOpenShift(hotelId).catch(() => null);
+	// Dining rings into its own till when Finance names one; without that setting it keeps
+	// falling back to the hotel default drawer, exactly as before.
+	const drawerId = await diningDrawerId(hotelId);
+	const shift = await (
+		drawerId ? getOpenShiftForDrawer(hotelId, drawerId) : getDefaultOpenShift(hotelId)
+	).catch(() => null);
+	const drawerName = drawerId
+		? ((await listCashAccounts(hotelId)).find((a) => a.id === drawerId)?.name ?? 'Dining drawer')
+		: null;
+	const recon = shift && DRAWER_CAPS.some(can) ? await getShiftReconciliation(hotelId, shift.id) : null;
 	// Guests staying now, for the "Charge to room" picker (only needed by staff who take orders).
 	const inHouse = can('dining:write') ? await listInHouseGuests(hotelId) : [];
 
@@ -114,6 +133,19 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 		tables: tables.filter((t) => menus[t.venueId]),
 		vatRateBps: locals.hotel!.vatRateBps,
 		shiftOpen: !!shift,
+		/** Dining's own till: null `name` means it shares the hotel's default drawer. */
+		drawer: {
+			name: drawerName,
+			openShift: shift
+				? {
+						id: shift.id,
+						openedAt: shift.openedAt.toISOString(),
+						openingFloatCentavos: shift.openingFloatCentavos,
+						expectedCashCentavos: recon?.expectedCashCentavos ?? null
+					}
+				: null
+		},
+		canRunDrawer: DRAWER_CAPS.some(can),
 		inHouse,
 		canWrite: can('dining:write'),
 		canVoid: can('dining:manage') || can('hotel:admin'),
@@ -263,6 +295,68 @@ export const actions: Actions = {
 		try {
 			await cancelDiningOrder({ hotelId: event.locals.hotel!.id, orderId: parsed.data.orderId, reason: parsed.data.reason, actor: event.locals.user });
 			return { ok: 'Order cancelled.' };
+		} catch (e) {
+			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
+			throw e;
+		}
+	},
+
+	/** Dining runs its own till: open and close happen here, at the register, never on a
+	 *  drawer the cashier names — it is always the one Finance assigned to dining. */
+	openDrawer: async (event) => {
+		requireAnyCap(event.locals.user, event.locals.role, DRAWER_CAPS);
+		const hotel = event.locals.hotel!;
+		const parsed = z
+			.object({ openingFloat: z.coerce.number().min(0).max(10_000_000) })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: 'Enter the opening float.' });
+
+		const drawerId = (await diningDrawerId(hotel.id)) ?? null;
+		if (!drawerId)
+			return fail(400, { error: 'No dining drawer is set up yet — Finance → Settings picks one.' });
+		try {
+			await openShiftFn({
+				hotelId: hotel.id,
+				cashAccountId: drawerId,
+				businessDate: localParts(new Date(), hotel.timezone).date,
+				openingFloatCentavos: Math.round(parsed.data.openingFloat * 100),
+				actor: event.locals.user
+			});
+			return { ok: 'Dining drawer opened.' };
+		} catch (e) {
+			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
+			throw e;
+		}
+	},
+
+	closeDrawer: async (event) => {
+		requireAnyCap(event.locals.user, event.locals.role, DRAWER_CAPS);
+		const hotel = event.locals.hotel!;
+		const parsed = z
+			.object({ counted: z.coerce.number().min(0), notes: z.string().max(500).optional() })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: 'Enter the counted cash.' });
+
+		const drawerId = (await diningDrawerId(hotel.id)) ?? null;
+		if (!drawerId)
+			return fail(400, { error: 'No dining drawer is set up yet — Finance → Settings picks one.' });
+		// Resolved from the drawer, not the form, so this can only ever close dining's own shift.
+		const shift = await getOpenShiftForDrawer(hotel.id, drawerId);
+		if (!shift) return fail(400, { error: 'The dining drawer is not open.' });
+		try {
+			const r = await closeShift({
+				hotelId: hotel.id,
+				shiftId: shift.id,
+				countedCentavos: Math.round(parsed.data.counted * 100),
+				notes: parsed.data.notes || null,
+				actor: event.locals.user
+			});
+			return {
+				ok:
+					r.varianceCentavos === 0
+						? 'Dining drawer closed — balanced.'
+						: `Dining drawer closed — ${r.varianceCentavos > 0 ? 'over' : 'short'} ₱${(Math.abs(r.varianceCentavos) / 100).toFixed(2)}.`
+			};
 		} catch (e) {
 			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
 			throw e;

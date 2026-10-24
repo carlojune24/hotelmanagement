@@ -24,6 +24,7 @@
 			{ seg: 'addons', label: 'Add-ons', show: true, badge: 0, hint: '', ready: 0 },
 			{ seg: 'sales', label: 'Sales', show: true, badge: 0, hint: '', ready: 0 },
 			{ seg: 'cashflow', label: 'Cashflow', show: true, badge: 0, hint: '', ready: 0 },
+			{ seg: 'drawer', label: 'Drawer', show: data.canRunDrawer, badge: 0, hint: '', ready: 0 },
 			{ seg: 'settings', label: 'Venues & page', show: data.canEditSettings, badge: 0, hint: '', ready: 0 }
 		].filter((t) => t.show)
 	);

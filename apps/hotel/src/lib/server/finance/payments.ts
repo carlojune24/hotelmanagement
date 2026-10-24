@@ -25,7 +25,7 @@ import { validateAllocations } from '$lib/allocation';
 import { FinanceError, businessDateFor, pesos, type Tx } from './shared';
 import { recordCashMovement, type RecordMovementInput } from './cash';
 import { getFinanceSettings } from './settings';
-import { getDefaultOpenShift } from './shifts';
+import { getDefaultOpenShift, getOpenShiftForDrawer } from './shifts';
 import { getBirSettings, issueOfficialReceipt } from './documents';
 
 export type PaymentMethod = Payment['method'];
@@ -122,21 +122,28 @@ const DRAWER_METHODS = new Set<PaymentMethod>(['cash']);
  * default bank/e-wallet account otherwise. Throws a `FinanceError` when nothing is
  * configured (or a shift is required and none is open). Shared by the front-desk
  * `recordPayment` path and the walk-in booking creators.
+ *
+ * `drawerAccountId` names the till the cash is physically going into — the dining
+ * register passes its own drawer so dining cash never lands in the front desk's
+ * shift. Null/omitted keeps the hotel's default drawer.
  */
 export async function resolvePaymentAccount(
 	hotelId: string,
-	method: PaymentMethod
+	method: PaymentMethod,
+	drawerAccountId?: string | null
 ): Promise<{ cashAccountId: string; shiftId: string | null }> {
 	const settings = await getFinanceSettings(hotelId);
 	if (DRAWER_METHODS.has(method)) {
-		const openShift = await getDefaultOpenShift(hotelId);
+		const openShift = drawerAccountId
+			? await getOpenShiftForDrawer(hotelId, drawerAccountId)
+			: await getDefaultOpenShift(hotelId);
 		if (openShift) return { cashAccountId: openShift.cashAccountId, shiftId: openShift.id };
 		if (settings.requireOpenShiftForCashPayment) {
 			throw new FinanceError('Open a cashier shift before taking a cash payment.');
 		}
-		if (!settings.defaultDrawerAccountId)
-			throw new FinanceError('No cash drawer is set up. Add one in Finance settings.');
-		return { cashAccountId: settings.defaultDrawerAccountId, shiftId: null };
+		const drawer = drawerAccountId ?? settings.defaultDrawerAccountId;
+		if (!drawer) throw new FinanceError('No cash drawer is set up. Add one in Finance settings.');
+		return { cashAccountId: drawer, shiftId: null };
 	}
 	if (!settings.defaultBankAccountId) {
 		throw new FinanceError(
@@ -144,6 +151,12 @@ export async function resolvePaymentAccount(
 		);
 	}
 	return { cashAccountId: settings.defaultBankAccountId, shiftId: null };
+}
+
+/** The dining register's own till, when one is configured in Finance settings. Dining cash —
+ *  order payments and cash refunds — resolves against this drawer instead of the front desk's. */
+export async function diningDrawerId(hotelId: string): Promise<string | null> {
+	return (await getFinanceSettings(hotelId)).diningDrawerAccountId;
 }
 
 export interface RecordPaymentInput {

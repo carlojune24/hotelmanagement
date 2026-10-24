@@ -613,6 +613,11 @@ export const financeSettings = pgTable('finance_settings', {
 	defaultDrawerAccountId: uuid('default_drawer_account_id').references(() => cashAccounts.id, {
 		onDelete: 'set null'
 	}),
+	/** The dining register's own till. Null = dining cash falls back to the default drawer,
+	 *  which is the pre-existing behavior. */
+	diningDrawerAccountId: uuid('dining_drawer_account_id').references(() => cashAccounts.id, {
+		onDelete: 'set null'
+	}),
 	defaultBankAccountId: uuid('default_bank_account_id').references(() => cashAccounts.id, {
 		onDelete: 'set null'
 	}),

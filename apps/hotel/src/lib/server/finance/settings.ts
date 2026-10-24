@@ -6,6 +6,7 @@ import type { SessionUser } from '../auth/session';
 
 export const DEFAULT_FINANCE_SETTINGS = {
 	defaultDrawerAccountId: null as string | null,
+	diningDrawerAccountId: null as string | null,
 	defaultBankAccountId: null as string | null,
 	undepositedAccountId: null as string | null,
 	autoPostOnlinePayments: true,
@@ -28,6 +29,7 @@ export async function getFinanceSettings(hotelId: string): Promise<ResolvedFinan
 	if (!row) return { ...DEFAULT_FINANCE_SETTINGS };
 	return {
 		defaultDrawerAccountId: row.defaultDrawerAccountId,
+		diningDrawerAccountId: row.diningDrawerAccountId,
 		defaultBankAccountId: row.defaultBankAccountId,
 		undepositedAccountId: row.undepositedAccountId,
 		autoPostOnlinePayments: row.autoPostOnlinePayments,

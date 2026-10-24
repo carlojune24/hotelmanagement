@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatClockTime } from '$lib/stay-dates';
 	import * as Sheet from '$lib/components/ui/sheet/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
@@ -304,7 +305,7 @@
 						</p>
 						{#each events as e (e.hallBookingId)}
 							<div class="text-sm text-ink">
-								{e.startTime.slice(0, 5)}–{e.endTime.slice(0, 5)} · {e.eventType} · {e.guestName}
+								{formatClockTime(e.startTime)}–{formatClockTime(e.endTime)} · {e.eventType} · {e.guestName}
 							</div>
 						{/each}
 					</div>

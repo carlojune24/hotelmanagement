@@ -1,5 +1,6 @@
 import { and, eq, isNull, ne, sql } from 'drizzle-orm';
 import { db } from './db/index';
+import { formatClockTime } from '$lib/stay-dates';
 import {
 	bookings,
 	bookingRooms,
@@ -358,7 +359,7 @@ export async function getCancellationQuote(
 		orderId: row.order.id,
 		guestName: row.guestName,
 		lineLabel: `${row.hallName} · ${row.hallBooking.eventType}`,
-		dateLabel: `${row.hallBooking.eventDate} · ${row.hallBooking.startTime.slice(0, 5)}–${row.hallBooking.endTime.slice(0, 5)}`,
+		dateLabel: `${row.hallBooking.eventDate} · ${formatClockTime(row.hallBooking.startTime)}–${formatClockTime(row.hallBooking.endTime)}`,
 		status: row.hallBooking.status,
 		orderStatus: row.order.status,
 		lineTotalCentavos: row.hallBooking.totalCentavos,

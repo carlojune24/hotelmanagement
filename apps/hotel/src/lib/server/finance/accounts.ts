@@ -1,8 +1,9 @@
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, ilike, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/index';
 import {
 	cashAccounts,
 	cashMovements,
+	chartOfAccounts,
 	expenseCategories,
 	expenses,
 	recurringExpenses,
@@ -14,6 +15,8 @@ import {
 import { writeAudit } from '../audit';
 import type { SessionUser } from '../auth/session';
 import { FinanceError } from './shared';
+import { coaTemplateForKind, nextCoaCodeInDecade } from './coa-seed';
+import { mintRef } from '../ids';
 
 // --- Cash accounts ---------------------------------------------------------
 
@@ -27,6 +30,40 @@ export async function listCashAccounts(hotelId: string, opts: { includeInactive?
 		.orderBy(asc(cashAccounts.sortOrder), asc(cashAccounts.name));
 }
 
+/**
+ * Mints the COA leaf a new cash account posts to: its own line, named after the account, in its
+ * kind's decade (drawers 1010‑1019, banks 1020‑1029 …). Returns null when the hotel has no chart
+ * of accounts yet, or when the decade is full — both leave the account unlinked, which
+ * `finance/posting.ts` reports as "run the chart-of-accounts backfill".
+ */
+async function mintCoaLeafFor(hotelId: string, name: string, kind: string): Promise<string | null> {
+	const template = coaTemplateForKind(kind);
+	if (!template) return null;
+
+	const rows = await db
+		.select({ code: chartOfAccounts.code })
+		.from(chartOfAccounts)
+		.where(eq(chartOfAccounts.hotelId, hotelId));
+	if (rows.length === 0) return null; // chart never seeded — the backfill will link it
+
+	const code = nextCoaCodeInDecade(kind, rows.map((r) => r.code));
+	if (!code) return null;
+
+	const [leaf] = await db
+		.insert(chartOfAccounts)
+		.values({
+			hotelId,
+			accountRef: mintRef('account'),
+			code,
+			name,
+			type: template.type,
+			subtype: template.subtype,
+			normalBalance: template.normalBalance
+		})
+		.returning({ id: chartOfAccounts.id });
+	return leaf!.id;
+}
+
 export async function createCashAccount(
 	hotelId: string,
 	input: {
@@ -38,14 +75,34 @@ export async function createCashAccount(
 	},
 	actor: SessionUser | null
 ): Promise<string> {
-	if (!input.name.trim()) throw new FinanceError('Give the account a name.');
+	const name = input.name.trim();
+	if (!name) throw new FinanceError('Give the account a name.');
+
+	// Two accounts with the same name are always a double-submit, never an intent — the pickers
+	// in Finance settings show nothing but the name, so the pair is impossible to tell apart.
+	const [clash] = await db
+		.select({ id: cashAccounts.id })
+		.from(cashAccounts)
+		.where(
+			and(eq(cashAccounts.hotelId, hotelId), isNull(cashAccounts.deletedAt), ilike(cashAccounts.name, name))
+		)
+		.limit(1);
+	if (clash) throw new FinanceError(`A cash account called “${name}” already exists.`);
+
+	// Its own chart-of-accounts leaf. Without one `resolvePostingAccounts` refuses every movement
+	// on this account; sharing the seeded kind's leaf would instead merge this till's money into
+	// that account's line on the balance sheet. Null stays possible for a hotel whose chart was
+	// never seeded — that is what the backfill message is for.
+	const coaAccountId = await mintCoaLeafFor(hotelId, name, input.kind);
+
 	const opening = input.openingBalanceCentavos ?? 0;
 	const [row] = await db
 		.insert(cashAccounts)
 		.values({
 			hotelId,
-			name: input.name.trim(),
+			name,
 			kind: input.kind,
+			coaAccountId,
 			institution: input.institution?.trim() || null,
 			accountRef: input.accountRef?.trim() || null,
 			openingBalanceCentavos: opening,
@@ -95,6 +152,15 @@ export async function updateCashAccount(
 			updatedAt: new Date()
 		})
 		.where(eq(cashAccounts.id, accountId));
+	// Keep the ledger line's name in step with the till's — a leaf still called "Front Desk
+	// Drawer" while the money is dining's is exactly the drift this feature tripped over.
+	const renamed = patch.name?.trim();
+	if (renamed && renamed !== a.name && a.coaAccountId) {
+		await db
+			.update(chartOfAccounts)
+			.set({ name: renamed, updatedAt: new Date() })
+			.where(and(eq(chartOfAccounts.id, a.coaAccountId), eq(chartOfAccounts.isSystem, false)));
+	}
 	await writeAudit({
 		hotelId,
 		actor,

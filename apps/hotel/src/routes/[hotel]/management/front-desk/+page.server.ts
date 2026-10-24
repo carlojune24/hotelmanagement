@@ -161,6 +161,13 @@ export const load: PageServerLoad = async ({ locals }) => {
 	);
 	const inspections = [...inspectionMap.values()];
 
+	// The front desk rings into the drawer Finance names as the hotel default; a second drawer
+	// (dining's, a bar's) must never turn the counter into a picker. Falls back to the only
+	// drawer there is, for a hotel that never set the default.
+	const frontDeskDrawer =
+		drawers.find((d) => d.id === financeSettings.defaultDrawerAccountId) ??
+		(drawers.length === 1 ? drawers[0]! : null);
+
 	return {
 		businessDate,
 		timezone: hotel.timezone,
@@ -178,8 +185,9 @@ export const load: PageServerLoad = async ({ locals }) => {
 		cashier: {
 			requireOpenShiftForCashPayment: financeSettings.requireOpenShiftForCashPayment,
 			hasBankAccount: !!financeSettings.defaultBankAccountId,
-			hasDrawerAccount: !!financeSettings.defaultDrawerAccountId || drawers.length > 0,
-			drawers,
+			hasDrawerAccount: !!frontDeskDrawer,
+			/** The front desk's own till, from Finance settings — never a choice at the counter. */
+			drawer: frontDeskDrawer,
 			openShift: openShift
 				? {
 						id: openShift.id,
@@ -873,18 +881,34 @@ export const actions: Actions = {
 		const hotel = event.locals.hotel!;
 		const raw = Object.fromEntries(await event.request.formData());
 		const parsed = z
-			.object({
-				cashAccountId: z.string().uuid(),
-				openingFloat: z.coerce.number().min(0).max(10_000_000)
-			})
+			.object({ openingFloat: z.coerce.number().min(0).max(10_000_000) })
 			.safeParse(raw);
-		if (!parsed.success)
-			return fail(400, { shiftError: 'Pick a drawer and enter the opening float.' });
+		if (!parsed.success) return fail(400, { shiftError: 'Enter the opening float.' });
+
+		// Resolved here, not posted: the counter opens its own till and no other.
+		const settings = await getFinanceSettings(hotel.id);
+		let cashAccountId = settings.defaultDrawerAccountId;
+		if (!cashAccountId) {
+			const [only] = await db
+				.select({ id: cashAccounts.id })
+				.from(cashAccounts)
+				.where(
+					and(
+						eq(cashAccounts.hotelId, hotel.id),
+						eq(cashAccounts.isActive, true),
+						eq(cashAccounts.kind, 'cash_drawer')
+					)
+				)
+				.limit(2);
+			cashAccountId = only?.id ?? null;
+		}
+		if (!cashAccountId)
+			return fail(400, { shiftError: 'No front desk drawer is set up — Finance → Settings picks one.' });
 
 		try {
 			await openShiftFn({
 				hotelId: hotel.id,
-				cashAccountId: parsed.data.cashAccountId,
+				cashAccountId,
 				businessDate: todayInTimezone(hotel.timezone),
 				openingFloatCentavos: Math.round(parsed.data.openingFloat * 100),
 				actor: event.locals.user

@@ -11,6 +11,8 @@
 	import * as Select from '$lib/components/ui/select/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import PlusIcon from '@lucide/svelte/icons/plus';
+	import ClockIcon from '@lucide/svelte/icons/clock';
+	import BanknoteIcon from '@lucide/svelte/icons/banknote';
 	import ChefHatIcon from '@lucide/svelte/icons/chef-hat';
 	import NewOrderSheet from './new-order-sheet.svelte';
 	import PayDialog from './pay-dialog.svelte';
@@ -112,6 +114,11 @@
 		}
 	}
 
+	// Dining runs its own till from this toolbar, the way the front desk does from its header.
+	let drawerFloat = $state<number | null>(null);
+	let closeDrawerOpen = $state(false);
+	let countedCash = $state<number | null>(null);
+
 	let newOpen = $state(false);
 	// "New order" on a Floor table lands here with ?newOrder=1&table=…: open the sheet on that table, then tidy the URL.
 	let newTable = $state<string | null>(null);
@@ -184,6 +191,9 @@
 			respondFor = null;
 			refundOpen = false;
 			undoRoomFor = null;
+			closeDrawerOpen = false;
+			drawerFloat = null;
+			countedCash = null;
 		}
 		const issued = form?.issued as { id: string; type: string; formattedNo: string } | undefined;
 		if (issued) {
@@ -221,6 +231,45 @@
 						{#each data.venues as v (v.id)}<Select.Item value={v.id} label={v.title} />{/each}
 					</Select.Content>
 				</Select.Root>
+			{/if}
+			{#if data.canRunDrawer}
+				{#if data.drawer.openShift}
+					<a
+						href="/{slug}/management/dining/drawer"
+						class="flex h-10 items-center gap-1.5 rounded-md border border-ok/40 bg-ok/10 px-2.5 text-xs font-medium text-ok"
+						title="Count the drawer, record a payout or a cash drop"
+					>
+						<BanknoteIcon class="size-3.5" aria-hidden="true" />
+						{data.drawer.name ?? 'Drawer'} open · float {peso(data.drawer.openShift.openingFloatCentavos)}
+					</a>
+					<Button class="h-10" variant="outline" onclick={() => (closeDrawerOpen = true)}>
+						<ClockIcon class="size-4" /> Close shift
+					</Button>
+				{:else if data.drawer.name}
+					<form method="POST" action="?/openDrawer" use:enhance class="flex items-center gap-1.5">
+						<input
+							name="openingFloat"
+							type="number"
+							min="0"
+							step="0.01"
+							bind:value={drawerFloat}
+							placeholder="Float ₱"
+							aria-label="Opening float"
+							class="h-10 w-24 rounded-md border border-input bg-transparent px-2 text-xs"
+							required
+						/>
+						<Button type="submit" class="h-10" variant="outline">
+							<ClockIcon class="size-4" /> Open shift
+						</Button>
+					</form>
+				{:else}
+					<a
+						href="/{slug}/management/finance/settings"
+						class="text-xs text-ink-muted underline underline-offset-2"
+					>
+						Set up the dining drawer →
+					</a>
+				{/if}
 			{/if}
 			{#if data.canWrite}
 				<Button class="h-10" onclick={() => (newOpen = true)} disabled={Object.keys(data.menus).length === 0}>
@@ -505,6 +554,36 @@
 				</Dialog.Footer>
 			</form>
 		{/if}
+	</Dialog.Content>
+</Dialog.Root>
+
+<!-- Close dining's own drawer: count the cash, same over/short math as Finance → Shifts -->
+<Dialog.Root bind:open={closeDrawerOpen}>
+	<Dialog.Content class="sm:max-w-sm">
+		<Dialog.Header>
+			<Dialog.Title>Close {data.drawer.name ?? 'the drawer'}</Dialog.Title>
+			<Dialog.Description>
+				{#if data.drawer.openShift?.expectedCashCentavos != null}
+					Count the cash in the drawer. {peso(data.drawer.openShift.expectedCashCentavos)} is expected.
+				{:else}
+					Count the cash in the drawer and enter the total.
+				{/if}
+			</Dialog.Description>
+		</Dialog.Header>
+		<form method="POST" action="?/closeDrawer" use:enhance class="space-y-3">
+			<div>
+				<Label for="counted">Counted cash</Label>
+				<Input id="counted" name="counted" type="number" min="0" step="0.01" bind:value={countedCash} required placeholder="0.00" class="mt-1" />
+			</div>
+			<div>
+				<Label for="closeNotes">Notes (optional)</Label>
+				<Textarea id="closeNotes" name="notes" maxlength={500} rows={2} placeholder="Anything worth recording about the count" class="mt-1" />
+			</div>
+			<Dialog.Footer>
+				<Button type="button" variant="outline" onclick={() => (closeDrawerOpen = false)}>Not yet</Button>
+				<Button type="submit">Close shift</Button>
+			</Dialog.Footer>
+		</form>
 	</Dialog.Content>
 </Dialog.Root>
 

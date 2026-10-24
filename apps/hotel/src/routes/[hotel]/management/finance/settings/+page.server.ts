@@ -296,6 +296,7 @@ export const actions: Actions = {
 		const p = z
 			.object({
 				defaultDrawerAccountId: z.string().uuid().optional().or(z.literal('')),
+				diningDrawerAccountId: z.string().uuid().optional().or(z.literal('')),
 				defaultBankAccountId: z.string().uuid().optional().or(z.literal('')),
 				undepositedAccountId: z.string().uuid().optional().or(z.literal('')),
 				autoPostOnlinePayments: z.enum(['on']).optional(),
@@ -310,12 +311,19 @@ export const actions: Actions = {
 			})
 			.safeParse(fd);
 		if (!p.success) return fail(400, { error: 'Check the settings.' });
+		// One drawer can't be both tills — that silently merges dining's cash back into the
+		// front desk's shift, which is the whole thing the dining drawer exists to prevent.
+		if (p.data.diningDrawerAccountId && p.data.diningDrawerAccountId === p.data.defaultDrawerAccountId)
+			return fail(400, {
+				error: 'The dining drawer must be a different till from the front desk drawer.'
+			});
 		return wrap(
 			() =>
 				updateFinanceSettings(
 					event.locals.hotel!.id,
 					{
 						defaultDrawerAccountId: p.data.defaultDrawerAccountId || null,
+						diningDrawerAccountId: p.data.diningDrawerAccountId || null,
 						defaultBankAccountId: p.data.defaultBankAccountId || null,
 						undepositedAccountId: p.data.undepositedAccountId || null,
 						autoPostOnlinePayments: p.data.autoPostOnlinePayments === 'on',

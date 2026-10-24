@@ -16,7 +16,7 @@ import { writeAudit } from './audit';
 import type { SessionUser } from './auth/session';
 import { FinanceError, businessDateFor } from './finance/shared';
 import { recordCashMovement } from './finance/cash';
-import { resolvePaymentAccount } from './finance/payments';
+import { diningDrawerId, resolvePaymentAccount } from './finance/payments';
 import { getBirSettings, issueDiningDocument } from './finance/documents';
 import { getPaymongoClient, isOnlinePaymentEnabled } from './paymongo/client';
 import { createDiningOrder, OrderError, type OrderLineInput } from './dining-orders';
@@ -970,7 +970,7 @@ export async function recordDiningRefund(args: {
 	let cashAccountId: string;
 	let shiftId: string | null = null;
 	if (args.method === 'cash') {
-		const acct = await resolvePaymentAccount(args.hotelId, 'cash');
+		const acct = await resolvePaymentAccount(args.hotelId, 'cash', await diningDrawerId(args.hotelId));
 		cashAccountId = acct.cashAccountId;
 		shiftId = acct.shiftId;
 	} else if (order.cashAccountId && order.paymentMethod !== 'cash') {

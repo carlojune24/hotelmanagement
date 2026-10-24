@@ -1,6 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { and, eq } from 'drizzle-orm';
 import { db } from '$lib/server/db/index';
+import { formatClockTime } from '$lib/stay-dates';
 import {
 	bookingRooms,
 	bookings,
@@ -140,7 +141,7 @@ export const actions: Actions = {
 			}),
 			...hallLines.map((h) => ({
 				name: h.hallName,
-				description: `${h.eventType}, ${h.eventDate} ${h.startTime.slice(0, 5)}–${h.endTime.slice(0, 5)}`,
+				description: `${h.eventType}, ${h.eventDate} ${formatClockTime(h.startTime)}–${formatClockTime(h.endTime)}`,
 				amountCentavos: h.subtotalCentavos
 			}))
 		];

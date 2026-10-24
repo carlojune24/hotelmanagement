@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatClockTime } from '$lib/stay-dates';
 	import { enhance } from '$app/forms';
 	import { invalidate } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -169,7 +170,7 @@
 						<div class="ledger-display text-lg">{h.hallName}</div>
 						<p class="text-sm text-[var(--ledger-ink-muted)]">{h.eventType}</p>
 						<p class="ledger-data mt-1 text-sm">
-							{h.eventDate} · {h.startTime.slice(0, 5)}–{h.endTime.slice(0, 5)}
+							{h.eventDate} · {formatClockTime(h.startTime)}–{formatClockTime(h.endTime)}
 						</p>
 					</div>
 					<div class="text-right">

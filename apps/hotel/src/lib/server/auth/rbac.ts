@@ -45,3 +45,16 @@ export function requireCap(user: SessionUser | null, role: ResolvedRole | null, 
 	if (user?.isPlatformAdmin) return;
 	if (!role || !roleCan(role.capabilities, cap)) error(403, `Missing capability: ${cap}`);
 }
+
+/** Any one of `caps` is enough. Reserved for a genuine either/or — a register's own
+ *  `<domain>:shift` drawer capability, or the hotel-wide `shift:write` finance holds. Prefer
+ *  `requireCap`: a guard listing several caps gets hard to reason about. */
+export function requireAnyCap(
+	user: SessionUser | null,
+	role: ResolvedRole | null,
+	caps: string[]
+): void {
+	if (user?.isPlatformAdmin) return;
+	if (!role || !caps.some((c) => roleCan(role.capabilities, c)))
+		error(403, `Missing capability: ${caps.join(' or ')}`);
+}

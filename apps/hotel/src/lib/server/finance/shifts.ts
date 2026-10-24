@@ -547,8 +547,9 @@ export async function closeShift(input: {
 	return { varianceCentavos: variance, expectedCentavos: expected };
 }
 
-/** List for the Shifts page — recent shifts with cashier names + variance. */
-export async function listShifts(hotelId: string, limit = 60) {
+/** List for the Shifts page — recent shifts with cashier names + variance. `cashAccountId`
+ *  narrows it to one drawer, which is how a register shows its own history and nobody else's. */
+export async function listShifts(hotelId: string, limit = 60, cashAccountId?: string | null) {
 	const opened = users;
 	return db
 		.select({
@@ -569,7 +570,11 @@ export async function listShifts(hotelId: string, limit = 60) {
 		.from(cashierShifts)
 		.innerJoin(cashAccounts, eq(cashAccounts.id, cashierShifts.cashAccountId))
 		.leftJoin(opened, eq(opened.id, cashierShifts.openedByUserId))
-		.where(eq(cashierShifts.hotelId, hotelId))
+		.where(
+			cashAccountId
+				? and(eq(cashierShifts.hotelId, hotelId), eq(cashierShifts.cashAccountId, cashAccountId))
+				: eq(cashierShifts.hotelId, hotelId)
+		)
 		.orderBy(desc(cashierShifts.openedAt))
 		.limit(limit);
 }

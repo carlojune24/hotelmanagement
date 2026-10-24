@@ -51,6 +51,11 @@ export const SELF_SERVICE_ASSIGNABLE_ROLES: MembershipRole[] = ASSIGNABLE_HOTEL_
  * `"<domain>:*"` (any action in a domain), or `"*:<action>"` (an action across every domain).
  * Only two segments are ever matched — do not introduce three-segment capability strings
  * (e.g. `finance:report:read`); use a distinct domain instead (e.g. `report:read`).
+ *
+ * Cash drawers follow a convention: a register's own drawer is `<domain>:shift` —
+ * `dining:shift` today, `bar:shift` next — and the hotel-wide `shift:write` grants it too, so
+ * finance and the front desk can run any drawer. Adding a register costs one `PERMISSION_CATALOG`
+ * line plus one `requireAnyCap([<domain>:shift, shift:write])` call; nothing else changes.
  */
 export const ROLE_CAPS: Record<MembershipRole, string[]> = {
 	hotel_admin: ['*'],
@@ -80,8 +85,10 @@ export const ROLE_CAPS: Record<MembershipRole, string[]> = {
 	housekeeping: ['housekeeping:*', 'room:read'],
 	// A dining account runs the Dining section end to end: Floor, Orders, Reservations and the guest bill,
 	// plus setting the floor up (areas, tables, QR codes), the menu and add-ons (`dining:manage`).
-	// No payments module, finance, bookings, Kitchen or hotel admin.
-	dining: ['dining:read', 'dining:write', 'dining:manage'],
+	// `dining:shift` is its own till, not the front desk's: the Orders toolbar can only ever open
+	// and close the drawer Finance assigned to dining. No payments module, finance, bookings,
+	// Kitchen or hotel admin.
+	dining: ['dining:read', 'dining:write', 'dining:manage', 'dining:shift'],
 	// A cook sees only the Kitchen module: live board, prep list, sold-out list and history.
 	// No Dining, payments or finance. Station setup (`kitchen:manage`) stays with hotel_admin.
 	kitchen: ['kitchen:read', 'kitchen:write'],
@@ -202,11 +209,11 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 	{ cap: 'shift:*', label: 'Everything with cash-drawer shifts', section: 'Folio & Payments' },
 	{ cap: 'folio:read', label: 'View guest folios', section: 'Folio & Payments' },
 	{ cap: 'folio:write', label: 'Post charges/adjustments to folios', section: 'Folio & Payments' },
-	{ cap: 'payment:create', label: 'Take payments', section: 'Folio & Payments' },
+	{ cap: 'payment:create', label: 'Walk-in quick sale (front desk register)', section: 'Folio & Payments' },
 	{ cap: 'payment:record', label: 'Record payments', section: 'Folio & Payments' },
 	{ cap: 'shift:open', label: 'Open a cash-drawer shift', section: 'Folio & Payments' },
 	{ cap: 'shift:close', label: 'Close a cash-drawer shift', section: 'Folio & Payments' },
-	{ cap: 'shift:write', label: 'Manage cash-drawer shifts', section: 'Folio & Payments' },
+	{ cap: 'shift:write', label: 'Open and close a cash drawer', section: 'Folio & Payments' },
 
 	{ cap: 'review:*', label: 'Everything with guest reviews', section: 'Reviews' },
 	{ cap: 'review:read', label: 'View guest reviews', section: 'Reviews' },
@@ -247,8 +254,9 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 
 	{ cap: 'dining:*', label: 'Everything in Dining', section: 'Dining' },
 	{ cap: 'dining:read', label: 'See the Dining section (menu, orders, reservations)', section: 'Dining' },
-	{ cap: 'dining:write', label: 'Take and update dining orders and reservations', section: 'Dining' },
+	{ cap: 'dining:write', label: 'Take and update dining orders, reservations and payments (the dining register)', section: 'Dining' },
 	{ cap: 'dining:manage', label: 'Edit the dining menu, add-ons, and the floor', section: 'Dining' },
+	{ cap: 'dining:shift', label: 'Open and close the dining drawer', section: 'Dining' },
 
 	{ cap: 'kitchen:*', label: 'Everything in the Kitchen', section: 'Kitchen' },
 	{ cap: 'kitchen:read', label: 'See the Kitchen section (board, prep, sold-out, history)', section: 'Kitchen' },

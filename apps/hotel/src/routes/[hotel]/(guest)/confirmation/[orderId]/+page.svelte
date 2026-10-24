@@ -177,7 +177,7 @@
 								<div class="text-sm">
 									<span class="ledger-data">{formatStayDate(h.eventDate)}</span>
 									<span class="ledger-data text-[var(--ledger-ink-muted)]">
-										· {h.startTime.slice(0, 5)}–{h.endTime.slice(0, 5)}</span
+										· {formatClockTime(h.startTime)}–{formatClockTime(h.endTime)}</span
 									>
 								</div>
 								<div class="text-xs text-[var(--ledger-ink-muted)]">{h.eventType}</div>
