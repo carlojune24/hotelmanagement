@@ -8,7 +8,7 @@ import {
 	listRolesWithCaps,
 	updateCustomRole
 } from '$lib/server/auth/roles';
-import { PERMISSION_CATALOG, PERMISSION_SECTIONS } from '$lib/authz';
+import { PERMISSION_CATALOG, PERMISSION_SECTIONS, isWildcardCap, roleCan } from '$lib/authz';
 import type { Actions, PageServerLoad } from './$types';
 
 const ALL_CAPS = new Set(PERMISSION_CATALOG.map((p) => p.cap));
@@ -29,10 +29,18 @@ const wrap = async (fn: () => Promise<unknown>, ok: string) => {
 	}
 };
 
-/** Only a capability this app actually checks may be granted — a stray/renamed value
- *  posted from a stale form silently drops instead of getting saved as dead weight. */
+/** Only a capability from the catalog may be granted — a stray/renamed value posted from a
+ *  stale form silently drops instead of getting saved as dead weight. A single permission a
+ *  posted wildcard already covers drops too, so a role keeps one row per grant that does work
+ *  (the editor disables those boxes, but a stale or scripted post can still carry them). */
 function parseCapabilities(fd: FormData): string[] {
-	return fd.getAll('capabilities').filter((c): c is string => typeof c === 'string' && ALL_CAPS.has(c));
+	const picked = [
+		...new Set(
+			fd.getAll('capabilities').filter((c): c is string => typeof c === 'string' && ALL_CAPS.has(c))
+		)
+	];
+	const wildcards = picked.filter(isWildcardCap);
+	return picked.filter((c) => isWildcardCap(c) || !roleCan(wildcards, c));
 }
 
 export const actions: Actions = {

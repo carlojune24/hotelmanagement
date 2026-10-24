@@ -106,6 +106,12 @@ export function roleCan(capabilities: string[], cap: string): boolean {
 	return capabilities.includes(`${domain}:*`) || capabilities.includes(`*:${action}`);
 }
 
+/** A grant that covers more than itself — `"<domain>:*"` or `"*:<action>"`. The role editor
+ *  shows these apart from the single permissions they subsume. */
+export function isWildcardCap(cap: string): boolean {
+	return cap.endsWith(':*') || cap.startsWith('*:');
+}
+
 /** A cook's account: it can see the Kitchen and nothing else of the working hotel, so the
  *  Dashboard has nothing to show it and login should land on the Kitchen instead. */
 export function isKitchenOnly(capabilities: string[]): boolean {
@@ -170,13 +176,18 @@ export const PERMISSION_SECTIONS = [
 	'Dining',
 	'Kitchen',
 	'Customer Support',
-	'Settings'
+	'Settings',
+	'Across the app'
 ] as const;
 
-/** The full set of capabilities real code actually checks (via `requireCap`/`roleCan`),
- *  formalized with labels/sections for a future role-permission UI. Keep in sync with the
- *  call sites — a permission here only means something if code somewhere gates on it. */
+/** The capabilities the role editor can grant: every one real code checks (via
+ *  `requireCap`/`roleCan`), plus the domain-wide `"<domain>:*"` grants the seeded roles in
+ *  `ROLE_CAPS` hold. Both kinds must be here — a grant the editor can't represent is a grant
+ *  it silently drops on save, since `updateCustomRole` rewrites a role's whole permission set.
+ *  Keep the single permissions in sync with the call sites: one of those only means something
+ *  if code somewhere gates on it. */
 export const PERMISSION_CATALOG: PermissionDef[] = [
+	{ cap: 'booking:*', label: 'Everything with bookings', section: 'Front Desk & Bookings' },
 	{ cap: 'booking:create', label: 'Create bookings', section: 'Front Desk & Bookings' },
 	{ cap: 'booking:read', label: 'View bookings', section: 'Front Desk & Bookings' },
 	{
@@ -186,6 +197,9 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 	},
 	{ cap: 'guest:*', label: 'Manage the guest directory', section: 'Front Desk & Bookings' },
 
+	{ cap: 'folio:*', label: 'Everything with guest folios', section: 'Folio & Payments' },
+	{ cap: 'payment:*', label: 'Everything with payments', section: 'Folio & Payments' },
+	{ cap: 'shift:*', label: 'Everything with cash-drawer shifts', section: 'Folio & Payments' },
 	{ cap: 'folio:read', label: 'View guest folios', section: 'Folio & Payments' },
 	{ cap: 'folio:write', label: 'Post charges/adjustments to folios', section: 'Folio & Payments' },
 	{ cap: 'payment:create', label: 'Take payments', section: 'Folio & Payments' },
@@ -194,6 +208,7 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 	{ cap: 'shift:close', label: 'Close a cash-drawer shift', section: 'Folio & Payments' },
 	{ cap: 'shift:write', label: 'Manage cash-drawer shifts', section: 'Folio & Payments' },
 
+	{ cap: 'review:*', label: 'Everything with guest reviews', section: 'Reviews' },
 	{ cap: 'review:read', label: 'View guest reviews', section: 'Reviews' },
 	{ cap: 'review:approve', label: 'Approve reviews', section: 'Reviews' },
 	{ cap: 'review:reject', label: 'Reject reviews', section: 'Reviews' },
@@ -201,6 +216,7 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 	{ cap: 'reports:read', label: 'View reports', section: 'Reports' },
 	{ cap: 'reports:*', label: 'View and export all reports', section: 'Reports' },
 
+	{ cap: 'housekeeping:*', label: 'Everything in housekeeping', section: 'Housekeeping' },
 	{ cap: 'housekeeping:read', label: 'View the housekeeping board', section: 'Housekeeping' },
 	{
 		cap: 'housekeeping:write',
@@ -209,6 +225,10 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 	},
 	{ cap: 'room:read', label: 'View room status', section: 'Housekeeping' },
 
+	{ cap: 'finance:*', label: 'Everything in Finance', section: 'Finance' },
+	{ cap: 'expense:*', label: 'Everything with expenses', section: 'Finance' },
+	{ cap: 'receivable:*', label: 'Everything with receivables', section: 'Finance' },
+	{ cap: 'dayclose:*', label: 'Everything with day-close', section: 'Finance' },
 	{ cap: 'finance:read', label: 'View the Finance dashboard', section: 'Finance' },
 	{ cap: 'finance:write', label: 'Post finance transactions', section: 'Finance' },
 	{ cap: 'finance:post', label: 'Post ledger entries', section: 'Finance' },
@@ -225,14 +245,17 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 
 
 
+	{ cap: 'dining:*', label: 'Everything in Dining', section: 'Dining' },
 	{ cap: 'dining:read', label: 'See the Dining section (menu, orders, reservations)', section: 'Dining' },
 	{ cap: 'dining:write', label: 'Take and update dining orders and reservations', section: 'Dining' },
 	{ cap: 'dining:manage', label: 'Edit the dining menu, add-ons, and the floor', section: 'Dining' },
 
+	{ cap: 'kitchen:*', label: 'Everything in the Kitchen', section: 'Kitchen' },
 	{ cap: 'kitchen:read', label: 'See the Kitchen section (board, prep, sold-out, history)', section: 'Kitchen' },
 	{ cap: 'kitchen:write', label: 'Start and finish dishes, mark dishes sold out', section: 'Kitchen' },
 	{ cap: 'kitchen:manage', label: 'Set up kitchen stations and their timing targets', section: 'Kitchen' },
 
+	{ cap: 'support:*', label: 'Everything in Customer Support', section: 'Customer Support' },
 	{ cap: 'support:read', label: 'Answer guest chats in the Support inbox', section: 'Customer Support' },
 	{ cap: 'support:manage', label: 'Edit the support FAQ and close any chat', section: 'Customer Support' },
 
@@ -240,5 +263,8 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 		cap: 'hotel:admin',
 		label: 'Manage hotel settings (rooms, rates, amenities, branding, automation)',
 		section: 'Settings'
-	}
+	},
+
+	// Cross-domain: the grant the seeded Read Only role is built on.
+	{ cap: '*:read', label: 'View everything, change nothing', section: 'Across the app' }
 ];
