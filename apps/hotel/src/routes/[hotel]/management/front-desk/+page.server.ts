@@ -55,7 +55,8 @@ import { sendBookingReviewRequest } from '$lib/server/email/send-booking-review-
 import {
 	reconcileSettledDeposit,
 	SecurityDepositError,
-	getSecurityDepositForBooking,
+	collectSecurityDeposit,
+	getSecurityDepositForTarget,
 	settleSecurityDeposit
 } from '$lib/server/security-deposits';
 import {
@@ -198,7 +199,7 @@ async function loadRoomDetailPayload(hotelId: string, bookingId: string) {
 	const detail = await getRoomBookingDetail(hotelId, bookingId);
 	if (!detail) error(404, 'Booking not found');
 	const folio = await getFolioDetail(hotelId, { kind: 'room', bookingId });
-	const securityDeposit = await getSecurityDepositForBooking(hotelId, bookingId);
+	const securityDeposit = await getSecurityDepositForTarget(hotelId, { kind: 'room', bookingId });
 	const scPwdClaim = await getActiveScPwdClaim(hotelId, bookingId);
 	return { roomDetail: detail, folio, securityDeposit, scPwdClaim };
 }
@@ -211,7 +212,8 @@ async function loadHallDetailPayload(hotelId: string, hallBookingId: string) {
 	// Damage housekeeping reported on this hall that front desk still has to charge or dismiss:
 	// Close is blocked until there is none.
 	const hallPendingDamage = await listPendingHallDamageReports(hotelId, detail.hallBooking.functionHallId, hallBookingId);
-	return { hallBookingDetail: detail, hallFolio: folio, hallPendingDamage };
+	const hallDeposit = await getSecurityDepositForTarget(hotelId, { kind: 'hall', hallBookingId });
+	return { hallBookingDetail: detail, hallFolio: folio, hallPendingDamage, hallDeposit };
 }
 
 const searchSchema = z.object({
@@ -542,7 +544,7 @@ export const actions: Actions = {
 		try {
 			const result = await settleSecurityDeposit(
 				hotelId,
-				parsed.data.bookingId,
+				{ kind: 'room', bookingId: parsed.data.bookingId },
 				event.locals.user,
 				wantsOverride
 			);
@@ -844,7 +846,7 @@ export const actions: Actions = {
 		try {
 			const r = await reconcileSettledDeposit(
 				hotelId,
-				parsed.data.bookingId,
+				{ kind: 'room', bookingId: parsed.data.bookingId },
 				parsed.data.reason ?? null,
 				event.locals.user
 			);
@@ -1092,9 +1094,15 @@ export const actions: Actions = {
 		const raw = await event.request.formData();
 		const hallBookingId = raw.get('hallBookingId');
 		if (typeof hallBookingId !== 'string') return fail(400, { error: 'Missing hall booking.' });
+		// When the event really ended, on the hotel's own clock — the desk may be clearing it hours later.
+		const endedAt = raw.get('endedAt');
+		if (endedAt != null && typeof endedAt !== 'string') return fail(400, { error: 'Bad end time.' });
+		if (endedAt && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(endedAt)) {
+			return fail(400, { error: 'Enter the end time as a date and time.' });
+		}
 
 		try {
-			const r = await checkOutHallBooking(hotel.id, hallBookingId, event.locals.user);
+			const r = await checkOutHallBooking(hotel.id, hallBookingId, event.locals.user, endedAt || undefined);
 			return {
 				ok:
 					r.overtimeHours > 0
@@ -1226,6 +1234,67 @@ export const actions: Actions = {
 		if (typeof hallBookingId !== 'string') return fail(400, { error: 'Missing hall booking.' });
 
 		return loadHallDetailPayload(hotelId, hallBookingId);
+	},
+
+	/** The damage hold for an event — same money path as a room's, just a different target. */
+	collectHallDeposit: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		const hotelId = event.locals.hotel!.id;
+		const raw = Object.fromEntries(await event.request.formData());
+		const parsed = z
+			.object({
+				hallBookingId: z.string().uuid(),
+				amountPhp: z.coerce.number().positive(),
+				method: z.enum(['cash', 'card', 'gcash', 'maya', 'bank_transfer', 'cheque']),
+				referenceNo: z.string().trim().max(120).optional()
+			})
+			.safeParse(raw);
+		if (!parsed.success) return fail(400, { folioError: 'Enter a deposit amount and how it was paid.' });
+
+		try {
+			await collectSecurityDeposit({
+				hotelId,
+				target: { kind: 'hall', hallBookingId: parsed.data.hallBookingId },
+				amountCentavos: Math.round(parsed.data.amountPhp * 100),
+				method: parsed.data.method,
+				referenceNo: parsed.data.referenceNo || null,
+				actor: event.locals.user
+			});
+		} catch (e) {
+			if (e instanceof SecurityDepositError) {
+				return fail(400, { ...(await loadHallDetailPayload(hotelId, parsed.data.hallBookingId)), folioError: e.message });
+			}
+			throw e;
+		}
+		return { ...(await loadHallDetailPayload(hotelId, parsed.data.hallBookingId)), folioOk: 'Security deposit collected.' };
+	},
+
+	settleHallDeposit: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		const hotelId = event.locals.hotel!.id;
+		const raw = Object.fromEntries(await event.request.formData());
+		const parsed = z.object({ hallBookingId: z.string().uuid() }).safeParse(raw);
+		if (!parsed.success) return fail(400, { folioError: 'Missing hall booking.' });
+
+		try {
+			const r = await settleSecurityDeposit(
+				hotelId,
+				{ kind: 'hall', hallBookingId: parsed.data.hallBookingId },
+				event.locals.user
+			);
+			return {
+				...(await loadHallDetailPayload(hotelId, parsed.data.hallBookingId)),
+				folioOk:
+					r.forfeitedCentavos === 0
+						? `Deposit refunded in full — ₱${(r.refundedCentavos / 100).toFixed(2)}.`
+						: `₱${(r.forfeitedCentavos / 100).toFixed(2)} kept for damage, ₱${(r.refundedCentavos / 100).toFixed(2)} refunded.`
+			};
+		} catch (e) {
+			if (e instanceof SecurityDepositError) {
+				return fail(400, { ...(await loadHallDetailPayload(hotelId, parsed.data.hallBookingId)), folioError: e.message });
+			}
+			throw e;
+		}
 	},
 
 	addHallItemCharge: async (event) => {

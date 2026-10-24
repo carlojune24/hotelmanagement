@@ -115,6 +115,7 @@
 		form && 'hallBookingDetail' in form ? form.hallBookingDetail : undefined
 	);
 	const formHallFolio = $derived(form && 'hallFolio' in form ? form.hallFolio : undefined);
+	const formHallDeposit = $derived(form && 'hallDeposit' in form ? form.hallDeposit : undefined);
 	const formHallPendingDamage = $derived(
 		form && 'hallPendingDamage' in form ? form.hallPendingDamage : undefined
 	);
@@ -218,10 +219,30 @@
 	let shiftFloat = $state('');
 	let shiftDrawer = $state('');
 
-	let hallDetailDialogOpen = $state(false);
+	let hallDetailOpen = $state(false);
 	$effect(() => {
-		if (formHallBookingDetail) hallDetailDialogOpen = true;
+		if (formHallBookingDetail) {
+			hallDetailOpen = true;
+			selectedRoomId = null;
+		}
 	});
+
+	/** The open hall detail's row on today's grid, which is where the scheduled end and the hall's
+	 *  extra-hour rate live. Null for an event that is not on the grid — overtime only matters for a
+	 *  checked-in one, and that is always on it. */
+	const hallDetailGridEvent = $derived(
+		formHallBookingDetail
+			? (data.hallGrid
+					.flatMap((hall) => hall.events.map((e) => ({ e, hall })))
+					.find((x) => x.e.hallBookingId === formHallBookingDetail.hallBooking.id) ?? null)
+			: null
+	);
+
+	/** Room and hall share the one rail, so picking a room closes the hall detail. */
+	function selectRoom(roomId: string) {
+		selectedRoomId = roomId;
+		hallDetailOpen = false;
+	}
 
 	// Hall check-out: the dialog previews the overtime for the moment it was opened. The server
 	// works the real figure out again from its own clock when the button is pressed.
@@ -234,21 +255,50 @@
 	};
 	let hallCheckout = $state<HallCheckoutTarget | null>(null);
 	let hallCheckoutAt = $state(0);
+	let hallCheckoutEndedAt = $state('');
 	let hallCheckoutOpen = $state(false);
 	function openHallCheckout(target: HallCheckoutTarget) {
 		hallCheckout = target;
 		hallCheckoutAt = Date.now();
+		hallCheckoutEndedAt = toHotelDateTimeLocal(hallCheckoutAt);
 		hallCheckoutOpen = true;
 	}
-	const hallCheckoutOvertime = $derived(
-		hallCheckout
-			? hallOvertimeAmount(
-					hallOvertimeHours(Date.parse(hallCheckout.scheduledEndIso), hallCheckoutAt),
-					hallCheckout.extraHourFeeCentavos,
-					hallCheckout.vatRateBps
-				)
-			: null
-	);
+	/** Ms → "YYYY-MM-DDTHH:MM" on the hotel's clock, the value a `datetime-local` input wants. */
+	function toHotelDateTimeLocal(ms: number): string {
+		const p = Object.fromEntries(
+			new Intl.DateTimeFormat('en-CA', {
+				timeZone: data.timezone,
+				year: 'numeric',
+				month: '2-digit',
+				day: '2-digit',
+				hour: '2-digit',
+				minute: '2-digit',
+				hour12: false
+			})
+				.formatToParts(new Date(ms))
+				.map((x) => [x.type, x.value])
+		);
+		return `${p.year}-${p.month}-${p.day}T${p.hour === '24' ? '00' : p.hour}:${p.minute}`;
+	}
+	/** "YYYY-MM-DDTHH:MM" parsed as if it were the staff device's own clock. Only ever used to subtract
+	 *  one such value from another, so whatever the device's offset is, it cancels — which lets the
+	 *  preview compare two hotel wall times without needing a wall-time→zone conversion in the browser. */
+	const wallMs = (v: string) => Date.parse(`${v}:00`);
+	/** Overtime for the end time the desk has typed, clamped to now exactly as the server clamps it,
+	 *  so the preview and the charge that gets posted never disagree. */
+	const hallCheckoutOvertime = $derived.by(() => {
+		if (!hallCheckout) return null;
+		const nowWall = wallMs(toHotelDateTimeLocal(hallCheckoutAt));
+		const bookedEndWall = wallMs(toHotelDateTimeLocal(Date.parse(hallCheckout.scheduledEndIso)));
+		const typed = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(hallCheckoutEndedAt)
+			? wallMs(hallCheckoutEndedAt)
+			: nowWall;
+		return hallOvertimeAmount(
+			hallOvertimeHours(bookedEndWall, Math.min(typed, nowWall)),
+			hallCheckout.extraHourFeeCentavos,
+			hallCheckout.vatRateBps
+		);
+	});
 	const hallTime = (iso: string) =>
 		new Date(iso).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit', timeZone: data.timezone });
 	/** What still blocks Close on a checked-out event, in words. */
@@ -262,9 +312,11 @@
 			);
 		}
 		if (close.balanceCentavos > 0) out.push(`${peso(close.balanceCentavos)} still owed on the bill`);
+		if (close.heldDepositCentavos > 0) {
+			out.push(`the ${peso(close.heldDepositCentavos)} security deposit is still held (settle it in Full details)`);
+		}
 		return out;
 	}
-	const hallStatusLabel = (status: string) => (status === 'completed' ? 'Closed' : humanize(status));
 
 	// --- Room-type detail dialog (click a room's name to view its full spec/gallery) ---
 	let roomTypeDetailOpen = $state(false);
@@ -1115,10 +1167,22 @@
 					'Could not price that booking.';
 				return;
 			}
-			const result = (await res.json()) as { available: boolean; price?: HallPriceBreakdown };
+			const result = (await res.json()) as {
+				available: boolean;
+				price?: HallPriceBreakdown;
+				conflicts?: { startTime: string; endTime: string; status: string; guestName: string }[];
+			};
 			if (!result.available) {
 				hallQuote = null;
-				hallQuoteError = 'This hall is already booked for that time — pick a different slot.';
+				const clash = (result.conflicts ?? [])
+					.map(
+						(c) =>
+							`${c.startTime.slice(0, 5)}–${c.endTime.slice(0, 5)} (${c.guestName}, ${humanize(c.status)})`
+					)
+					.join('; ');
+				hallQuoteError = clash
+					? `Taken by ${clash} — pick a slot outside that.`
+					: 'This hall is already booked for that time — pick a different slot.';
 				return;
 			}
 			hallQuote = result.price ?? null;
@@ -1131,8 +1195,7 @@
 	}
 
 	function statusPillClassGeneric(status: string): string {
-		if (status === 'confirmed' || status === 'completed')
-			return 'border-transparent bg-ok/15 text-ok';
+		if (status === 'confirmed') return 'border-transparent bg-ok/15 text-ok';
 		if (status === 'checked_in') return 'border-transparent bg-brand/15 text-brand';
 		if (status === 'checked_out') return 'border-transparent bg-warning/15 text-warning';
 		if (status === 'cancelled') return 'border-transparent bg-danger/15 text-danger';
@@ -1363,7 +1426,7 @@
 							<li>
 								<button
 									type="button"
-									onclick={() => (selectedRoomId = row.roomId)}
+									onclick={() => selectRoom(row.roomId)}
 									class="group flex min-h-12 w-full items-center gap-3 px-4 py-3 text-left text-sm transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
 								>
 									<TriangleAlertIcon class="size-4 shrink-0 text-danger" />
@@ -1479,7 +1542,7 @@
 									aria-label="Room {c.roomNumber}, {c.roomTypeName}, {statusLabel[c.status] ??
 										c.status}{c.status === 'departing' ? ', departing today' : ''}"
 									aria-pressed={picked || (!pickMode && selectedRoomId === c.roomId)}
-									onclick={() => (pickMode ? toggleTilePick(c) : (selectedRoomId = c.roomId))}
+									onclick={() => (pickMode ? toggleTilePick(c) : selectRoom(c.roomId))}
 									class="relative rounded-xl border p-3 text-left transition {statusCardClass(
 										c
 									)} {pickDisabled
@@ -1629,7 +1692,7 @@
 													</div>
 													<div class="flex items-center gap-2">
 														<Badge variant="outline" class={statusPillClassGeneric(e.status)}>
-															{hallStatusLabel(e.status)}
+															{humanize(e.status)}
 														</Badge>
 														{#if e.status === 'confirmed'}
 															<form method="POST" action="?/checkInHall" use:enhance>
@@ -1637,6 +1700,7 @@
 																<Button type="submit" size="sm">Check in</Button>
 															</form>
 														{:else if e.status === 'checked_in'}
+															{@render hallRunningOver(e.scheduledEndIso, hall.extraHourFeeCentavos, hall.vatRateBps)}
 															<Button
 																size="sm"
 																onclick={() =>
@@ -1684,7 +1748,7 @@
 		</div>
 
 		<div
-			class="{pickMode || selectedRoomId
+			class="{pickMode || selectedRoomId || hallDetailOpen
 				? 'fixed inset-0 z-40 bg-background'
 				: 'hidden'} overflow-y-auto lg:static lg:z-auto lg:block lg:w-120 lg:shrink-0 lg:border-l lg:border-border lg:bg-transparent"
 		>
@@ -1819,6 +1883,8 @@
 						</form>
 					{/if}
 				</div>
+			{:else if hallDetailOpen && formHallBookingDetail}
+				{@render hallDetailPanel()}
 			{:else if selectedRoom}
 				<div class="p-4">
 					<button
@@ -3371,15 +3437,22 @@
 	</Sheet.Content>
 </Sheet.Root>
 
-<Dialog.Root bind:open={hallDetailDialogOpen}>
-	<Dialog.Content class="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+{#snippet hallDetailPanel()}
+	<div class="p-4" data-testid="hall-detail">
 		{#if formHallBookingDetail}
-			<Dialog.Header>
-				<Dialog.Title
-					>{formHallBookingDetail.hall.name} — {formHallBookingDetail.guest.fullName}</Dialog.Title
-				>
-				<Dialog.Description>{formHallBookingDetail.hallBooking.eventType}</Dialog.Description>
-			</Dialog.Header>
+			<button
+				type="button"
+				onclick={() => (hallDetailOpen = false)}
+				class="mb-3 flex items-center gap-1 text-xs font-semibold text-ink-muted hover:text-ink"
+			>
+				<ChevronLeftIcon class="size-3.5" />
+				Back to today's list
+			</button>
+			<p class="text-[11px] font-semibold tracking-wide text-ink-muted uppercase">Function hall</p>
+			<div class="mb-1 text-lg font-bold text-ink">{formHallBookingDetail.hall.name}</div>
+			<p class="mb-3 text-sm text-ink-muted">
+				{formHallBookingDetail.guest.fullName} · {formHallBookingDetail.hallBooking.eventType}
+			</p>
 
 			<div class="space-y-4">
 				<div class="rounded-lg border border-border p-4">
@@ -3415,6 +3488,87 @@
 							<div class="text-ink">{formHallBookingDetail.hallBooking.guestCount}</div>
 						</div>
 					</div>
+					{#if hallDetailGridEvent}
+						<div class="mt-2">
+							{@render hallRunningOver(
+								hallDetailGridEvent.e.scheduledEndIso,
+								hallDetailGridEvent.hall.extraHourFeeCentavos,
+								hallDetailGridEvent.hall.vatRateBps
+							)}
+						</div>
+					{/if}
+				</div>
+
+				<div class="rounded-lg border border-border p-4">
+					<div class="mb-2 flex items-center justify-between">
+						<h3 class="text-sm font-semibold text-ink">Security deposit</h3>
+						{#if formHallDeposit}
+							<Badge
+								variant="outline"
+								class={formHallDeposit.status === 'held'
+									? 'border-transparent bg-warning/15 text-warning'
+									: 'border-transparent bg-surface-2 text-ink-muted'}
+							>
+								{formHallDeposit.status === 'held' ? 'Held' : humanize(formHallDeposit.status)}
+							</Badge>
+						{/if}
+					</div>
+
+					{#if formHallDeposit?.status === 'held'}
+						<p class="text-sm text-ink">
+							{peso(formHallDeposit.amountCentavos)} held · {humanize(formHallDeposit.method)}
+						</p>
+						<p class="mt-1 text-xs text-ink-muted">
+							Settling applies any unpaid damage from the hold and refunds the rest. The event cannot
+							be closed while it is still held.
+						</p>
+						<form method="POST" action="?/settleHallDeposit" use:enhance class="mt-2">
+							<input type="hidden" name="hallBookingId" value={formHallBookingDetail.hallBooking.id} />
+							<Button type="submit" size="sm" class="w-full">Settle deposit</Button>
+						</form>
+					{:else if formHallDeposit}
+						<p class="text-sm text-ink-muted">
+							{peso(formHallDeposit.amountCentavos)} settled —
+							{peso(formHallDeposit.forfeitedCentavos ?? 0)} kept for damage,
+							{peso(formHallDeposit.refundedCentavos ?? 0)} refunded.
+						</p>
+					{:else if formHallBookingDetail.hallBooking.status !== 'completed'}
+						<p class="mb-2 text-xs text-ink-muted">
+							A refundable hold against damage. It is collateral, not revenue — it never counts
+							toward the bill.
+						</p>
+						<form
+							method="POST"
+							action="?/collectHallDeposit"
+							use:enhance
+							class="flex flex-wrap items-end gap-2"
+						>
+							<input type="hidden" name="hallBookingId" value={formHallBookingDetail.hallBooking.id} />
+							<Input
+								name="amountPhp"
+								type="number"
+								min="0.01"
+								step="0.01"
+								required
+								placeholder="₱ amount"
+								class="w-32"
+							/>
+							<select
+								name="method"
+								class="h-9 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm"
+							>
+								<option value="cash">Cash</option>
+								<option value="card">Card</option>
+								<option value="gcash">GCash</option>
+								<option value="maya">Maya</option>
+								<option value="bank_transfer">Bank transfer</option>
+								<option value="cheque">Cheque</option>
+							</select>
+							<Button type="submit" size="sm">Collect</Button>
+						</form>
+					{:else}
+						<p class="text-sm text-ink-muted">No deposit was collected for this event.</p>
+					{/if}
 				</div>
 
 				{#if formHallPendingDamage && formHallPendingDamage.length > 0}
@@ -3641,8 +3795,23 @@
 				</div>
 			</div>
 		{/if}
-	</Dialog.Content>
-</Dialog.Root>
+	</div>
+{/snippet}
+
+<!-- Overtime as it accrues, for an event still checked in. A preview off the page's own one-minute
+     clock — nothing is posted until check-out, which recomputes it server-side. -->
+{#snippet hallRunningOver(scheduledEndIso: string, extraHourFeeCentavos: number, vatRateBps: number)}
+	{@const ot = hallOvertimeAmount(
+		hallOvertimeHours(Date.parse(scheduledEndIso), nowMs),
+		extraHourFeeCentavos,
+		vatRateBps
+	)}
+	{#if ot.hours > 0}
+		<span class="text-xs font-semibold text-warning">
+			Running {ot.hours}h over · {peso(ot.totalCentavos)} so far
+		</span>
+	{/if}
+{/snippet}
 
 <Dialog.Root bind:open={hallCheckoutOpen}>
 	<Dialog.Content class="sm:max-w-md">
@@ -3653,6 +3822,19 @@
 					The event was booked to end at {hallTime(hallCheckout.scheduledEndIso)}. It is now {hallTime(new Date(hallCheckoutAt).toISOString())}.
 				</Dialog.Description>
 			</Dialog.Header>
+			<div class="space-y-1">
+				<Label for="hallEndedAt">The event actually ended at</Label>
+				<Input
+					id="hallEndedAt"
+					type="datetime-local"
+					bind:value={hallCheckoutEndedAt}
+					max={toHotelDateTimeLocal(hallCheckoutAt)}
+				/>
+				<p class="text-xs text-ink-muted">
+					Hotel time. Set it back to when the event really finished if you are clearing it later — the
+					overtime below is charged from this time, not from now.
+				</p>
+			</div>
 			{#if hallCheckoutOvertime.hours > 0}
 				<div class="rounded-lg border border-border p-4 text-sm">
 					<div class="flex justify-between">
@@ -3701,6 +3883,7 @@
 					}}
 				>
 					<input type="hidden" name="hallBookingId" value={hallCheckout.hallBookingId} />
+					<input type="hidden" name="endedAt" value={hallCheckoutEndedAt} />
 					<Button type="submit">
 						{hallCheckoutOvertime.hours > 0 ? `Check out and charge ${peso(hallCheckoutOvertime.totalCentavos)}` : 'Check out'}
 					</Button>

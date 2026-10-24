@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payment Verification &amp; Reconciliation</title>
+<style>
+	:root {
+		--bg: #fbfaf7; --card: #ffffff; --ink: #1c1b18; --muted: #6a675f; --line: #e4e0d6;
+		--accent: #9a7a1f; --ok: #1d7a46; --bad: #b3261e; --code: #f1eee6;
+	}
+	@media (prefers-color-scheme: dark) {
+		:root { --bg: #121110; --card: #1b1a17; --ink: #efece4; --muted: #a09c90; --line: #2f2d27; --accent: #d4b04c; --ok: #5fc58a; --bad: #ff8a80; --code: #25231f; }
+	}
+	* { box-sizing: border-box; }
+	body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+	main { max-width: 56rem; margin: 0 auto; padding: 1.25rem 16px 4rem; }
+	h1 { font-size: 1.6rem; margin: 1rem 0 .25rem; }
+	h2 { font-size: 1.1rem; margin: 2rem 0 .6rem; padding-bottom: .3rem; border-bottom: 1px solid var(--line); }
+	h3 { font-size: .95rem; margin: 1rem 0 .3rem; }
+	p { margin: .4rem 0; }
+	.sub { color: var(--muted); margin: 0 0 1rem; }
+	.pill { display: inline-block; font-size: .72rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: .15rem .55rem; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+	.pill.ok { color: var(--ok); border-color: currentColor; }
+	.grid { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+	.card { background: var(--card); border: 1px solid var(--line); border-radius: .75rem; padding: .8rem 1rem; }
+	.card h3 { margin-top: 0; }
+	ul, ol { margin: .3rem 0; padding-left: 1.2rem; }
+	li { margin: .2rem 0; }
+	code { background: var(--code); padding: .05rem .35rem; border-radius: .3rem; font: .85em ui-monospace, Consolas, monospace; word-break: break-word; }
+	table { width: 100%; border-collapse: collapse; font-size: .88rem; display: block; overflow-x: auto; }
+	th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+	th { color: var(--muted); font-weight: 600; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+	.flow { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin: .6rem 0; font-size: .85rem; }
+	.flow span { background: var(--card); border: 1px solid var(--line); border-radius: .5rem; padding: .3rem .6rem; }
+	.flow .arrow { background: none; border: 0; color: var(--muted); padding: 0; }
+	.flow .bad { border-color: var(--bad); color: var(--bad); }
+	.flow .good { border-color: var(--ok); color: var(--ok); }
+	.note { border-left: 3px solid var(--accent); background: var(--card); padding: .5rem .8rem; border-radius: 0 .5rem .5rem 0; margin: .7rem 0; }
+	.warn { border-left-color: var(--bad); }
+	footer { color: var(--muted); font-size: .8rem; margin-top: 2.5rem; }
+	@media print { body { background: #fff; color: #000; } .card, .note { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Payment Verification &amp; Reconciliation</h1>
+<p class="sub">mmhotel · PayMongo payments that confirm themselves, with a tamper-evident money trail.
+	<span class="pill ok">Live</span> <span class="pill">Deployed 15 Oct 2026 · main 5e3bd41 · migrations 0101–0102</span></p>
+
+<h2>The problem it fixes</h2>
+<p>A booking used to be confirmed <strong>only</strong> when PayMongo's webhook reached our server. When it could not (a dead ngrok tunnel in dev, an outage,
+a missing event subscription) the guest sat on "Waiting for confirmation… (check 1 of 12)", gave up after about 36 seconds, and a refresh lost the state.
+Real money could sit in PayMongo while the booking stayed <code>pending_payment</code>, and the 60-minute hold sweep could then
+<strong>cancel a paid booking</strong> and release the room.</p>
+
+<h2>How it works now</h2>
+<div class="flow">
+	<span>Guest pays on PayMongo</span><span class="arrow">→</span>
+	<span class="bad">Webhook lost?</span><span class="arrow">→</span>
+	<span>We ask PayMongo directly</span><span class="arrow">→</span>
+	<span>Payment recorded &amp; booking confirmed</span><span class="arrow">→</span>
+	<span class="good">Entry on the money trail</span>
+</div>
+<p>Every checkout session we create is stored forever in <code>payment_attempts</code>. A checkout is <em>paid</em> when PayMongo's session
+<code>payments[]</code> holds a payment whose own status is <code>paid</code> (the session's own status stays <code>active</code>). The same confirm
+code runs from every path, so a webhook and a verifier arriving together record <strong>one</strong> payment (unique index on the paid <code>pay_</code> ID).</p>
+
+<table>
+	<tr><th>What asks PayMongo</th><th>When</th></tr>
+	<tr><td>Guest's confirmation page</td><td>On every load / refresh while pending (throttled, one look per order every ~4 s) and the "Check again now" button</td></tr>
+	<tr><td>Background worker <code>payment_verify</code> (pg-boss)</td><td>Every minute. Backoff per attempt: every minute for ~10 min, every 5 min up to 1 h, then every 15 min, for as long as the session can still be paid. No retry cap.</td></tr>
+	<tr><td>Webhook <code>payment.paid</code></td><td>Nudges an immediate check of the hotel's open attempts</td></tr>
+	<tr><td>Hold sweep (room and dining)</td><td>Asks PayMongo first. A paid booking is confirmed, never cancelled. If PayMongo cannot be asked, orders under 24 h old are not cancelled.</td></tr>
+	<tr><td>Safety net <code>paymongo_sync</code></td><td>Every 15 min, mirrors PayMongo's own records for the Finance → PayMongo tab</td></tr>
+</table>
+
+<h2>What guests see</h2>
+<div class="grid">
+	<div class="card"><h3>While waiting</h3><ul>
+		<li>Never "gave up": polling has no cap (3 s → 5 s → 10 s → 30 s)</li>
+		<li>Booking code and a <code>PC-XXXXXXXX</code> payment check code</li>
+		<li>"Check again now" button; a refresh recovers instantly</li>
+		<li>"Pay" reuses an open checkout instead of creating duplicates</li></ul></div>
+	<div class="card"><h3>Once paid</h3><ul>
+		<li>Payment reference <code>pay_…</code> (copy button) and <code>pi_…</code></li>
+		<li>Same reference in the confirmation email</li>
+		<li>Dining orders get the same treatment</li></ul></div>
+	<div class="card"><h3>Emails (best effort, once each)</h3><ul>
+		<li><strong>Track your payment</strong>: sent when they start paying, with the link</li>
+		<li><strong>Still checking</strong>: sent once if unconfirmed after ~10 min ("do not pay again")</li>
+		<li><strong>Confirmation</strong>: now includes the <code>pay_…</code> reference</li></ul></div>
+</div>
+<p>The tracking link is the existing <code>/{slug}/confirmation/{orderId}?t={token}</code> (room) or <code>/{slug}/dining/order/{code}?t=</code> (dining): unguessable, no login, works on any device.</p>
+
+<h2>What staff see</h2>
+<ul>
+	<li><strong>Booking page</strong> (<code>management/transactions/[orderId]</code>): "Online payment attempts" list with amount, status, <code>pay_</code>/<code>pi_</code>/<code>cs_</code> IDs, check code, times checked, last error.</li>
+	<li><strong>Find by number</strong> accepts <code>pay_…</code>, <code>pi_…</code>, <code>cs_…</code> and <code>PC-…</code> codes.</li>
+	<li><strong>Finance → Reconciliation</strong> (new tab, needs <code>finance:read</code>), below.</li>
+</ul>
+
+<h2>Finance → Reconciliation tab</h2>
+<div class="grid">
+	<div class="card"><h3>Integrity banner</h3><p>Re-checks the whole money trail on every visit: green "Money trail verified" with the latest fingerprint, or a red warning naming the broken entry.</p></div>
+	<div class="card"><h3>Needs attention</h3><ul>
+		<li><strong>Cannot verify</strong>: PayMongo could not be asked yet (auto-retries)</li>
+		<li><strong>Paid, not recorded</strong>: PayMongo has it, our write failed (auto-retries)</li>
+		<li><strong>Refund due</strong>: paid after the booking was cancelled</li>
+		<li><strong>Not on the trail</strong>: recorded but its trail write failed</li></ul></div>
+	<div class="card"><h3>Settled automatically</h3><p>One row per payment the verifier recovered. "Details" shows the timeline: checkout started → PayMongo took it → missing from our books (for how long) → found and recorded, with how it was found, amounts asked vs received, status before/after, every ID, check code, and the trail fingerprint. Filter by date and type; Print; CSV.</p></div>
+</div>
+
+<h2>Security of the money trail</h2>
+<ul>
+	<li><strong>Append-only table</strong> <code>payment_reconciliation_events</code>: database triggers refuse UPDATE, DELETE and TRUNCATE.</li>
+	<li><strong>Hash chain</strong>: each row stores SHA-256 of its content plus the previous row's hash (per hotel, per <code>seq</code>). Any edit made around the triggers breaks every hash after it; the tab shows it.</li>
+	<li><strong>Serialised writes</strong>: a per-hotel advisory lock stops parallel writes from forking the chain (tested with 12 parallel appends).</li>
+	<li><strong>No personal data</strong> and no foreign keys in the trail; names are read from the booking when displayed.</li>
+	<li><strong>Exports are audited</strong> (<code>reconciliation.exported</code> in the Audit log, with who and when); guest names are neutralised against spreadsheet formula injection; pages and CSV are served <code>no-store</code>.</li>
+	<li>A failed trail write never blocks a real payment: it is logged, and the payment shows as "Not on the trail" for follow-up.</li>
+</ul>
+<div class="note"><strong>Limit:</strong> a database admin could still drop the triggers; the chain would expose any edit, but only if someone checks. For proof that nothing changed later, note the latest fingerprint from the banner (for example at month-end).</div>
+
+<h2>Reference</h2>
+<table>
+	<tr><th>Item</th><th>Where</th></tr>
+	<tr><td>Migrations</td><td><code>0101_payment_attempts</code> (attempts table, email types, unique paid <code>pay_</code> indexes) · <code>0102_payment_reconciliation_events</code> (trail + triggers)</td></tr>
+	<tr><td>Verifier</td><td><code>src/lib/server/paymongo/verify.ts</code>, <code>attempts.ts</code>, <code>confirm-room-payment.ts</code> (extracted from the webhook)</td></tr>
+	<tr><td>Worker</td><td><code>jobs/boss.ts</code> queue <code>payment_verify</code> (<code>* * * * *</code>), <code>jobs/tasks.ts</code> <code>runPaymentVerifyJob</code></td></tr>
+	<tr><td>Trail</td><td><code>finance/reconciliation-trail.ts</code> (append, hash, verify) · <code>finance/payment-reconciliation.ts</code> (report data)</td></tr>
+	<tr><td>Tab</td><td><code>routes/[hotel]/management/finance/reconciliation/</code> (+page, +page.server, export)</td></tr>
+	<tr><td>PayMongo client</td><td><code>packages/paymongo</code>: <code>listPayments / listRefunds / listPayouts / listWallets / retrievePayment</code></td></tr>
+	<tr><td>Probe</td><td><code>apps/hotel/scripts/probe-checkout-session.ts</code> (read-only look at a real checkout session)</td></tr>
+	<tr><td>Playwright spec</td><td><code>apps/hotel/e2e/payment-verify.spec.ts</code> (written, not run; needs <code>E2E_MANUAL=1</code> and a headed browser)</td></tr>
+</table>
+
+<h2>Operations</h2>
+<h3>Check it is healthy (production)</h3>
+<ul>
+	<li><code>pm2 logs mm-hotel</code> shows <code>[jobs] payment_verify: { … errors: 0 }</code> every minute.</li>
+	<li>Reconciliation tab banner is green and "Needs attention" is 0.</li>
+	<li>Server DB: <code>select status, count(*) from payment_attempts group by 1;</code></li>
+</ul>
+<h3>Deploy</h3>
+<p>Commit to <code>Jade</code>, merge into <code>main</code> in a clean worktree of <code>origin/main</code>, then from that worktree run <code>bash scripts/deploy.sh --migrate</code> (<code>--migrate</code> whenever a migration is added). Server <code>mmserver@100.109.167.10</code>, pm2 app <code>mm-hotel</code>, port 3011, live hotel slug <code>mmhoteltandag</code>.</p>
+<h3>Testing locally without a tunnel</h3>
+<p>Run the dev server with no ngrok, book, pay on the PayMongo test page, return. The page confirms within seconds with the <code>pay_…</code> ID; the trail shows the entry as found by the guest page or the worker.</p>
+
+<h2>Known gaps</h2>
+<div class="note warn"><strong>No Official Receipt series:</strong> the server logs "No active Official Receipt series is registered" on online payments. Payments still record and confirm, but no official receipt is issued until a series is added in Finance → BIR → Series.</div>
+<ul>
+	<li>Bookings paid before 15 Oct 2026 have no <code>payment_attempts</code> row and are not tracked by the verifier.</li>
+	<li>The live PayMongo webhook subscription has not been checked for <code>payment.paid</code>; it no longer matters for confirming payments.</li>
+	<li>Dining rows on the Reconciliation tab link to the dining orders page, not to the individual order.</li>
+	<li>The trail records reconciliations and failures, not every ordinary webhook payment.</li>
+</ul>
+
+<footer>Generated from the 15 Oct 2026 work session. Source of truth is the code; this page summarises it.</footer>
+</main>
+</body>
+</html>

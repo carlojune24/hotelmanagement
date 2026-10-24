@@ -25,7 +25,7 @@ import { FolioError, addHallOvertimeCharge, closeFolio, closeHallFolio, getFolio
 import { planInRoomOrder } from '$lib/allocation';
 import { splitRoomLine } from '$lib/room-split';
 import { lineBalances } from './order-balances';
-import { getSecurityDepositForBooking } from './security-deposits';
+import { getSecurityDepositForTarget } from './security-deposits';
 import { recordWalkInPayment, resolvePaymentAccount, type PaymentMethod } from './finance/payments';
 import { openReceivable } from './finance/receivables';
 import { getBirSettings, issueInvoice } from './finance/documents';
@@ -894,14 +894,19 @@ export async function createWalkInBooking(params: {
 		// lock — never trust client-supplied amounts, same posture as the
 		// single-line version this loop replaces.
 		for (const item of roomItems) {
-			const available = await getAvailableRoomType({
-				hotelId,
-				checkIn: item.checkIn,
-				checkOut: item.checkOut,
-				occupancy: item.occupancy,
-				roomCount: item.roomCount,
-				roomTypeId: item.roomTypeId
-			});
+			// On `tx`, not `db`: this runs inside the advisory-locked transaction, and a read on a
+			// second pooled connection here deadlocks the pool once enough walk-ins land at once.
+			const available = await getAvailableRoomType(
+				{
+					hotelId,
+					checkIn: item.checkIn,
+					checkOut: item.checkOut,
+					occupancy: item.occupancy,
+					roomCount: item.roomCount,
+					roomTypeId: item.roomTypeId
+				},
+				tx
+			);
 			const plan = available?.ratePlans.find((p) => p.id === item.ratePlanId);
 			if (!available || !plan) {
 				throw new WalkInError('One of the selected rooms is no longer available for these dates.');
@@ -1168,7 +1173,7 @@ export async function checkOutBooking(
 	// A held deposit must be explicitly settled (released or applied to damage) before
 	// checkout — never silently left open, and never routable to the city ledger, since
 	// it's collateral the hotel is holding, not a charge the guest still owes.
-	const securityDeposit = await getSecurityDepositForBooking(hotelId, bookingId);
+	const securityDeposit = await getSecurityDepositForTarget(hotelId, { kind: 'room', bookingId });
 	if (securityDeposit?.status === 'held') {
 		throw new CheckOutError(
 			`Settle the ₱${(securityDeposit.amountCentavos / 100).toFixed(2)} security deposit before checking out.`
@@ -1313,6 +1318,8 @@ export interface HallGridEvent {
 		housekeeping: 'dirty' | 'in_progress' | 'clean';
 		pendingDamageCount: number;
 		balanceCentavos: number;
+		/** A deposit still held on the event; it must be settled before Close, never city-ledgered. */
+		heldDepositCentavos: number;
 	} | null;
 }
 
@@ -1374,9 +1381,11 @@ export async function getHallStatusBoard(
 			and(
 				eq(orders.hotelId, hotelId),
 				or(
+					// A closed event leaves the board at once, the way a checked-out room does; it lives on
+					// in Transactions and in Reservations' Past tab.
 					and(
 						eq(hallBookings.eventDate, businessDate),
-						inArray(hallBookings.status, ['confirmed', 'checked_in', 'checked_out', 'completed'])
+						inArray(hallBookings.status, ['confirmed', 'checked_in', 'checked_out'])
 					),
 					// An event from an earlier day that was never checked out or closed stays on the board until it is.
 					and(lt(hallBookings.eventDate, businessDate), inArray(hallBookings.status, ['checked_in', 'checked_out']))
@@ -1403,7 +1412,13 @@ export async function getHallStatusBoard(
 	for (const r of eventRows.filter((e) => e.status === 'checked_out')) {
 		const gate = await getHallCloseGate(hotelId, r.functionHallId, r.hallBookingId);
 		const folio = await getFolioDetail(hotelId, { kind: 'hall', hallBookingId: r.hallBookingId });
-		closeByEvent.set(r.hallBookingId, { housekeeping: gate.status, pendingDamageCount: gate.pendingDamageCount, balanceCentavos: folio.balanceCentavos });
+		const deposit = await getSecurityDepositForTarget(hotelId, { kind: 'hall', hallBookingId: r.hallBookingId });
+		closeByEvent.set(r.hallBookingId, {
+			housekeeping: gate.status,
+			pendingDamageCount: gate.pendingDamageCount,
+			balanceCentavos: folio.balanceCentavos,
+			heldDepositCentavos: deposit?.status === 'held' ? deposit.amountCentavos : 0
+		});
 	}
 
 	const eventsByHall = new Map<string, HallGridEvent[]>();
@@ -1476,16 +1491,16 @@ export async function createWalkInHallBooking(params: {
 			sql`select pg_advisory_xact_lock(hashtext(${hotelId}), hashtext(${'hall:' + functionHallId + ':' + eventDate}))`
 		);
 
-		const available = await checkHallAvailability({
-			hotelId,
-			functionHallId,
-			eventDate,
-			startTime,
-			endTime
-		});
+		// Both of these run on `tx` on purpose: a read on `db` here would take a second pooled
+		// connection while this transaction still holds the first, and enough concurrent walk-ins
+		// then deadlock the whole pool.
+		const available = await checkHallAvailability(
+			{ hotelId, functionHallId, eventDate, startTime, endTime },
+			tx
+		);
 		if (!available) throw new HallWalkInError('That function hall slot is no longer available.');
 
-		const price = await priceEventHall({ hotelId, functionHallId, startTime, endTime });
+		const price = await priceEventHall({ hotelId, functionHallId, startTime, endTime }, tx);
 		const lineFees = price.fees.reduce((sum, f) => sum + f.amountCentavos, 0);
 
 		const [guestRow] = await tx
@@ -1651,15 +1666,34 @@ export async function checkInHallBooking(
 }
 
 /**
+ * A `<input type="datetime-local">` value ("YYYY-MM-DDTHH:MM") read on the hotel's own wall clock, as ms.
+ * Returns undefined for anything malformed, so a junk value falls back to the current clock rather than
+ * silently billing from epoch.
+ */
+function parseWallDateTime(value: string | undefined, timezone: string): number | undefined {
+	if (!value) return undefined;
+	const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(value);
+	if (!m?.[1] || !m[2]) return undefined;
+	const ms = wallTimeToUtcMs(m[1], m[2], timezone);
+	return Number.isFinite(ms) ? ms : undefined;
+}
+
+/**
  * The event is over: `checked_in` → `checked_out`. If it ran past its booked end, the overtime is worked out
- * here from the clock (per started hour, no grace) at the hall's extra-hour rate and posted to the event's
- * bill once. The hall is flagged dirty in the same transaction, so housekeeping always has something to
- * clear before Close. Leaving early earns no credit: the booked price stands.
+ * here (per started hour, no grace) at the hall's extra-hour rate and posted to the event's bill once. The
+ * hall is flagged dirty in the same transaction, so housekeeping always has something to clear before Close.
+ * Leaving early earns no credit: the booked price stands.
+ *
+ * `endedAtWall` is when the event actually ended, as the front desk states it — "YYYY-MM-DDTHH:MM" in the
+ * hotel's own timezone, the same wall clock `endTime` is read on. Without it the current clock is used, which
+ * is only right when the desk checks out promptly; a desk that clears the event hours later would otherwise
+ * bill every hour since.
  */
 export async function checkOutHallBooking(
 	hotelId: string,
 	hallBookingId: string,
 	actor: SessionUser | null,
+	endedAtWall?: string,
 	now: Date = new Date()
 ): Promise<{ overtimeHours: number; overtimeCentavos: number }> {
 	return db.transaction(async (tx) => {
@@ -1672,8 +1706,13 @@ export async function checkOutHallBooking(
 			.from(functionHalls)
 			.where(eq(functionHalls.id, row.functionHallId))
 			.limit(1);
-		const scheduledEnd = wallTimeToUtcMs(row.eventDate, row.endTime, hotel?.timezone ?? 'Asia/Manila');
-		const hours = hallOvertimeHours(scheduledEnd, now.getTime());
+		const timezone = hotel?.timezone ?? 'Asia/Manila';
+		const scheduledEnd = wallTimeToUtcMs(row.eventDate, row.endTime, timezone);
+		// Never past the real clock, so a mistyped future end time cannot inflate the bill. One before the
+		// booked end needs no guard — `hallOvertimeHours` already returns 0 for it.
+		const endedAt = parseWallDateTime(endedAtWall, timezone);
+		const effectiveEnd = Math.min(endedAt ?? now.getTime(), now.getTime());
+		const hours = hallOvertimeHours(scheduledEnd, effectiveEnd);
 		const rate = hall?.extraHourFeeCentavos ?? 0;
 		const vatRateBps = hotel?.vatRateBps ?? 0;
 
@@ -1697,7 +1736,8 @@ export async function checkOutHallBooking(
 			after: {
 				functionHallId: row.functionHallId,
 				scheduledEnd: new Date(scheduledEnd).toISOString(),
-				actualEnd: now.toISOString(),
+				actualEnd: new Date(effectiveEnd).toISOString(),
+				checkedOutAt: now.toISOString(),
 				overtimeHours: hours,
 				overtimeRateCentavos: rate,
 				overtimeCentavos: posted?.totalCentavos ?? 0
@@ -1740,30 +1780,20 @@ export async function completeHallBooking(
 		if (e instanceof FolioError) throw new HallCompleteError(e.message);
 		throw e;
 	}
+	// Collateral, not a charge: it must be settled outright and can never go to the city ledger,
+	// exactly as at a room checkout.
+	const deposit = await getSecurityDepositForTarget(hotelId, { kind: 'hall', hallBookingId });
 	const owes = folio.balanceCentavos > 0 && !cityLedger;
 	const blockers: string[] = [];
+	if (deposit?.status === 'held') {
+		blockers.push(`the ₱${(deposit.amountCentavos / 100).toFixed(2)} security deposit is still held`);
+	}
 	if (gate.status !== 'clean') blockers.push(gate.status === 'dirty' ? 'housekeeping has not cleaned the hall yet' : 'housekeeping is still cleaning the hall');
 	if (gate.pendingDamageCount > 0) {
 		blockers.push(`${gate.pendingDamageCount} damage report${gate.pendingDamageCount === 1 ? ' is' : 's are'} waiting to be charged or dismissed`);
 	}
 	if (owes) blockers.push(`₱${(folio.balanceCentavos / 100).toFixed(2)} is still owed on the bill`);
 	if (blockers.length) throw new HallCompleteError(`Can't close yet: ${blockers.join('; ')}.`);
-
-	if (folio.balanceCentavos > 0 && cityLedger) {
-		try {
-			await openReceivable({
-				hotelId,
-				target: { kind: 'hall', hallBookingId },
-				billToName: cityLedger.billToName,
-				billToCompany: cityLedger.billToCompany ?? null,
-				referenceNo: cityLedger.referenceNo ?? null,
-				notes: cityLedger.notes ?? null,
-				actor
-			});
-		} catch (e) {
-			throw new HallCompleteError(e instanceof Error ? e.message : 'Could not move the balance to the city ledger.');
-		}
-	}
 
 	await db.transaction(async (tx) => {
 		const locked = await loadHallEventForUpdate(tx, hotelId, hallBookingId);
@@ -1785,6 +1815,29 @@ export async function completeHallBooking(
 			after: { functionHallId: locked.functionHallId, balanceCentavos: folio.balanceCentavos, cityLedger: !!cityLedger && folio.balanceCentavos > 0 }
 		});
 	});
+
+	// Only once the event is really closed. `openReceivable` squares the folio with a `house_use`
+	// payment, so opening it first and then failing the close would leave a settled-looking folio
+	// on an event still open — a phantom claim. This way a failure here leaves a closed event with
+	// a visible balance instead, which the desk can still move to the city ledger from Transactions.
+	// shortcut: the receivable is not in the close's own transaction, because `openReceivable` opens
+	// its own and reads through `db`; threading a `tx` through it and `getFolioDetail` is the proper
+	// fix, and the room checkout path needs the same treatment.
+	if (folio.balanceCentavos > 0 && cityLedger) {
+		try {
+			await openReceivable({
+				hotelId,
+				target: { kind: 'hall', hallBookingId },
+				billToName: cityLedger.billToName,
+				billToCompany: cityLedger.billToCompany ?? null,
+				referenceNo: cityLedger.referenceNo ?? null,
+				notes: cityLedger.notes ?? null,
+				actor
+			});
+		} catch (e) {
+			throw new HallCompleteError(e instanceof Error ? e.message : 'The event was closed, but the balance could not be moved to the city ledger. Move it from Transactions.');
+		}
+	}
 
 	await closeHallFolio(hotelId, hallBookingId);
 

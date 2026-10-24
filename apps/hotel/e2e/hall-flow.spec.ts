@@ -7,8 +7,10 @@ import { SLUG, staffLogin, uniqueGuest } from './helpers';
  *
  *   confirmed ──Check in──▶ checked in ──Check out──▶ checked out ──Close──▶ Closed
  *
- * Overtime is per started hour at the hall's extra-hour rate, no grace. Close is blocked until
- * housekeeping has marked the hall clean, no damage report is pending and the bill is settled.
+ * Overtime is per started hour at the hall's extra-hour rate, no grace, counted from the end time the
+ * desk states at check-out (defaulting to now) rather than from the moment the button is pressed. Close
+ * is blocked until housekeeping has marked the hall clean, no damage is pending and the bill is settled.
+ * "Full details" opens the front desk's right-hand rail (`data-testid="hall-detail"`), not a dialog.
  *
  * Prerequisites: an active function hall with an extra-hour rate set, a cashier shift open for the
  * walk-in's cash payment, and the staff login (E2E_STAFF_*) allowed to use the front desk and
@@ -117,18 +119,104 @@ test.describe('function hall: check in, check out, close', () => {
 
 		// Full details: exactly one overtime line, for the amount that was previewed.
 		await row.getByRole('button', { name: 'Full details' }).click();
-		const details = page.getByRole('dialog');
+		const details = page.getByTestId('hall-detail');
 		await expect(details.getByText(/Overtime \(\d+h ×/)).toHaveCount(1);
 		await expect(details.getByText(preview!).first()).toBeVisible();
 		await details.getByRole('button', { name: /Take payment/ }).click();
 		await details.getByRole('button', { name: /Record payment|Take payment|Pay/ }).last().click();
 		await expect(details.getByText('Settled')).toBeVisible({ timeout: 10_000 });
-		await page.keyboard.press('Escape');
 
 		await housekeepingClean(page, hallName);
 		await page.goto(frontDesk);
 		await eventRow(page, guest.name).getByRole('button', { name: 'Close', exact: true }).click();
 		await expect(eventRow(page, guest.name).getByText('Closed')).toBeVisible();
+	});
+
+	test('the bill follows the end time the desk states, not the moment Check out is pressed', async ({ page }) => {
+		test.skip(hotelHour() < 3, 'The 00:00-01:00 window is not over before 03:00 hotel time.');
+		const today = new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date());
+		const { guest } = await walkInEvent(page, { start: '00:00', end: '01:00' });
+		await eventRow(page, guest.name).getByRole('button', { name: 'Check in' }).click();
+
+		// While it is still checked in the row shows the meter running, before anything is posted.
+		await expect(eventRow(page, guest.name).getByText(/Running \d+h over/)).toBeVisible();
+
+		await eventRow(page, guest.name).getByRole('button', { name: 'Check out' }).click();
+		const dialog = page.getByRole('dialog');
+		const endedAt = dialog.locator('#hallEndedAt');
+
+		// Stating the booked end itself: nothing to charge, however late it is now.
+		await endedAt.fill(`${today}T01:00`);
+		await expect(dialog.getByText('The event ended on time. There is no overtime to charge.')).toBeVisible();
+
+		// An hour past it: exactly one hour, not the hours since.
+		await endedAt.fill(`${today}T02:00`);
+		await expect(dialog.getByText(/^1 hour ×/)).toBeVisible();
+		await dialog.getByRole('button', { name: /Check out and charge/ }).click();
+
+		await expect(eventRow(page, guest.name).getByText('Checked out')).toBeVisible();
+		await eventRow(page, guest.name).getByRole('button', { name: 'Full details' }).click();
+		await expect(page.getByTestId('hall-detail').getByText(/Overtime \(1h ×/)).toHaveCount(1);
+	});
+
+	test('a security deposit is held against the event and blocks Close until it is settled', async ({ page }) => {
+		const { guest, hallName } = await walkInEvent(page, { start: '00:00', end: '23:59' });
+		await eventRow(page, guest.name).getByRole('button', { name: 'Check in' }).click();
+
+		// Collect the hold from the detail rail. It is collateral, so it never touches the bill.
+		await eventRow(page, guest.name).getByRole('button', { name: 'Full details' }).click();
+		let rail = page.getByTestId('hall-detail');
+		const balanceBefore = await rail.innerText();
+		await rail.locator('input[name="amountPhp"]').fill('5000');
+		await rail.locator('select[name="method"]').selectOption('cash');
+		await rail.getByRole('button', { name: 'Collect' }).click();
+		await expect(rail.getByText('₱5000.00 held · Cash')).toBeVisible();
+		expect(balanceBefore.match(/Balance ₱[\d,.]+/)?.[0]).toBe(
+			(await rail.innerText()).match(/Balance ₱[\d,.]+/)?.[0]
+		);
+
+		await page.goto(frontDesk);
+		await eventRow(page, guest.name).getByRole('button', { name: 'Check out' }).click();
+		await page.getByRole('dialog').locator('button[type="submit"]').click();
+
+		// Close names the hold, and the button stays disabled.
+		let row = eventRow(page, guest.name);
+		await expect(row.getByText(/security deposit is still held/)).toBeVisible();
+		await expect(row.getByRole('button', { name: 'Close', exact: true })).toBeDisabled();
+
+		// Housekeeping gates the settle too, the way it gates a room's.
+		await housekeepingClean(page, hallName);
+		await page.goto(frontDesk);
+		await eventRow(page, guest.name).getByRole('button', { name: 'Full details' }).click();
+		rail = page.getByTestId('hall-detail');
+		await rail.getByRole('button', { name: 'Settle deposit' }).click();
+		await expect(rail.getByText(/settled —/)).toBeVisible();
+
+		await page.goto(frontDesk);
+		await expect(eventRow(page, guest.name).getByText(/security deposit is still held/)).toHaveCount(0);
+	});
+
+	test('a closed event leaves the board and shows as Closed in Transactions', async ({ page }) => {
+		const { guest, hallName } = await walkInEvent(page, { start: '00:00', end: '23:59' });
+		await eventRow(page, guest.name).getByRole('button', { name: 'Check in' }).click();
+		await eventRow(page, guest.name).getByRole('button', { name: 'Check out' }).click();
+		await page.getByRole('dialog').locator('button[type="submit"]').click();
+		await housekeepingClean(page, hallName);
+
+		await page.goto(frontDesk);
+		const row = eventRow(page, guest.name);
+		await expect(row.getByText(/Ready to close/)).toBeVisible();
+		await row.getByRole('button', { name: 'Close', exact: true }).click();
+
+		// Gone from today's board — a checked-out room leaves it the same way.
+		await page.goto(frontDesk);
+		await expect(eventRow(page, guest.name)).toHaveCount(0);
+
+		// Still on the books, badged Closed rather than lumped in with "Checked out".
+		await page.goto(`/${SLUG}/management/transactions`);
+		const txRow = page.locator('tr', { hasText: guest.name }).first();
+		await expect(txRow).toBeVisible();
+		await expect(txRow.getByText('Closed')).toBeVisible();
 	});
 
 	test('a pending damage report blocks Close until it is charged or dismissed', async ({ page }) => {
@@ -159,11 +247,10 @@ test.describe('function hall: check in, check out, close', () => {
 
 		// Dismiss it from Full details: Close opens up.
 		await row.getByRole('button', { name: 'Full details' }).click();
-		const details = page.getByRole('dialog');
+		const details = page.getByTestId('hall-detail');
 		await expect(details.getByText('Damage reported by Housekeeping')).toBeVisible();
 		await details.getByRole('button', { name: 'Dismiss' }).click();
 		await expect(details.getByText('Damage reported by Housekeeping')).toHaveCount(0);
-		await page.keyboard.press('Escape');
 		await page.goto(frontDesk);
 		row = eventRow(page, guest.name);
 		await expect(row.getByText(/Ready to close/)).toBeVisible();

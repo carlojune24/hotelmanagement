@@ -1,5 +1,6 @@
 import { and, asc, eq, count, gt, inArray, lt, sql } from 'drizzle-orm';
 import { db } from './db/index';
+import type { Tx } from './finance/shared';
 import {
 	amenities,
 	bookingRooms,
@@ -197,17 +198,23 @@ export const ACTIVE_BOOKING_STATUSES = [
  * active status) for any overlapping night in `[checkIn, checkOut)`; a room type
  * is only returned if `availableRooms >= roomCount`.
  */
-export async function searchAvailability(params: {
-	hotelId: string;
-	checkIn: string;
-	checkOut: string;
-	occupancy: number;
-	/** How many rooms of a type the guest wants — a type only qualifies if it has at least this
-	 *  many rooms free. Defaults to 1 so existing callers are unaffected. */
-	roomCount?: number;
-	/** Restrict to room types flagged wheelchair-accessible. */
-	accessibleOnly?: boolean;
-}): Promise<AvailableRoomType[]> {
+export async function searchAvailability(
+	params: {
+		hotelId: string;
+		checkIn: string;
+		checkOut: string;
+		occupancy: number;
+		/** How many rooms of a type the guest wants — a type only qualifies if it has at least this
+		 *  many rooms free. Defaults to 1 so existing callers are unaffected. */
+		roomCount?: number;
+		/** Restrict to room types flagged wheelchair-accessible. */
+		accessibleOnly?: boolean;
+	},
+	/** The caller's transaction when searching inside one: without it each read takes another
+	 *  pooled connection while the first is still held, which deadlocks the pool under load. */
+	tx?: Tx
+): Promise<AvailableRoomType[]> {
+	const conn = tx ?? db;
 	const { hotelId, checkIn, checkOut, occupancy, roomCount = 1, accessibleOnly } = params;
 	if (checkIn >= checkOut) throw new Error('checkOut must be after checkIn');
 	const stayNights = nightsBetween(checkIn, checkOut).length;
@@ -220,7 +227,7 @@ export async function searchAvailability(params: {
 	// base occupancy alone still qualifies if its own extra-bed allowance covers the
 	// shortfall — previously such a type just vanished from results with no way for a
 	// guest/front-desk to know an extra bed would have solved it.
-	const allTypes = await db
+	const allTypes = await conn
 		.select()
 		.from(roomTypes)
 		.where(
@@ -248,7 +255,7 @@ export async function searchAvailability(params: {
 	const types = allTypes.filter((t) => occupancyPlanByType.get(t.id)!.fits);
 	if (types.length === 0) return [];
 
-	const roomCounts = await db
+	const roomCounts = await conn
 		.select({ roomTypeId: rooms.roomTypeId, n: count() })
 		.from(rooms)
 		.where(
@@ -275,7 +282,7 @@ export async function searchAvailability(params: {
 	//   never-happened checkout date (the exact "no rooms available" bug a real early
 	//   checkout surfaced — front desk showed the room vacant, walk-in search didn't).
 	const [preAssignedRows, assignedRows] = await Promise.all([
-		db
+		conn
 			.select({ roomTypeId: bookingRooms.roomTypeId, quantity: bookingRooms.quantity })
 			.from(bookingRooms)
 			.innerJoin(bookings, eq(bookings.id, bookingRooms.bookingId))
@@ -287,7 +294,7 @@ export async function searchAvailability(params: {
 					gt(bookings.checkOut, checkIn)
 				)
 			),
-		db
+		conn
 			.select({ roomTypeId: bookingRooms.roomTypeId })
 			.from(roomAssignments)
 			.innerJoin(bookingRooms, eq(bookingRooms.id, roomAssignments.bookingRoomId))
@@ -318,11 +325,11 @@ export async function searchAvailability(params: {
 	if (available.length === 0) return [];
 
 	const [plansByType, cancellationByPlan, highlightsByType, amenitiesByType, depositByPlan] = await Promise.all([
-		db
+		conn
 			.select()
 			.from(ratePlans)
 			.where(and(eq(ratePlans.hotelId, hotelId), eq(ratePlans.isActive, true))),
-		db
+		conn
 			.select({
 				ratePlanId: ratePlans.id,
 				freeCancelHours: cancellationPolicies.freeCancelHours,
@@ -337,7 +344,7 @@ export async function searchAvailability(params: {
 			.then((rows) => new Map(rows.map((r) => [r.ratePlanId, r]))),
 		loadHighlightedAmenitiesByType(hotelId),
 		loadAllAmenitiesByType(hotelId),
-		db
+		conn
 			.select({ ratePlanId: ratePlans.id, amount: securityDepositPolicies.amountCentavos })
 			.from(ratePlans)
 			.innerJoin(securityDepositPolicies, eq(securityDepositPolicies.id, ratePlans.securityDepositPolicyId))
@@ -357,7 +364,7 @@ export async function searchAvailability(params: {
 
 		const ratePlansOut: AvailableRatePlan[] = [];
 		for (const plan of plans) {
-			const price = await priceStay({ hotelId, ratePlanId: plan.id, checkIn, checkOut });
+			const price = await priceStay({ hotelId, ratePlanId: plan.id, checkIn, checkOut }, tx);
 			const cancellation = cancellationByPlan.get(plan.id);
 			ratePlansOut.push({
 				id: plan.id,
@@ -549,10 +556,11 @@ export async function listBrowsableRoomTypes(
  * is negligible, and this keeps the diff off an already-verified, payment-adjacent function.
  */
 export async function getAvailableRoomType(
-	params: Parameters<typeof searchAvailability>[0] & { roomTypeId: string }
+	params: Parameters<typeof searchAvailability>[0] & { roomTypeId: string },
+	tx?: Tx
 ): Promise<AvailableRoomType | null> {
 	const { roomTypeId, ...rest } = params;
-	const all = await searchAvailability(rest);
+	const all = await searchAvailability(rest, tx);
 	return all.find((t) => t.id === roomTypeId) ?? null;
 }
 

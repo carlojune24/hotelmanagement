@@ -32,6 +32,7 @@ export const ACTION_LABELS: Record<string, string> = {
 	'folio.void_payment': 'Voided a payment',
 	'folio.add_item_charge': 'Added a charge to a folio',
 	'folio.add_extension_fee': 'Added an extension fee',
+	'folio.add_hall_overtime': 'Charged function hall overtime',
 	'folio.void_charge': 'Voided a folio charge',
 	'finance.open_shift': 'Opened a cashier shift',
 	'finance.close_shift': 'Closed a cashier shift',

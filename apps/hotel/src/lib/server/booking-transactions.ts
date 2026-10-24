@@ -37,7 +37,7 @@ export interface BookingTransactionRow {
 	checkIn: string;
 	checkOut: string;
 	lineCount: number;
-	status: 'confirmed' | 'in_house' | 'checked_out' | 'cancelled';
+	status: 'confirmed' | 'in_house' | 'checked_out' | 'closed' | 'cancelled';
 	/** How many of the booking's rooms/events are cancelled (a partly cancelled booking keeps its live status). */
 	cancelledCount: number;
 	chargesCentavos: number;
@@ -57,6 +57,9 @@ function summariseStatus(statuses: string[]): BookingTransactionRow['status'] {
 	if (statuses.every((s) => s === 'cancelled' || s === 'no_show')) return 'cancelled';
 	const live = statuses.filter((s) => s !== 'cancelled' && s !== 'no_show');
 	if (live.some((s) => s === 'checked_in')) return 'in_house';
+	// Closed is the end of the line — folio shut, invoice issued. Only when every line is there;
+	// a booking still mid-settlement keeps "checked out".
+	if (live.every((s) => s === 'completed')) return 'closed';
 	if (live.every((s) => s === 'checked_out' || s === 'completed')) return 'checked_out';
 	return 'confirmed';
 }

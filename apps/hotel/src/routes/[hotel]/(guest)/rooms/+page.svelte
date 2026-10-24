@@ -111,7 +111,7 @@
 		photos.find((p) => p.tag === 'cover')?.url ?? photos[0]?.url ?? null;
 
 	const roomDetailHref = (rt: AvailableRoomType) =>
-		`${rt.id}?checkIn=${data.checkIn}&checkOut=${data.checkOut}&adults=${data.adults}&children=${data.children}`;
+		`rooms/${rt.id}?checkIn=${data.checkIn}&checkOut=${data.checkOut}&adults=${data.adults}&children=${data.children}`;
 
 	// Back to Dates, pre-filled with whatever's already known — same param set the
 	// Booking Summary sidebar's own "Edit" link builds.

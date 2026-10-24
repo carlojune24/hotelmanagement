@@ -217,6 +217,9 @@ html:has(.woven-ledger) {
 .woven-ledger .sf-nav-link {
 	position: relative;
 	padding-block: 0.5rem;
+	/* Two-word labels ("Rooms & Rates") wrapped at narrow desktop widths, leaving the row ragged.
+	   The brand shrinks to its ellipsis instead — it already has min-width: 0. */
+	white-space: nowrap;
 	font-size: 0.875rem;
 	font-weight: 500;
 	letter-spacing: 0.02em;
@@ -261,7 +264,9 @@ html:has(.woven-ledger) {
 .woven-ledger .sf-nav-menu-btn.sf-mode-btn {
 	display: none;
 }
-@media (min-width: 1024px) {
+/* 1200, not 1024: below this the row cannot fit the full hotel name beside seven links, and the
+   name would truncate to an ellipsis. The sheet menu shows it in full instead. */
+@media (min-width: 1200px) {
 	.woven-ledger .sf-nav-menu-btn.sf-mode-btn {
 		display: inline-flex;
 	}
@@ -311,7 +316,7 @@ html:has(.woven-ledger) {
 	background: linear-gradient(to bottom, rgb(8 7 6 / 0.55), transparent);
 	pointer-events: none;
 }
-@media (min-width: 1024px) {
+@media (min-width: 1200px) {
 	.woven-ledger .sf-nav-links {
 		display: flex;
 	}

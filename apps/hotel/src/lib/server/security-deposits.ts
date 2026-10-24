@@ -1,10 +1,12 @@
-import { and, desc, eq, inArray, isNull, ne } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { db } from './db/index';
 import {
 	bookingRooms,
 	bookings,
 	cashMovements,
+	functionHalls,
 	guests,
+	hallBookings,
 	hotels,
 	orders,
 	payments,
@@ -18,17 +20,54 @@ import {
 } from './db/schema/index';
 import { writeAudit } from './audit';
 import type { SessionUser } from './auth/session';
-import { ensureFolio, getFolioDetail, FolioError } from './folio';
-import { getRoomHousekeepingOverlay } from './housekeeping';
+import { ensureFolio, getFolioDetail, FolioError, type FolioTarget } from './folio';
+import { getHallCloseGate, getRoomHousekeepingOverlay } from './housekeeping';
 import { businessDateFor, type Tx } from './finance/shared';
 import { recordCashMovement, voidCashMovement } from './finance/cash';
 import { resolvePaymentAccount, type PaymentMethod } from './finance/payments';
 
 export class SecurityDepositError extends Error {}
 
+/** What a hold is collateral for. Same shape as `FolioTarget` on purpose: a deposit and the
+ *  folio it nets against always name the same stay or event. */
+export type DepositTarget = FolioTarget;
+
+const targetMatches = (target: DepositTarget) =>
+	target.kind === 'room'
+		? eq(securityDeposits.bookingId, target.bookingId)
+		: eq(securityDeposits.hallBookingId, target.hallBookingId);
+
+/** How the audit trail names the thing the deposit is held against. */
+const targetEntity = (target: DepositTarget) =>
+	target.kind === 'room'
+		? { entityType: 'booking' as const, entityId: target.bookingId }
+		: { entityType: 'hall_booking' as const, entityId: target.hallBookingId };
+
+const targetNoun = (target: DepositTarget) => (target.kind === 'room' ? 'booking' : 'event');
+
+/** The stay/event must exist and belong to this hotel before any money is taken against it. */
+async function assertTargetExists(hotelId: string, target: DepositTarget): Promise<void> {
+	if (target.kind === 'room') {
+		const [booking] = await db
+			.select({ hotelId: bookings.hotelId })
+			.from(bookings)
+			.where(eq(bookings.id, target.bookingId))
+			.limit(1);
+		if (!booking || booking.hotelId !== hotelId) throw new SecurityDepositError('Booking not found.');
+		return;
+	}
+	const [hall] = await db
+		.select({ hotelId: orders.hotelId })
+		.from(hallBookings)
+		.innerJoin(orders, eq(orders.id, hallBookings.orderId))
+		.where(eq(hallBookings.id, target.hallBookingId))
+		.limit(1);
+	if (!hall || hall.hotelId !== hotelId) throw new SecurityDepositError('Hall booking not found.');
+}
+
 export interface CollectSecurityDepositInput {
 	hotelId: string;
-	bookingId: string;
+	target: DepositTarget;
 	securityDepositPolicyId?: string | null;
 	amountCentavos: number;
 	method: PaymentMethod;
@@ -53,17 +92,17 @@ export async function getSecurityDepositPolicy(
 	return row ?? null;
 }
 
-/** The current (most recent) deposit row for a booking, or null if none was ever
- *  collected. Used by both the check-in load (to decide whether to show the collect
- *  form) and the checkout panel (to show held/settled state). */
-export async function getSecurityDepositForBooking(
+/** The current (most recent) deposit row for a stay or an event, or null if none was ever
+ *  collected. Used by the check-in load (to decide whether to show the collect form), the
+ *  checkout panel and the hall close gate (to show held/settled state). */
+export async function getSecurityDepositForTarget(
 	hotelId: string,
-	bookingId: string
+	target: DepositTarget
 ): Promise<SecurityDeposit | null> {
 	const [row] = await db
 		.select()
 		.from(securityDeposits)
-		.where(and(eq(securityDeposits.hotelId, hotelId), eq(securityDeposits.bookingId, bookingId)))
+		.where(and(eq(securityDeposits.hotelId, hotelId), targetMatches(target)))
 		.orderBy(desc(securityDeposits.createdAt))
 		.limit(1);
 	return row ?? null;
@@ -72,10 +111,13 @@ export async function getSecurityDepositForBooking(
 export interface SecurityDepositListRow {
 	id: string;
 	bookingId: string | null;
-	/** The parent booking (order) this room's deposit belongs to. */
+	hallBookingId: string | null;
+	/** The parent booking (order) this room's or event's deposit belongs to. */
 	orderId: string | null;
-	/** Assigned room number(s) of the booking this deposit is held against. */
+	/** Assigned room number(s) of the booking this deposit is held against; empty for a hall. */
 	roomNumbers: string[];
+	/** The hall this deposit is held against, for a function hall event. */
+	hallName: string | null;
 	status: 'held' | 'settled' | 'voided';
 	amountCentavos: number;
 	method: PaymentMethod;
@@ -105,7 +147,8 @@ export async function listSecurityDeposits(
 		.select({
 			id: securityDeposits.id,
 			bookingId: securityDeposits.bookingId,
-			orderId: bookings.orderId,
+			hallBookingId: securityDeposits.hallBookingId,
+			orderId: sql<string | null>`coalesce(${bookings.orderId}, ${hallBookings.orderId})`,
 			status: securityDeposits.status,
 			amountCentavos: securityDeposits.amountCentavos,
 			method: securityDeposits.method,
@@ -117,13 +160,17 @@ export async function listSecurityDeposits(
 			voidedAt: securityDeposits.voidedAt,
 			voidReason: securityDeposits.voidReason,
 			guestName: guests.fullName,
-			checkIn: bookings.checkIn,
-			checkOut: bookings.checkOut,
-			roomTypeName: roomTypes.name
+			// A hall event is one day, so both ends read as its event date.
+			checkIn: sql<string | null>`coalesce(${bookings.checkIn}, ${hallBookings.eventDate})`,
+			checkOut: sql<string | null>`coalesce(${bookings.checkOut}, ${hallBookings.eventDate})`,
+			roomTypeName: roomTypes.name,
+			hallName: functionHalls.name
 		})
 		.from(securityDeposits)
 		.leftJoin(bookings, eq(bookings.id, securityDeposits.bookingId))
-		.leftJoin(orders, eq(orders.id, bookings.orderId))
+		.leftJoin(hallBookings, eq(hallBookings.id, securityDeposits.hallBookingId))
+		.leftJoin(functionHalls, eq(functionHalls.id, hallBookings.functionHallId))
+		.leftJoin(orders, sql`${orders.id} = coalesce(${bookings.orderId}, ${hallBookings.orderId})`)
 		.leftJoin(guests, eq(guests.id, orders.guestId))
 		.leftJoin(bookingRooms, eq(bookingRooms.bookingId, bookings.id))
 		.leftJoin(roomTypes, eq(roomTypes.id, bookingRooms.roomTypeId))
@@ -181,18 +228,11 @@ export async function collectSecurityDeposit(
 		throw new SecurityDepositError('Enter a deposit amount greater than zero.');
 	}
 
-	const [booking] = await db
-		.select({ hotelId: bookings.hotelId })
-		.from(bookings)
-		.where(eq(bookings.id, input.bookingId))
-		.limit(1);
-	if (!booking || booking.hotelId !== input.hotelId) {
-		throw new SecurityDepositError('Booking not found.');
-	}
+	await assertTargetExists(input.hotelId, input.target);
 
-	const existing = await getSecurityDepositForBooking(input.hotelId, input.bookingId);
+	const existing = await getSecurityDepositForTarget(input.hotelId, input.target);
 	if (existing?.status === 'held') {
-		throw new SecurityDepositError('A deposit is already held for this booking.');
+		throw new SecurityDepositError(`A deposit is already held for this ${targetNoun(input.target)}.`);
 	}
 
 	const [hotel] = await db
@@ -210,7 +250,8 @@ export async function collectSecurityDeposit(
 			.insert(securityDeposits)
 			.values({
 				hotelId: input.hotelId,
-				bookingId: input.bookingId,
+				bookingId: input.target.kind === 'room' ? input.target.bookingId : null,
+				hallBookingId: input.target.kind === 'hall' ? input.target.hallBookingId : null,
 				securityDepositPolicyId: input.securityDepositPolicyId ?? null,
 				status: 'held',
 				amountCentavos: input.amountCentavos,
@@ -232,7 +273,10 @@ export async function collectSecurityDeposit(
 				counterpartyType: 'guest',
 				sourceType: 'security_deposit',
 				sourceId: row!.id,
-				memo: 'Security deposit collected at check-in',
+				memo:
+					input.target.kind === 'room'
+						? 'Security deposit collected at check-in'
+						: 'Security deposit collected for a function hall event',
 				actor: input.actor
 			},
 			tx
@@ -245,8 +289,7 @@ export async function collectSecurityDeposit(
 		hotelId: input.hotelId,
 		actor: input.actor,
 		action: 'security_deposit.collect',
-		entityType: 'booking',
-		entityId: input.bookingId,
+		...targetEntity(input.target),
 		after: { securityDepositId, amountCentavos: input.amountCentavos, method: input.method }
 	});
 
@@ -299,7 +342,7 @@ export async function collectSecurityDeposit(
  */
 export async function settleSecurityDeposit(
 	hotelId: string,
-	bookingId: string,
+	target: DepositTarget,
 	actor: SessionUser | null,
 	/** Hotel-admin-only escape hatch — the caller MUST have already checked the `hotel:admin`
 	 *  capability before passing `true`. Skips the housekeeping gate below but never the
@@ -312,9 +355,9 @@ export async function settleSecurityDeposit(
 	refundedCentavos: number;
 	remainingFolioBalanceCentavos: number;
 }> {
-	const deposit = await getSecurityDepositForBooking(hotelId, bookingId);
+	const deposit = await getSecurityDepositForTarget(hotelId, target);
 	if (!deposit || deposit.status !== 'held') {
-		throw new SecurityDepositError('No held deposit found for this booking.');
+		throw new SecurityDepositError(`No held deposit found for this ${targetNoun(target)}.`);
 	}
 
 	// Never let the deposit settle on front desk's say-so alone — the folio's damage charges
@@ -322,24 +365,45 @@ export async function settleSecurityDeposit(
 	// the room yet, or has reported damage that isn't charged (or dismissed) yet, settling now
 	// would refund in full before anyone actually checked. A hotel admin can override this one
 	// gate (e.g. housekeeping is backed up and the guest can't wait) — see `overrideHousekeepingGate`.
-	const assignedRooms = await db
-		.select({ roomId: roomAssignments.roomId })
-		.from(bookingRooms)
-		.innerJoin(roomAssignments, eq(roomAssignments.bookingRoomId, bookingRooms.id))
-		.where(eq(bookingRooms.bookingId, bookingId));
-	const roomIds = [...new Set(assignedRooms.map((r) => r.roomId))];
-	if (roomIds.length > 0 && !overrideHousekeepingGate) {
-		const overlay = await getRoomHousekeepingOverlay(hotelId, roomIds);
-		for (const roomId of roomIds) {
-			const entry = overlay.get(roomId);
-			if (entry?.pendingDamageReports.length) {
+	if (!overrideHousekeepingGate) {
+		if (target.kind === 'room') {
+			const assignedRooms = await db
+				.select({ roomId: roomAssignments.roomId })
+				.from(bookingRooms)
+				.innerJoin(roomAssignments, eq(roomAssignments.bookingRoomId, bookingRooms.id))
+				.where(eq(bookingRooms.bookingId, target.bookingId));
+			const roomIds = [...new Set(assignedRooms.map((r) => r.roomId))];
+			const overlay = roomIds.length > 0 ? await getRoomHousekeepingOverlay(hotelId, roomIds) : null;
+			for (const roomId of roomIds) {
+				const entry = overlay?.get(roomId);
+				if (entry?.pendingDamageReports.length) {
+					throw new SecurityDepositError(
+						'Housekeeping has an unresolved damage report on this room — resolve it before settling the deposit.'
+					);
+				}
+				if (entry && entry.status !== 'clean') {
+					throw new SecurityDepositError(
+						"Housekeeping hasn't marked this room clean yet — settle the deposit once it's inspected."
+					);
+				}
+			}
+		} else {
+			// The hall's own close gate already answers both questions the room overlay does.
+			const [hall] = await db
+				.select({ functionHallId: hallBookings.functionHallId })
+				.from(hallBookings)
+				.where(eq(hallBookings.id, target.hallBookingId))
+				.limit(1);
+			if (!hall) throw new SecurityDepositError('Hall booking not found.');
+			const gate = await getHallCloseGate(hotelId, hall.functionHallId, target.hallBookingId);
+			if (gate.pendingDamageCount > 0) {
 				throw new SecurityDepositError(
-					'Housekeeping has an unresolved damage report on this room — resolve it before settling the deposit.'
+					'Housekeeping has an unresolved damage report on this hall — resolve it before settling the deposit.'
 				);
 			}
-			if (entry && entry.status !== 'clean') {
+			if (gate.status !== 'clean') {
 				throw new SecurityDepositError(
-					"Housekeeping hasn't marked this room clean yet — settle the deposit once it's inspected."
+					"Housekeeping hasn't marked this hall clean yet — settle the deposit once it's inspected."
 				);
 			}
 		}
@@ -347,7 +411,7 @@ export async function settleSecurityDeposit(
 
 	let folio;
 	try {
-		folio = await getFolioDetail(hotelId, { kind: 'room', bookingId });
+		folio = await getFolioDetail(hotelId, target);
 	} catch (e) {
 		if (e instanceof FolioError) throw new SecurityDepositError(e.message);
 		throw e;
@@ -389,12 +453,19 @@ export async function settleSecurityDeposit(
 
 	await db.transaction(async (tx: Tx) => {
 		if (forfeitedCentavos > 0) {
-			const folioId = await ensureFolio(tx, hotelId, { kind: 'room', bookingId });
-			const [order] = await tx
-				.select({ orderId: bookings.orderId })
-				.from(bookings)
-				.where(eq(bookings.id, bookingId))
-				.limit(1);
+			const folioId = await ensureFolio(tx, hotelId, target);
+			const [order] =
+				target.kind === 'room'
+					? await tx
+							.select({ orderId: bookings.orderId })
+							.from(bookings)
+							.where(eq(bookings.id, target.bookingId))
+							.limit(1)
+					: await tx
+							.select({ orderId: hallBookings.orderId })
+							.from(hallBookings)
+							.where(eq(hallBookings.id, target.hallBookingId))
+							.limit(1);
 			if (!order) throw new SecurityDepositError('Booking not found.');
 
 			await tx.insert(payments).values({
@@ -421,7 +492,10 @@ export async function settleSecurityDeposit(
 				counterpartyType: 'guest',
 				sourceType: 'security_deposit',
 				sourceId: deposit.id,
-				memo: 'Security deposit settled at checkout',
+				memo:
+					target.kind === 'room'
+						? 'Security deposit settled at checkout'
+						: 'Security deposit settled at event close',
 				actor
 			},
 			tx
@@ -463,8 +537,7 @@ export async function settleSecurityDeposit(
 		hotelId,
 		actor,
 		action: 'security_deposit.settle',
-		entityType: 'booking',
-		entityId: bookingId,
+		...targetEntity(target),
 		after: {
 			securityDepositId: deposit.id,
 			forfeitedCentavos,
@@ -501,17 +574,17 @@ export async function settleSecurityDeposit(
  */
 export async function reconcileSettledDeposit(
 	hotelId: string,
-	bookingId: string,
+	target: DepositTarget,
 	reason: string | null,
 	actor: SessionUser | null
 ): Promise<{ releasedCentavos: number; forfeitedCentavos: number }> {
-	const deposit = await getSecurityDepositForBooking(hotelId, bookingId);
+	const deposit = await getSecurityDepositForTarget(hotelId, target);
 	const oldForfeited = deposit?.forfeitedCentavos ?? 0;
 	if (!deposit || deposit.status !== 'settled' || oldForfeited <= 0) {
 		return { releasedCentavos: 0, forfeitedCentavos: oldForfeited };
 	}
 
-	const folio = await getFolioDetail(hotelId, { kind: 'room', bookingId });
+	const folio = await getFolioDetail(hotelId, target);
 	const baseCharges = folio.charges
 		.filter((c) => c.isBaseCharge && !c.voidedAt)
 		.reduce((sum, c) => sum + c.totalCentavos, 0);
@@ -578,11 +651,18 @@ export async function reconcileSettledDeposit(
 			);
 
 		if (newForfeited > 0) {
-			const [order] = await tx
-				.select({ orderId: bookings.orderId })
-				.from(bookings)
-				.where(eq(bookings.id, bookingId))
-				.limit(1);
+			const [order] =
+				target.kind === 'room'
+					? await tx
+							.select({ orderId: bookings.orderId })
+							.from(bookings)
+							.where(eq(bookings.id, target.bookingId))
+							.limit(1)
+					: await tx
+							.select({ orderId: hallBookings.orderId })
+							.from(hallBookings)
+							.where(eq(hallBookings.id, target.hallBookingId))
+							.limit(1);
 			if (!order) throw new SecurityDepositError('Booking not found.');
 			await tx.insert(payments).values({
 				orderId: order.orderId,
@@ -627,8 +707,7 @@ export async function reconcileSettledDeposit(
 		hotelId,
 		actor,
 		action: 'security_deposit.forfeiture_reduced',
-		entityType: 'booking',
-		entityId: bookingId,
+		...targetEntity(target),
 		after: {
 			securityDepositId: deposit.id,
 			previousForfeitedCentavos: oldForfeited,
@@ -686,8 +765,8 @@ export async function voidSecurityDeposit(
 		hotelId,
 		actor,
 		action: 'security_deposit.void',
-		entityType: 'booking',
-		entityId: deposit.bookingId ?? securityDepositId,
+		entityType: deposit.hallBookingId ? 'hall_booking' : 'booking',
+		entityId: deposit.bookingId ?? deposit.hallBookingId ?? securityDepositId,
 		after: { securityDepositId, reason: reason || null }
 	});
 }

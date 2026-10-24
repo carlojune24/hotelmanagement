@@ -64,7 +64,9 @@
 						</Table.Cell>
 						<Table.Cell class="text-ink">
 							{r.guestName ?? '—'}
-							{#if r.roomTypeName}
+							{#if r.hallName}
+								<span class="block text-xs text-ink-muted">{r.hallName} · {r.checkIn}</span>
+							{:else if r.roomTypeName}
 								<span class="block text-xs text-ink-muted">
 									{r.roomNumbers.length ? `Room ${r.roomNumbers.join(', ')} · ` : ''}{r.roomTypeName} · {r.checkIn} → {r.checkOut}
 								</span>

@@ -68,10 +68,10 @@
 
 	const links = $derived([
 		{ href: `${base}#about`, label: 'About', show: true },
-		{ href: `${base}#rooms`, label: 'Rooms & Rates', show: true },
+		{ href: `${base}#rooms`, label: 'Rooms', show: true },
 		{ href: `${base}#amenities`, label: 'Amenities', show: showAmenities },
 		{ href: `${base}/dining`, label: 'Dining', show: showDining, page: true },
-		{ href: `${base}/meetings-events`, label: 'Meetings & Events', show: showFunctionHall, page: true },
+		{ href: `${base}/meetings-events`, label: 'Events', show: showFunctionHall, page: true },
 		{ href: `${base}#gallery`, label: 'Gallery', show: true },
 		{ href: `${base}#reviews`, label: 'Reviews', show: showReviews },
 		{ href: `${base}/contact`, label: 'Contact', show: true, page: true }
