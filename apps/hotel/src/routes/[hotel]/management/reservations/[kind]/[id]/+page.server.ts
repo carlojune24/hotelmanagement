@@ -38,6 +38,7 @@ import {
 	listRoomTypeOptionsForModify,
 	modifyBookingStay
 } from '$lib/server/booking-modify';
+import { PENDING_ORDER_TTL_MINUTES } from '$lib/server/orders';
 import { saveUpload } from '$lib/server/uploads';
 import {
 	SecurityDepositError,
@@ -497,6 +498,13 @@ export const actions: Actions = {
 			});
 			const bits = ['Booking reinstated.'];
 			if (res.refundReversed) bits.push('The earlier refund was reversed.');
+			// The cancellation already killed the guest's checkout session, so they can't pay from
+			// their old email link — without a fresh one this hold releases itself again.
+			if (res.reinstatedTo === 'pending_payment') {
+				bits.push(
+					`It is unpaid and releases itself again in ${PENDING_ORDER_TTL_MINUTES} minutes — send the guest a payment link, or confirm the payment manually.`
+				);
+			}
 			return { ok: bits.join(' ') };
 		} catch (e) {
 			if (e instanceof StatusOverrideError) return fail(400, { error: e.message });

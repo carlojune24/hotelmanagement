@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, lt, lte } from 'drizzle-orm';
+import { and, eq, gt, inArray, lt, sql } from 'drizzle-orm';
 import { env } from '$env/dynamic/private';
 import { db } from './db/index';
 import {
@@ -28,6 +28,18 @@ export const PENDING_ORDER_TTL_MINUTES = (() => {
 	return Number.isFinite(raw) && raw >= 5 ? Math.floor(raw) : 60;
 })();
 
+/**
+ * When an order's current unpaid hold began. Normally the order's own creation (the
+ * storefront writes a `null -> pending_payment` history row in the same transaction), but
+ * a staff *reinstate* re-enters `pending_payment` long after creation
+ * (`status-override.ts`) — its hold has to start there, or the sweep below would release
+ * it the instant it was reinstated.
+ */
+const holdStartedAt = () => sql`coalesce((
+		select max(h.created_at) from order_status_history h
+		where h.order_id = ${orders.id} and h.to_status = 'pending_payment'
+	), ${orders.createdAt})`;
+
 export interface UnpaidHold {
 	roomTypeName: string;
 	rooms: number;
@@ -54,7 +66,7 @@ export async function listUnpaidHolds(
 			quantity: bookingRooms.quantity,
 			checkIn: bookings.checkIn,
 			checkOut: bookings.checkOut,
-			orderCreatedAt: orders.createdAt
+			orderCreatedAt: holdStartedAt().mapWith(orders.createdAt)
 		})
 		.from(bookings)
 		.innerJoin(orders, eq(orders.id, bookings.orderId))
@@ -84,9 +96,11 @@ type ExpiryCandidate = { id: string; status: string; createdAt: Date };
 
 /**
  * Pure split of candidate orders into those whose hold has lapsed and those to
- * keep. An order expires only while still `pending_payment` and at least
- * `ttlMs` old (boundary inclusive). Extracted for unit testing — the DB
- * orchestration in {@link expirePendingOrders} is thin around this.
+ * keep. An order expires only while still `pending_payment` and held for at least
+ * `ttlMs` — `createdAt` here is the hold's start (see {@link holdStartedAt}),
+ * which is not the order's creation for a reinstated booking. Boundary inclusive.
+ * Extracted for unit testing — the DB orchestration in
+ * {@link expirePendingOrders} is thin around this.
  */
 export function partitionExpiredOrders<T extends ExpiryCandidate>(
 	rows: T[],
@@ -129,14 +143,14 @@ export async function expirePendingOrders(opts?: {
 		.select({
 			id: orders.id,
 			hotelId: orders.hotelId,
-			createdAt: orders.createdAt,
+			holdStartedAt: holdStartedAt().mapWith(orders.createdAt),
 			checkoutSessionId: orders.paymongoCheckoutSessionId
 		})
 		.from(orders)
 		.where(
 			and(
 				eq(orders.status, 'pending_payment'),
-				lte(orders.createdAt, cutoff),
+				sql`${holdStartedAt()} <= ${cutoff.toISOString()}::timestamptz`,
 				opts?.hotelId ? eq(orders.hotelId, opts.hotelId) : undefined
 			)
 		);
@@ -150,7 +164,8 @@ export async function expirePendingOrders(opts?: {
 		const { verifyOrderNow } = await import('./paymongo/verify');
 		const verified = await verifyOrderNow({ orderId: candidate.id }, 0, 'hold_sweep').catch(() => null);
 		if (verified?.paid) continue;
-		if (verified?.unknown && now.getTime() - candidate.createdAt.getTime() < 24 * 60 * 60_000) continue;
+		if (verified?.unknown && now.getTime() - candidate.holdStartedAt.getTime() < 24 * 60 * 60_000)
+			continue;
 
 		const didExpire = await db.transaction(async (tx) => {
 			const updated = await tx

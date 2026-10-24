@@ -1,6 +1,6 @@
-import { and, eq, inArray, lt } from 'drizzle-orm';
+import { and, eq, inArray, lt, notExists } from 'drizzle-orm';
 import { db } from '../db/index';
-import { bookings, hotels, hrConnections } from '../db/schema/index';
+import { bookings, bookingStatusHistory, hotels, hrConnections } from '../db/schema/index';
 import { syncHrLinkedMembers } from '../hr-link/sync';
 import { expirePendingOrders } from '../orders';
 import { generateDueRecurringExpenses } from '../finance/expenses';
@@ -52,7 +52,8 @@ export async function runRecurringExpenses(): Promise<JobRunSummary> {
 /** Flips a confirmed arrival to `no_show` once its check-in date has fully passed
  *  with no check-in, per hotel that has `no_show_autoflag` on. Uses each hotel's
  *  own business date (its own timezone), same as every other dated Finance/
- *  front-desk rule in this app. */
+ *  front-desk rule in this app. A booking a human already reinstated out of
+ *  `no_show` is left alone — otherwise this undoes the override within the hour. */
 export async function runNoShowAutoflag(): Promise<JobRunSummary> {
 	const hotelIds = await getEnabledHotelIds('no_show_autoflag');
 	if (hotelIds.length === 0) return { hotelsProcessed: 0, detail: { flagged: 0 } };
@@ -68,7 +69,26 @@ export async function runNoShowAutoflag(): Promise<JobRunSummary> {
 		const candidates = await db
 			.select({ id: bookings.id })
 			.from(bookings)
-			.where(and(eq(bookings.hotelId, h.id), eq(bookings.status, 'confirmed'), lt(bookings.checkIn, today)));
+			.where(
+				and(
+					eq(bookings.hotelId, h.id),
+					eq(bookings.status, 'confirmed'),
+					lt(bookings.checkIn, today),
+					// `reinstateBooking` is the only writer of a `from_status = 'no_show'` row, so
+					// this row means staff deliberately brought the booking back. Don't re-flag it.
+					notExists(
+						db
+							.select({ one: bookingStatusHistory.id })
+							.from(bookingStatusHistory)
+							.where(
+								and(
+									eq(bookingStatusHistory.bookingId, bookings.id),
+									eq(bookingStatusHistory.fromStatus, 'no_show')
+								)
+							)
+					)
+				)
+			);
 		for (const c of candidates) {
 			// markNoShow re-checks status under a guarded update, so a race (e.g. staff
 			// checking the guest in seconds before this runs) simply no-ops there.
