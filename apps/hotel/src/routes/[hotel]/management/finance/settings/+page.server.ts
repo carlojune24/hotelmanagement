@@ -23,6 +23,7 @@ import {
 import { ensureFinanceSettings, getFinanceSettings, updateFinanceSettings } from '$lib/server/finance/settings';
 import { createApiKey, listApiKeysForHotel, revokeApiKey } from '$lib/server/auth/api-key';
 import { getScPwdDiscountBps, setScPwdDiscountBps } from '$lib/server/sc-pwd-discount';
+import { getBirSettings } from '$lib/server/finance/documents';
 import type { Actions, PageServerLoad } from './$types';
 
 const ACCOUNT_KINDS = ['cash_drawer', 'petty_cash', 'bank', 'e_wallet', 'undeposited'] as const;
@@ -44,7 +45,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 	requireCap(locals.user, locals.role, 'hotel:admin');
 	const hotel = locals.hotel!;
 	await ensureFinanceSettings(hotel.id);
-	const [accounts, categories, vendors, settings, apiKeys, hotelDetails, scPwdDiscountBps] =
+	const [accounts, categories, vendors, settings, apiKeys, hotelDetails, scPwdDiscountBps, bir] =
 		await Promise.all([
 			listCashAccounts(hotel.id, { includeInactive: true }),
 			listExpenseCategories(hotel.id, { includeInactive: true }),
@@ -56,7 +57,8 @@ export const load: PageServerLoad = async ({ locals }) => {
 				.from(hotels)
 				.where(eq(hotels.id, hotel.id))
 				.then((r) => r[0]!),
-			getScPwdDiscountBps(hotel.id)
+			getScPwdDiscountBps(hotel.id),
+				getBirSettings(hotel.id)
 		]);
 	return {
 		accounts,
@@ -66,6 +68,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 		apiKeys,
 		hotelDetails,
 		scPwdDiscountBps,
+		vatLocked: !!bir && !bir.isVatRegistered,
 		accountKinds: ACCOUNT_KINDS,
 		expenseGroups: EXPENSE_GROUPS
 	};
@@ -95,11 +98,15 @@ export const actions: Actions = {
 			.safeParse(Object.fromEntries(await event.request.formData()));
 		if (!p.success) return fail(400, { error: 'Check the hotel details.' });
 
+		// No BIR row yet counts as VAT-registered (the column default); a non-VAT hotel is pinned to 0%.
+		const bir = await getBirSettings(hotelId);
+		const vatRateBps = bir && !bir.isVatRegistered ? 0 : Math.round(p.data.vatRatePct * 100);
+
 		await db
 			.update(hotels)
 			.set({
 				currency: p.data.currency,
-				vatRateBps: Math.round(p.data.vatRatePct * 100),
+				vatRateBps,
 				timezone: p.data.timezone,
 				updatedAt: new Date()
 			})

@@ -243,6 +243,16 @@ export async function upsertBirSettings(
 		.values(values)
 		.onConflictDoUpdate({ target: birSettings.hotelId, set: values });
 
+	// The VAT-registered flag drives the hotel's VAT rate: off → 0%, back on → 12% unless a rate is already set.
+	if (!input.isVatRegistered) {
+		await db.update(hotels).set({ vatRateBps: 0, updatedAt: new Date() }).where(eq(hotels.id, hotelId));
+	} else {
+		await db
+			.update(hotels)
+			.set({ vatRateBps: 1200, updatedAt: new Date() })
+			.where(and(eq(hotels.id, hotelId), eq(hotels.vatRateBps, 0)));
+	}
+
 	await writeAudit({
 		hotelId,
 		actor,

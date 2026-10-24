@@ -47,7 +47,10 @@
 				</div>
 				<div>
 					<Label class="text-xs" for="vatRatePct">VAT %</Label>
-					<Input id="vatRatePct" name="vatRatePct" type="number" step="0.01" value={vatPct} required />
+					<Input id="vatRatePct" name="vatRatePct" type="number" step="0.01" value={vatPct} readonly={data.vatLocked} required />
+					{#if data.vatLocked}
+						<p class="mt-1 text-xs text-ink-muted">Fixed at 0% — set in BIR → Setup (VAT-registered is off).</p>
+					{/if}
 				</div>
 				<div>
 					<Label class="text-xs" for="timezone">Timezone</Label>
