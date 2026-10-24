@@ -5,11 +5,15 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
+	import type { SubmitFunction } from '@sveltejs/kit';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 	const s = $derived(data.settings);
 	const identity = $derived(data.identity);
+
+	// Keep what was typed after saving; the default reset would blank every input.
+	const keepValues: SubmitFunction = () => async ({ update }) => update({ reset: false });
 
 	$effect(() => {
 		if (form && 'ok' in form && form.ok) toast.success(form.ok);
@@ -25,7 +29,7 @@
 	{/if}
 </div>
 
-<form method="POST" action="?/saveIdentity" use:enhance class="mb-6 space-y-3">
+<form method="POST" action="?/saveIdentity" use:enhance={keepValues} class="mb-6 space-y-3">
 	<section class="rounded-xl border border-border p-5">
 		<h2 class="mb-3 text-sm font-semibold text-ink">Business identity</h2>
 		<p class="mb-3 text-xs text-ink-muted">
@@ -50,7 +54,7 @@
 	</section>
 </form>
 
-<form method="POST" action="?/save" use:enhance class="space-y-6">
+<form method="POST" action="?/save" use:enhance={keepValues} class="space-y-6">
 	<section class="rounded-xl border border-border p-5">
 		<h2 class="mb-3 text-sm font-semibold text-ink">Tax identity</h2>
 		<div class="grid gap-3 sm:grid-cols-2">
