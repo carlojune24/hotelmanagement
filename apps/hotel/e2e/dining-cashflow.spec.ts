@@ -10,11 +10,14 @@ test.describe('Dining · Cashflow tab', () => {
 
 	test('sits beside Sales and shows the money summary', async ({ page }) => {
 		await page.goto(`${dining}/sales`);
-		await expect(page.getByRole('link', { name: 'Cashflow' })).toBeVisible();
-		await page.getByRole('link', { name: 'Cashflow' }).click();
+		// Scoped to the tab bar: the Sales page also cross-links to Cashflow once the day has money.
+		const tab = page.getByRole('navigation', { name: 'Dining sections' }).getByRole('link', { name: 'Cashflow' });
+		await expect(tab).toBeVisible();
+		await tab.click();
 		await expect(page).toHaveURL(/\/dining\/cashflow/);
+		// `.first()`: once the day has money these labels repeat as column headings below.
 		for (const label of ['Money in', 'Refunds out', 'Net', 'Online money awaiting payout']) {
-			await expect(page.getByText(label, { exact: true })).toBeVisible();
+			await expect(page.getByText(label, { exact: true }).first()).toBeVisible();
 		}
 		await expect(page.getByText('Undeposited Funds').first()).toBeVisible();
 	});

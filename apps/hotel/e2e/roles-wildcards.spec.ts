@@ -14,11 +14,18 @@ function roleCard(page: import('playwright/test').Page, name: string) {
 	return page.locator('section').filter({ hasText: name }).first();
 }
 
+/** Presses a button that opens a form in the browser, until the page has hydrated enough to hear it. */
+async function pressUntil(page: import('playwright/test').Page, button: () => Promise<void>, form: import('playwright/test').Locator) {
+	await expect(async () => {
+		await button();
+		await expect(form).toBeVisible({ timeout: 2000 });
+	}).toPass({ timeout: 30_000 });
+}
+
 async function openEditor(page: import('playwright/test').Page, name: string) {
 	const card = roleCard(page, name);
-	await card.getByRole('button', { name: 'Edit' }).click();
 	const form = card.locator('form[action="?/updateRole"]');
-	await expect(form).toBeVisible();
+	await pressUntil(page, () => card.getByRole('button', { name: 'Edit' }).click(), form);
 	return form;
 }
 
@@ -54,8 +61,8 @@ test('narrowing a broader grant to one permission still works', async ({ page })
 
 	// A throwaway role, so the test never leaves a seeded role narrowed.
 	const name = `E2E Caps ${Date.now().toString().slice(-6)}`;
-	await page.getByRole('button', { name: 'Add role' }).click();
 	const create = page.locator('form[action="?/createRole"]');
+	await pressUntil(page, () => page.getByRole('button', { name: 'Add role' }).click(), create);
 	await create.locator('input[name="name"]').fill(name);
 	await create.locator('input[value="payment:*"]').check();
 	await create.getByRole('button', { name: 'Create role' }).click();

@@ -150,15 +150,31 @@ Spot-check the earlier display fix:
 
 ## Automated
 
+The dev hotel's slug is `mmhotel`, and `e2e/helpers.ts` defaults to `hotel1` — pass it, or every
+test skips itself:
+
 ```bash
-pnpm --filter @mm/hotel exec playwright test e2e/dining-drawer.spec.ts
-pnpm --filter @mm/hotel exec playwright test e2e/roles-wildcards.spec.ts
+pnpm dev                                           # terminal 1, http://localhost:5175
+cd apps/hotel
+E2E_HOTEL_SLUG=mmhotel pnpm exec playwright test e2e/dining-drawer.spec.ts
+E2E_HOTEL_SLUG=mmhotel pnpm exec playwright test e2e/dining-cashflow.spec.ts e2e/roles-wildcards.spec.ts
 ```
 
-`dining-drawer.spec.ts` covers: a new drawer gets its own COA leaf, the two pickers exclude each
-other, the unconfigured state, the open/close round trip, and dining's shift not displacing the
-front desk's. **Untested as written** — its `ensureDiningDrawer` helper guesses the Add-account
-button labels; if it fails on the first run, that selector is the likely cause.
+`e2e/dining-drawer.spec.ts` now drives the real register and then reads the rows it left behind
+(`e2e/db.ts` is a read-only connection for exactly this — the specs never write SQL):
+
+| Test | What it proves |
+|---|---|
+| a cash account made in the UI gets its own COA leaf | `createCashAccount` mints a leaf in the drawer decade and never reuses `1010` |
+| the two drawer pickers exclude each other | one till can't serve both registers |
+| **dining cash lands in dining's till** | a real takeaway sale paid in cash writes one `cash_movements` row on dining's drawer, inside dining's shift, `dining_revenue`/`in`, amount = order total, memo naming the order, a journal entry debiting dining's own leaf and crediting `4040` — and the front desk's open shift gains nothing |
+| a payout and a cash drop reduce what the drawer should hold | ₱50 payout + ₱100 drop land as `expense`/`transfer_out`; a short count records the variance and posts the matching `adjustment` |
+| the opening float reaches the ledger, and is counted once | the top-up posts only the shortfall, untagged by shift, and the close still expects the float exactly once |
+| with dining's drawer closed, cash cannot be taken | the Orders toolbar offers only *Open shift*, and closing lives on the Drawer page |
+| Finance sees dining's shifts on their own drawer | Finance → Shifts lists it; the Drawer page's history shows no front-desk shift |
+
+Each test closes dining's drawer again in `afterEach`, counting what it should be holding, so a
+tidy-up never leaves a fake variance or an open shift that blocks the next run.
 
 ## Known gaps
 
@@ -170,3 +186,109 @@ button labels; if it fails on the first run, that selector is the likely cause.
   it by accident is gone. A second counter needs its own register surface, as dining has.
 - The Dining → Drawer page reuses the approved Finance shift card, but the page itself has not had
   the `impeccable` design pass CLAUDE.md asks for.
+
+---
+
+# Regression run — 2026-10-25
+
+Branch `dining-cash-drawer` (`503c050`), against the dev server and dev DB (`mmhotel`).
+`pnpm check`: **0 errors**. `pnpm test` (vitest): **12 failures in 6 files — the documented
+pre-existing set**, nothing new. Playwright: `dining-drawer.spec.ts` **6/6**,
+`dining-cashflow.spec.ts` **4/4** (1 skipped, needs PayMongo).
+
+## The money trail is straight
+
+A cash takeaway sale of ₱199.00 rang up through the real UI produced exactly one trail, end to end:
+
+```
+dining_orders  DN-NN66   total 19900  method cash
+               cash_account_id → Dining Desk Drawer   shift_id → dining's open shift
+cash_movements in / dining_revenue / 19900
+               source_type 'dining_order' → the order,  memo "Dining DN-NN66"
+journal_lines  1012 Dining Desk Drawer   debit  19900
+               4040 Food & Beverage Revenue  credit 19900
+```
+
+- The cash leg posts to the drawer's **own** leaf `1012`, not the front desk's `1010`.
+- The front desk's open shift gained nothing from the sale.
+- Every dining movement on that drawer carries a `shift_id` — no orphan cash (`select count(*)
+  from cash_movements where cash_account_id = <dining> and shift_id is null` → **0**).
+- Drawer events are just as legible: payout → `expense`/`out` with the reason as memo, cash drop →
+  `transfer_out` + `transfer_in` through the `1091` clearing account, short close → `adjustment`
+  "Shift close — cash short". All four carry a journal entry.
+- Dining → Cashflow reads ₱1,194.00 money in, attributed to **Dining Desk Drawer**, matching the
+  sales side.
+
+## Bug found and fixed
+
+**An uncategorised payout was silently rejected.** On Dining → Drawer (and Finance → Shifts, which
+shares the card), recording a payout with the category left at "— Uncategorised —" did nothing: no
+money moved, no visible error. The select posts an empty string and
+`expenseCategoryId: z.string().uuid().optional()` rejected it, so the action returned
+`fail(400, 'Check the amount.')` — a message about a field that was fine. Picking any real category
+worked, which is why it had not been noticed. Fixed at both parse sites by treating empty as
+absent; the payout test now covers the Uncategorised path.
+
+## Fixes applied — 2026-10-26
+
+Every finding from the run above was taken on. Guarded by `e2e/dining-drawer.spec.ts` (now **7
+tests**, green).
+
+1. **★ The opening float now reaches the ledger.** `openShift` (`finance/shifts.ts`) tops the
+   drawer up to its declared float from `defaultBankAccountId`, as a paired `transfer_out`/
+   `transfer_in` sharing a `transferGroupId` — the same move a "Float pickup ← bank" drawer event
+   makes, and like that one it does not demand the bank's book balance covers it, because the cash
+   comes from the safe.
+   - **Only the shortfall** moves, so a till whose cash stays in it overnight posts nothing the
+     next morning. The top-up is **capped at the float**: a wrong (or negative) book balance must
+     not drag a fortune out of the bank to catch up — that is a correction, not a float.
+   - The movements are deliberately **not tagged with `shift_id`**, following the precedent
+     `collectShiftChargeback` sets: `getShiftReconciliation` sums by `shift_id` and already counts
+     the float once via the shift's own opening figure, so tagging them would make every drawer
+     expect its float twice and post a bogus shortfall at close. `source_type='shift_open'` +
+     `source_id` keep the audit link.
+   - **Opening a shift can never fail because of it.** No bank account, a closed business day, no
+     chart-of-accounts link — the shift opens anyway and the cashier gets the reason in the toast
+     (`openShift` returns `{ shiftId, floatNote? }`; all three registers show it).
+   - A zero float posts nothing.
+2. **★ Desk money can no longer fall into dining's till.** `getDefaultOpenShift`'s "any open shift"
+   fallback now excludes the drawer Finance has assigned to dining, which fixes `refundPayment`,
+   `receivables.ts` and `standalone-sales.ts` in one place.
+3. **★ A dining cash refund leaves the till that took the money.** `recordDiningRefund` passes the
+   order's own `cashAccountId` as the drawer; dining's current drawer only stands in when the order
+   carries none.
+4. **A cash drop no longer tags its bank leg with the drawer's shift** — the pair stays linked by
+   `transferGroupId` and `source_id`, so a report keyed on `shift_id` alone stops double-counting.
+5. **The front desk's fallback drawer matches its own page:** exactly one drawer, never dining's,
+   in both the load and the `openShift` action.
+
+### Looked at, and left alone on purpose
+
+- **Non-cash dining refunds carrying no `shift_id`** is correct: a card/GCash refund leaves the
+  bank or e-wallet, and only `cash_drawer` accounts have shifts. The drawer showing the cash in and
+  not out is right too — that cash really is still in the till.
+- **The two drawer pages catching different error types** is harmless: the Drawer page only calls
+  finance code, which throws `FinanceError` alone; the Orders page also calls order and document
+  code, hence its wider `isBusinessError`.
+- **A second petty-cash account landing in the drawer decade** stays — separating the ranges would
+  renumber a seeded chart. The comment claiming "drawers live in 1010-1019" was the wrong part, and
+  now says the decade is shared with petty cash.
+
+### What this did to the dev figures
+
+Dining Desk Drawer climbed out of the red on its own as the spec reran: each open topped it up, and
+it now reads **+₱917.00** — float plus takings not yet banked, which is what a till should show.
+The negative moved to **Bank — Main (−₱2,744.00)**: this dev bank was never funded in the ledger
+(it held ₱800), so roughly ₱27,000 of float pickups across the test runs overdrew it. That is dev
+data, not a code fault — a real hotel's bank carries the balance, and `recordCashMovement` has no
+funds check by design (the existing pickup path behaves the same). Clear it when convenient by
+recording the bank's real money as an `owner_contribution`, or by setting its opening balance in
+Finance → Settings; **no code posts a correction, because inventing the counterparty for money that
+was never recorded is not something a script should decide.**
+
+## What the run left in the dev data
+
+The spec's paid ₱199 takeaway orders on 2026-10-25 and their closed dining shifts, a cash account
+`E2E Spare Drawer` (COA `1013`, never selected anywhere), and the drawer events above. The
+duplicate inactive `Dining Desk Drawer` still points at COA `1010` — unchanged, and still unable
+to post while inactive.
