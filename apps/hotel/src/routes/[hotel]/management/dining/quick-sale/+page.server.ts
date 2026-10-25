@@ -38,7 +38,7 @@ async function diningTill(hotelId: string) {
 }
 
 export const load: PageServerLoad = async ({ locals, url }) => {
-	requireCap(locals.user, locals.role, 'dining:write');
+	requireCap(locals.user, locals.role, 'dining:sell');
 	const hotel = locals.hotel!;
 
 	const { drawerId, openShift } = await diningTill(hotel.id);
@@ -110,7 +110,7 @@ const customItemSchema = z.object({
 
 export const actions: Actions = {
 	sell: async (event) => {
-		requireCap(event.locals.user, event.locals.role, 'dining:write');
+		requireCap(event.locals.user, event.locals.role, 'dining:sell');
 		const fd = await event.request.formData();
 		const raw = fd.get('cart');
 		if (typeof raw !== 'string') return fail(400, { error: 'Empty cart.' });
@@ -147,7 +147,7 @@ export const actions: Actions = {
 	 * count the same money twice.
 	 */
 	chargeRoom: async (event) => {
-		requireCap(event.locals.user, event.locals.role, 'dining:write');
+		requireCap(event.locals.user, event.locals.role, 'dining:sell');
 		const fd = await event.request.formData();
 		const raw = fd.get('cart');
 		const bookingId = fd.get('bookingId');
@@ -179,7 +179,7 @@ export const actions: Actions = {
 	/** A custom item typed at the till becomes a reusable catalog entry — see
 	 *  `findOrCreateAmenityItem` for the match/create rule. */
 	addCustomItem: async (event) => {
-		requireCap(event.locals.user, event.locals.role, 'dining:write');
+		requireCap(event.locals.user, event.locals.role, 'dining:sell');
 		const fd = await event.request.formData();
 		const parsed = customItemSchema.safeParse({ name: fd.get('name'), priceCentavos: fd.get('priceCentavos') });
 		if (!parsed.success) return fail(400, { error: 'Enter a name and a positive price.' });

@@ -56,6 +56,8 @@ export const SELF_SERVICE_ASSIGNABLE_ROLES: MembershipRole[] = ASSIGNABLE_HOTEL_
  * `dining:shift` today, `bar:shift` next — and the hotel-wide `shift:write` grants it too, so
  * finance and the front desk can run any drawer. Adding a register costs one `PERMISSION_CATALOG`
  * line plus one `requireAnyCap([<domain>:shift, shift:write])` call; nothing else changes.
+ * Its off-menu till follows the same shape as `<domain>:sell`, kept apart from `<domain>:write`
+ * so a waiter can take orders without being handed the register.
  */
 export const ROLE_CAPS: Record<MembershipRole, string[]> = {
 	hotel_admin: ['*'],
@@ -88,7 +90,7 @@ export const ROLE_CAPS: Record<MembershipRole, string[]> = {
 	// `dining:shift` is its own till, not the front desk's: the Orders toolbar can only ever open
 	// and close the drawer Finance assigned to dining. No payments module, finance, bookings,
 	// Kitchen or hotel admin.
-	dining: ['dining:read', 'dining:write', 'dining:manage', 'dining:shift'],
+	dining: ['dining:read', 'dining:write', 'dining:manage', 'dining:shift', 'dining:sell'],
 	// A cook sees only the Kitchen module: live board, prep list, sold-out list and history.
 	// No Dining, payments or finance. Station setup (`kitchen:manage`) stays with hotel_admin.
 	kitchen: ['kitchen:read', 'kitchen:write'],
@@ -257,6 +259,7 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 	{ cap: 'dining:write', label: 'Take and update dining orders, reservations and payments (the dining register)', section: 'Dining' },
 	{ cap: 'dining:manage', label: 'Edit the dining menu, add-ons, and the floor', section: 'Dining' },
 	{ cap: 'dining:shift', label: 'Open and close the dining drawer', section: 'Dining' },
+	{ cap: 'dining:sell', label: 'Use the dining Quick sale till', section: 'Dining' },
 
 	{ cap: 'kitchen:*', label: 'Everything in the Kitchen', section: 'Kitchen' },
 	{ cap: 'kitchen:read', label: 'See the Kitchen section (board, prep, sold-out, history)', section: 'Kitchen' },

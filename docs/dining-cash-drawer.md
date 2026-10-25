@@ -37,10 +37,21 @@ no leaf cannot post at all.
 
 ## Who may open and close it
 
-`dining:shift` — "Open and close the dining drawer" — is on the Dining role by default. The
-hotel-wide `shift:write` that finance and the front desk hold also grants it, so a manager can
-always run any drawer. A dining account does **not** get `finance:read`, so Finance → Shifts is a
-403 for them; the **Drawer** tab is their way in.
+Two grants, both in the **Dining** section of Settings → Team → Roles, both on the Dining role by
+default and both covered by "Everything in Dining" (`dining:*`):
+
+| Capability | Label in the roles page | Gives |
+|---|---|---|
+| `dining:shift` | Open and close the dining drawer | the **Drawer** tab, and the Open shift control on Orders |
+| `dining:sell` | Use the dining Quick sale till | the **Quick sale** tab and its actions |
+
+They are deliberately apart from `dining:write`, so a waiter can take orders and payments without
+being handed the register — untick either one and that tab disappears for them, while Orders keeps
+working. The hotel-wide `shift:write` that finance and the front desk hold also grants the drawer,
+so a manager can always run any till.
+
+A dining account does **not** get `finance:read`, so Finance → Shifts is a 403 for them; the
+**Drawer** tab is their way in. Changing a role takes effect at the next sign-in.
 
 ## Where the staff do it
 
@@ -191,4 +202,5 @@ up its own shifts.
 ---
 
 *Written by **Jade**, 2026-10-26. Updated the same day with the seeded dining drawer, the Quick
-sale till and charging a quick sale to a room.*
+sale till, charging a quick sale to a room, and the `dining:sell` permission that controls the
+till from Settings → Team → Roles.*

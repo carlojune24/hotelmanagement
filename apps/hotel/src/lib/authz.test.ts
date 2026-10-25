@@ -91,11 +91,21 @@ describe('homePathFor', () => {
 
 describe('the dining role', () => {
 	it('runs Dining end to end (orders, floor layout, QR codes, menu) and its own till, nothing else', () => {
-		expect(ROLE_CAPS.dining).toEqual(['dining:read', 'dining:write', 'dining:manage', 'dining:shift']);
+		expect(ROLE_CAPS.dining).toEqual([
+			'dining:read',
+			'dining:write',
+			'dining:manage',
+			'dining:shift',
+			'dining:sell'
+		]);
 		// `dining:shift` is dining's own drawer, not the front desk's — the Orders toolbar can
 		// only ever open and close the till Finance assigned to dining, and "Everything in
 		// Dining" (`dining:*`) covers it.
 		expect(roleCan(ROLE_CAPS.dining, 'dining:shift')).toBe(true);
+		// The Quick sale till is its own grant, so a waiter can take orders without the register.
+		expect(roleCan(ROLE_CAPS.dining, 'dining:sell')).toBe(true);
+		expect(roleCan(['dining:read', 'dining:write'], 'dining:sell')).toBe(false);
+		expect(roleCan(['dining:*'], 'dining:sell')).toBe(true);
 		expect(roleCan(['dining:*'], 'dining:shift')).toBe(true);
 		expect(roleCan(ROLE_CAPS.dining, 'dining:manage')).toBe(true); // areas, tables, QR codes, menu
 		for (const cap of ['kitchen:read', 'booking:read', 'room:read', 'finance:read', 'payment:create', 'hotel:admin', 'team:read']) {

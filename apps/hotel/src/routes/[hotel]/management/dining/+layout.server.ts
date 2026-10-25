@@ -18,8 +18,8 @@ export const load: LayoutServerLoad = async ({ locals, depends }) => {
 	]);
 	return {
 		canManageMenu: can('dining:manage') || can('hotel:admin'),
-		/** Takes orders and payments at the dining register — the Quick sale till included. */
-		canSell: can('dining:write'),
+		/** The dining register's own off-menu till, separate from taking orders. */
+		canSell: can('dining:sell'),
 		canEditSettings: can('hotel:admin'),
 		/** Dining's own till: its own `dining:shift`, or the hotel-wide `shift:write`. */
 		canRunDrawer: can('dining:shift') || can('shift:write'),
