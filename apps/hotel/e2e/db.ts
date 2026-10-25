@@ -190,3 +190,11 @@ export async function floatMovementFor(shiftId: string, cashAccountId: string): 
 		order by created_at desc limit 1`;
 	return row ? movement(row) : null;
 }
+
+/** Dining charges sitting on a guest's room bill, newest first. */
+export async function diningFolioCharges(limit = 5) {
+	return sql<{ description: string; quantity: number; total_centavos: string; tax_centavos: string; source: string }[]>`
+		select description, quantity, total_centavos, tax_centavos, source
+		from folio_charges where source = 'dining'
+		order by created_at desc limit ${limit}`;
+}

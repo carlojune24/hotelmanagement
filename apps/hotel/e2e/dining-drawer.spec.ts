@@ -39,6 +39,12 @@ function requireDrawer(): db.Drawer {
 }
 
 async function openDiningShift(page: Page, floatPhp: string) {
+	// Someone may have left a shift open on this drawer — a real cashier, or a run that failed
+	// before its cleanup. Close it on what it should be holding so the test starts from a till
+	// it owns, rather than failing on a toolbar that offers no float box.
+	const stale = requireDrawer() && (await db.openShiftFor(drawer!.id));
+	if (stale) await closeDiningShift(page, ((await db.expectedCashFor(stale)) / 100).toFixed(2));
+
 	await page.goto(orders);
 	const float = page.getByLabel('Opening float');
 	await expect(float).toBeVisible();
@@ -227,6 +233,64 @@ test.describe('Dining · its own cash drawer', () => {
 		const closed = await db.shiftById(shift.id);
 		expect(closed?.expectedCashCentavos).toBe(100000);
 		expect(closed?.varianceCentavos).toBe(0);
+	});
+
+	test('a dining quick sale rings into dining’s till, as dining money', async ({ page }) => {
+		const dining = requireDrawer();
+		const shift = await openDiningShift(page, '500');
+
+		// An off-menu line typed at the till: a price, a tender, done.
+		await page.goto(`${staff}/dining/quick-sale`);
+		const custom = page.locator('form[action="?/addCustomItem"]');
+		await custom.locator('input[name="name"]').fill(`E2E Corkage ${Date.now().toString().slice(-5)}`);
+		await custom.getByPlaceholder('Price').fill('150');
+		await custom.getByRole('button', { name: 'Add', exact: true }).click();
+
+		// Adding a custom item drops it straight into the cart — no second tap needed.
+		await expect(page.getByText('Total')).toBeVisible();
+		await page.locator('#tendered').fill('200');
+		await page.getByRole('button', { name: /^Charge ₱/ }).click();
+
+		// It lands on dining's drawer, inside dining's shift, as dining money — not as a
+		// front-desk incidental, or Dining → Cashflow would never show it.
+		await expect
+			.poll(async () => (await db.movementsForShift(shift.id)).length, { timeout: 15_000 })
+			.toBeGreaterThan(0);
+		const sale = (await db.movementsForShift(shift.id)).find((m) => m.sourceType === 'standalone_sale');
+		expect(sale, 'the quick sale must leave a cash movement').toBeTruthy();
+		expect(sale!.cashAccountId).toBe(dining.id);
+		expect(sale!.category).toBe('dining_revenue');
+		expect(sale!.direction).toBe('in');
+		expect(sale!.amountCentavos).toBe(15000);
+		expect(sale!.journalEntryId).toBeTruthy();
+	});
+
+	test('a quick sale charged to a room takes nothing from the till', async ({ page }) => {
+		requireDrawer();
+		const shift = await openDiningShift(page, '500');
+		const movesBefore = (await db.movementsForShift(shift.id)).length;
+
+		await page.goto(`${staff}/dining/quick-sale`);
+		const custom = page.locator('form[action="?/addCustomItem"]');
+		const label = `E2E Room item ${Date.now().toString().slice(-5)}`;
+		await custom.locator('input[name="name"]').fill(label);
+		await custom.getByPlaceholder('Price').fill('250');
+		await custom.getByRole('button', { name: 'Add', exact: true }).click();
+		await expect(page.getByText('Total')).toBeVisible();
+
+		await page.getByRole('button', { name: 'Room', exact: true }).click();
+		const guest = page.getByRole('radio').first();
+		test.skip((await guest.count()) === 0, 'No guest is checked in to charge a room.');
+		await guest.click();
+		await page.getByRole('button', { name: /^Charge ₱/ }).click();
+
+		// It lands on the guest's bill…
+		await expect
+			.poll(async () => (await db.diningFolioCharges()).some((c) => c.description.includes(label)), { timeout: 15_000 })
+			.toBeTruthy();
+		// …and the till is untouched: counting it here as well would charge the guest twice, once
+		// now and once when they settle at the front desk.
+		expect((await db.movementsForShift(shift.id)).length).toBe(movesBefore);
 	});
 
 	test('a payout and a cash drop reduce what the drawer should hold', async ({ page }) => {

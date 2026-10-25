@@ -15,6 +15,11 @@ So: **one register, one drawer, one shift, one count.** The front desk counts it
 
 ## Setting it up
 
+A seeded hotel already has it: `db:seed` creates a **Dining Desk Drawer** beside the front desk's,
+gives it its own chart-of-accounts leaf, and points Finance → Settings at it — along with a demo
+venue, tables and a short menu, so a dining account can take an order and a payment on a fresh
+database. An older hotel sets it up by hand:
+
 Finance → Settings → **Preferences** holds two pickers:
 
 | Setting | Meaning |
@@ -41,10 +46,43 @@ always run any drawer. A dining account does **not** get `finance:read`, so Fina
 
 - **Dining → Orders** — the toolbar opens the shift (float + **Open shift**) and shows a green
   chip, `Dining Desk Drawer open · float ₱1,000.00`, linking to the Drawer page.
+- **Dining → Quick sale** — the off-menu till: corkage, a bottle of water, anything with no dish
+  behind it. Same cart as the front desk's Quick sale, but the cash goes into dining's drawer and
+  posts as dining revenue. A dish goes through Orders instead, so the kitchen sees it.
+  Picking **Room** puts the cart on a staying guest's bill instead: nothing is taken at the till,
+  no shift is involved, and the front desk collects it at check-out. Recording it as a sale *and*
+  letting the guest pay it later would count the same money twice — so it posts one `folio_charges`
+  line per item (`source: 'dining'`) and no cash movement at all. When the folio is settled, the
+  dining share comes back to `dining_revenue` automatically.
 - **Dining → Drawer** — the whole till: the open-shift card (opening float, cash in, cash out,
   expected in drawer), payouts and cash drops, closing the count, and the shift history for **this
   drawer only**. Closing lives here and nowhere else; the Orders toolbar only opens.
 - **Finance → Shifts** — a manager's view of every shift, each on its own drawer.
+
+## Quick sale: off-menu, and "charge to room"
+
+Orders is for dishes — the kitchen needs to see those. Quick sale is for everything else: corkage,
+a bottle of water, a charge with no dish behind it. The cart is the front desk's, with two
+differences.
+
+**Paid at the till.** Cash, card, GCash, Maya or bank transfer. It rings into dining's drawer and
+posts as `dining_revenue`, so it shows in Dining → Sales and Cashflow rather than disappearing into
+the hotel's incidentals. A typed custom item is saved to the catalog, so the second time it is one tap.
+
+**Charged to a room.** Pick **Room**, then the guest — by room number, name or booking code, from
+the guests staying right now. Nothing is taken at the till:
+
+- one `folio_charges` line **per item**, `source: 'dining'`, so the bill reads like a bill;
+- **no cash movement, no shift, no OR.** The receipt belongs to the payment, and the payment
+  happens at check-out. Ringing it as a sale *and* letting the guest pay later would count the
+  same money twice;
+- the front desk collects it at check-out, into **the desk's** drawer, and the dining share comes
+  back to `dining_revenue` when the folio is settled;
+- a closed bill is refused — "This guest's bill is closed. Charge it another way." Undo a line
+  from the folio while it is still open.
+
+Till prices include VAT, so the base and the VAT are split **per unit**: they multiply back to
+exactly the price quoted, with no rounding drift on a quantity.
 
 ## The money trail
 
@@ -72,6 +110,8 @@ What goes where:
 | Online (PayMongo) | Undeposited Funds until PayMongo pays out | No |
 | Charged to a room | No cash movement — a folio charge; it settles at the front desk when the guest pays, into **the desk's** drawer | At the desk |
 | Cash refund | Out of the till that **took** the money | Yes, if that drawer has one open |
+| Quick sale (off-menu) | Dining's drawer | Yes, if cash |
+| Quick sale charged to a room | No cash movement — a folio charge; the desk collects it at check-out | At the desk |
 | Payout, cash drop, close variance | Dining's drawer | Yes |
 
 The last two rows matter: a refund follows the original payment's drawer, not whichever drawer
@@ -144,7 +184,11 @@ up its own shifts.
   register surface, as dining has.
 - The Drawer page reuses the approved Finance shift card but has not had its own `impeccable`
   design pass.
+- Quick sale's own list of recent sales is shift- and cash-based, so a sale **charged to a room**
+  does not appear on that page. It is on the guest's folio; the cashier has no confirmation list
+  of what they put on which room.
 
 ---
 
-*Written by **Jade**, 2026-10-26.*
+*Written by **Jade**, 2026-10-26. Updated the same day with the seeded dining drawer, the Quick
+sale till and charging a quick sale to a room.*
