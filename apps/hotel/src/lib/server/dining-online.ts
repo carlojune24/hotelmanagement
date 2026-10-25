@@ -970,7 +970,15 @@ export async function recordDiningRefund(args: {
 	let cashAccountId: string;
 	let shiftId: string | null = null;
 	if (args.method === 'cash') {
-		const acct = await resolvePaymentAccount(args.hotelId, 'cash', await diningDrawerId(args.hotelId));
+		// Out of the till that took the money, not whichever drawer dining points at today —
+		// otherwise an order paid before the dining drawer existed refunds from a till that
+		// never held its cash. Dining's drawer only stands in when the order carries none.
+		const paidInto = order.paymentMethod === 'cash' ? order.cashAccountId : null;
+		const acct = await resolvePaymentAccount(
+			args.hotelId,
+			'cash',
+			paidInto ?? (await diningDrawerId(args.hotelId))
+		);
 		cashAccountId = acct.cashAccountId;
 		shiftId = acct.shiftId;
 	} else if (order.cashAccountId && order.paymentMethod !== 'cash') {

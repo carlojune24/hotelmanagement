@@ -64,7 +64,8 @@ export const actions: Actions = {
 				amount: z.coerce.number().positive(),
 				direction: z.enum(['in', 'out']).optional(),
 				reason: z.string().max(300).optional(),
-				expenseCategoryId: z.string().uuid().optional(),
+				// “— Uncategorised —” posts an empty string; it means no category, not a bad one.
+				expenseCategoryId: z.preprocess((v) => v || undefined, z.string().uuid().optional()),
 				isVatable: z.enum(['1']).optional()
 			})
 			.safeParse(Object.fromEntries(await event.request.formData()));

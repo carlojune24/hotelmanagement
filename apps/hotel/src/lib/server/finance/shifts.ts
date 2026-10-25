@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/index';
 import {
@@ -32,13 +33,85 @@ export { expectedShiftCash } from './calc';
  * account and never appear in a shift's cash math.
  */
 
+/**
+ * Puts the declared float into the drawer's ledger balance, so the till's balance-sheet line
+ * holds the cash that is physically in it. Only the **shortfall** is moved: a drawer whose cash
+ * stayed in it overnight already covers tomorrow's float and nothing posts — this models topping
+ * the till up from the safe, not re-funding it every morning.
+ *
+ * Deliberately not tagged with `shiftId`, for the same reason as `collectShiftChargeback`: that
+ * column drives `getShiftReconciliation`'s expected-cash sum, which already counts the float once
+ * via `openingFloatCentavos`. `sourceType`/`sourceId` still link the movement to the shift.
+ *
+ * Never throws: a till that cannot be topped up (no bank account, a closed business day, no
+ * chart-of-accounts link) must still open, or the register is stuck. Returns a note to show the
+ * cashier instead.
+ */
+async function postOpeningFloat(input: {
+	hotelId: string;
+	cashAccountId: string;
+	businessDate: string;
+	openingFloatCentavos: number;
+	shiftId: string;
+	actor: SessionUser | null;
+}): Promise<string | undefined> {
+	try {
+		const [drawer] = await db
+			.select({ balance: cashAccounts.currentBalanceCentavos })
+			.from(cashAccounts)
+			.where(eq(cashAccounts.id, input.cashAccountId))
+			.limit(1);
+		// Never more than the float itself: a till whose book balance is wrong (or negative) must
+		// not drag a fortune out of the bank to "catch up" — that is a correction, not a float.
+		const held = Math.max(0, drawer?.balance ?? 0);
+		const shortfall = input.openingFloatCentavos - held;
+		if (shortfall <= 0) return undefined; // the till already holds its float
+
+		const [settings] = await db
+			.select({ bank: financeSettings.defaultBankAccountId })
+			.from(financeSettings)
+			.where(eq(financeSettings.hotelId, input.hotelId))
+			.limit(1);
+		if (!settings?.bank) {
+			return 'The float was not posted to the ledger — set a default bank account in Finance settings.';
+		}
+
+		// The same paired move a "Float pickup ← bank" drawer event makes, and like that one it
+		// does not insist the bank's book balance covers it — the cash comes from the safe.
+		const transferGroupId = randomUUID();
+		const common = {
+			hotelId: input.hotelId,
+			businessDate: input.businessDate,
+			amountCentavos: shortfall,
+			sourceType: 'shift_open',
+			sourceId: input.shiftId,
+			transferGroupId,
+			actor: input.actor
+		} as const;
+		await db.transaction(async (tx) => {
+			await recordCashMovement(
+				{ ...common, cashAccountId: settings.bank!, direction: 'out', category: 'transfer_out', memo: 'Opening float to the drawer' },
+				tx
+			);
+			await recordCashMovement(
+				{ ...common, cashAccountId: input.cashAccountId, direction: 'in', category: 'transfer_in', memo: 'Opening float from the bank' },
+				tx
+			);
+		});
+		return undefined;
+	} catch (e) {
+		const why = e instanceof FinanceError ? e.message : 'it could not be posted';
+		return `The shift is open, but the float did not reach the ledger: ${why}`;
+	}
+}
+
 export async function openShift(input: {
 	hotelId: string;
 	cashAccountId: string;
 	businessDate: string;
 	openingFloatCentavos: number;
 	actor: SessionUser | null;
-}): Promise<{ shiftId: string }> {
+}): Promise<{ shiftId: string; floatNote?: string }> {
 	if (!Number.isInteger(input.openingFloatCentavos) || input.openingFloatCentavos < 0) {
 		throw new FinanceError('Opening float must be zero or a positive amount.');
 	}
@@ -74,7 +147,10 @@ export async function openShift(input: {
 				openingFloatCentavos: input.openingFloatCentavos
 			}
 		});
-		return { shiftId: row!.id };
+		const floatNote = input.openingFloatCentavos
+			? await postOpeningFloat({ ...input, shiftId: row!.id })
+			: undefined;
+		return { shiftId: row!.id, floatNote };
 	} catch (e) {
 		// The partial unique index `cashier_shifts_one_open_per_drawer`.
 		if (e instanceof Error && /one_open_per_drawer|unique/i.test(e.message)) {
@@ -106,17 +182,27 @@ export async function getOpenShiftForDrawer(
  *  cash-payment path use when the cashier doesn't pick a drawer explicitly. */
 export async function getDefaultOpenShift(hotelId: string): Promise<CashierShift | null> {
 	const [settings] = await db
-		.select({ drawer: financeSettings.defaultDrawerAccountId })
+		.select({
+			drawer: financeSettings.defaultDrawerAccountId,
+			dining: financeSettings.diningDrawerAccountId
+		})
 		.from(financeSettings)
 		.where(eq(financeSettings.hotelId, hotelId))
 		.limit(1);
 	if (settings?.drawer) return getOpenShiftForDrawer(hotelId, settings.drawer);
 
-	// No configured default — fall back to any open shift for the hotel.
+	// No configured default — fall back to any open shift for the hotel, except a register's own
+	// till. Dining's drawer answers to dining alone; desk money must never land in its count.
 	const [row] = await db
 		.select()
 		.from(cashierShifts)
-		.where(and(eq(cashierShifts.hotelId, hotelId), eq(cashierShifts.status, 'open')))
+		.where(
+			and(
+				eq(cashierShifts.hotelId, hotelId),
+				eq(cashierShifts.status, 'open'),
+				settings?.dining ? sql`${cashierShifts.cashAccountId} <> ${settings.dining}` : undefined
+			)
+		)
 		.orderBy(desc(cashierShifts.openedAt))
 		.limit(1);
 	return row ?? null;
@@ -455,7 +541,9 @@ export async function addShiftEvent(input: {
 					category: bankDir === 'in' ? 'transfer_in' : 'transfer_out',
 					sourceType: 'shift_event',
 					sourceId: ev!.id,
-					shiftId: input.shiftId,
+					// Not the shift's: this leg is the bank's side of the move. `transferGroupId` and
+					// `sourceId` still pair it with the drawer leg, and a report keyed on `shift_id`
+					// alone no longer counts the same money twice.
 					transferGroupId: groupId,
 					memo: input.kind === 'cash_drop' ? 'Cash drop from drawer' : 'Float pickup to drawer',
 					actor: input.actor

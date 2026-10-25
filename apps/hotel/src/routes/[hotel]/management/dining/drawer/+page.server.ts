@@ -73,14 +73,14 @@ export const actions: Actions = {
 		if (!drawer)
 			return fail(400, { error: 'No dining drawer is set up yet — Finance → Settings picks one.' });
 		try {
-			await openShiftFn({
+			const { floatNote } = await openShiftFn({
 				hotelId: hotel.id,
 				cashAccountId: drawer.id,
 				businessDate: localParts(new Date(), hotel.timezone).date,
 				openingFloatCentavos: Math.round(parsed.data.openingFloat * 100),
 				actor: event.locals.user
 			});
-			return { ok: 'Dining drawer opened.' };
+			return { ok: floatNote ?? 'Dining drawer opened.' };
 		} catch (e) {
 			if (e instanceof FinanceError) return fail(400, { error: e.message });
 			throw e;
@@ -97,7 +97,8 @@ export const actions: Actions = {
 				amount: z.coerce.number().positive(),
 				direction: z.enum(['in', 'out']).optional(),
 				reason: z.string().max(300).optional(),
-				expenseCategoryId: z.string().uuid().optional(),
+				// “— Uncategorised —” posts an empty string; it means no category, not a bad one.
+				expenseCategoryId: z.preprocess((v) => v || undefined, z.string().uuid().optional()),
 				isVatable: z.enum(['1']).optional()
 			})
 			.safeParse(Object.fromEntries(await event.request.formData()));

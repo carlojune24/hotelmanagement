@@ -131,8 +131,8 @@ export const CASH_ACCOUNT_KIND_TO_COA_CODE: Record<string, string> = {
 };
 
 /**
- * A free COA code for another account of `kind`, inside that kind's decade — drawers live in
- * 1010‑1019, banks in 1020‑1029, and so on. Each till being its own leaf is what lets the
+ * A free COA code for another account of `kind`, inside that kind's decade — 1010‑1019 for cash
+ * on hand (drawers *and* petty cash, which share it), 1020‑1029 for banks, and so on. Each till being its own leaf is what lets the
  * balance sheet show them apart; they would otherwise all post to the seeded account's line.
  * Returns null when the decade is full (ten accounts of one kind is already unusual).
  */

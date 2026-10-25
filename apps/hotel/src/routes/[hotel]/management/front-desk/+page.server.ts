@@ -164,9 +164,10 @@ export const load: PageServerLoad = async ({ locals }) => {
 	// The front desk rings into the drawer Finance names as the hotel default; a second drawer
 	// (dining's, a bar's) must never turn the counter into a picker. Falls back to the only
 	// drawer there is, for a hotel that never set the default.
+	const spareDrawers = drawers.filter((d) => d.id !== financeSettings.diningDrawerAccountId);
 	const frontDeskDrawer =
 		drawers.find((d) => d.id === financeSettings.defaultDrawerAccountId) ??
-		(drawers.length === 1 ? drawers[0]! : null);
+		(spareDrawers.length === 1 ? spareDrawers[0]! : null);
 
 	return {
 		businessDate,
@@ -889,7 +890,10 @@ export const actions: Actions = {
 		const settings = await getFinanceSettings(hotel.id);
 		let cashAccountId = settings.defaultDrawerAccountId;
 		if (!cashAccountId) {
-			const [only] = await db
+			// The same rule the page itself uses: fall back only when there is exactly one till to
+			// mean, and never another register's — opening dining's drawer from the counter would
+			// put desk cash in dining's count.
+			const drawers = await db
 				.select({ id: cashAccounts.id })
 				.from(cashAccounts)
 				.where(
@@ -899,21 +903,22 @@ export const actions: Actions = {
 						eq(cashAccounts.kind, 'cash_drawer')
 					)
 				)
-				.limit(2);
-			cashAccountId = only?.id ?? null;
+				.limit(3);
+			const spare = drawers.filter((d) => d.id !== settings.diningDrawerAccountId);
+			cashAccountId = spare.length === 1 ? spare[0]!.id : null;
 		}
 		if (!cashAccountId)
 			return fail(400, { shiftError: 'No front desk drawer is set up — Finance → Settings picks one.' });
 
 		try {
-			await openShiftFn({
+			const { floatNote } = await openShiftFn({
 				hotelId: hotel.id,
 				cashAccountId,
 				businessDate: todayInTimezone(hotel.timezone),
 				openingFloatCentavos: Math.round(parsed.data.openingFloat * 100),
 				actor: event.locals.user
 			});
-			return { ok: 'Shift opened.' };
+			return { ok: floatNote ?? 'Shift opened.' };
 		} catch (e) {
 			if (e instanceof FinanceError) return fail(400, { shiftError: e.message });
 			throw e;
