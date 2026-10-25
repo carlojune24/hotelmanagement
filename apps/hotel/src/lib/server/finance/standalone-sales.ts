@@ -6,7 +6,7 @@ import { writeAudit } from '../audit';
 import type { SessionUser } from '../auth/session';
 import { FinanceError, businessDateFor } from './shared';
 import { changeFor } from './calc';
-import { recordCashMovement } from './cash';
+import { recordCashMovement, type RecordMovementInput } from './cash';
 import { resolvePaymentAccount } from './payments';
 
 export interface StandaloneSaleLineInput {
@@ -28,6 +28,13 @@ export interface CreateStandaloneSaleInput {
 	 *  total) for `method: 'cash'`; ignored for every other method, since a quick
 	 *  sale has no folio to carry an under-tender forward on. */
 	tenderedCentavos?: number | null;
+	/** The till the cash physically goes into — the dining register passes its own drawer, so a
+	 *  restaurant sale never lands in the front desk's shift. Omitted keeps the hotel default. */
+	drawerAccountId?: string | null;
+	/** Which revenue line the sale posts to. `incidental_sale` is the front desk's walk-in sale;
+	 *  the dining register passes `dining_revenue` so its money shows in Dining's own figures,
+	 *  which are filtered by category. */
+	category?: RecordMovementInput['category'];
 	actor: SessionUser | null;
 }
 
@@ -101,7 +108,11 @@ export async function createStandaloneSale(
 		changeCentavos = changeFor(tenderedCentavos, totalCentavos);
 	}
 
-	const { cashAccountId, shiftId } = await resolvePaymentAccount(input.hotelId, input.method);
+	const { cashAccountId, shiftId } = await resolvePaymentAccount(
+		input.hotelId,
+		input.method,
+		input.drawerAccountId
+	);
 
 	const saleId = await db.transaction(async (tx) => {
 		const movementId = await recordCashMovement(
@@ -109,7 +120,7 @@ export async function createStandaloneSale(
 				hotelId: input.hotelId,
 				businessDate,
 				direction: 'in',
-				category: 'incidental_sale',
+				category: input.category ?? 'incidental_sale',
 				cashAccountId,
 				amountCentavos: totalCentavos,
 				sourceType: 'standalone_sale',

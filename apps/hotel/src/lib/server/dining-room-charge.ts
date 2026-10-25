@@ -18,6 +18,7 @@ import { businessDateFor } from './finance/shared';
 import { ensureFolio, voidFolioCharge, FolioError } from './folio';
 import { hotels } from './db/schema/index';
 import { OrderError } from './dining-orders';
+import { vatPortion } from '$lib/dining-orders';
 
 type Actor = SessionUser | null;
 
@@ -79,6 +80,103 @@ const isDuplicate = (e: unknown) =>
  * that point. Only a checked-in guest with an open folio can be charged; an order that is waiting
  * for online payment, already paid, cancelled or already on a bill cannot.
  */
+export interface RoomChargeLine {
+	description: string;
+	quantity: number;
+	/** VAT-**inclusive**, the price the cashier quoted — menu and till prices both include it. */
+	unitPriceCentavos: number;
+	amenityItemId?: string | null;
+}
+
+/**
+ * Puts loose lines — a Quick sale cart, not a dining order — on a staying guest's room bill.
+ *
+ * No money moves here and no shift is involved: the till takes nothing, it posts a claim the
+ * front desk collects at checkout. Recording it as a sale *and* letting the guest pay it later
+ * would count the same money twice. When the folio is settled, `recordFolioMovements` splits the
+ * `source: 'dining'` share back out to `dining_revenue`, so dining still gets its revenue even
+ * though the cash landed at the counter.
+ */
+export async function chargeDiningLinesToRoom(args: {
+	hotelId: string;
+	bookingId: string;
+	lines: RoomChargeLine[];
+	/** Shown on the folio line after the item name, e.g. the venue or "Quick sale". */
+	memo?: string | null;
+	actor: Actor;
+}): Promise<{ chargeIds: string[]; totalCentavos: number; roomLabel: string; guestName: string; bookingCode: string }> {
+	if (args.lines.length === 0) throw new OrderError('Add at least one item to charge.');
+	for (const l of args.lines) {
+		if (!Number.isInteger(l.quantity) || l.quantity <= 0) throw new OrderError('Quantity must be a positive whole number.');
+		if (!Number.isInteger(l.unitPriceCentavos) || l.unitPriceCentavos <= 0) throw new OrderError('Every line needs a positive price.');
+	}
+
+	const inHouse = (await listInHouseGuests(args.hotelId)).find((g) => g.bookingId === args.bookingId);
+	if (!inHouse) throw new OrderError('That guest is not checked in, so their room cannot be charged.');
+
+	const [hotel] = await db
+		.select({ timezone: hotels.timezone, vatRateBps: hotels.vatRateBps })
+		.from(hotels)
+		.where(eq(hotels.id, args.hotelId))
+		.limit(1);
+	const vatRateBps = hotel?.vatRateBps ?? 0;
+
+	try {
+		return await db.transaction(async (tx) => {
+			const folioId = await ensureFolio(tx, args.hotelId, { kind: 'room', bookingId: args.bookingId });
+			const [folio] = await tx.select({ status: folios.status }).from(folios).where(eq(folios.id, folioId)).limit(1);
+			if (folio?.status !== 'open') throw new OrderError("This guest's bill is closed. Charge it another way.");
+
+			// Split per unit, not per line: the VAT-exclusive base and the VAT then multiply back to
+			// exactly what the cashier quoted, with no rounding drift on a quantity.
+			const rows = args.lines.map((l) => {
+				const unitVat = vatPortion(l.unitPriceCentavos, vatRateBps);
+				return {
+					folioId,
+					amenityItemId: l.amenityItemId ?? null,
+					description: args.memo ? `${l.description} (${args.memo})` : l.description,
+					quantity: l.quantity,
+					unitPriceCentavos: l.unitPriceCentavos - unitVat,
+					taxCentavos: unitVat * l.quantity,
+					totalCentavos: l.unitPriceCentavos * l.quantity,
+					source: 'dining' as const,
+					addedByUserId: args.actor?.id ?? null
+				};
+			});
+			const charges = await tx.insert(folioCharges).values(rows).returning({ id: folioCharges.id });
+			const totalCentavos = rows.reduce((s, r) => s + r.totalCentavos, 0);
+
+			await writeAudit({
+				tx,
+				hotelId: args.hotelId,
+				actor: args.actor,
+				action: 'dining_quick_sale.room_charge',
+				entityType: 'folio',
+				entityId: folioId,
+				refCode: inHouse.bookingCode,
+				after: {
+					bookingId: args.bookingId,
+					room: inHouse.roomNumber,
+					folioId,
+					chargeIds: charges.map((c) => c.id),
+					totalCentavos
+				}
+			});
+
+			return {
+				chargeIds: charges.map((c) => c.id),
+				totalCentavos,
+				roomLabel: inHouse.roomNumber,
+				guestName: inHouse.guestName,
+				bookingCode: inHouse.bookingCode
+			};
+		});
+	} catch (e) {
+		if (e instanceof FolioError) throw new OrderError(e.message);
+		throw e;
+	}
+}
+
 export async function chargeDiningOrderToRoom(args: {
 	hotelId: string;
 	orderId: string;
