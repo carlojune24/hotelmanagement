@@ -39,7 +39,6 @@ import { FinanceError } from '$lib/server/finance/shared';
 import { diningDrawerId } from '$lib/server/finance/payments';
 import { listCashAccounts } from '$lib/server/finance/accounts';
 import {
-	closeShift,
 	getDefaultOpenShift,
 	getOpenShiftForDrawer,
 	getShiftReconciliation,
@@ -301,8 +300,7 @@ export const actions: Actions = {
 		}
 	},
 
-	/** Dining runs its own till: open and close happen here, at the register, never on a
-	 *  drawer the cashier names — it is always the one Finance assigned to dining. */
+	/** Dining runs its own till: the register opens it; counting and closing live on the Drawer page. */
 	openDrawer: async (event) => {
 		requireAnyCap(event.locals.user, event.locals.role, DRAWER_CAPS);
 		const hotel = event.locals.hotel!;
@@ -315,53 +313,20 @@ export const actions: Actions = {
 		if (!drawerId)
 			return fail(400, { error: 'No dining drawer is set up yet — Finance → Settings picks one.' });
 		try {
-			await openShiftFn({
+			const { floatNote } = await openShiftFn({
 				hotelId: hotel.id,
 				cashAccountId: drawerId,
 				businessDate: localParts(new Date(), hotel.timezone).date,
 				openingFloatCentavos: Math.round(parsed.data.openingFloat * 100),
 				actor: event.locals.user
 			});
-			return { ok: 'Dining drawer opened.' };
+			return { ok: floatNote ?? 'Dining drawer opened.' };
 		} catch (e) {
 			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
 			throw e;
 		}
 	},
 
-	closeDrawer: async (event) => {
-		requireAnyCap(event.locals.user, event.locals.role, DRAWER_CAPS);
-		const hotel = event.locals.hotel!;
-		const parsed = z
-			.object({ counted: z.coerce.number().min(0), notes: z.string().max(500).optional() })
-			.safeParse(Object.fromEntries(await event.request.formData()));
-		if (!parsed.success) return fail(400, { error: 'Enter the counted cash.' });
-
-		const drawerId = (await diningDrawerId(hotel.id)) ?? null;
-		if (!drawerId)
-			return fail(400, { error: 'No dining drawer is set up yet — Finance → Settings picks one.' });
-		// Resolved from the drawer, not the form, so this can only ever close dining's own shift.
-		const shift = await getOpenShiftForDrawer(hotel.id, drawerId);
-		if (!shift) return fail(400, { error: 'The dining drawer is not open.' });
-		try {
-			const r = await closeShift({
-				hotelId: hotel.id,
-				shiftId: shift.id,
-				countedCentavos: Math.round(parsed.data.counted * 100),
-				notes: parsed.data.notes || null,
-				actor: event.locals.user
-			});
-			return {
-				ok:
-					r.varianceCentavos === 0
-						? 'Dining drawer closed — balanced.'
-						: `Dining drawer closed — ${r.varianceCentavos > 0 ? 'over' : 'short'} ₱${(Math.abs(r.varianceCentavos) / 100).toFixed(2)}.`
-			};
-		} catch (e) {
-			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
-			throw e;
-		}
-	},
 
 	pay: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'dining:write');

@@ -116,8 +116,6 @@
 
 	// Dining runs its own till from this toolbar, the way the front desk does from its header.
 	let drawerFloat = $state<number | null>(null);
-	let closeDrawerOpen = $state(false);
-	let countedCash = $state<number | null>(null);
 
 	let newOpen = $state(false);
 	// "New order" on a Floor table lands here with ?newOrder=1&table=…: open the sheet on that table, then tidy the URL.
@@ -191,9 +189,7 @@
 			respondFor = null;
 			refundOpen = false;
 			undoRoomFor = null;
-			closeDrawerOpen = false;
 			drawerFloat = null;
-			countedCash = null;
 		}
 		const issued = form?.issued as { id: string; type: string; formattedNo: string } | undefined;
 		if (issued) {
@@ -242,9 +238,6 @@
 						<BanknoteIcon class="size-3.5" aria-hidden="true" />
 						{data.drawer.name ?? 'Drawer'} open · float {peso(data.drawer.openShift.openingFloatCentavos)}
 					</a>
-					<Button class="h-10" variant="outline" onclick={() => (closeDrawerOpen = true)}>
-						<ClockIcon class="size-4" /> Close shift
-					</Button>
 				{:else if data.drawer.name}
 					<form method="POST" action="?/openDrawer" use:enhance class="flex items-center gap-1.5">
 						<input
@@ -554,36 +547,6 @@
 				</Dialog.Footer>
 			</form>
 		{/if}
-	</Dialog.Content>
-</Dialog.Root>
-
-<!-- Close dining's own drawer: count the cash, same over/short math as Finance → Shifts -->
-<Dialog.Root bind:open={closeDrawerOpen}>
-	<Dialog.Content class="sm:max-w-sm">
-		<Dialog.Header>
-			<Dialog.Title>Close {data.drawer.name ?? 'the drawer'}</Dialog.Title>
-			<Dialog.Description>
-				{#if data.drawer.openShift?.expectedCashCentavos != null}
-					Count the cash in the drawer. {peso(data.drawer.openShift.expectedCashCentavos)} is expected.
-				{:else}
-					Count the cash in the drawer and enter the total.
-				{/if}
-			</Dialog.Description>
-		</Dialog.Header>
-		<form method="POST" action="?/closeDrawer" use:enhance class="space-y-3">
-			<div>
-				<Label for="counted">Counted cash</Label>
-				<Input id="counted" name="counted" type="number" min="0" step="0.01" bind:value={countedCash} required placeholder="0.00" class="mt-1" />
-			</div>
-			<div>
-				<Label for="closeNotes">Notes (optional)</Label>
-				<Textarea id="closeNotes" name="notes" maxlength={500} rows={2} placeholder="Anything worth recording about the count" class="mt-1" />
-			</div>
-			<Dialog.Footer>
-				<Button type="button" variant="outline" onclick={() => (closeDrawerOpen = false)}>Not yet</Button>
-				<Button type="submit">Close shift</Button>
-			</Dialog.Footer>
-		</form>
 	</Dialog.Content>
 </Dialog.Root>
 
