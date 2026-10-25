@@ -73,6 +73,89 @@ async function upsertUser(input: {
  * status / flag, and rate plans covering weekend pricing, child rules, extra-bed
  * fees, min/max stay, and a seasonal range. Skipped once room types exist.
  */
+/**
+ * A restaurant the dining account can actually run on a fresh database: one venue, a station
+ * for the kitchen board, an area with tables to seat, and a small menu. Without it a dining
+ * sign-in lands on an empty Floor and an empty Menu with nothing to sell.
+ *
+ * Idempotent — a no-op once the hotel has a venue.
+ */
+async function seedDining(hotelId: string) {
+	const existing = await db
+		.select({ id: schema.diningItems.id })
+		.from(schema.diningItems)
+		.where(eq(schema.diningItems.hotelId, hotelId))
+		.limit(1);
+	if (existing.length > 0) return;
+
+	const [venue] = await db
+		.insert(schema.diningItems)
+		.values({
+			hotelId,
+			title: 'Demo Restaurant',
+			category: 'Restaurant',
+			tagline: 'All-day dining, a short walk from the lobby.',
+			description:
+				'The hotel’s own restaurant: breakfast through dinner, with a short menu built around local produce.',
+			operatingHours: '6:00 AM – 10:00 PM',
+			isActive: true,
+			sortOrder: 0,
+			// Seating hours make the Reservations tab usable from the first sign-in.
+			reservationsEnabled: true,
+			seatingOpen: '06:00',
+			lastSeating: '21:00'
+		})
+		.returning({ id: schema.diningItems.id });
+	const venueId = venue!.id;
+
+	// Every dish needs a station: `dining_menu_items.station_id` is NOT NULL.
+	const [station] = await db
+		.insert(schema.diningStations)
+		.values({ hotelId, name: 'Kitchen', sortOrder: 0 })
+		.returning({ id: schema.diningStations.id });
+
+	const [area] = await db
+		.insert(schema.diningAreas)
+		.values({ hotelId, diningItemId: venueId, name: 'Main Hall', sortOrder: 0 })
+		.returning({ id: schema.diningAreas.id });
+
+	await db.insert(schema.diningTables).values(
+		[
+			{ name: 'T1', seats: 2, x: 0, y: 0 },
+			{ name: 'T2', seats: 2, x: 1, y: 0 },
+			{ name: 'T3', seats: 4, x: 0, y: 1 },
+			{ name: 'T4', seats: 6, x: 1, y: 1 }
+		].map((t) => ({ hotelId, diningItemId: venueId, areaId: area!.id, area: 'Main Hall', ...t }))
+	);
+
+	const categories = await db
+		.insert(schema.diningMenuCategories)
+		.values([
+			{ hotelId, diningItemId: venueId, name: 'Mains', sortOrder: 0 },
+			{ hotelId, diningItemId: venueId, name: 'Drinks', sortOrder: 1 }
+		])
+		.returning({ id: schema.diningMenuCategories.id, name: schema.diningMenuCategories.name });
+	const categoryId = (name: string) => categories.find((c) => c.name === name)!.id;
+
+	// Prices are centavos, like every other amount in the app.
+	await db.insert(schema.diningMenuItems).values([
+		{ name: 'Chicken Adobo', description: 'Slow-braised in soy, vinegar and garlic. Served with rice.', priceCentavos: 28000, category: 'Mains', sortOrder: 0 },
+		{ name: 'Beef Tapa', description: 'Cured beef, garlic rice and a fried egg.', priceCentavos: 32000, category: 'Mains', sortOrder: 1 },
+		{ name: 'Pancit Canton', description: 'Wheat noodles with pork, shrimp and vegetables.', priceCentavos: 24000, category: 'Mains', sortOrder: 2 },
+		{ name: 'Brewed Coffee', description: 'Single origin, brewed to order.', priceCentavos: 9000, category: 'Drinks', sortOrder: 3 },
+		{ name: 'Calamansi Juice', description: 'Freshly squeezed, served over ice.', priceCentavos: 7000, category: 'Drinks', sortOrder: 4 }
+	].map((d) => ({
+		hotelId,
+		diningItemId: venueId,
+		categoryId: categoryId(d.category),
+		stationId: station!.id,
+		name: d.name,
+		description: d.description,
+		priceCentavos: d.priceCentavos,
+		sortOrder: d.sortOrder
+	})));
+}
+
 async function seedInventory(hotelId: string) {
 	const existing = await db
 		.select({ id: schema.roomTypes.id })
@@ -389,6 +472,7 @@ async function main() {
 	await seedHotelAmenities(db, hotel.id);
 	await seedHotelAmenityLinks(hotel.id);
 	if (!MINIMAL) await seedInventory(hotel.id);
+	if (!MINIMAL) await seedDining(hotel.id);
 	await seedFinance(hotel.id);
 
 	console.log('Seed complete:');
@@ -396,6 +480,7 @@ async function main() {
 	console.log(`  Hotel manager  : ${MANAGER_EMAIL} / ${MANAGER_PW}  -> /${HOTEL_SLUG}/dashboard`);
 	console.log(`  Kitchen cook   : ${KITCHEN_EMAIL} / ${KITCHEN_PW}  -> /${HOTEL_SLUG}/management/kitchen`);
 	console.log(`  Dining staff   : ${DINING_EMAIL} / ${DINING_PW}  -> /${HOTEL_SLUG}/management/dining`);
+	if (!MINIMAL) console.log('  Dining is set up with a venue, tables, a menu and its own cash drawer.');
 	console.log(`  Demo hotel     : /${HOTEL_SLUG}  (${hotel.orgRef})`);
 	void adminId;
 }

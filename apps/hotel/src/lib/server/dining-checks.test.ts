@@ -68,7 +68,8 @@ describe.skipIf(!hasDb)('dining table checks (live DB)', async () => {
 		const settings = await db.select().from(s.financeSettings).where(eq(s.financeSettings.hotelId, hotelId));
 		await openShift({
 			hotelId,
-			cashAccountId: settings[0]!.defaultDrawerAccountId!,
+			// Dining money goes into dining's own till, so that is the shift to open.
+			cashAccountId: settings[0]!.diningDrawerAccountId ?? settings[0]!.defaultDrawerAccountId!,
 			businessDate: today,
 			openingFloatCentavos: 100_000,
 			actor: null

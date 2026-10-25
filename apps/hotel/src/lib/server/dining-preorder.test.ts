@@ -57,7 +57,8 @@ describe.skipIf(!hasDb)('reserve a table with an order (live DB)', async () => {
 		const settings = await db.select().from(s.financeSettings).where(eq(s.financeSettings.hotelId, hotelId));
 		await openShift({
 			hotelId,
-			cashAccountId: settings[0]!.defaultDrawerAccountId!,
+			// Dining money goes into dining's own till, so that is the shift to open.
+			cashAccountId: settings[0]!.diningDrawerAccountId ?? settings[0]!.defaultDrawerAccountId!,
 			businessDate: businessDateFor('Asia/Manila'),
 			openingFloatCentavos: 100_000,
 			actor: null

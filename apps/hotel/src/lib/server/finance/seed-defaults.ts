@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import type { db as Db } from '../db/index';
 import {
 	birSettings,
@@ -10,7 +10,14 @@ import {
 	type CashMovement
 } from '../db/schema/index';
 import { mintRef } from '../ids';
-import { COA_SEED, CASH_ACCOUNT_KIND_TO_COA_CODE, CASH_CATEGORY_TO_COA_CODE, EXPENSE_GROUP_TO_COA_CODE } from './coa-seed';
+import {
+	COA_SEED,
+	CASH_ACCOUNT_KIND_TO_COA_CODE,
+	CASH_CATEGORY_TO_COA_CODE,
+	EXPENSE_GROUP_TO_COA_CODE,
+	coaTemplateForKind,
+	nextCoaCodeInDecade
+} from './coa-seed';
 
 type DbLike = typeof Db;
 type CashCategory = CashMovement['category'];
@@ -77,13 +84,44 @@ export async function seedChartOfAccounts(db: DbLike, hotelId: string): Promise<
 	};
 
 	const existingCashAccounts = await db
-		.select({ id: cashAccounts.id, kind: cashAccounts.kind })
+		.select({ id: cashAccounts.id, name: cashAccounts.name, kind: cashAccounts.kind, sortOrder: cashAccounts.sortOrder })
 		.from(cashAccounts)
-		.where(eq(cashAccounts.hotelId, hotelId));
+		.where(eq(cashAccounts.hotelId, hotelId))
+		.orderBy(asc(cashAccounts.sortOrder), asc(cashAccounts.name));
+	// The first account of a kind takes that kind's seeded line (a drawer → 1010). A second one
+	// — dining's till, a bar's — gets a line of its own in the same decade, named after it, the
+	// way `createCashAccount` mints one: sharing 1010 would merge two tills on the balance sheet.
+	const takenCodes = new Set(allCoaRows.map((r) => r.code));
+	const claimedKinds = new Set<string>();
 	for (const a of existingCashAccounts) {
-		const code = CASH_ACCOUNT_KIND_TO_COA_CODE[a.kind];
-		if (code) {
-			await db.update(cashAccounts).set({ coaAccountId: byCode(code) }).where(eq(cashAccounts.id, a.id));
+		const seeded = CASH_ACCOUNT_KIND_TO_COA_CODE[a.kind];
+		if (!seeded) continue;
+		let coaAccountId: string | null = null;
+		if (!claimedKinds.has(a.kind)) {
+			claimedKinds.add(a.kind);
+			coaAccountId = byCode(seeded);
+		} else {
+			const template = coaTemplateForKind(a.kind);
+			const code = nextCoaCodeInDecade(a.kind, takenCodes);
+			if (template && code) {
+				const [leaf] = await db
+					.insert(chartOfAccounts)
+					.values({
+						hotelId,
+						accountRef: mintRef('account'),
+						code,
+						name: a.name,
+						type: template.type,
+						subtype: template.subtype,
+						normalBalance: template.normalBalance
+					})
+					.returning({ id: chartOfAccounts.id });
+				takenCodes.add(code);
+				coaAccountId = leaf!.id;
+			}
+		}
+		if (coaAccountId) {
+			await db.update(cashAccounts).set({ coaAccountId }).where(eq(cashAccounts.id, a.id));
 		}
 	}
 
@@ -128,23 +166,29 @@ export async function seedFinanceDefaults(db: DbLike, hotelId: string): Promise<
 		.limit(1);
 	if (existing.length > 0) return;
 
+	// Two tills from the start: the counter's and the restaurant's. Dining rings into its own,
+	// counts its own shift and carries its own line on the balance sheet — see
+	// docs/dining-cash-drawer.md. A hotel with no restaurant simply never opens the second one.
 	const accounts = await db
 		.insert(cashAccounts)
 		.values([
 			{ hotelId, name: 'Front Desk Drawer', kind: 'cash_drawer', sortOrder: 0 },
-			{ hotelId, name: 'Petty Cash', kind: 'petty_cash', sortOrder: 1 },
-			{ hotelId, name: 'Bank — Main', kind: 'bank', sortOrder: 2 },
-			{ hotelId, name: 'E-wallet', kind: 'e_wallet', sortOrder: 3 },
-			{ hotelId, name: 'Undeposited Funds', kind: 'undeposited', isSystem: true, sortOrder: 4 }
+			{ hotelId, name: 'Dining Desk Drawer', kind: 'cash_drawer', sortOrder: 1 },
+			{ hotelId, name: 'Petty Cash', kind: 'petty_cash', sortOrder: 2 },
+			{ hotelId, name: 'Bank — Main', kind: 'bank', sortOrder: 3 },
+			{ hotelId, name: 'E-wallet', kind: 'e_wallet', sortOrder: 4 },
+			{ hotelId, name: 'Undeposited Funds', kind: 'undeposited', isSystem: true, sortOrder: 5 }
 		])
-		.returning({ id: cashAccounts.id, kind: cashAccounts.kind });
+		.returning({ id: cashAccounts.id, name: cashAccounts.name, kind: cashAccounts.kind });
 	const byKind = (k: string) => accounts.find((a) => a.kind === k)?.id ?? null;
+	const byName = (n: string) => accounts.find((a) => a.name === n)?.id ?? null;
 
 	await db
 		.insert(financeSettings)
 		.values({
 			hotelId,
-			defaultDrawerAccountId: byKind('cash_drawer'),
+			defaultDrawerAccountId: byName('Front Desk Drawer'),
+			diningDrawerAccountId: byName('Dining Desk Drawer'),
 			defaultBankAccountId: byKind('bank'),
 			undepositedAccountId: byKind('undeposited')
 		})

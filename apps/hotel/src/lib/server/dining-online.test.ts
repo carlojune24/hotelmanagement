@@ -125,7 +125,8 @@ describe.skipIf(!hasDb)('online dining orders (live DB)', async () => {
 		await db.insert(s.diningMenuItemAddonGroups).values({ menuItemId: adobo, addonGroupId: g!.id });
 
 		const settings = await db.select().from(s.financeSettings).where(eq(s.financeSettings.hotelId, hotelA.id));
-		drawerId = settings[0]!.defaultDrawerAccountId!;
+		// Dining's own till — what a dining payment resolves against once Finance names one.
+		drawerId = settings[0]!.diningDrawerAccountId ?? settings[0]!.defaultDrawerAccountId!;
 		undepositedId = settings[0]!.undepositedAccountId!;
 	});
 
