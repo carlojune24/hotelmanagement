@@ -1,5 +1,5 @@
 {
-  "id": "45127014-9e16-4121-b4b6-da2dbf754de0",
+  "id": "c84e3b15-c9ff-451a-a733-0ceee330dc69",
   "prevId": "c4a36aa8-979b-4702-b888-15d1d1f6fc77",
   "version": "7",
   "dialect": "postgresql",
@@ -10168,12 +10168,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "dining_drawer_account_id": {
-          "name": "dining_drawer_account_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "default_bank_account_id": {
           "name": "default_bank_account_id",
           "type": "uuid",
@@ -10185,6 +10179,13 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
+        },
+        "method_account_ids": {
+          "name": "method_account_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
         },
         "auto_post_online_payments": {
           "name": "auto_post_online_payments",
@@ -10263,19 +10264,6 @@
           "tableTo": "cash_accounts",
           "columnsFrom": [
             "default_drawer_account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "finance_settings_dining_drawer_account_id_cash_accounts_id_fk": {
-          "name": "finance_settings_dining_drawer_account_id_cash_accounts_id_fk",
-          "tableFrom": "finance_settings",
-          "tableTo": "cash_accounts",
-          "columnsFrom": [
-            "dining_drawer_account_id"
           ],
           "columnsTo": [
             "id"

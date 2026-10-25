@@ -147,6 +147,23 @@
 					</select>
 				</div>
 			</div>
+			<div>
+				<p class="text-xs font-medium text-ink">Account per payment method</p>
+				<p class="text-xs text-muted-foreground">Leave on "default" to use the default bank / e-wallet above.</p>
+				<div class="mt-2 grid gap-3 sm:grid-cols-3">
+					{#each [{ m: 'card', label: 'Card' }, { m: 'gcash', label: 'GCash' }, { m: 'maya', label: 'Maya' }, { m: 'bank_transfer', label: 'Bank transfer' }, { m: 'cheque', label: 'Cheque' }] as { m, label } (m)}
+						<div>
+							<Label class="text-xs">{label}</Label>
+							<select name="account_{m}" class="mt-1 w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-sm">
+								<option value="">— default —</option>
+								{#each data.accounts.filter((a) => a.kind === 'bank' || a.kind === 'e_wallet') as a (a.id)}
+									<option value={a.id} selected={data.settings.methodAccountIds[m] === a.id}>{a.name}</option>
+								{/each}
+							</select>
+						</div>
+					{/each}
+				</div>
+			</div>
 			<label class="flex items-center gap-2 text-sm text-ink">
 				<input type="checkbox" name="autoPostOnlinePayments" class="size-4" checked={data.settings.autoPostOnlinePayments} />
 				Post online (PayMongo) payments into the undeposited account automatically

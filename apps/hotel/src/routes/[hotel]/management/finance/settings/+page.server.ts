@@ -299,6 +299,11 @@ export const actions: Actions = {
 				diningDrawerAccountId: z.string().uuid().optional().or(z.literal('')),
 				defaultBankAccountId: z.string().uuid().optional().or(z.literal('')),
 				undepositedAccountId: z.string().uuid().optional().or(z.literal('')),
+				account_card: z.string().uuid().optional().or(z.literal('')),
+				account_gcash: z.string().uuid().optional().or(z.literal('')),
+				account_maya: z.string().uuid().optional().or(z.literal('')),
+				account_bank_transfer: z.string().uuid().optional().or(z.literal('')),
+				account_cheque: z.string().uuid().optional().or(z.literal('')),
 				autoPostOnlinePayments: z.enum(['on']).optional(),
 				requireExpenseApproval: z.enum(['on']).optional(),
 				lockOnDayClose: z.enum(['on']).optional(),
@@ -326,6 +331,11 @@ export const actions: Actions = {
 						diningDrawerAccountId: p.data.diningDrawerAccountId || null,
 						defaultBankAccountId: p.data.defaultBankAccountId || null,
 						undepositedAccountId: p.data.undepositedAccountId || null,
+						methodAccountIds: Object.fromEntries(
+							(['card', 'gcash', 'maya', 'bank_transfer', 'cheque'] as const)
+								.map((m) => [m, p.data[`account_${m}`]] as const)
+								.filter(([, id]) => id)
+						) as Record<string, string>,
 						autoPostOnlinePayments: p.data.autoPostOnlinePayments === 'on',
 						requireExpenseApproval: p.data.requireExpenseApproval === 'on',
 						lockOnDayClose: p.data.lockOnDayClose === 'on',

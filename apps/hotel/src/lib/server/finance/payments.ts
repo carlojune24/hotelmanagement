@@ -24,7 +24,7 @@ import {
 import { validateAllocations } from '$lib/allocation';
 import { FinanceError, businessDateFor, pesos, type Tx } from './shared';
 import { recordCashMovement, type RecordMovementInput } from './cash';
-import { getFinanceSettings } from './settings';
+import { accountForMethod, getFinanceSettings } from './settings';
 import { getDefaultOpenShift, getOpenShiftForDrawer } from './shifts';
 import { getBirSettings, issueOfficialReceipt } from './documents';
 
@@ -145,12 +145,13 @@ export async function resolvePaymentAccount(
 		if (!drawer) throw new FinanceError('No cash drawer is set up. Add one in Finance settings.');
 		return { cashAccountId: drawer, shiftId: null };
 	}
-	if (!settings.defaultBankAccountId) {
+	const accountId = accountForMethod(settings, method);
+	if (!accountId) {
 		throw new FinanceError(
 			'No bank / e-wallet account is set up for non-cash payments. Add one in Finance settings.'
 		);
 	}
-	return { cashAccountId: settings.defaultBankAccountId, shiftId: null };
+	return { cashAccountId: accountId, shiftId: null };
 }
 
 /** The dining register's own till, when one is configured in Finance settings. Dining cash —
@@ -622,7 +623,7 @@ export async function refundPayment(input: RefundInput): Promise<{ paymentId: st
 		shiftId = openShift?.id ?? null;
 		cashAccountId = cashAccountId ?? openShift?.cashAccountId ?? settings.defaultDrawerAccountId;
 	} else {
-		cashAccountId = cashAccountId ?? settings.defaultBankAccountId;
+		cashAccountId = cashAccountId ?? accountForMethod(settings, input.method);
 	}
 	if (!cashAccountId) throw new FinanceError('No account is set up to pay the refund from.');
 

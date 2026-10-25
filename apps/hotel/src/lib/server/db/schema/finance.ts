@@ -624,6 +624,12 @@ export const financeSettings = pgTable('finance_settings', {
 	undepositedAccountId: uuid('undeposited_account_id').references(() => cashAccounts.id, {
 		onDelete: 'set null'
 	}),
+	/** Per-method override of `defaultBankAccountId`: `{ gcash: <cash account id>, ... }`. A method
+	 *  with no entry (or whose account is gone) falls back to the default bank / e-wallet. */
+	methodAccountIds: jsonb('method_account_ids')
+		.$type<Record<string, string>>()
+		.notNull()
+		.default({}),
 	autoPostOnlinePayments: boolean('auto_post_online_payments').notNull().default(true),
 	requireExpenseApproval: boolean('require_expense_approval').notNull().default(true),
 	lockOnDayClose: boolean('lock_on_day_close').notNull().default(true),

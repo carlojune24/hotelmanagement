@@ -21,7 +21,7 @@ import type { SessionUser } from '../auth/session';
 import { ensureFolio, getFolioDetail, getOrderIdForTarget, type FolioTarget } from '../folio';
 import { FinanceError, businessDateFor, pesos, type Tx } from './shared';
 import { recordCashMovement } from './cash';
-import { getFinanceSettings } from './settings';
+import { accountForMethod, getFinanceSettings } from './settings';
 import { getBirSettings } from './documents';
 import { getDefaultOpenShift } from './shifts';
 import type { PaymentMethod } from './payments';
@@ -189,7 +189,7 @@ export async function settleReceivable(input: {
 		shiftId = openShift?.id ?? null;
 		cashAccountId = openShift?.cashAccountId ?? settings.defaultDrawerAccountId;
 	} else {
-		cashAccountId = settings.defaultBankAccountId;
+		cashAccountId = accountForMethod(settings, input.method);
 	}
 	if (!cashAccountId) throw new FinanceError('No account is set up to receive this collection.');
 
