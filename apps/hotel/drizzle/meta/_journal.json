@@ -736,6 +736,13 @@
       "when": 1792738264944,
       "tag": "0104_big_deathbird",
       "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1792891912885,
+      "tag": "0105_neat_stardust",
+      "breakpoints": true
     }
   ]
 }
