@@ -46,6 +46,7 @@ export function hotelJsonLd(h: {
 	image: string | undefined;
 	lat: number | undefined;
 	lng: number | undefined;
+	sameAs?: (string | null | undefined)[];
 }): string {
 	const ld = {
 		'@context': 'https://schema.org',
@@ -54,6 +55,8 @@ export function hotelJsonLd(h: {
 		...(h.alternateName && { alternateName: h.alternateName }),
 		url: h.url,
 		...(h.image && { image: h.image }),
+		...(h.sameAs?.some(Boolean) && { sameAs: h.sameAs.filter(Boolean) }),
+		...(h.sameAs?.some(Boolean) && { sameAs: h.sameAs.filter(Boolean) }),
 		...(h.phone && { telephone: h.phone }),
 		...(h.email && { email: h.email }),
 		...((h.address || h.city) && {

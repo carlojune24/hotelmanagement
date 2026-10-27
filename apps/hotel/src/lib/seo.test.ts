@@ -40,5 +40,7 @@ describe('hotelJsonLd', () => {
 		const ld = JSON.parse(out);
 		expect(ld.address).toEqual({ '@type': 'PostalAddress', addressLocality: 'Tandag', addressCountry: 'PH' });
 		expect(ld.telephone).toBeUndefined();
+		expect(ld.sameAs).toBeUndefined();
+		expect(JSON.parse(hotelJsonLd({ name: 'A', url: 'https://x', city: null, address: undefined, phone: undefined, email: undefined, image: undefined, lat: undefined, lng: undefined, sameAs: ['https://fb', null, ''] })).sameAs).toEqual(['https://fb']);
 	});
 });

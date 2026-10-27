@@ -303,7 +303,8 @@
 			email: data.branding.contactEmail,
 			image: shareImage,
 			lat: data.branding.contactLat,
-			lng: data.branding.contactLng
+			lng: data.branding.contactLng,
+			sameAs: [data.branding.facebookUrl, data.branding.instagramUrl, data.branding.tiktokUrl]
 		})
 	);
 </script>
