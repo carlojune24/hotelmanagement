@@ -9,7 +9,7 @@
 	import SupportChatWidget from '$lib/components/storefront/support-chat-widget.svelte';
 	import { DEFAULT_DISPLAY_FONT, DISPLAY_FONTS } from '$lib/branding';
 	import { StorefrontTheme } from '$lib/storefront-mode.svelte';
-	import { INDEXABLE_ROUTES, brandName, canonicalUrl, homeTitle } from '$lib/seo';
+	import { brandName, canonicalUrl, homeTitle } from '$lib/seo';
 	import type { LayoutData } from './$types';
 
 	let { data, children }: { data: LayoutData; children: import('svelte').Snippet } = $props();
@@ -78,9 +78,9 @@
 </script>
 
 <svelte:head>
-	<title>{page.route.id === '/[hotel]/(guest)' ? homeTitle(brandName(data.hotel.name, data.hotel.city)) : `${brandName(data.hotel.name, data.hotel.city)} — Book your stay`}</title>
+	<title>{data.isHome ? homeTitle(brandName(data.hotel.name, data.hotel.city)) : `${brandName(data.hotel.name, data.hotel.city)} — Book your stay`}</title>
 	<link rel="canonical" href={canonical} />
-	{#if !INDEXABLE_ROUTES.has(page.route.id ?? '')}<meta name="robots" content="noindex" />{/if}
+	{#if !data.indexable}<meta name="robots" content="noindex" />{/if}
 	<meta property="og:site_name" content={brandName(data.hotel.name, data.hotel.city)} />
 	<meta property="og:type" content="website" />
 	<meta property="og:url" content={canonical} />

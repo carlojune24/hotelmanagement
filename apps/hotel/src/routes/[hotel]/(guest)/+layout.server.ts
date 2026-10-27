@@ -8,13 +8,14 @@ import { listPublicMenus } from '$lib/server/dining-menu';
 import { expirePendingDiningOrders, loadOnlineOrderingConfig } from '$lib/server/dining-online';
 import { listHotelAmenities } from '$lib/server/availability';
 import { expirePendingOrders } from '$lib/server/orders';
+import { INDEXABLE_ROUTES } from '$lib/seo';
 import type { LayoutServerLoad } from './$types';
 
 /** Shared across every guest booking page — the storefront nav (now a shared component reused
  *  by the homepage, Dining, Meetings & Events, and Contact) needs `functionHalls`/`reviews`/
  *  `diningItems`/`hotelAmenities` to decide which optional nav links to show, regardless of
  *  which page renders it. */
-export const load: LayoutServerLoad = async ({ locals, cookies }) => {
+export const load: LayoutServerLoad = async ({ locals, cookies, route }) => {
 	if (!locals.hotel) error(404, 'Hotel not found');
 
 	const { branding, theme } = guestTheme(locals.hotel.config);
@@ -55,6 +56,9 @@ export const load: LayoutServerLoad = async ({ locals, cookies }) => {
 			currency: locals.hotel.currency,
 			vatRateBps: locals.hotel.vatRateBps
 		},
+		// Decided on the server: the client's route can differ during hydration (e.g. a crawler that can't reach /api).
+		isHome: route.id === '/[hotel]/(guest)',
+		indexable: INDEXABLE_ROUTES.has(route.id ?? ''),
 		branding,
 		theme,
 		themeMode: parseStorefrontMode(cookies.get(STOREFRONT_MODE_COOKIE)),
