@@ -14,7 +14,9 @@ export const RESERVED_PREFIXES = new Set([
 	'_app',
 	'assets',
 	'favicon.svg',
-	'health'
+	'health',
+	'robots.txt',
+	'sitemap.xml'
 ]);
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;

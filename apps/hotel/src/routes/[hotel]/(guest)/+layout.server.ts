@@ -51,6 +51,7 @@ export const load: LayoutServerLoad = async ({ locals, cookies }) => {
 			timezone: locals.hotel.timezone,
 			name: locals.hotel.name,
 			city: locals.hotel.city,
+			customDomain: locals.hotel.customDomain,
 			currency: locals.hotel.currency,
 			vatRateBps: locals.hotel.vatRateBps
 		},

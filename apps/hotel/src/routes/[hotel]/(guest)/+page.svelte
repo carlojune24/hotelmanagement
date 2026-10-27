@@ -19,6 +19,8 @@
 	import BookingBar from '$lib/components/storefront/booking-bar.svelte';
 	import RoomCard from '$lib/components/storefront/room-card.svelte';
 	import RoomQuickView from '$lib/components/storefront/room-quick-view.svelte';
+	import { brandName, canonicalUrl, hotelJsonLd } from '$lib/seo';
+	import { page } from '$app/state';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -278,14 +280,40 @@
 		void goto(`/${slug}/details`);
 	}
 
+	const brand = $derived(brandName(data.hotel.name, data.hotel.city));
+	// Lead with the name people search for, then the hotel's own line.
 	const description = $derived(
-		data.branding.tagline ?? data.branding.heroSubtitle ?? `Book directly with ${data.hotel.name}.`
+		`${brand} — official website. ${data.branding.tagline ?? data.branding.heroSubtitle ?? 'Book direct for the best rates.'}`
+	);
+	const pageTitle = $derived(`${brand} — Official Website & Online Booking`);
+	const homeUrl = $derived(
+		canonicalUrl({ origin: page.url.origin, slug: data.hotel.slug, customDomain: data.hotel.customDomain, pathname: page.url.pathname })
+	);
+	const shareImage = $derived(
+		data.branding.heroImageUrl ? new URL(data.branding.heroImageUrl, homeUrl).href : undefined
+	);
+	const jsonLd = $derived(
+		hotelJsonLd({
+			name: brand,
+			url: homeUrl,
+			city: data.hotel.city,
+			address: data.branding.contactAddress,
+			phone: data.branding.contactPhone,
+			email: data.branding.contactEmail,
+			image: shareImage,
+			lat: data.branding.contactLat,
+			lng: data.branding.contactLng
+		})
 	);
 </script>
 
 <svelte:head>
-	<title>{data.hotel.name} — Book your stay</title>
+	<title>{pageTitle}</title>
 	<meta name="description" content={description} />
+	<meta property="og:title" content={pageTitle} />
+	<meta property="og:description" content={description} />
+	{#if shareImage}<meta property="og:image" content={shareImage} />{/if}
+	{@html `<script type="application/ld+json">${jsonLd}</script>`}
 </svelte:head>
 
 <StorefrontNav

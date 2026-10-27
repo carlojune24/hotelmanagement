@@ -9,6 +9,7 @@
 	import SupportChatWidget from '$lib/components/storefront/support-chat-widget.svelte';
 	import { DEFAULT_DISPLAY_FONT, DISPLAY_FONTS } from '$lib/branding';
 	import { StorefrontTheme } from '$lib/storefront-mode.svelte';
+	import { INDEXABLE_ROUTES, brandName, canonicalUrl } from '$lib/seo';
 	import type { LayoutData } from './$types';
 
 	let { data, children }: { data: LayoutData; children: import('svelte').Snippet } = $props();
@@ -61,6 +62,9 @@
 	const fontDisplayFamily = $derived(
 		DISPLAY_FONTS[data.branding.fontDisplay ?? DEFAULT_DISPLAY_FONT].family
 	);
+	const canonical = $derived(
+		canonicalUrl({ origin: page.url.origin, slug: data.hotel.slug, customDomain: data.hotel.customDomain, pathname: page.url.pathname })
+	);
 	const rootStyle = $derived(
 		`--hotel-accent: ${data.theme.accent}; ` +
 			`--hotel-accent-light: ${data.theme.accentLight}; ` +
@@ -74,7 +78,12 @@
 </script>
 
 <svelte:head>
-	<title>{data.hotel.name} — Book your stay</title>
+	<title>{brandName(data.hotel.name, data.hotel.city)} — Book your stay</title>
+	<link rel="canonical" href={canonical} />
+	{#if !INDEXABLE_ROUTES.has(page.route.id ?? '')}<meta name="robots" content="noindex" />{/if}
+	<meta property="og:site_name" content={brandName(data.hotel.name, data.hotel.city)} />
+	<meta property="og:type" content="website" />
+	<meta property="og:url" content={canonical} />
 </svelte:head>
 
 <!-- Only the storefront pages follow the mode; the booking wizard and the guest self-service pages keep
