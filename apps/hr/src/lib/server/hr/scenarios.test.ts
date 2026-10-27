@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { cleanupTestEstablishments, createTestStaff, testOrgId } from './test-helpers';
+import { cleanupTestEstablishments, cleanupTestOrg, createTestOrg, createTestStaff, testOrgId } from './test-helpers';
 
 /**
  * End-to-end scenarios against the live DB: a mock March 2026 DTR for one establishment, two payroll
@@ -70,7 +70,8 @@ describe.skipIf(!hasDb)('HR scenarios (live DB)', async () => {
 		(await db.select().from(S.employeeAssignments).where(eq(S.employeeAssignments.employeeId, id)))[0]!.endDate;
 
 	beforeAll(async () => {
-		org = await testOrgId();
+		// Own company unless KEEP_MOCK: the dev DB's real org already has March 2026 payroll, which blocks these runs.
+		org = process.env.KEEP_MOCK ? await testOrgId() : await createTestOrg();
 		const o = await db.select({ c: S.organizations.config }).from(S.organizations).where(eq(S.organizations.id, org));
 		originalConfig = o[0]!.c;
 		await P.saveDayFactor(org, 313);
@@ -124,7 +125,7 @@ describe.skipIf(!hasDb)('HR scenarios (live DB)', async () => {
 		}
 		await cleanupTestEstablishments([est]);
 		await db.delete(S.loanTypes).where(and(eq(S.loanTypes.organizationId, org), eq(S.loanTypes.key, loanTypeKey)));
-		await db.update(S.organizations).set({ config: originalConfig as object }).where(eq(S.organizations.id, org));
+		await cleanupTestOrg(org);
 	});
 
 	// ---------------------------------------------------------------- payroll baseline

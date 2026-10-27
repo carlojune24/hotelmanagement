@@ -19,7 +19,8 @@ import {
 	payrollLoanDeductions,
 	payrollRunLines,
 	payrollRuns,
-	schedules
+	schedules,
+	separations
 } from '$lib/server/db/schema/index';
 import { effectiveCalendar } from './calendar';
 import { getHandoff } from './dtr-submissions';
@@ -387,6 +388,15 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 	const estById = new Map(estRows.map((e) => [e.id, e]));
 	const holidayAt = new Map(holidays.map((h) => [`${h.establishmentId}|${h.date}`, h.kind]));
 	const keptAdjustments = new Map(existing.map((l) => [l.employeeId, l.adjustments]));
+	// A DTR row dated after a person's separation last day is never paid, however it got there.
+	const lastDays = new Map(
+		(
+			await db
+				.select({ employeeId: separations.employeeId, lastDay: separations.lastDay })
+				.from(separations)
+				.where(inArray(separations.employeeId, candidateIds))
+		).map((s) => [s.employeeId, s.lastDay])
+	);
 	// Earnings and deductions come from the pay items filed for the cutoff and loans from the ledger; only a
 	// withholding override Main HR typed on the line is kept.
 	const itemRows = (
@@ -430,7 +440,8 @@ export async function generateBatch(batchId: string): Promise<GenerateResult> {
 	const built: Built[] = [];
 
 	for (const emp of people) {
-		const mineEntries = entries.filter((e) => e.e.employeeId === emp.id);
+		const lastDay = lastDays.get(emp.id);
+		const mineEntries = entries.filter((e) => e.e.employeeId === emp.id && (!lastDay || e.e.date <= lastDay));
 		const mineAssignments = assignments.filter((a) => a.employeeId === emp.id);
 
 		// Home for this run: the flagged primary among the assignments held in the cutoff, else the

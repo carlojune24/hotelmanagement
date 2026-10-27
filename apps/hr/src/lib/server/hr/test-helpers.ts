@@ -7,6 +7,7 @@ import {
 	employees,
 	establishments,
 	leaveTypes,
+	loanTypes,
 	organizations
 } from '$lib/server/db/schema/index';
 import { mintRef } from '$lib/server/ids';
@@ -32,9 +33,10 @@ export async function createTestOrg(): Promise<string> {
 	return org!.id;
 }
 
-/** Remove a throwaway company after its establishments are gone (leave types first: they restrict it). */
+/** Remove a throwaway company after its establishments are gone (leave and loan types first: they restrict it). */
 export async function cleanupTestOrg(orgId: string) {
 	await db.delete(leaveTypes).where(eq(leaveTypes.organizationId, orgId));
+	await db.delete(loanTypes).where(eq(loanTypes.organizationId, orgId));
 	await db.delete(organizations).where(eq(organizations.id, orgId));
 }
 

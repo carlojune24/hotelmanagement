@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { cleanupTestEstablishments, createTestStaff, testOrgId } from './test-helpers';
+import { cleanupTestEstablishments, cleanupTestOrg, createTestOrg, createTestStaff } from './test-helpers';
 
 /**
  * Live-DB tests for payroll runs: built only from received DTRs, per establishment, one line per
@@ -77,7 +77,7 @@ describe.skipIf(!hasDb)('payroll (live DB)', async () => {
 		});
 
 	beforeAll(async () => {
-		org = await testOrgId();
+		org = await createTestOrg(); // own company: the dev DB's real org already has March 2026 payroll
 		const o = await db.select({ c: organizations.config }).from(organizations).where(eq(organizations.id, org));
 		originalConfig = o[0]!.c;
 		await P.saveDayFactor(org, 313);
@@ -102,7 +102,7 @@ describe.skipIf(!hasDb)('payroll (live DB)', async () => {
 	afterAll(async () => {
 		if (runId) await db.delete(payrollRuns).where(eq(payrollRuns.id, runId));
 		await cleanupTestEstablishments([A, B]);
-		await db.update(organizations).set({ config: originalConfig as object }).where(eq(organizations.id, org));
+		await cleanupTestOrg(org);
 	});
 
 	it('refuses to start a run until the working-day factor is chosen', async () => {

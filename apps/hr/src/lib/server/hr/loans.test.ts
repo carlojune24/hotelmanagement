@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { agencyOfRemit, allocate, dueNow, isSecondHalf, monthsAfter, scheduleStatus, scheduledShare } from './loans';
 import { buildSchedule, toCsv, type ScheduleLine } from './remittance';
-import { cleanupTestEstablishments, createTestStaff, testOrgId } from './test-helpers';
+import { cleanupTestEstablishments, cleanupTestOrg, createTestOrg, createTestStaff } from './test-helpers';
 
 describe('loan rules', () => {
 	it('splits a monthly amount across a semi-monthly month, the odd centavo in the second half', () => {
@@ -171,10 +171,11 @@ describe.skipIf(!hasDb)('loans through payroll (live DB)', async () => {
 	};
 
 	beforeAll(async () => {
-		org = await testOrgId();
+		org = await createTestOrg(); // own company: the dev DB's real org already has April 2026 payroll
 		const o = await db.select({ c: organizations.config }).from(organizations).where(eq(organizations.id, org));
 		originalConfig = o[0]!.c;
 		await P.saveDayFactor(org, 313);
+		await L.listLoanTypes(org); // seeds the default loan types for a fresh company
 		const [e] = await db
 			.insert(establishments)
 			.values({ organizationId: org, kind: 'business', slug: tag, name: 'Loan test', orgRef: mintRef('org') })
@@ -194,7 +195,7 @@ describe.skipIf(!hasDb)('loans through payroll (live DB)', async () => {
 		await db.delete(employeeLoans).where(eq(employeeLoans.employeeId, ana));
 		await db.delete(loanTypes).where(like(loanTypes.key, `custom_emergency_${tag.replace(/-/g, '_')}%`));
 		await cleanupTestEstablishments([est]);
-		await db.update(organizations).set({ config: originalConfig as object }).where(eq(organizations.id, org));
+		await cleanupTestOrg(org);
 	});
 
 	it('records loans and rejects a monthly amount larger than the loan', async () => {

@@ -270,3 +270,62 @@ describe.skipIf(!live)('13th month from payslips (live DB)', async () => {
 		await expect(S.addThirteenthMonth(org, sepId)).rejects.toThrow(/already in this statement/);
 	});
 });
+
+describe.skipIf(!live)('payroll ignores DTR after the last day (live DB)', async () => {
+	const { db } = await import('$lib/server/db/index');
+	const S = await import('$lib/server/db/schema/index');
+	const { mintRef } = await import('$lib/server/ids');
+	const { eq } = await import('drizzle-orm');
+	const P = await import('./payroll');
+	const SEP = await import('./separations');
+
+	const tag = `lastday-${Math.random().toString(36).slice(2, 10)}`;
+	let org = '';
+	let est = '';
+	let emp = '';
+	let runId = '';
+	let sepId = '';
+
+	const dtr = (date: string) =>
+		db.insert(S.dtrEntries).values({
+			establishmentId: est,
+			employeeId: emp,
+			date,
+			timeIn: new Date(`${date}T00:00:00Z`),
+			timeOut: new Date(`${date}T08:00:00Z`),
+			workedMinutes: 480,
+			source: 'manual'
+		});
+
+	beforeAll(async () => {
+		org = await testOrgId();
+		const [e] = await db
+			.insert(S.establishments)
+			.values({ organizationId: org, kind: 'business', slug: tag, name: 'Last day test', orgRef: mintRef('org') })
+			.returning({ id: S.establishments.id });
+		est = e!.id;
+		emp = await createTestStaff(est, { employeeNo: 'LD1', firstName: 'Ld', hiredOn: '2031-01-01' });
+		const sep = await SEP.startSeparation(org, { employeeId: emp, kind: 'resigned', lastDay: '2031-03-03' }, null);
+		sepId = sep.id;
+		// Two days on the job, plus a stray row dated after the last day.
+		for (const d of ['2031-03-02', '2031-03-03', '2031-03-09']) await dtr(d);
+		await db.insert(S.dtrSubmissions).values({ establishmentId: est, cutoffStart: '2031-03-01', cutoffEnd: '2031-03-31', status: 'received' });
+	});
+	afterAll(async () => {
+		if (runId) await db.delete(S.payrollRuns).where(eq(S.payrollRuns.id, runId));
+		if (sepId) {
+			await db.delete(S.separationClearance).where(eq(S.separationClearance.separationId, sepId));
+			await db.delete(S.separations).where(eq(S.separations.id, sepId));
+		}
+		await cleanupTestEstablishments([est]);
+	});
+
+	it('pays only the days up to the last day', async () => {
+		const run = await P.createRun(org, { cutoffStart: '2031-03-01', cutoffEnd: '2031-03-15', payDate: '2031-03-20', frequency: 'semi_monthly' }, null);
+		runId = run.id;
+		const batch = (await P.getRun(run.id)).batches.find((b) => b.establishmentId === est)!.id;
+		await P.generateBatch(batch);
+		const line = (await P.listBatchLines(batch)).find((l) => l.employeeId === emp)!;
+		expect(line.minutesRegular).toBe(2 * 480);
+	});
+});
