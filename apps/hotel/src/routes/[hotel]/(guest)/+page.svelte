@@ -19,7 +19,7 @@
 	import BookingBar from '$lib/components/storefront/booking-bar.svelte';
 	import RoomCard from '$lib/components/storefront/room-card.svelte';
 	import RoomQuickView from '$lib/components/storefront/room-quick-view.svelte';
-	import { brandName, canonicalUrl, hotelJsonLd } from '$lib/seo';
+	import { brandName, canonicalUrl, homeTitle, hotelJsonLd } from '$lib/seo';
 	import { page } from '$app/state';
 	import type { PageData } from './$types';
 
@@ -285,7 +285,7 @@
 	const description = $derived(
 		`${brand} — official website. ${data.branding.tagline ?? data.branding.heroSubtitle ?? 'Book direct for the best rates.'}`
 	);
-	const pageTitle = $derived(`${brand} — Official Website & Online Booking`);
+	const pageTitle = $derived(homeTitle(brand));
 	const homeUrl = $derived(
 		canonicalUrl({ origin: page.url.origin, slug: data.hotel.slug, customDomain: data.hotel.customDomain, pathname: page.url.pathname })
 	);
@@ -308,7 +308,6 @@
 </script>
 
 <svelte:head>
-	<title>{pageTitle}</title>
 	<meta name="description" content={description} />
 	<meta property="og:title" content={pageTitle} />
 	<meta property="og:description" content={description} />

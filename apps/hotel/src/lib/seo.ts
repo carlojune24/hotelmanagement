@@ -19,6 +19,9 @@ export function brandName(name: string, city: string | null): string {
 	return city && !name.toLowerCase().includes(city.toLowerCase()) ? `${name} ${city}` : name;
 }
 
+/** The home page's <title>. Set from the layout: the page renders async there, and a page-level <title> loses to the layout's. */
+export const homeTitle = (brand: string) => `${brand} — Official Website & Online Booking`;
+
 /** schema.org Hotel, serialised safely for an inline `<script>` (no `<` that could close it). */
 export function hotelJsonLd(h: {
 	name: string;
