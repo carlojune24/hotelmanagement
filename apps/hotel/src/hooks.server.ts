@@ -10,7 +10,7 @@ import {
 	getMembershipRole,
 	loadHotelBySlug
 } from '$lib/server/tenant';
-import { env } from '$env/dynamic/private';
+import { platformOrigin } from '$lib/server/hotel-origin';
 import { startJobRunner } from '$lib/server/jobs/boss';
 import { writeErrorLog } from '$lib/server/error-log';
 import { runWithRequestContext } from '$lib/server/request-context';
@@ -69,12 +69,13 @@ export const handle: Handle = async ({ event, resolve }) => {
 		event.locals.isCustomDomain = event.url.hostname === hotel.customDomain;
 
 		// Staff login lives on the platform host only: the custom domain is the guest-facing address.
-		const platformHost = env.ORIGIN ? new URL(env.ORIGIN).host : null;
+		const origin = platformOrigin();
+		const platformHost = origin ? new URL(origin).host : null;
 		const routeId = event.route.id ?? '';
 		if (event.locals.isCustomDomain && platformHost && routeId.startsWith('/[hotel]/management')) {
 			const { pathname, search } = event.url;
 			const path = pathname === `/${slug}` || pathname.startsWith(`/${slug}/`) ? pathname : `/${slug}${pathname}`;
-			redirect(307, `${env.ORIGIN!.replace(/\/$/, '')}${path}${search}`);
+			redirect(307, `${origin}${path}${search}`);
 		}
 		// Guest pages opened on the platform host move to the hotel's own domain (old emails, QR codes, bookmarks).
 		// Only when the request really came in on the platform host, so dev/staging hosts are never bounced.

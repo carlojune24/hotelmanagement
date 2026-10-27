@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('$env/dynamic/private', () => ({ env: { ORIGIN: 'https://hotels.example.com/' } }));
+vi.mock('$env/dynamic/private', () => ({ env: { APP_ORIGIN: 'https://hotels.example.com/' } }));
 const { hotelOrigin } = await import('./hotel-origin');
 
 describe('hotelOrigin', () => {

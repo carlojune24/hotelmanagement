@@ -1,7 +1,12 @@
 import { env } from '$env/dynamic/private';
 
-/** Public origin for links sent to guests: the hotel's own domain when it has one, else the platform `ORIGIN`. */
+/** The platform's own public origin. `APP_ORIGIN` is for production, where `ORIGIN` must stay unset so
+ *  adapter-node takes the host from the request (a custom domain needs that); dev/staging may keep `ORIGIN`. */
+export function platformOrigin(): string {
+	return (env.APP_ORIGIN || env.ORIGIN || '').replace(/\/$/, '');
+}
+
+/** Public origin for links sent to guests: the hotel's own domain when it has one, else the platform origin. */
 export function hotelOrigin(hotel: { customDomain: string | null }): string {
-	if (hotel.customDomain) return `https://${hotel.customDomain}`;
-	return (env.ORIGIN ?? '').replace(/\/$/, '');
+	return hotel.customDomain ? `https://${hotel.customDomain}` : platformOrigin();
 }

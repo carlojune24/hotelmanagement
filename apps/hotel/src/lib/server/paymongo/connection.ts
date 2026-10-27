@@ -1,6 +1,6 @@
+import { platformOrigin } from '../hotel-origin';
 import { PayMongoClient, PayMongoError, type Webhook } from '@mm/paymongo';
 import { eq } from 'drizzle-orm';
-import { env } from '$env/dynamic/private';
 import { db } from '../db/index';
 import { hotels, paymongoSettings } from '../db/schema/index';
 import { decryptSecret, encryptSecret, maskSecret } from '../secrets';
@@ -42,7 +42,7 @@ function modeOf(secretKey: string): 'test' | 'live' {
  * `ORIGIN` is used, which is what production wants.
  */
 function webhookUrlFor(slug: string, publicUrl?: string | null): string {
-	const parsed = normalizePublicUrl(publicUrl?.trim() ? publicUrl : (env.ORIGIN ?? ''));
+	const parsed = normalizePublicUrl(publicUrl?.trim() ? publicUrl : platformOrigin());
 	if ('error' in parsed) throw new PaymongoConnectionError(parsed.error);
 	return `${parsed.origin}${webhookPathFor(slug)}`;
 }

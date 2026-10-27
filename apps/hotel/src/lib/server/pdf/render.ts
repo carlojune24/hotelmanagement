@@ -1,3 +1,4 @@
+import { platformOrigin } from '../hotel-origin';
 import { chromium, type Browser } from 'playwright';
 import { env } from '$env/dynamic/private';
 
@@ -36,7 +37,7 @@ function getBrowser(): Promise<Browser> {
  * there's no reason to go out through the public edge and back.
  */
 function renderOrigin(): string {
-	const origin = env.PDF_RENDER_ORIGIN || env.ORIGIN;
+	const origin = env.PDF_RENDER_ORIGIN || platformOrigin();
 	if (!origin) throw new Error('PDF_RENDER_ORIGIN (or ORIGIN) is not set');
 	return origin.replace(/\/$/, '');
 }
