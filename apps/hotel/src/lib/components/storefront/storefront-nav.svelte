@@ -103,7 +103,7 @@
 				<SunIcon class="sf-mode-sun size-5" aria-hidden="true" />
 				<MoonIcon class="sf-mode-moon size-5" aria-hidden="true" />
 			</button>
-			<a href="{base}/dates" class="sf-btn sf-btn--sm">Book now</a>
+			<a href="{base}/dates" class="sf-btn sf-btn--cta">Book now</a>
 			<button
 				type="button"
 				class="sf-nav-menu-btn"
