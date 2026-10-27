@@ -19,7 +19,7 @@
 	import BookingBar from '$lib/components/storefront/booking-bar.svelte';
 	import RoomCard from '$lib/components/storefront/room-card.svelte';
 	import RoomQuickView from '$lib/components/storefront/room-quick-view.svelte';
-	import { brandName, canonicalUrl, homeTitle, hotelJsonLd } from '$lib/seo';
+	import { brandBothWays, brandName, canonicalUrl, homeTitle, hotelJsonLd, spacedName } from '$lib/seo';
 	import { page } from '$app/state';
 	import type { PageData } from './$types';
 
@@ -283,9 +283,9 @@
 	const brand = $derived(brandName(data.hotel.name, data.hotel.city));
 	// Lead with the name people search for, then the hotel's own line.
 	const description = $derived(
-		`${brand} — official website. ${data.branding.tagline ?? data.branding.heroSubtitle ?? 'Book direct for the best rates.'}`
+		`${brandBothWays(data.hotel.name, data.hotel.city)} — official website. ${data.branding.tagline ?? data.branding.heroSubtitle ?? 'Book direct for the best rates.'}`
 	);
-	const pageTitle = $derived(homeTitle(brand));
+	const pageTitle = $derived(homeTitle(data.hotel.name, data.hotel.city));
 	const homeUrl = $derived(
 		canonicalUrl({ origin: page.url.origin, slug: data.hotel.slug, customDomain: data.hotel.customDomain, pathname: page.url.pathname })
 	);
@@ -295,6 +295,7 @@
 	const jsonLd = $derived(
 		hotelJsonLd({
 			name: brand,
+			alternateName: spacedName(brand) ?? undefined,
 			url: homeUrl,
 			city: data.hotel.city,
 			address: data.branding.contactAddress,

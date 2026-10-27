@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { brandName, canonicalUrl, hotelJsonLd } from './seo';
+import { brandBothWays, brandName, canonicalUrl, homeTitle, hotelJsonLd, spacedName } from './seo';
 
 const base = { origin: 'https://hotels.example.com', slug: 'mmhotel' };
 
@@ -19,6 +19,17 @@ describe('brandName', () => {
 		expect(brandName('MMHotel', 'Tandag')).toBe('MMHotel Tandag');
 		expect(brandName('MMHotel Tandag', 'Tandag')).toBe('MMHotel Tandag');
 		expect(brandName('MMHotel', null)).toBe('MMHotel');
+	});
+});
+
+describe('spacedName / brandBothWays', () => {
+	it('splits a camel-cased name and keeps both spellings', () => {
+		expect(spacedName('MMHotel')).toBe('MM Hotel');
+		expect(spacedName('GrandPlaza')).toBe('Grand Plaza');
+		expect(spacedName('Seaside')).toBeNull();
+		expect(brandBothWays('MMHotel', 'Tandag')).toBe('MM Hotel Tandag (MMHotel)');
+		expect(brandBothWays('Seaside', 'Tandag')).toBe('Seaside Tandag');
+		expect(homeTitle('MMHotel', 'Tandag')).toBe('MM Hotel Tandag (MMHotel) — Official Website & Online Booking');
 	});
 });
 

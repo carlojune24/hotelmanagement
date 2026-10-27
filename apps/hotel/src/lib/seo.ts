@@ -19,12 +19,25 @@ export function brandName(name: string, city: string | null): string {
 	return city && !name.toLowerCase().includes(city.toLowerCase()) ? `${name} ${city}` : name;
 }
 
+/** "MMHotel" -> "MM Hotel": how people (and Google) type a camel-cased name. Null when the name has no such split. */
+export function spacedName(name: string): string | null {
+	const spaced = name.replace(/([A-Z]{2,})([A-Z][a-z])/g, '$1 $2').replace(/([a-z])([A-Z])/g, '$1 $2');
+	return spaced === name ? null : spaced;
+}
+
+/** The brand with both spellings: "MM Hotel Tandag (MMHotel)", or just the brand when it has no spaced form. */
+export function brandBothWays(name: string, city: string | null): string {
+	const spaced = spacedName(name);
+	return spaced ? `${brandName(spaced, city)} (${name})` : brandName(name, city);
+}
+
 /** The home page's <title>. Set from the layout: the page renders async there, and a page-level <title> loses to the layout's. */
-export const homeTitle = (brand: string) => `${brand} — Official Website & Online Booking`;
+export const homeTitle = (name: string, city: string | null) => `${brandBothWays(name, city)} — Official Website & Online Booking`;
 
 /** schema.org Hotel, serialised safely for an inline `<script>` (no `<` that could close it). */
 export function hotelJsonLd(h: {
 	name: string;
+	alternateName?: string;
 	url: string;
 	city: string | null;
 	address: string | undefined;
@@ -38,6 +51,7 @@ export function hotelJsonLd(h: {
 		'@context': 'https://schema.org',
 		'@type': 'Hotel',
 		name: h.name,
+		...(h.alternateName && { alternateName: h.alternateName }),
 		url: h.url,
 		...(h.image && { image: h.image }),
 		...(h.phone && { telephone: h.phone }),

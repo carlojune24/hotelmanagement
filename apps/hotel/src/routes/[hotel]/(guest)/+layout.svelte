@@ -78,7 +78,7 @@
 </script>
 
 <svelte:head>
-	<title>{data.isHome ? homeTitle(brandName(data.hotel.name, data.hotel.city)) : `${brandName(data.hotel.name, data.hotel.city)} — Book your stay`}</title>
+	<title>{data.isHome ? homeTitle(data.hotel.name, data.hotel.city) : `${brandName(data.hotel.name, data.hotel.city)} — Book your stay`}</title>
 	<link rel="canonical" href={canonical} />
 	{#if !data.indexable}<meta name="robots" content="noindex" />{/if}
 	<meta property="og:site_name" content={brandName(data.hotel.name, data.hotel.city)} />
