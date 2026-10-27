@@ -1,6 +1,5 @@
 import { and, asc, desc, eq } from 'drizzle-orm';
 import { getOrderPaymentSummary } from '../order-payment';
-import { env } from '$env/dynamic/private';
 import { db } from '../db/index';
 import {
 	bookingRooms,
@@ -21,6 +20,7 @@ import { renderPdf } from '../pdf/render';
 import { getOrderPromo } from '../promo-codes';
 import { orderSecurityDepositCentavos } from '../security-deposit-lookup';
 import { alreadySent, sendMail, type MailAttachment, type SendMailResult } from './send';
+import { hotelOrigin } from '../hotel-origin';
 
 /**
  * Gathers an order's data and sends the guest their booking-confirmation email.
@@ -74,7 +74,7 @@ export async function sendBookingConfirmation(
 			.innerJoin(functionHalls, eq(functionHalls.id, hallBookings.functionHallId))
 			.where(eq(hallBookings.orderId, order.id));
 
-		const origin = (env.ORIGIN ?? '').replace(/\/$/, '');
+		const origin = hotelOrigin(hotel);
 		const manageUrl = `${origin}/${hotel.slug}/confirmation/${order.id}?t=${order.accessToken}`;
 		const manageBookingUrl = `${origin}/${hotel.slug}/manage/${order.id}?t=${order.accessToken}`;
 

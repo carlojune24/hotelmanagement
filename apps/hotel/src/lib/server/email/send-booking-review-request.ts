@@ -1,10 +1,10 @@
 import { eq } from 'drizzle-orm';
-import { env } from '$env/dynamic/private';
 import { db } from '../db/index';
 import { bookingRooms, bookings, guests, hotels, orders, roomTypes } from '../db/schema/index';
 import { DEFAULT_ACCENT_COLOR, DEFAULT_PAPER_COLOR, parseBranding } from '../branding';
 import { renderBookingReviewRequest, type ReviewRequestEmailData } from './booking-review-request';
 import { sendMail, type SendMailResult } from './send';
+import { hotelOrigin } from '../hotel-origin';
 
 /**
  * Emails the guest a "how was your stay?" prompt after a room booking is
@@ -38,7 +38,7 @@ export async function sendBookingReviewRequest(bookingId: string): Promise<SendM
 		if (!hotel) return { ok: false, error: 'hotel not found' };
 
 		const branding = parseBranding(hotel.config);
-		const origin = (env.ORIGIN ?? '').replace(/\/$/, '');
+		const origin = hotelOrigin(hotel);
 		const reviewUrl = `${origin}/${hotel.slug}/leave-review/${bookingId}?t=${order.accessToken}`;
 
 		const data: ReviewRequestEmailData = {

@@ -1,10 +1,10 @@
 import { eq } from 'drizzle-orm';
-import { env } from '$env/dynamic/private';
 import { db } from '../db/index';
 import { guests, hotels, orders } from '../db/schema/index';
 import { DEFAULT_ACCENT_COLOR, DEFAULT_PAPER_COLOR, parseBranding } from '../branding';
 import { renderGuestMessageReply, type GuestMessageReplyEmailData } from './guest-message-reply';
 import { sendMail, type SendMailResult } from './send';
+import { hotelOrigin } from '../hotel-origin';
 
 /**
  * Emails the guest that staff replied to their message/cancellation request on
@@ -28,7 +28,7 @@ export async function sendGuestMessageReply(
 		if (!hotel) return { ok: false, error: 'hotel not found' };
 
 		const branding = parseBranding(hotel.config);
-		const origin = (env.ORIGIN ?? '').replace(/\/$/, '');
+		const origin = hotelOrigin(hotel);
 		const manageUrl = `${origin}/${hotel.slug}/manage/${order.id}?t=${order.accessToken}`;
 
 		const data: GuestMessageReplyEmailData = {

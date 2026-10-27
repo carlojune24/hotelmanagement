@@ -1,5 +1,4 @@
 import { eq } from 'drizzle-orm';
-import { env } from '$env/dynamic/private';
 import { db } from '../db/index';
 import {
 	bookingRooms,
@@ -15,6 +14,7 @@ import { DEFAULT_ACCENT_COLOR, DEFAULT_PAPER_COLOR, parseBranding } from '../bra
 import { PENDING_ORDER_TTL_MINUTES } from '../orders';
 import { renderPaymentLink } from './payment-link';
 import { sendMail, type SendMailResult } from './send';
+import { hotelOrigin } from '../hotel-origin';
 
 /**
  * Emails the guest a link back to the payment step of an unpaid online booking (the guest closed the
@@ -54,7 +54,7 @@ export async function sendPaymentLink(orderId: string): Promise<SendMailResult> 
 				.where(eq(hallBookings.orderId, orderId))
 		]);
 
-		const origin = (env.ORIGIN ?? '').replace(/\/$/, '');
+		const origin = hotelOrigin(hotel);
 		const expiresAt = new Date(order.createdAt.getTime() + PENDING_ORDER_TTL_MINUTES * 60_000);
 		const holdUntil = expiresAt.toLocaleString('en-PH', {
 			timeZone: hotel.timezone,

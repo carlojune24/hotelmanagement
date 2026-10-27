@@ -18,8 +18,7 @@ const schema = z.object({
 	next: z.string().optional()
 });
 
-/** Platform-admin sign-in only — a hotel-staff account is routed to its own hotel's
- *  `/{slug}/management/login` instead (see the `actions.default` branch below). */
+/** Sign-in for platform admins; a hotel-staff account is signed in too and sent to its own hotel. */
 export const load: PageServerLoad = async ({ locals, url }) => {
 	if (locals.user) {
 		if (!locals.user.isPlatformAdmin) {
@@ -50,12 +49,8 @@ export const actions: Actions = {
 		}
 		loginSucceeded(ip, email);
 
-		if (!user.isPlatformAdmin) {
-			// Valid credentials, but this is a hotel-staff account, not a platform admin —
-			// no session is created here at all; send them to sign in at their own hotel's
-			// login instead.
-			const slug = await firstHotelSlugForUser(user.id);
-			if (slug) redirect(302, `/${slug}/management/login`);
+		const slug = user.isPlatformAdmin ? null : await firstHotelSlugForUser(user.id);
+		if (!user.isPlatformAdmin && !slug) {
 			return fail(403, { error: 'This account has no platform-admin access.' });
 		}
 
@@ -63,6 +58,9 @@ export const actions: Actions = {
 		const session = await createSession(token, user.id);
 		setSessionCookie(event, token, session.expiresAt);
 
+		// Hotel staff are signed in here too, then handed to their hotel's login route, which forwards
+		// a signed-in member straight to their home — no second sign-in.
+		if (slug) redirect(302, `/${slug}/management/login`);
 		redirect(302, safeNext(next));
 	}
 };

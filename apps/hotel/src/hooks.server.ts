@@ -1,4 +1,4 @@
-import { error, type Handle, type HandleServerError, type Reroute } from '@sveltejs/kit';
+import { error, redirect, type Handle, type HandleServerError, type Reroute } from '@sveltejs/kit';
 import {
 	SESSION_COOKIE,
 	deleteSessionCookie,
@@ -11,6 +11,7 @@ import {
 	loadHotelBySlug,
 	loadHotelSlugByDomain
 } from '$lib/server/tenant';
+import { env } from '$env/dynamic/private';
 import { startJobRunner } from '$lib/server/jobs/boss';
 import { writeErrorLog } from '$lib/server/error-log';
 import { runWithRequestContext } from '$lib/server/request-context';
@@ -115,6 +116,28 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 		event.locals.hotel = hotel;
 		event.locals.isCustomDomain = event.url.hostname === hotel.customDomain;
+
+		// Staff login lives on the platform host only: the custom domain is the guest-facing address.
+		const platformHost = env.ORIGIN ? new URL(env.ORIGIN).host : null;
+		const routeId = event.route.id ?? '';
+		if (event.locals.isCustomDomain && platformHost && routeId.startsWith('/[hotel]/management')) {
+			const { pathname, search } = event.url;
+			const path = pathname === `/${slug}` || pathname.startsWith(`/${slug}/`) ? pathname : `/${slug}${pathname}`;
+			redirect(307, `${env.ORIGIN!.replace(/\/$/, '')}${path}${search}`);
+		}
+		// Guest pages opened on the platform host move to the hotel's own domain (old emails, QR codes, bookmarks).
+		// Only when the request really came in on the platform host, so dev/staging hosts are never bounced.
+		if (
+			hotel.customDomain &&
+			!event.locals.isCustomDomain &&
+			event.url.host === platformHost &&
+			['GET', 'HEAD'].includes(event.request.method) &&
+			/^\/\[hotel\]\/\((guest|table)\)/.test(routeId) &&
+			!routeId.includes('/api')
+		) {
+			const rest = event.url.pathname.slice(`/${slug}`.length) || '/';
+			redirect(301, `https://${hotel.customDomain}${rest}${event.url.search}`);
+		}
 		if (user) event.locals.role = await getMembershipRole(user.id, hotel.id);
 	}
 

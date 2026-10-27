@@ -62,7 +62,6 @@
 				</a>
 				<nav class="actions" aria-label="Site">
 					<a href="/auth/login" class="signin">Sign in</a>
-					<a href="#featured" class="book-outline" onclick={toFeatured}>Book Now</a>
 				</nav>
 			</header>
 
@@ -137,7 +136,10 @@
 									{#if current.email}<a href="mailto:{current.email}">{current.email}</a>{/if}
 								</p>
 							{/if}
-							<a href="/{current.slug}" class="book">Book Now <ArrowRightIcon class="size-4" /></a>
+							<div class="cta">
+								<a href="/{current.slug}" class="book">Book Now <ArrowRightIcon class="size-4" /></a>
+								<a href="/{current.slug}/management/login" class="book-outline">Manage</a>
+							</div>
 						</div>
 					</article>
 				{/each}
@@ -515,12 +517,18 @@
 	.contact a:hover {
 		color: var(--gold);
 	}
+	.cta {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.75rem;
+		margin-top: 0.5rem;
+	}
 	.book {
 		display: inline-flex;
 		align-items: center;
 		gap: 0.5rem;
 		min-height: 2.75rem;
-		margin-top: 0.5rem;
 		padding-inline: 1.75rem;
 		border-radius: 999px;
 		background: var(--gold);

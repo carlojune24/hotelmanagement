@@ -1,11 +1,11 @@
 import { eq } from 'drizzle-orm';
-import { env } from '$env/dynamic/private';
 import { db } from '../db/index';
 import { diningItems, diningReservations, hotels } from '../db/schema/index';
 import { parseBranding } from '../branding';
 import { DEFAULT_ACCENT_COLOR, DEFAULT_PAPER_COLOR } from '../branding';
 import { renderDiningReservation } from './dining-reservation';
 import { sendMail, type SendMailResult } from './send';
+import { hotelOrigin } from '../hotel-origin';
 
 /**
  * Sends the guest their table-reservation confirmation. Best-effort and never throws:
@@ -28,7 +28,7 @@ export async function sendDiningReservationConfirmation(
 		if (!hotel) return { ok: false, error: 'hotel not found' };
 		const branding = parseBranding(hotel.config);
 
-		const origin = (env.ORIGIN ?? '').replace(/\/$/, '');
+		const origin = hotelOrigin(hotel);
 		const logoUrl = branding.logoUrl
 			? /^https?:\/\//.test(branding.logoUrl)
 				? branding.logoUrl

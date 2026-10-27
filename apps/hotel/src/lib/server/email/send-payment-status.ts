@@ -1,11 +1,11 @@
 import { eq } from 'drizzle-orm';
-import { env } from '$env/dynamic/private';
 import { db } from '../db/index';
 import { attemptCode, diningOrders, guests, hotels, orders, paymentAttempts } from '../db/schema/index';
 import { DEFAULT_ACCENT_COLOR, DEFAULT_PAPER_COLOR, parseBranding } from '../branding';
 import { PENDING_ORDER_TTL_MINUTES } from '../orders';
 import { renderPaymentStatus } from './payment-status';
 import { sendMail, type SendMailResult } from './send';
+import { hotelOrigin } from '../hotel-origin';
 
 /**
  * Emails the guest where their payment stands: `tracking` when they start paying, `delayed` once if PayMongo has not
@@ -26,7 +26,7 @@ export async function sendPaymentStatusEmail(
 		const [hotel] = await db.select().from(hotels).where(eq(hotels.id, attempt.hotelId)).limit(1);
 		if (!hotel) return { ok: false, error: 'hotel not found' };
 		const branding = parseBranding(hotel.config);
-		const origin = (env.ORIGIN ?? '').replace(/\/$/, '');
+		const origin = hotelOrigin(hotel);
 
 		let to: string | null = null;
 		let guestName = 'there';

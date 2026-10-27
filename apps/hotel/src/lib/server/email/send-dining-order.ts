@@ -1,10 +1,10 @@
 import { asc, eq, inArray } from 'drizzle-orm';
-import { env } from '$env/dynamic/private';
 import { db } from '../db/index';
 import { diningItems, diningOrderItemAddons, diningOrderItems, diningOrders, hotels } from '../db/schema/index';
 import { DEFAULT_ACCENT_COLOR, DEFAULT_PAPER_COLOR, parseBranding } from '../branding';
 import { renderDiningOrder } from './dining-order';
 import { sendMail, type SendMailResult } from './send';
+import { hotelOrigin } from '../hotel-origin';
 
 /**
  * Emails the guest about their online order: `confirmation` once the kitchen has it, `ready` when it
@@ -30,7 +30,7 @@ export async function sendDiningOrderEmail(
 			? await db.select().from(diningOrderItemAddons).where(inArray(diningOrderItemAddons.orderItemId, items.map((i) => i.id)))
 			: [];
 
-		const origin = (env.ORIGIN ?? '').replace(/\/$/, '');
+		const origin = hotelOrigin(hotel);
 		const logoUrl = branding.logoUrl ? (/^https?:\/\//.test(branding.logoUrl) ? branding.logoUrl : `${origin}${branding.logoUrl}`) : null;
 		const fmt = (opts: Intl.DateTimeFormatOptions) =>
 			order.pickupAt ? new Intl.DateTimeFormat('en-PH', { ...opts, timeZone: hotel.timezone }).format(order.pickupAt) : null;
