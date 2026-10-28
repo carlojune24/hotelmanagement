@@ -80,13 +80,13 @@
 
 			<div class="af-serial">
 				<div class="af-doctype">{doc.typeLabel}</div>
-				<div class="af-serial-no af-mono">No. {doc.formattedNo || '—'}</div>
+				{#if doc.formattedNo}<div class="af-serial-no af-mono">No. {doc.formattedNo}</div>{/if}
 				<div
 					class="af-copy-tag"
 					class:is-reprint={doc.isReprint && !cancelled}
 					class:is-cancelled={cancelled}
 				>
-					{cancelled ? 'CANCELLED' : doc.isReprint ? 'REPRINT' : 'ORIGINAL'}
+					{cancelled ? 'CANCELLED' : !doc.formattedNo ? 'NOT AN OFFICIAL RECEIPT' : doc.isReprint ? 'REPRINT' : 'ORIGINAL'}
 				</div>
 				<dl class="af-serial-meta">
 					<div><dt>Date issued</dt><dd class="af-mono">{fmtDateTime(doc.issuedAtIso)}</dd></div>
@@ -219,9 +219,14 @@
 				</p>
 			{:else}
 				<p class="af-legal-strong">
-					Computer-generated {doc.typeLabel.toLowerCase()} for the guest's reference. This is not a
-					BIR-registered document. Set the hotel's BIR details in Finance → BIR → Setup to issue a
-					compliant document.
+					{#if doc.formattedNo}
+						Computer-generated {doc.typeLabel.toLowerCase()} for the guest's reference. This is not a
+						BIR-registered document. Set the hotel's BIR details in Finance → BIR → Setup to issue a
+						compliant document.
+					{:else}
+						This acknowledges payment received. It is not an Official Receipt or Invoice; an official
+						document will be issued once the hotel's BIR registration is complete.
+					{/if}
 				</p>
 			{/if}
 			{#if snapshot.bir.footerNote}

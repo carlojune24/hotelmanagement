@@ -6,6 +6,8 @@ import { diningOrders, orders } from '$lib/server/db/schema/index';
 import { parseBranding } from '$lib/server/branding';
 import {
 	DocumentError,
+	NoSeriesError,
+	buildAcknowledgmentForPayment,
 	getBirSettings,
 	getDocumentForRender,
 	getOrIssueReceiptForPayment
@@ -26,6 +28,20 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		try {
 			rendered = await getOrIssueReceiptForPayment(hotel.id, params.documentId, locals.user ?? null);
 		} catch (e) {
+			// No BIR series yet (still awaiting authority): print an unnumbered acknowledgment instead.
+			if (e instanceof NoSeriesError) {
+				const [ackSnapshot, birRow] = await Promise.all([
+					buildAcknowledgmentForPayment(hotel.id, params.documentId, locals.user ?? null),
+					getBirSettings(hotel.id)
+				]);
+				return {
+					snapshot: ackSnapshot,
+					logoUrl: parseBranding(hotel.config).logoUrl ?? null,
+					cancelled: false,
+					thermalPaperWidthMm: (birRow?.thermalPaperWidthMm === 58 ? 58 : 80) as 58 | 80,
+					format: url.searchParams.get('format') === 'a4' ? ('a4' as const) : ('thermal' as const)
+				};
+			}
 			if (e instanceof DocumentError) error(409, e.message);
 			throw e;
 		}

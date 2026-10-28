@@ -115,9 +115,9 @@
 
 	<div class="tr-doctype-block">
 		<div class="tr-doctype">{doc.typeLabel}</div>
-		<div class="tr-serial-no">No. {doc.formattedNo || '—'}</div>
+		{#if doc.formattedNo}<div class="tr-serial-no">No. {doc.formattedNo}</div>{/if}
 		<div class="tr-copy-tag" class:is-cancelled={cancelled}>
-			{cancelled ? '✖ CANCELLED ✖' : doc.isReprint ? 'REPRINT' : 'ORIGINAL'}
+			{cancelled ? '✖ CANCELLED ✖' : !doc.formattedNo ? 'NOT AN OFFICIAL RECEIPT' : doc.isReprint ? 'REPRINT' : 'ORIGINAL'}
 		</div>
 	</div>
 
@@ -222,8 +222,13 @@
 			<p>Valid for five (5) years from the date of the permit to use.</p>
 		{:else}
 			<p class="tr-legal-strong">
-				Computer-generated {doc.typeLabel.toLowerCase()} for the guest's reference — not a
-				BIR-registered document.
+				{#if doc.formattedNo}
+					Computer-generated {doc.typeLabel.toLowerCase()} for the guest's reference — not a
+					BIR-registered document.
+				{:else}
+					Acknowledges payment received. Not an Official Receipt or Invoice; an official document
+					follows once BIR registration is complete.
+				{/if}
 			</p>
 		{/if}
 		{#if snapshot.bir.footerNote}<p>{snapshot.bir.footerNote}</p>{/if}

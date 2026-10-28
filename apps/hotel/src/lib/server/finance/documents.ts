@@ -31,6 +31,9 @@ import type { Tx } from './shared';
  *  series, an exhausted range, a missing folio) — route actions surface `.message`. */
 export class DocumentError extends Error {}
 
+/** No active series to draw a serial from — the cue for the unnumbered Acknowledgment Receipt fallback. */
+export class NoSeriesError extends DocumentError {}
+
 type DocType = 'invoice' | 'official_receipt';
 
 const TYPE_LABEL: Record<DocType, string> = {
@@ -424,7 +427,7 @@ export async function allocateSerial(
 		.limit(1);
 
 	if (!series) {
-		throw new DocumentError(
+		throw new NoSeriesError(
 			`No active ${TYPE_LABEL[type]} series is registered. Add one in Finance → BIR → Series.`
 		);
 	}
@@ -1284,6 +1287,26 @@ export async function getOrIssueReceiptForPayment(
 ): Promise<DocumentForRender> {
 	const doc = await issueOfficialReceipt(hotelId, paymentId, actor);
 	return { document: doc, snapshot: doc.snapshot as DocumentSnapshot };
+}
+
+/**
+ * Unnumbered, non-accountable stand-in for an Official Receipt while the hotel has no BIR series
+ * (still awaiting authority). Consumes no serial and persists nothing; once a series exists the
+ * normal path issues the real OR for the same payment.
+ */
+export async function buildAcknowledgmentForPayment(
+	hotelId: string,
+	paymentId: string,
+	actor: SessionUser | null
+): Promise<DocumentSnapshot> {
+	const snap = await buildReceiptSnapshot(hotelId, paymentId, null);
+	snap.bir.configured = false;
+	snap.bir.serialRange = null;
+	snap.document.typeLabel = 'Acknowledgment Receipt';
+	snap.document.formattedNo = '';
+	snap.document.issuedAtIso = new Date().toISOString();
+	snap.document.preparedBy = actor?.name ?? null;
+	return snap;
 }
 
 export interface DocumentListRow {
