@@ -1,3 +1,4 @@
+import { listBrowsableRoomTypes } from '$lib/server/availability';
 import { listDiningItems } from '$lib/server/dining';
 import { listFunctionHalls } from '$lib/server/hall-availability';
 import { loadHotelBySlug, loadHotelSlugByDomain } from '$lib/server/tenant';
@@ -10,6 +11,7 @@ export const GET: RequestHandler = async ({ url }) => {
 	const paths = ['/'];
 	if (hotel?.status === 'published') {
 		paths.push('/contact');
+		for (const t of await listBrowsableRoomTypes(hotel.id)) paths.push(`/rooms/${t.id}`);
 		if ((await listDiningItems(hotel.id)).length) paths.push('/dining');
 		if ((await listFunctionHalls(hotel.id)).length) paths.push('/meetings-events');
 	}
