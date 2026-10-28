@@ -242,7 +242,7 @@ export async function listPaymongoLedger(hotelId: string, tz: string, f: LedgerF
 				inFees: sql<number>`coalesce(sum(${l.feeCentavos}) filter (where ${l.kind} = 'payment' and ${l.status} = 'paid'), 0)::int`,
 				inNet: sql<number>`coalesce(sum(${l.netCentavos}) filter (where ${l.kind} = 'payment' and ${l.status} = 'paid'), 0)::int`,
 				refundsOut: sql<number>`coalesce(sum(${l.grossCentavos}) filter (where ${l.kind} = 'refund' and ${l.status} in (${sql.join(REFUND_COUNTED.map((s) => sql`${s}`), sql`, `)})), 0)::int`,
-				payoutsOut: sql<number>`coalesce(sum(${l.netCentavos}) filter (where ${l.kind} = 'payout' and ${l.status} not in ('returned', 'cancelled', 'failed')), 0)::int`
+				payoutsOut: sql<number>`coalesce(sum(${l.netCentavos}) filter (where ${l.kind} = 'payout' and ${l.status} not in ('returned', 'cancelled', 'failed', 'unknown')), 0)::int`
 			})
 			.from(l)
 			.leftJoin(orders, eq(orders.id, l.orderId))
