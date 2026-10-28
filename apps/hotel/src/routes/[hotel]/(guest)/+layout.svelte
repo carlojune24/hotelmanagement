@@ -84,7 +84,7 @@
 </script>
 
 <svelte:head>
-	<title>{data.isHome ? homeTitle(data.hotel.name, data.hotel.city) : `${SECTION_TITLES[page.route.id ?? ''] ?? 'Book your stay'} — ${brandTitle(data.hotel.name, data.hotel.city)}`}</title>
+	<title>{data.isHome ? homeTitle(data.hotel.name, data.hotel.city) : `${SECTION_TITLES[page.route.id ?? ''] ?? (page.route.id === '/[hotel]/(guest)/rooms/[roomTypeId]' ? page.data.roomType?.name : null) ?? 'Book your stay'} — ${brandTitle(data.hotel.name, data.hotel.city)}`}</title>
 	<link rel="canonical" href={canonical} />
 	{#if !data.indexable}<meta name="robots" content="noindex" />{/if}
 	<meta property="og:site_name" content={brandName(data.hotel.name, data.hotel.city)} />
