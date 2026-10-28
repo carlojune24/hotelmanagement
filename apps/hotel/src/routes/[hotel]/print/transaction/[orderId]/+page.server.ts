@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db/index';
 import { hotels } from '$lib/server/db/schema/index';
+import { paperFrom } from '$lib/print-paper';
 import { requireCap } from '$lib/server/auth/rbac';
 import { load as loadTransaction } from '../../../management/transactions/[orderId]/+page.server';
 import type { PageServerLoad } from './$types';
@@ -32,6 +33,7 @@ export const load: PageServerLoad = async (event) => {
 			ledger: t.ledger,
 			cityLedgerAccount: t.cityLedgerAccount
 		},
+		paper: paperFrom(event.url.searchParams.get('paper')),
 		printedAt: new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
 	};
 };

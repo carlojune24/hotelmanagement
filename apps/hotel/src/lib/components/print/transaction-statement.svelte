@@ -82,8 +82,11 @@
 		} | null;
 	}
 
-	let { data, printedAt }: { data: Data; printedAt: string } = $props();
+	import { PAPER, type PaperKey } from '$lib/print-paper';
+
+	let { data, printedAt, paper = 'a4' }: { data: Data; printedAt: string; paper?: PaperKey } = $props();
 	const d = $derived(data);
+	const sheet = $derived(PAPER[paper]);
 
 	const peso = (c: number) =>
 		`${c < 0 ? '−' : ''}₱${(Math.abs(c) / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -113,7 +116,9 @@
 	};
 </script>
 
-<div class="ts-page">
+<svelte:head><style>{`@page { size: ${sheet.w}mm ${sheet.h}mm; margin: 10mm; }`}</style></svelte:head>
+
+<div class="ts-page" style="--paper-w: {sheet.w}mm; --paper-h: {sheet.h}mm">
 	<div class="ts-frame">
 		<header class="ts-head">
 			<div>
@@ -296,7 +301,7 @@
 		--soft: #55524c;
 		--rule: #b7b2a8;
 		box-sizing: border-box;
-		width: 210mm;
+		width: var(--paper-w);
 		margin: 0 auto;
 		padding: 10mm;
 		background: #fff;
@@ -313,6 +318,10 @@
 	.ts-frame {
 		border: 3px double var(--ink);
 		padding: 6mm;
+		display: flex;
+		flex-direction: column;
+		/* The whole sheet less the 10mm @page margins (1mm spare so it never spills onto a 2nd page). */
+		min-height: calc(var(--paper-h) - 21mm);
 	}
 	.ts-mono,
 	.ts-num {
@@ -426,7 +435,8 @@
 	.ts-sign {
 		display: flex;
 		gap: 12mm;
-		margin-top: 12mm;
+		margin-top: auto;
+		padding-top: 12mm;
 	}
 	.ts-sign div {
 		flex: 1;
@@ -441,10 +451,7 @@
 	@media print {
 		.ts-page {
 			padding: 0;
+			width: auto;
 		}
-	}
-	@page {
-		size: A4;
-		margin: 10mm;
 	}
 </style>
