@@ -1,5 +1,4 @@
-<script lang="ts">	import { brandTitle } from '$lib/seo';
-
+<script lang="ts">
 	import StorefrontNav from '$lib/components/storefront/storefront-nav.svelte';
 	import StorefrontFooter from '$lib/components/storefront/storefront-footer.svelte';
 	import StorefrontLightbox from '$lib/components/storefront/storefront-lightbox.svelte';
@@ -24,10 +23,6 @@
 		(e.currentTarget as HTMLImageElement).style.display = 'none';
 	}
 </script>
-
-<svelte:head>
-	<title>Meetings &amp; Events — {brandTitle(data.hotel.name, data.hotel.city)}</title>
-</svelte:head>
 
 <StorefrontNav
 	hotelSlug={data.hotel.slug}

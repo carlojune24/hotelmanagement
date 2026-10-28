@@ -1,5 +1,4 @@
-<script lang="ts">	import { brandTitle } from '$lib/seo';
-
+<script lang="ts">
 	import PhoneIcon from '@lucide/svelte/icons/phone';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import MapPinIcon from '@lucide/svelte/icons/map-pin';
@@ -26,10 +25,6 @@
 		Boolean(data.branding.contactPhone || data.branding.contactEmail || data.branding.contactAddress)
 	);
 </script>
-
-<svelte:head>
-	<title>Contact Us — {brandTitle(data.hotel.name, data.hotel.city)}</title>
-</svelte:head>
 
 <StorefrontNav
 	hotelSlug={data.hotel.slug}

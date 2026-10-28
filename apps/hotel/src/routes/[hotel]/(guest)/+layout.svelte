@@ -62,6 +62,12 @@
 	const fontDisplayFamily = $derived(
 		DISPLAY_FONTS[data.branding.fontDisplay ?? DEFAULT_DISPLAY_FONT].family
 	);
+	// Set here, not in each page: a page-level <title> can lose to this one in the server-rendered HTML crawlers read.
+	const SECTION_TITLES: Record<string, string> = {
+		'/[hotel]/(guest)/contact': 'Contact Us',
+		'/[hotel]/(guest)/dining': 'Restaurant & Dining',
+		'/[hotel]/(guest)/meetings-events': 'Meetings & Events'
+	};
 	const canonical = $derived(
 		canonicalUrl({ origin: page.url.origin, slug: data.hotel.slug, customDomain: data.hotel.customDomain, pathname: page.url.pathname })
 	);
@@ -78,7 +84,7 @@
 </script>
 
 <svelte:head>
-	<title>{data.isHome ? homeTitle(data.hotel.name, data.hotel.city) : `${brandTitle(data.hotel.name, data.hotel.city)} — Book your stay`}</title>
+	<title>{data.isHome ? homeTitle(data.hotel.name, data.hotel.city) : `${SECTION_TITLES[page.route.id ?? ''] ?? 'Book your stay'} — ${brandTitle(data.hotel.name, data.hotel.city)}`}</title>
 	<link rel="canonical" href={canonical} />
 	{#if !data.indexable}<meta name="robots" content="noindex" />{/if}
 	<meta property="og:site_name" content={brandName(data.hotel.name, data.hotel.city)} />
