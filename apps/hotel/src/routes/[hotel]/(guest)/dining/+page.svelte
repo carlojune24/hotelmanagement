@@ -1,4 +1,5 @@
-<script lang="ts">
+<script lang="ts">	import { brandTitle } from '$lib/seo';
+
 	import StorefrontNav from '$lib/components/storefront/storefront-nav.svelte';
 	import StorefrontFooter from '$lib/components/storefront/storefront-footer.svelte';
 	import StorefrontLightbox from '$lib/components/storefront/storefront-lightbox.svelte';
@@ -50,7 +51,7 @@
 </script>
 
 <svelte:head>
-	<title>Dining — {data.hotel.name}</title>
+	<title>Restaurant & Dining — {brandTitle(data.hotel.name, data.hotel.city)}</title>
 </svelte:head>
 
 <StorefrontNav

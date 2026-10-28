@@ -1,4 +1,5 @@
-<script lang="ts">
+<script lang="ts">	import { brandTitle } from '$lib/seo';
+
 	import PhoneIcon from '@lucide/svelte/icons/phone';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import MapPinIcon from '@lucide/svelte/icons/map-pin';
@@ -27,7 +28,7 @@
 </script>
 
 <svelte:head>
-	<title>Contact Us — {data.hotel.name}</title>
+	<title>Contact Us — {brandTitle(data.hotel.name, data.hotel.city)}</title>
 </svelte:head>
 
 <StorefrontNav

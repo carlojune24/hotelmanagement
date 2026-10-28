@@ -3,6 +3,7 @@ export const INDEXABLE_ROUTES = new Set([
 	'/[hotel]/(guest)',
 	'/[hotel]/(guest)/contact',
 	'/[hotel]/(guest)/dining',
+	'/[hotel]/(guest)/rooms/[roomTypeId]',
 	'/[hotel]/(guest)/meetings-events'
 ]);
 
@@ -30,6 +31,9 @@ export function brandBothWays(name: string, city: string | null): string {
 	const spaced = spacedName(name);
 	return spaced ? `${brandName(spaced, city)} (${name})` : brandName(name, city);
 }
+
+/** Brand for sub-page titles: the spaced form people type ("MM Hotel Tandag") when the name has one, else the plain brand. */
+export const brandTitle = (name: string, city: string | null) => brandName(spacedName(name) ?? name, city);
 
 /** The home page's <title>. Set from the layout: the page renders async there, and a page-level <title> loses to the layout's. */
 export const homeTitle = (name: string, city: string | null) => `${brandBothWays(name, city)} — Official Website & Online Booking`;

@@ -1,4 +1,5 @@
-<script lang="ts">
+<script lang="ts">	import { brandTitle } from '$lib/seo';
+
 	import { amenityIcon } from '$lib/amenity-icons';
 	import { AMENITY_CATEGORY_LABELS, AMENITY_CATEGORY_ORDER } from '$lib/amenity-categories';
 	import BedIcon from '@lucide/svelte/icons/bed';
@@ -65,7 +66,7 @@
 </script>
 
 <svelte:head>
-	<title>{rt.name} — {data.hotel.name}</title>
+	<title>{rt.name} — {brandTitle(data.hotel.name, data.hotel.city)}</title>
 </svelte:head>
 
 <StorefrontNav
