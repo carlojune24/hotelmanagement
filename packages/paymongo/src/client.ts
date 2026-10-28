@@ -210,10 +210,12 @@ export class PayMongoClient {
 		nextCursor: string | null;
 	}> {
 		const res = await this.request<{
-			data: PayMongoPayout[];
+			data: Array<PayMongoPayout & { attributes?: Partial<PayMongoPayout> }>;
 			pagination?: { next_cursor?: string | null };
 		}>(`/payouts${PayMongoClient.query({ limit: params.limit ?? 100, after: params.after })}`);
-		return { data: res.data ?? [], nextCursor: res.pagination?.next_cursor ?? null };
+		// PayMongo wraps each payout as {id, type, attributes}; the rest of the code reads it flat.
+		const data = (res.data ?? []).map(({ attributes, ...top }) => ({ ...top, ...attributes }) as PayMongoPayout);
+		return { data, nextCursor: res.pagination?.next_cursor ?? null };
 	}
 
 	/** `GET /wallets`: empty unless the account has a PayMongo wallet (Money Movement). */
