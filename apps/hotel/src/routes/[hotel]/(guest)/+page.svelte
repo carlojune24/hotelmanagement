@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
 	import { goto } from '$app/navigation';
 	import { getContext, onMount } from 'svelte';
 	import { AMENITY_CATEGORY_LABELS, AMENITY_CATEGORY_ORDER } from '$lib/amenity-categories';
@@ -22,6 +23,7 @@
 	import { brandBothWays, brandName, canonicalUrl, homeTitle, hotelJsonLd, spacedName } from '$lib/seo';
 	import { page } from '$app/state';
 	import type { PageData } from './$types';
+	const base = $derived(guestBase(page));
 
 	let { data }: { data: PageData } = $props();
 
@@ -109,7 +111,7 @@
 				vatRateBps: data.hotel.vatRateBps
 			})
 		);
-		void goto(`/${slug}/details`);
+		void goto(`${base}/details`);
 	}
 
 	/** A room card's own "Check dates & price": same search as the booking bar, then back to THAT room. */
@@ -121,7 +123,7 @@
 			adults: String(adults),
 			children: String(children)
 		});
-		await goto(`/${slug}?${q}`, { keepFocus: true, noScroll: true, invalidateAll: true });
+		await goto(`${base || '/'}?${q}`, { keepFocus: true, noScroll: true, invalidateAll: true });
 		document.getElementById(`room-${roomId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 	}
 
@@ -277,7 +279,7 @@
 			guestCount: f.guestCount,
 			price: f.quote
 		});
-		void goto(`/${slug}/details`);
+		void goto(`${base}/details`);
 	}
 
 	const brand = $derived(brandName(data.hotel.name, data.hotel.city));
@@ -402,7 +404,7 @@
 					{#if data.hotel.city}<p class="sf-about-place">{data.hotel.city}, Philippines</p>{/if}
 					<div class="sf-feature-actions">
 						<a href="#rooms" class="sf-btn">See rooms &amp; rates</a>
-						<a href="/{slug}/contact" class="sf-link">Find us <ArrowRightIcon class="size-4" aria-hidden="true" /></a>
+						<a href="{base}/contact" class="sf-link">Find us <ArrowRightIcon class="size-4" aria-hidden="true" /></a>
 					</div>
 				</div>
 				{#if aboutPhoto}
@@ -511,12 +513,12 @@
 						<p class="sf-lede" style="margin-top: 0.75rem; font-size: 0.9375rem">Open {diningFeature.operatingHours}</p>
 					{/if}
 					<div class="sf-feature-actions">
-						<a href="/{slug}/dining" class="sf-btn">View the menu</a>
+						<a href="{base}/dining" class="sf-btn">View the menu</a>
 						{#if diningFeature.reservationsEnabled}
-							<a href="/{slug}/dining/reserve?venue={diningFeature.id}" class="sf-btn sf-btn--outline">Reserve a table</a>
+							<a href="{base}/dining/reserve?venue={diningFeature.id}" class="sf-btn sf-btn--outline">Reserve a table</a>
 						{/if}
 						{#if data.orderableVenueIds.includes(diningFeature.id)}
-							<a href="/{slug}/dining/order?venue={diningFeature.id}" class="sf-link">Order online <ArrowRightIcon class="size-4" aria-hidden="true" /></a>
+							<a href="{base}/dining/order?venue={diningFeature.id}" class="sf-link">Order online <ArrowRightIcon class="size-4" aria-hidden="true" /></a>
 						{/if}
 					</div>
 				</div>
@@ -533,7 +535,7 @@
 						<h2 class="sf-h2">Weddings, meetings &amp; celebrations</h2>
 						<p class="sf-lede">Rent our event space by the hour. Pick a date and time and the price is worked out for you.</p>
 					</div>
-					<a href="/{slug}/meetings-events" class="sf-link">All event details <ArrowRightIcon class="size-4" aria-hidden="true" /></a>
+					<a href="{base}/meetings-events" class="sf-link">All event details <ArrowRightIcon class="size-4" aria-hidden="true" /></a>
 				</div>
 
 				{#each data.functionHalls as hall (hall.id)}

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
+	import { page } from '$app/state';
 	import BedIcon from '@lucide/svelte/icons/bed';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import RulerIcon from '@lucide/svelte/icons/ruler';
@@ -10,6 +12,7 @@
 	import { FEW_LEFT_ROOMS, type DayAvailability } from '$lib/day-availability';
 	import type { AvailableRatePlan, AvailableRoomType, BrowsableRoomType } from '$lib/server/availability';
 	import type { BedConfigEntry } from '$lib/server/db/schema/inventory';
+	const base = $derived(guestBase(page));
 
 	/**
 	 * One room type. Undated: a large photo-led row with "from ₱X / night", Quick view and Details (rows
@@ -64,7 +67,7 @@
 		`₱${(centavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 	const bedText = (entries: BedConfigEntry[]) => entries.map((e) => `${e.quantity} ${e.type}`).join(' + ');
 	const cover = $derived(room.photos.find((p) => p.tag === 'cover')?.url ?? room.photos[0]?.url ?? null);
-	const detailHref = $derived(`/${hotelSlug}/rooms/${room.id}${stayQuery}`);
+	const detailHref = $derived(`${base}/rooms/${room.id}${stayQuery}`);
 	const searched = $derived(search !== null);
 	const unavailable = $derived(searched && live === null);
 

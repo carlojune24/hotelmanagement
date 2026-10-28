@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
 	import { getContext, onMount } from 'svelte';
 	import { page } from '$app/state';
 	import * as Sheet from '$lib/components/ui/sheet/index.js';
@@ -7,6 +8,7 @@
 	import MoonIcon from '@lucide/svelte/icons/moon';
 	import { lighten } from '$lib/woven-pattern';
 	import type { StorefrontTheme } from '$lib/storefront-mode.svelte';
+	const base = $derived(guestBase(page));
 
 	let {
 		hotelSlug,
@@ -62,18 +64,17 @@
 	});
 
 	// Absolute /{slug}/... paths: this nav renders from several nesting depths.
-	const base = $derived(`/${hotelSlug}`);
 	const path = $derived(page.url.pathname);
 	const current = (href: string) => (path === href || path.startsWith(`${href}/`) ? 'page' : undefined);
 
 	const links = $derived([
-		{ href: `${base}#about`, label: 'About', show: true },
-		{ href: `${base}#rooms`, label: 'Rooms', show: true },
-		{ href: `${base}#amenities`, label: 'Amenities', show: showAmenities },
+		{ href: `${base || '/'}#about`, label: 'About', show: true },
+		{ href: `${base || '/'}#rooms`, label: 'Rooms', show: true },
+		{ href: `${base || '/'}#amenities`, label: 'Amenities', show: showAmenities },
 		{ href: `${base}/dining`, label: 'Dining', show: showDining, page: true },
 		{ href: `${base}/meetings-events`, label: 'Events', show: showFunctionHall, page: true },
-		{ href: `${base}#gallery`, label: 'Gallery', show: true },
-		{ href: `${base}#reviews`, label: 'Reviews', show: showReviews },
+		{ href: `${base || '/'}#gallery`, label: 'Gallery', show: true },
+		{ href: `${base || '/'}#reviews`, label: 'Reviews', show: showReviews },
 		{ href: `${base}/contact`, label: 'Contact', show: true, page: true }
 	]);
 
@@ -82,7 +83,7 @@
 
 <nav class="sf-nav" class:is-over-hero={transparentOverHero && !scrolled} aria-label="Main">
 	<div class="sf-wrap sf-nav-inner">
-		<a href={base} class="sf-nav-brand">
+		<a href={base || '/'} class="sf-nav-brand">
 			{#if logoUrl}<img src={logoUrl} alt="" />{/if}
 			<span>{hotelName}</span>
 		</a>

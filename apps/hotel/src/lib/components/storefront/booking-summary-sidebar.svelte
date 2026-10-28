@@ -1,8 +1,10 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
 	import { page } from '$app/state';
 	import type { CartItem, CartStore } from '$lib/cart.svelte';
 	import { itemLabel, itemDetail } from '$lib/cart-display';
 	import { Input } from '$lib/components/ui/input/index.js';
+	const base = $derived(guestBase(page));
 
 	let { cart, hotelSlug }: { cart: CartStore; hotelSlug: string } = $props();
 
@@ -34,7 +36,7 @@
 	    right now — the only place occupancy can be corrected once past the Dates step, since
 	    `/rooms` itself collects room count per card, not occupancy. */
 	const editDatesHref = $derived(
-		`/${hotelSlug}/dates?${new URLSearchParams({
+		`${base}/dates?${new URLSearchParams({
 			...(checkIn ? { checkIn } : {}),
 			...(checkOut ? { checkOut } : {}),
 			adults,
@@ -120,7 +122,7 @@
 		{#if page.route.id === '/[hotel]/(guest)/rooms'}
 			<!-- Guest Info and Review each already have their own primary action ("Continue to
 			     review", "Pay ₱X") — a second Continue here would be redundant/confusing. -->
-			<a href="/{hotelSlug}/details" class="ledger-btn-primary storefront-summary-cta">
+			<a href="{base}/details" class="ledger-btn-primary storefront-summary-cta">
 				Continue
 			</a>
 		{/if}

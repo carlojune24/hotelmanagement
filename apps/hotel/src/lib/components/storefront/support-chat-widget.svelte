@@ -1,10 +1,12 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
 	import { page } from '$app/state';
 	import MessageCircleIcon from '@lucide/svelte/icons/message-circle';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import CheckCheckIcon from '@lucide/svelte/icons/check-check';
 	import ArrowDownIcon from '@lucide/svelte/icons/arrow-down';
+	const base = $derived(guestBase(page));
 
 	/**
 	 * Customer Support chat, guest side (Woven Ledger world): FAQ quick questions first, then a
@@ -633,7 +635,7 @@
 							{#each faqs as f (f.id)}
 								<li><button type="button" class="chip" onclick={() => chooseFaq(f)}>{f.question}</button></li>
 							{/each}
-							<li><a class="chip chip-link" href="/{hotelSlug}/dates">Book now</a></li>
+							<li><a class="chip chip-link" href="{base}/dates">Book now</a></li>
 						</ul>
 					</div>
 					<div class="foot">

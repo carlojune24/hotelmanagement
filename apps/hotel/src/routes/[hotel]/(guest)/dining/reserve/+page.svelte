@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import StorefrontNav from '$lib/components/storefront/storefront-nav.svelte';
@@ -8,6 +9,7 @@
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
 	import ClockIcon from '@lucide/svelte/icons/clock';
 	import type { ActionData, PageData } from './$types';
+	const base = $derived(guestBase(page));
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
@@ -57,7 +59,7 @@
 
 <section class="storefront-section">
 	<div class="mx-auto max-w-3xl">
-		<a href="/{hotel.slug}/dining" class="storefront-step-back">← Back to dining</a>
+		<a href="{base}/dining" class="storefront-step-back">← Back to dining</a>
 		<h1 class="storefront-section-title ink-heading ledger-display mt-3 text-3xl sm:text-4xl">Reserve a table</h1>
 		<p class="storefront-section-lede text-[0.9375rem] leading-relaxed">
 			Choose a day and the size of your party, then pick a time. No payment is needed to hold a table.

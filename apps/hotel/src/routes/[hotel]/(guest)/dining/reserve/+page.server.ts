@@ -132,7 +132,7 @@ export const actions: Actions = {
 			const ordering = d.preorder === '1' ? await loadOnlineOrderingConfig(hotelId, d.venue) : null;
 			const canPreOrder = !!ordering?.enabled && r.startsAt.getTime() > Date.now() + ordering.prepMinutes * 60_000;
 			if (canPreOrder) {
-				redirect(303, `/${params.hotel}/dining/order?venue=${d.venue}&reservation=${r.code}&t=${r.accessToken}`);
+				redirect(303, `${locals.isCustomDomain ? "" : `/${params.hotel}`}/dining/order?venue=${d.venue}&reservation=${r.code}&t=${r.accessToken}`);
 			}
 			redirect(303, ticket);
 		} catch (e) {

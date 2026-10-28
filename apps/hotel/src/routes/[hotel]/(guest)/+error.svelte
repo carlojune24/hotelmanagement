@@ -1,14 +1,15 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
 	import { page } from '$app/state';
 	import { invalidateAll } from '$app/navigation';
 	import { errorCopy } from '$lib/error-copy';
+	const base = $derived(guestBase(page));
 
 	/** Woven Ledger error page. Renders inside the (guest) layout, so the hotel's accent, paper
 	 *  and display font are already in scope. The one branded gesture is a single accent
 	 *  hairline — no woven band, no illustration (an error isn't a hero moment). */
 	const copy = $derived(errorCopy(page.status, page.error?.message));
 	const hotelName = $derived(page.data.hotel?.name);
-	const base = $derived(`/${page.params.hotel}`);
 	const ref = $derived(page.error?.ref);
 </script>
 
@@ -32,7 +33,7 @@
 	{/if}
 
 	<div class="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
-		<a href={base} class="ledger-btn-primary">
+		<a href={base || '/'} class="ledger-btn-primary">
 			{hotelName ? `Back to ${hotelName}` : 'Back to the hotel'}
 		</a>
 		<a href="{base}/dates" class="ledger-btn-ghost">Start a new search</a>

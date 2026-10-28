@@ -1,10 +1,13 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
+	import { page } from '$app/state';
 	import StorefrontNav from '$lib/components/storefront/storefront-nav.svelte';
 	import StorefrontFooter from '$lib/components/storefront/storefront-footer.svelte';
 	import StorefrontLightbox from '$lib/components/storefront/storefront-lightbox.svelte';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
 	import type { PageData } from './$types';
+	const base = $derived(guestBase(page));
 
 	let { data }: { data: PageData } = $props();
 
@@ -102,7 +105,7 @@
 							{/if}
 
 							<div class="sf-feature-actions">
-								<a href="/{data.hotel.slug}#function-hall" class="sf-btn">Check date &amp; price</a>
+								<a href="{base || '/'}#function-hall" class="sf-btn">Check date &amp; price</a>
 							</div>
 						</div>
 					</div>

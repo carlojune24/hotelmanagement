@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
+	import { page } from '$app/state';
 	import { getContext } from 'svelte';
 	import * as Sheet from '$lib/components/ui/sheet/index.js';
 	import type { StorefrontTheme } from '$lib/storefront-mode.svelte';
@@ -14,6 +16,7 @@
 	import { AMENITY_CATEGORY_LABELS, AMENITY_CATEGORY_ORDER } from '$lib/amenity-categories';
 	import type { AvailableRatePlan, AvailableRoomType, BrowsableRoomType } from '$lib/server/availability';
 	import type { BedConfigEntry } from '$lib/server/db/schema/inventory';
+	const base = $derived(guestBase(page));
 
 	/**
 	 * Quick view: a room's photos, facts, full amenity list and rate options in a sheet, without leaving
@@ -73,7 +76,7 @@
 	});
 
 	const searched = $derived(search !== null);
-	const detailHref = $derived(room ? `/${hotelSlug}/rooms/${room.id}${stayQuery}` : '#');
+	const detailHref = $derived(room ? `${base}/rooms/${room.id}${stayQuery}` : '#');
 
 	function hidePhoto(e: Event) {
 		(e.currentTarget as HTMLImageElement).style.display = 'none';

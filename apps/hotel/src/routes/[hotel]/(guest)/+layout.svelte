@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
 	import './woven-ledger.css';
 	import './storefront.css';
 	import { page } from '$app/state';
@@ -11,6 +12,7 @@
 	import { StorefrontTheme } from '$lib/storefront-mode.svelte';
 	import { brandName, brandTitle, canonicalUrl, homeTitle } from '$lib/seo';
 	import type { LayoutData } from './$types';
+	const base = $derived(guestBase(page));
 
 	let { data, children }: { data: LayoutData; children: import('svelte').Snippet } = $props();
 
@@ -100,7 +102,7 @@
 		     indicator there. -->
 		<header class="ledger-hairline lg:hidden">
 			<div class="mx-auto flex max-w-5xl items-center justify-between px-4 py-4 sm:px-6">
-				<a href="/{data.hotel.slug}" class="flex items-center gap-2.5">
+				<a href="{base || '/'}" class="flex items-center gap-2.5">
 					{#if data.branding.logoUrl}
 						<img src={data.branding.logoUrl} alt="" class="h-8 w-auto object-contain" />
 					{/if}

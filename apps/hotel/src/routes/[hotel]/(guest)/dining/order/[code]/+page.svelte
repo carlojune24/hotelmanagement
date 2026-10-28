@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
 	import { enhance } from '$app/forms';
 	import { invalidate } from '$app/navigation';
 	import { page } from '$app/state';
@@ -17,6 +18,7 @@
 	import ReceiptTextIcon from '@lucide/svelte/icons/receipt-text';
 	import PhoneIcon from '@lucide/svelte/icons/phone';
 	import type { ActionData, PageData } from './$types';
+	const base = $derived(guestBase(page));
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
@@ -364,7 +366,7 @@
 			</form>
 		</section>
 
-		<p class="no-print mt-10 text-sm"><a href="/{hotel.slug}/dining" class="underline underline-offset-4">Back to dining</a></p>
+		<p class="no-print mt-10 text-sm"><a href="{base}/dining" class="underline underline-offset-4">Back to dining</a></p>
 	</div>
 </section>
 

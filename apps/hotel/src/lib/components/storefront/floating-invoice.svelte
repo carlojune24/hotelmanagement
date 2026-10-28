@@ -1,6 +1,9 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
+	import { page } from '$app/state';
 	import type { CartStore } from '$lib/cart.svelte';
 	import { itemLabel, itemDetail } from '$lib/cart-display';
+	const base = $derived(guestBase(page));
 
 	let { cart, hotelSlug, visible }: { cart: CartStore; hotelSlug: string; visible: boolean } =
 		$props();
@@ -72,7 +75,7 @@
 						Refundable security deposit {peso(cart.securityDepositCentavos)}, collected at check-in. Not part of the total above.
 					</p>
 				{/if}
-				<a href="/{hotelSlug}/details" class="ledger-btn-primary storefront-invoice-cta">
+				<a href="{base}/details" class="ledger-btn-primary storefront-invoice-cta">
 					Proceed to checkout
 				</a>
 			</div>

@@ -1,5 +1,8 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
+	import { page } from '$app/state';
 	import MusicIcon from '@lucide/svelte/icons/music';
+	const base = $derived(guestBase(page));
 
 	let {
 		hotelSlug,
@@ -32,7 +35,6 @@
 	} = $props();
 
 	// Same absolute-path convention as storefront-nav.svelte.
-	const base = $derived(`/${hotelSlug}`);
 	const year = new Date().getFullYear();
 	const hasSocial = $derived(Boolean(facebookUrl || instagramUrl || tiktokUrl));
 	const hasContact = $derived(Boolean(phone || email || address));
@@ -58,13 +60,13 @@
 			<div>
 				<h3>Explore</h3>
 				<nav aria-label="Footer">
-					<a href="{base}#about">About</a>
-					<a href="{base}#rooms">Rooms &amp; Rates</a>
-					{#if showAmenities}<a href="{base}#amenities">Amenities</a>{/if}
+					<a href="{base || '/'}#about">About</a>
+					<a href="{base || '/'}#rooms">Rooms &amp; Rates</a>
+					{#if showAmenities}<a href="{base || '/'}#amenities">Amenities</a>{/if}
 					{#if showDining}<a href="{base}/dining">Dining</a>{/if}
 					{#if showFunctionHall}<a href="{base}/meetings-events">Meetings &amp; Events</a>{/if}
-					<a href="{base}#gallery">Gallery</a>
-					{#if showReviews}<a href="{base}#reviews">Reviews</a>{/if}
+					<a href="{base || '/'}#gallery">Gallery</a>
+					{#if showReviews}<a href="{base || '/'}#reviews">Reviews</a>{/if}
 				</nav>
 			</div>
 

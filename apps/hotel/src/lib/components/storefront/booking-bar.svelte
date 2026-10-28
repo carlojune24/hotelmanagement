@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
+	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import AvailabilityRangePicker from '$lib/components/storefront/availability-range-picker.svelte';
@@ -6,6 +8,7 @@
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import MinusIcon from '@lucide/svelte/icons/minus';
 	import PlusIcon from '@lucide/svelte/icons/plus';
+	const base = $derived(guestBase(page));
 
 	/**
 	 * The storefront's booking bar: dates + guests + "Check availability". It sits docked in the hero and,
@@ -100,7 +103,7 @@
 			adults: String(adults),
 			children: String(children)
 		});
-		await goto(`/${hotelSlug}?${q}`, { keepFocus: true, noScroll: true, invalidateAll: true });
+		await goto(`${base || '/'}?${q}`, { keepFocus: true, noScroll: true, invalidateAll: true });
 		document.getElementById('rooms')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 	}
 </script>
@@ -113,7 +116,7 @@
 		class="sf-bar"
 		class:is-stuck={stuck}
 		method="GET"
-		action="/{hotelSlug}#rooms"
+		action="{base || '/'}#rooms"
 		onsubmit={submit}
 		aria-label="Check availability"
 	>

@@ -1,4 +1,7 @@
-<script lang="ts">	import { brandTitle } from '$lib/seo';
+<script lang="ts">
+	import { page } from '$app/state';
+	import { guestBase } from '$lib/guest-base';
+	import { brandTitle } from '$lib/seo';
 
 	import { amenityIcon } from '$lib/amenity-icons';
 	import { AMENITY_CATEGORY_LABELS, AMENITY_CATEGORY_ORDER } from '$lib/amenity-categories';
@@ -19,6 +22,7 @@
 	import StorefrontFooter from '$lib/components/storefront/storefront-footer.svelte';
 	import StorefrontLightbox from '$lib/components/storefront/storefront-lightbox.svelte';
 	import type { PageData } from './$types';
+	const base = $derived(guestBase(page));
 
 	let { data }: { data: PageData } = $props();
 
@@ -55,8 +59,8 @@
 	    verified dates/occupancy, so it skips to room selection; undated mode starts at the Dates step. */
 	const bookNowHref = $derived(
 		data.mode === 'dated'
-			? `/${slug}/rooms?checkIn=${data.checkIn}&checkOut=${data.checkOut}&adults=${data.adults}&children=${data.children}&roomTypeId=${rt.id}`
-			: `/${slug}/dates?roomTypeId=${rt.id}`
+			? `${base}/rooms?checkIn=${data.checkIn}&checkOut=${data.checkOut}&adults=${data.adults}&children=${data.children}&roomTypeId=${rt.id}`
+			: `${base}/dates?roomTypeId=${rt.id}`
 	);
 
 	let lightboxIndex = $state<number | null>(null);
@@ -86,7 +90,7 @@
 <main>
 	<header class="sf-page-head" style="padding-bottom: clamp(1.5rem, 4vw, 2.5rem)">
 		<div class="sf-wrap">
-			<a href="/{slug}#rooms" class="sf-link" style="font-size: 0.875rem"><ArrowLeftIcon class="size-4" aria-hidden="true" /> All rooms</a>
+			<a href="{base || '/'}#rooms" class="sf-link" style="font-size: 0.875rem"><ArrowLeftIcon class="size-4" aria-hidden="true" /> All rooms</a>
 			<h1 style="margin-top: 1rem">{rt.name}</h1>
 		</div>
 	</header>

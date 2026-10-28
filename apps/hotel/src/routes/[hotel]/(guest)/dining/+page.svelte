@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
+	import { page } from '$app/state';
 	import StorefrontNav from '$lib/components/storefront/storefront-nav.svelte';
 	import StorefrontFooter from '$lib/components/storefront/storefront-footer.svelte';
 	import StorefrontLightbox from '$lib/components/storefront/storefront-lightbox.svelte';
@@ -8,6 +10,7 @@
 	import SlidersHorizontalIcon from '@lucide/svelte/icons/sliders-horizontal';
 	import type { DiningPhoto } from '$lib/server/db/schema/dining';
 	import type { PageData } from './$types';
+	const base = $derived(guestBase(page));
 
 	let { data }: { data: PageData } = $props();
 
@@ -143,10 +146,10 @@
 							{#if item.reservationsEnabled || data.orderableVenueIds.includes(item.id)}
 								<div class="sf-feature-actions">
 									{#if item.reservationsEnabled}
-										<a href="/{data.hotel.slug}/dining/reserve?venue={item.id}" class="sf-btn">Reserve a table</a>
+										<a href="{base}/dining/reserve?venue={item.id}" class="sf-btn">Reserve a table</a>
 									{/if}
 									{#if data.orderableVenueIds.includes(item.id)}
-										<a href="/{data.hotel.slug}/dining/order?venue={item.id}" class="sf-btn sf-btn--outline">Order online</a>
+										<a href="{base}/dining/order?venue={item.id}" class="sf-btn sf-btn--outline">Order online</a>
 									{/if}
 								</div>
 							{/if}
@@ -167,8 +170,8 @@
 								</div>
 								{#if canOrder || canReserve}
 									<div class="sf-feature-actions">
-										{#if canOrder}<a href="/{data.hotel.slug}/dining/order?venue={item.id}" class="sf-btn">Order online</a>{/if}
-										{#if canReserve}<a href="/{data.hotel.slug}/dining/reserve?venue={item.id}" class="sf-btn sf-btn--outline">Reserve a table</a>{/if}
+										{#if canOrder}<a href="{base}/dining/order?venue={item.id}" class="sf-btn">Order online</a>{/if}
+										{#if canReserve}<a href="{base}/dining/reserve?venue={item.id}" class="sf-btn sf-btn--outline">Reserve a table</a>{/if}
 									</div>
 								{/if}
 							</div>

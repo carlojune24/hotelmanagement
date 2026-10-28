@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
 	import { getContext } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
@@ -8,6 +9,7 @@
 	import LockIcon from '@lucide/svelte/icons/lock';
 	import type { CartStore } from '$lib/cart.svelte';
 	import type { ActionData } from './$types';
+	const base = $derived(guestBase(page));
 
 	let { form }: { form: ActionData } = $props();
 
@@ -21,11 +23,11 @@
 	const firstRoomItem = $derived(cart.items.find((i) => i.kind === 'room'));
 	const backHref = $derived(
 		firstRoomItem
-			? `/${page.params.hotel}/rooms?${new URLSearchParams({
+			? `${base}/rooms?${new URLSearchParams({
 					checkIn: firstRoomItem.checkIn,
 					checkOut: firstRoomItem.checkOut
 				}).toString()}`
-			: `/${page.params.hotel}`
+			: `${base || '/'}`
 	);
 
 	// The cart itself is the only source of truth for what's being booked — serialized into
@@ -78,7 +80,7 @@
 			<p class="mt-1 text-sm text-[var(--ledger-ink-muted)]">
 				Go back and add a room or the function hall before continuing.
 			</p>
-			<Button href="/{page.params.hotel}" class="ledger-btn-primary mt-4">
+			<Button href="{base || '/'}" class="ledger-btn-primary mt-4">
 				Back to {page.params.hotel}
 			</Button>
 		</div>

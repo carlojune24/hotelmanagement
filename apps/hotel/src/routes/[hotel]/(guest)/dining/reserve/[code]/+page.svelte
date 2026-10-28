@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
 	import { enhance } from '$app/forms';
 	import { invalidate } from '$app/navigation';
 	import { page } from '$app/state';
@@ -14,6 +15,7 @@
 	import PrinterIcon from '@lucide/svelte/icons/printer';
 	import PhoneIcon from '@lucide/svelte/icons/phone';
 	import type { ActionData, PageData } from './$types';
+	const base = $derived(guestBase(page));
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
@@ -184,7 +186,7 @@
 								{:else}
 									Placed. Pay at the restaurant.
 								{/if}
-								<a class="underline underline-offset-2" href="/{page.params.hotel}/dining/order/{p.code}?t={p.accessToken}">View order</a>
+								<a class="underline underline-offset-2" href="{base}/dining/order/{p.code}?t={p.accessToken}">View order</a>
 							</p>
 						</li>
 					{/each}
@@ -202,7 +204,7 @@
 				<PrinterIcon class="size-4" aria-hidden="true" /> Print
 			</button>
 			{#if data.canPreOrder}
-				<a href="/{page.params.hotel}/dining/order?venue={r.venueId}&reservation={r.code}&t={data.token}" class="ledger-btn-ghost inline-flex min-h-11 items-center gap-1.5 text-sm">
+				<a href="{base}/dining/order?venue={r.venueId}&reservation={r.code}&t={data.token}" class="ledger-btn-ghost inline-flex min-h-11 items-center gap-1.5 text-sm">
 					{data.preOrders.some((p) => p.status !== 'cancelled') ? 'Add another order' : 'Pre-order your meal'}
 				</a>
 			{/if}
@@ -234,7 +236,7 @@
 		{/if}
 
 		<p class="no-print mt-8 text-sm">
-			<a href="/{page.params.hotel}/dining" class="underline underline-offset-4">Back to dining</a>
+			<a href="{base}/dining" class="underline underline-offset-4">Back to dining</a>
 		</p>
 	</div>
 </section>

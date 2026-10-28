@@ -1,10 +1,13 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
+	import { page } from '$app/state';
 	import PhoneIcon from '@lucide/svelte/icons/phone';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import MapPinIcon from '@lucide/svelte/icons/map-pin';
 	import StorefrontNav from '$lib/components/storefront/storefront-nav.svelte';
 	import StorefrontFooter from '$lib/components/storefront/storefront-footer.svelte';
 	import type { PageData } from './$types';
+	const base = $derived(guestBase(page));
 
 	let { data }: { data: PageData } = $props();
 
@@ -76,7 +79,7 @@
 					<p class="sf-lede" style="margin-top: 0">Contact details are coming soon.</p>
 				{/if}
 				<div class="sf-feature-actions">
-					<a href="/{data.hotel.slug}/dates" class="sf-btn">Check availability</a>
+					<a href="{base}/dates" class="sf-btn">Check availability</a>
 				</div>
 			</div>
 

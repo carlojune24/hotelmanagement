@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
 	import { enhance } from '$app/forms';
 import { pushState } from '$app/navigation';
 import { tick, untrack } from 'svelte';
@@ -17,6 +18,7 @@ import { tick, untrack } from 'svelte';
 	import { addDays } from '$lib/dining-sales-range';
 	import { listSlots, localParts } from '$lib/dining-slots';
 	import type { ActionData, PageData } from './$types';
+	const base = $derived(guestBase(page));
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
@@ -293,7 +295,7 @@ import { tick, untrack } from 'svelte';
 
 <section class="storefront-section">
 	<div class="mx-auto max-w-5xl">
-		<a href={isPre ? `/${hotel.slug}/dining/reserve/${data.reservation!.code}?t=${data.reservation!.token}` : `/${hotel.slug}/dining`} class="storefront-step-back">
+		<a href={isPre ? `${base}/dining/reserve/${data.reservation!.code}?t=${data.reservation!.token}` : `${base}/dining`} class="storefront-step-back">
 			← {isPre ? 'Back to your reservation' : 'Back to dining'}
 		</a>
 		<h1 class="storefront-section-title ink-heading ledger-display mt-3 text-3xl sm:text-4xl">{heading}</h1>

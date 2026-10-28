@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { guestBase } from '$lib/guest-base';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -8,6 +9,7 @@
 	import LockIcon from '@lucide/svelte/icons/lock';
 	import { formatClockTime, formatStayDate, nightsLabel, stayNights } from '$lib/stay-dates';
 	import type { ActionData, PageData } from './$types';
+	const base = $derived(guestBase(page));
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
@@ -30,7 +32,7 @@
 </svelte:head>
 
 <div class="mx-auto max-w-3xl">
-	<a href="/{page.params.hotel}/details" class="storefront-step-back">
+	<a href="{base}/details" class="storefront-step-back">
 		← Back to guest information
 	</a>
 	<h1 class="mt-2 ledger-display text-2xl">Review your booking</h1>
@@ -46,7 +48,7 @@
 			role="alert"
 		>
 			This booking has expired — payment wasn't completed in time and the rooms have been
-			released. Please <a class="underline" href="/{page.params.hotel}">start a new search</a>.
+			released. Please <a class="underline" href="{base || '/'}">start a new search</a>.
 		</p>
 	{:else if data.cancelled}
 		<p
