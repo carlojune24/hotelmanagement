@@ -182,6 +182,86 @@ html:has(.woven-ledger) {
 		}
 	}
 }
+/* The hero's Book your stay: the biggest button on the page. Three bounces shortly after load, then one soft
+   bounce every ~9s; paused while the guest points at or focuses it. Static under reduced motion. */
+.woven-ledger .sf-btn--hero {
+	margin-top: 1.5rem;
+	min-height: 3.5rem;
+	padding: 0.85rem 2.1rem;
+	font-size: 1.125rem;
+	gap: 0.6rem;
+	transform-origin: 50% 100%;
+	box-shadow: 0 12px 28px -10px var(--hotel-accent);
+}
+.woven-ledger .sf-btn--hero svg {
+	transition: transform 0.2s var(--sf-ease);
+}
+.woven-ledger .sf-btn--hero:hover svg {
+	transform: translateX(4px);
+}
+/* After the tap the button turns calm (like the "Done" state of the reference) while the calendar is open. */
+.woven-ledger .sf-btn--hero.is-morphed {
+	background: var(--ledger-ink-muted);
+	border-color: var(--ledger-ink-muted);
+	box-shadow: none;
+	transition: background-color 0.3s var(--sf-ease), border-color 0.3s var(--sf-ease), box-shadow 0.3s var(--sf-ease);
+}
+@media (max-width: 899px) {
+	.woven-ledger .sf-btn--hero {
+		display: flex;
+		width: 100%;
+		justify-content: center;
+	}
+}
+@media (prefers-reduced-motion: no-preference) {
+	.woven-ledger .sf-btn--hero {
+		animation:
+			sf-hero-bounce 1.3s 1.4s var(--sf-ease) 1 both,
+			sf-hero-nudge 9s 4.5s ease-in-out infinite;
+	}
+	.woven-ledger .sf-btn--hero:is(:hover, :focus-visible) {
+		animation: none;
+		transform: translateY(-2px);
+	}
+	/* Squash and stretch, anchored at the base: crouch, spring up long and thin, land wide and flat, settle. */
+	@keyframes sf-hero-bounce {
+		0% { transform: translateY(0) scale(1, 1); }
+		12% { transform: translateY(0) scale(1.08, 0.9); }
+		30% { transform: translateY(-18px) scale(0.94, 1.08); }
+		48% { transform: translateY(0) scale(1.07, 0.92); }
+		62% { transform: translateY(-8px) scale(0.98, 1.03); }
+		76% { transform: translateY(0) scale(1.03, 0.97); }
+		90% { transform: translateY(0) scale(0.99, 1.01); }
+		100% { transform: translateY(0) scale(1, 1); }
+	}
+	@keyframes sf-hero-nudge {
+		0%, 8%, 100% { transform: translateY(0) scale(1, 1); }
+		1.5% { transform: translateY(0) scale(1.05, 0.94); }
+		4% { transform: translateY(-8px) scale(0.97, 1.04); }
+		6% { transform: translateY(0) scale(1.03, 0.97); }
+	}
+	.woven-ledger .sf-btn--hero:active {
+		transform: scale(0.96, 0.94);
+	}
+	/* The label swaps with a small rise, and the whole button gives one springy pulse as it changes state. */
+	.woven-ledger .sf-hero-label {
+		display: inline-block;
+		animation: sf-hero-label-in 0.35s var(--sf-ease) both;
+	}
+	.woven-ledger .sf-btn--hero.is-morphed {
+		animation: sf-hero-morph 0.5s var(--sf-ease) both;
+	}
+	@keyframes sf-hero-label-in {
+		from { opacity: 0; transform: translateY(0.5rem); }
+		to { opacity: 1; transform: translateY(0); }
+	}
+	@keyframes sf-hero-morph {
+		0% { transform: scale(1, 1); }
+		30% { transform: scale(1.05, 0.93); }
+		60% { transform: scale(0.98, 1.04); }
+		100% { transform: scale(1, 1); }
+	}
+}
 .woven-ledger .sf-link {
 	display: inline-flex;
 	align-items: center;

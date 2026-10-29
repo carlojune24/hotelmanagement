@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { guestBase } from '$lib/guest-base';
 	import { goto } from '$app/navigation';
-	import { getContext, onMount } from 'svelte';
+	import { getContext, onDestroy, onMount } from 'svelte';
 	import { AMENITY_CATEGORY_LABELS, AMENITY_CATEGORY_ORDER } from '$lib/amenity-categories';
 	import { DEFAULT_DISPLAY_FONT, DISPLAY_FONTS } from '$lib/branding';
 	import { roomCartItem } from '$lib/room-line';
@@ -160,6 +160,22 @@
 	});
 
 	let lightboxIndex = $state<number | null>(null);
+
+	/** The hero button: bring the date bar into view and open its calendar, so "Book" is one tap from a date. */
+	let heroMorphed = $state(false);
+	let heroMorphTimer: ReturnType<typeof setTimeout> | undefined;
+	onDestroy(() => clearTimeout(heroMorphTimer));
+
+	function startBooking(e: MouseEvent) {
+		e.preventDefault();
+		// The label morphs to "Pick your dates" for a moment, then springs back to the call to action.
+		heroMorphed = true;
+		clearTimeout(heroMorphTimer);
+		heroMorphTimer = setTimeout(() => (heroMorphed = false), 2600);
+		const slot = document.getElementById('search');
+		slot?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		slot?.querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]')?.click();
+	}
 	/** A photo that fails to load hides itself so the woven placeholder underneath shows, never a broken icon. */
 	function hidePhoto(e: Event) {
 		(e.currentTarget as HTMLImageElement).style.display = 'none';
@@ -371,6 +387,16 @@
 			{#if startingPrice != null}
 				<p class="sf-hero-from">Rooms from <b>{peso(startingPrice)}</b> / night</p>
 			{/if}
+			<a href="#search" class="sf-btn sf-btn--hero" class:is-morphed={heroMorphed} onclick={startBooking}>
+				{#key heroMorphed}
+					<span class="sf-hero-label" aria-live="polite">{heroMorphed ? 'Pick your dates' : 'Book your stay'}</span>
+				{/key}
+				{#if heroMorphed}
+					<CalendarCheckIcon class="size-5" aria-hidden="true" />
+				{:else}
+					<ArrowRightIcon class="size-5" aria-hidden="true" />
+				{/if}
+			</a>
 		</div>
 
 		<div id="search" class="sf-wrap sf-hero-bar-slot">
