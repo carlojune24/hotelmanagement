@@ -47,6 +47,8 @@
 	let replying = $state(false);
 	let manualConfirmOpen = $state(false);
 	let reinstateOpen = $state(false);
+	let renameOpen = $state(false);
+	let renameName = $state('');
 	let manualConfirmReason = $state('');
 	let reinstateReason = $state('');
 	let overrideSubmitting = $state(false);
@@ -325,6 +327,19 @@
 		<div class="min-w-0 flex-1">
 			<div class="flex flex-wrap items-center gap-2">
 				<span class="text-base font-semibold text-ink">{data.detail.guest.fullName}</span>
+				{#if data.canAdmin}
+					<Button
+						variant="ghost"
+						size="sm"
+						class="h-6 px-2 text-xs"
+						onclick={() => {
+							renameName = data.detail.guest.fullName;
+							renameOpen = true;
+						}}
+					>
+						Rename
+					</Button>
+				{/if}
 				<Badge variant="outline" class={statusVariantClass(currentStatus)}>
 					{statusLabel(currentStatus)}
 				</Badge>
@@ -1506,6 +1521,37 @@
 				<Button type="submit" disabled={overrideSubmitting || reinstateReason.trim().length === 0}>
 					{overrideSubmitting ? 'Reinstating…' : 'Reinstate'}
 				</Button>
+			</div>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={renameOpen}>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>Correct guest name</Dialog.Title>
+			<Dialog.Description>
+				Fixes a misspelled name on this booking. The change is recorded in the audit log.
+			</Dialog.Description>
+		</Dialog.Header>
+		<form
+			method="POST"
+			action="?/renameGuest"
+			use:enhance={() => {
+				return async ({ update, result }) => {
+					await update({ reset: false });
+					if (result.type === 'success') renameOpen = false;
+				};
+			}}
+			class="space-y-4"
+		>
+			<div>
+				<Label for="rename-guest" class="text-xs">Full name</Label>
+				<Input id="rename-guest" name="fullName" bind:value={renameName} required maxlength={200} class="mt-1" />
+			</div>
+			<div class="flex justify-end gap-2 pt-1">
+				<Button type="button" variant="ghost" onclick={() => (renameOpen = false)}>Never mind</Button>
+				<Button type="submit" disabled={renameName.trim().length === 0}>Save name</Button>
 			</div>
 		</form>
 	</Dialog.Content>

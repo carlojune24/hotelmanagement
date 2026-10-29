@@ -1,5 +1,9 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
+import { and, eq } from 'drizzle-orm';
+import { db } from '$lib/server/db/index';
+import { guests } from '$lib/server/db/schema/index';
+import { writeAudit } from '$lib/server/audit';
 import { roleCan } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
 import { getHallBookingDetail, getRoomBookingDetail } from '$lib/server/reservations';
@@ -429,6 +433,41 @@ export const actions: Actions = {
 			if (e instanceof GuestMessageError) return fail(400, { error: e.message });
 			throw e;
 		}
+	},
+
+	renameGuest: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		const hotelId = event.locals.hotel!.id;
+
+		const detail =
+			event.params.kind === 'room'
+				? await getRoomBookingDetail(hotelId, event.params.id)
+				: await getHallBookingDetail(hotelId, event.params.id);
+		if (!detail) return fail(404, { error: 'Booking not found.' });
+
+		const parsed = z
+			.object({ fullName: z.string().trim().min(1, 'Enter the guest name.').max(200) })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) {
+			return fail(400, { error: parsed.error.issues[0]?.message ?? 'Enter the guest name.' });
+		}
+
+		// Guest rows are per-order (one per checkout), so this fixes the name on this booking only.
+		await db
+			.update(guests)
+			.set({ fullName: parsed.data.fullName })
+			.where(and(eq(guests.id, detail.order.guestId), eq(guests.hotelId, hotelId)));
+		await writeAudit({
+			hotelId,
+			actor: event.locals.user,
+			action: 'guest.rename',
+			entityType: 'guest',
+			entityId: detail.order.guestId,
+			before: { fullName: detail.guest.fullName },
+			after: { fullName: parsed.data.fullName }
+		});
+		return { ok: 'Guest name updated.' };
 	},
 
 	manualConfirm: async (event) => {
