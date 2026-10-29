@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { guestBase } from '$lib/guest-base';
-	import { brandTitle } from '$lib/seo';
+	import { brandTitle, roomJsonLd } from '$lib/seo';
 
 	import { amenityIcon } from '$lib/amenity-icons';
 	import { AMENITY_CATEGORY_LABELS, AMENITY_CATEGORY_ORDER } from '$lib/amenity-categories';
@@ -63,6 +63,12 @@
 			: `${base}/dates?roomTypeId=${rt.id}`
 	);
 
+	const metaDesc = $derived.by(() => {
+		const text = (rt.description ?? '').replace(/\s+/g, ' ').trim();
+		const fallback = `${rt.name} at ${brandTitle(data.hotel.name, data.hotel.city)}${data.hotel.city ? `, ${data.hotel.city}` : ''}. Book direct online.`;
+		return text.length > 155 ? `${text.slice(0, 154).trimEnd()}…` : text || fallback;
+	});
+
 	let lightboxIndex = $state<number | null>(null);
 	function hidePhoto(e: Event) {
 		(e.currentTarget as HTMLImageElement).style.display = 'none';
@@ -71,6 +77,18 @@
 
 <svelte:head>
 	<title>{rt.name} — {brandTitle(data.hotel.name, data.hotel.city)}</title>
+	<meta name="description" content={metaDesc} />
+	<meta property="og:title" content="{rt.name} — {brandTitle(data.hotel.name, data.hotel.city)}" />
+	<meta property="og:description" content={metaDesc} />
+	{#if mainPhoto}<meta property="og:image" content={new URL(mainPhoto.url, page.url.origin).href} />{/if}
+	{@html `<script type="application/ld+json">${roomJsonLd({
+		name: rt.name,
+		description: metaDesc,
+		image: mainPhoto ? new URL(mainPhoto.url, page.url.origin).href : undefined,
+		maxOccupancy: rt.maxOccupancy,
+		hotelName: data.hotel.name,
+		hotelUrl: new URL(base || '/', page.url.origin).href
+	})}</script>`}
 </svelte:head>
 
 <StorefrontNav

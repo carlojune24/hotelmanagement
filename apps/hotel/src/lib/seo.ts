@@ -38,6 +38,20 @@ export const brandTitle = (name: string, city: string | null) => brandName(space
 /** The home page's <title>. Set from the layout: the page renders async there, and a page-level <title> loses to the layout's. */
 export const homeTitle = (name: string, city: string | null) => `${brandBothWays(name, city)} — Official Website & Online Booking`;
 
+/** schema.org HotelRoom for a room-type page, serialised like `hotelJsonLd`. */
+export function roomJsonLd(r: { name: string; description: string; image: string | undefined; maxOccupancy: number | null; hotelName: string; hotelUrl: string }): string {
+	const ld = {
+		'@context': 'https://schema.org',
+		'@type': 'HotelRoom',
+		name: r.name,
+		...(r.description && { description: r.description }),
+		...(r.image && { image: r.image }),
+		...(r.maxOccupancy && { occupancy: { '@type': 'QuantitativeValue', maxValue: r.maxOccupancy } }),
+		isPartOf: { '@type': 'Hotel', name: r.hotelName, url: r.hotelUrl }
+	};
+	return JSON.stringify(ld).replace(/</g, '\\u003c');
+}
+
 /** schema.org Hotel, serialised safely for an inline `<script>` (no `<` that could close it). */
 export function hotelJsonLd(h: {
 	name: string;
@@ -59,7 +73,6 @@ export function hotelJsonLd(h: {
 		...(h.alternateName && { alternateName: h.alternateName }),
 		url: h.url,
 		...(h.image && { image: h.image }),
-		...(h.sameAs?.some(Boolean) && { sameAs: h.sameAs.filter(Boolean) }),
 		...(h.sameAs?.some(Boolean) && { sameAs: h.sameAs.filter(Boolean) }),
 		...(h.phone && { telephone: h.phone }),
 		...(h.email && { email: h.email }),

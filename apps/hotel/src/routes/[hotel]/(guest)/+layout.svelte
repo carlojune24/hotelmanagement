@@ -2,6 +2,7 @@
 	import { guestBase } from '$lib/guest-base';
 	import './woven-ledger.css';
 	import './storefront.css';
+	import { dev } from '$app/environment';
 	import { page } from '$app/state';
 	import { setContext } from 'svelte';
 	import { CartStore } from '$lib/cart.svelte';
@@ -73,6 +74,13 @@
 	const canonical = $derived(
 		canonicalUrl({ origin: page.url.origin, slug: data.hotel.slug, customDomain: data.hotel.customDomain, pathname: page.url.pathname })
 	);
+	// Home and the room page set their own description/og tags; the other indexable pages get this default.
+	const sectionTitle = $derived(SECTION_TITLES[page.route.id ?? '']);
+	const sectionDesc = $derived(
+		sectionTitle
+			? `${sectionTitle} at ${brandTitle(data.hotel.name, data.hotel.city)}${data.hotel.city ? `, ${data.hotel.city}` : ''}. Official website with online booking.`
+			: null
+	);
 	const rootStyle = $derived(
 		`--hotel-accent: ${data.theme.accent}; ` +
 			`--hotel-accent-light: ${data.theme.accentLight}; ` +
@@ -92,6 +100,18 @@
 	<meta property="og:site_name" content={brandName(data.hotel.name, data.hotel.city)} />
 	<meta property="og:type" content="website" />
 	<meta property="og:url" content={canonical} />
+	<!-- Microsoft Clarity (heatmaps/recordings), guest pages only; skipped in dev so local clicks don't pollute it. -->
+	{#if !dev}
+		{@html `<script type="text/javascript">(function(c,l,a,r,i,t,y){c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);})(window,document,"clarity","script","z51ea9zzv2");</script>`}
+	{/if}
+	{#if !dev}
+		{@html `<script async src="https://www.googletagmanager.com/gtm.js?id=GTM-MMTJG3W8"></script><script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());</script>`}
+	{/if}
+	{#if sectionDesc}
+		<meta name="description" content={sectionDesc} />
+		<meta property="og:title" content="{sectionTitle} — {brandTitle(data.hotel.name, data.hotel.city)}" />
+		<meta property="og:description" content={sectionDesc} />
+	{/if}
 </svelte:head>
 
 <!-- Only the storefront pages follow the mode; the booking wizard and the guest self-service pages keep
