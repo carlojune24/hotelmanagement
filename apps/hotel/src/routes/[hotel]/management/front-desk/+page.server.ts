@@ -3,6 +3,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import { amenityItems, cashAccounts, roomTypes } from '$lib/server/db/schema/index';
+import { listOtaChannels } from '$lib/server/ota-channels';
 import { requireCap } from '$lib/server/auth/rbac';
 import { MAX_EXTENSION_HOURS } from '$lib/extension-hours';
 import { getHallBookingDetail, getRoomBookingDetail } from '$lib/server/reservations';
@@ -169,8 +170,12 @@ export const load: PageServerLoad = async ({ locals }) => {
 		drawers.find((d) => d.id === financeSettings.defaultDrawerAccountId) ??
 		(spareDrawers.length === 1 ? spareDrawers[0]! : null);
 
+	// The OTAs this hotel takes bookings from: the OTA form offers exactly these.
+	const otaNames = (await listOtaChannels(hotel.id, { activeOnly: true })).map((c) => c.name);
+
 	return {
 		businessDate,
+		otaNames,
 		timezone: hotel.timezone,
 		checkInTime: hotel.checkInTime,
 		checkOutTime: hotel.checkOutTime,
@@ -1096,6 +1101,64 @@ export const actions: Actions = {
 			? `?roomId=${encodeURIComponent(originRoomId)}`
 			: '?from=front-desk';
 		redirect(303, `/${event.locals.hotel!.slug}/management/transactions/${orderId}${backQuery}`);
+	},
+
+	/** A prepaid OTA booking: no desk payment, the OTA's gross is the booking total. */
+	otaCreate: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		const hotel = event.locals.hotel!;
+		const raw = Object.fromEntries(await event.request.formData());
+		const parsed = z
+			.object({
+				fullName: z.string().min(2).max(160),
+				email: z.union([z.string().email(), z.literal('')]).default(''),
+				phone: z.string().max(40).optional(),
+				specialRequests: z.string().max(1000).optional(),
+				itemsJson: z.string(),
+				otaName: z.string().trim().min(1).max(80, 'Pick the OTA.'),
+				otaReference: z.string().trim().min(1).max(80),
+				grossCentavos: z.coerce.number().int().positive(),
+				commissionCentavos: z.coerce.number().int().min(0)
+			})
+			.safeParse(raw);
+		if (!parsed.success) {
+			return fail(400, { walkInError: 'Check the guest, the OTA name and reference, and the amounts.' });
+		}
+		const d = parsed.data;
+		const originRoomId = typeof raw.originRoomId === 'string' ? raw.originRoomId : '';
+
+		let items: z.infer<typeof walkInRoomItemSchema>[];
+		try {
+			items = z.array(walkInRoomItemSchema).min(1).parse(JSON.parse(d.itemsJson));
+		} catch {
+			return fail(400, { walkInError: 'Your cart looks empty — add a room before continuing.' });
+		}
+
+		let orderId: string;
+		try {
+			const result = await createWalkInBooking({
+				hotelId: hotel.id,
+				businessDate: todayInTimezone(hotel.timezone),
+				guest: { fullName: d.fullName, email: d.email, phone: d.phone ?? null, specialRequests: d.specialRequests ?? null },
+				rooms: items,
+				ota: {
+					name: d.otaName,
+					reference: d.otaReference,
+					grossCentavos: d.grossCentavos,
+					commissionCentavos: d.commissionCentavos
+				},
+				actor: event.locals.user
+			});
+			orderId = result.orderId;
+		} catch (e) {
+			if (e instanceof WalkInError || e instanceof FinanceError) return fail(400, { walkInError: e.message });
+			// (hotel, ota name, reference) is unique: a second entry of the same reservation.
+			if (e instanceof Error && /orders_ota_reference_idx|duplicate key/i.test(`${e.message} ${(e as { cause?: Error }).cause?.message ?? ''}`))
+				return fail(400, { walkInError: `${d.otaName} reference ${d.otaReference} is already booked here.` });
+			throw e;
+		}
+		const backQuery = originRoomId ? `?roomId=${encodeURIComponent(originRoomId)}` : '?from=front-desk';
+		redirect(303, `/${hotel.slug}/management/transactions/${orderId}${backQuery}`);
 	},
 
 	/** The event has started: confirmed → checked in (event day only). */

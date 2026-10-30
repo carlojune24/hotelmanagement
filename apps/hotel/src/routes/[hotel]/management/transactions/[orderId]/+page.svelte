@@ -82,6 +82,8 @@
 		credit: 'border-transparent bg-warning/15 text-warning',
 		unpaid: 'border-border bg-surface-2 text-ink-muted'
 	};
+	/** An OTA booking's squared bill is owed by the OTA, not moved to the city ledger. */
+	const otaTitle = $derived(data.ota?.name ?? '');
 	const methodLabel: Record<string, string> = {
 		cash: 'Cash',
 		card: 'Card',
@@ -307,21 +309,26 @@
 							</div>
 							{#if l.cityLedgerMovedCentavos > 0}
 								<div class="flex items-start justify-between gap-3 px-3 py-1.5">
-									<span class="text-ink-muted">Less: moved to the city ledger</span>
+									<span class="text-ink-muted">{data.ota ? `Less: owed by ${otaTitle} (paid at the OTA)` : 'Less: moved to the city ledger'}</span>
 									<span class="shrink-0 tabular-nums text-ink">−{peso(l.cityLedgerMovedCentavos)}</span>
 								</div>
 							{/if}
 							{#each l.cityLedger as r (r.id)}
 								<div class="flex items-start justify-between gap-3 bg-surface-2 px-3 py-1.5 text-xs">
 									<span class="text-ink-muted">
-										City ledger account · {r.billToName}{#if r.billToCompany} · {r.billToCompany}{/if} ·
-										<a
-											href="{staffBase}/finance/receivables"
-											class="underline underline-offset-2 hover:text-ink">open</a
-										>
+										{#if data.ota}
+											{otaTitle} · {r.status === 'open' || r.status === 'partial' ? 'awaiting payout' : 'closed'} ·
+											<a href="{staffBase}/finance/ota" class="underline underline-offset-2 hover:text-ink">OTA payouts</a>
+										{:else}
+											City ledger account · {r.billToName}{#if r.billToCompany} · {r.billToCompany}{/if} ·
+											<a
+												href="{staffBase}/finance/receivables"
+												class="underline underline-offset-2 hover:text-ink">open</a
+											>
+										{/if}
 									</span>
 									<span class="shrink-0 tabular-nums">
-										{peso(r.amountCentavos)} moved
+										{peso(r.amountCentavos)} {data.ota ? 'owed' : 'moved'}
 									</span>
 								</div>
 							{/each}
@@ -337,7 +344,7 @@
 								</span>
 							</div>
 							<div class="flex items-center gap-1.5">
-								{#if data.canCityLedger && l.balanceCentavos > 0}
+								{#if data.canCityLedger && l.balanceCentavos > 0 && !data.ota}
 									<Button variant="outline" size="xs" onclick={() => openLedger(l)}>
 										Move to city ledger
 									</Button>
@@ -374,7 +381,7 @@
 								<div class="min-w-0">
 									<div class="flex flex-wrap items-center gap-1.5">
 										<span class="font-medium text-ink {p.voidedAt ? 'line-through' : ''}">
-											{methodLabel[p.method] ?? p.method}
+											{p.method === 'house_use' && data.ota ? 'Paid at OTA' : (methodLabel[p.method] ?? p.method)}
 										</span>
 										{#if p.purpose === 'deposit'}
 											<Badge variant="outline" class="border-border bg-surface-2 text-ink-muted"
@@ -492,18 +499,18 @@
 			{#if data.cityLedgerAccount}
 				<section class="rounded-lg border border-border">
 					<h2 class="border-b border-border px-3 py-2.5 text-sm font-semibold text-ink">
-						City ledger account
+						{data.ota ? `${otaTitle} receivable` : 'City ledger account'}
 					</h2>
 					<div class="space-y-1 px-3 py-2.5 text-sm">
 						<div class="flex justify-between gap-3">
-							<span class="text-ink-muted">Bill to</span>
+							<span class="text-ink-muted">{data.ota ? 'Booking reference' : 'Bill to'}</span>
 							<span class="text-ink">
-								{data.cityLedgerAccount.billToName}{#if data.cityLedgerAccount.billToCompany}
-									· {data.cityLedgerAccount.billToCompany}{/if}
+								{#if data.ota}{data.ota.reference}{:else}{data.cityLedgerAccount.billToName}{#if data.cityLedgerAccount.billToCompany}
+									· {data.cityLedgerAccount.billToCompany}{/if}{/if}
 							</span>
 						</div>
 						<div class="flex justify-between gap-3">
-							<span class="text-ink-muted">Moved from the rooms</span>
+							<span class="text-ink-muted">{data.ota ? 'Room price owed by the OTA' : 'Moved from the rooms'}</span>
 							<span class="tabular-nums text-ink">{peso(data.cityLedgerAccount.originalCentavos)}</span>
 						</div>
 						{#each data.cityLedgerAccount.collections as c (c.id)}
@@ -523,9 +530,9 @@
 							<span class="tabular-nums text-ink">{peso(data.cityLedgerAccount.outstandingCentavos)}</span>
 						</div>
 						<a
-							href="{staffBase}/finance/receivables"
+							href={data.ota ? `${staffBase}/finance/ota` : `${staffBase}/finance/receivables`}
 							class="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
-							>Open in Finance → Receivables →</a
+							>{data.ota ? 'Open in Finance → OTA payouts →' : 'Open in Finance → Receivables →'}</a
 						>
 					</div>
 				</section>
@@ -580,7 +587,7 @@
 					</div>
 					{#if data.ledger.cityLedgerTotalCentavos > 0}
 						<div class="flex items-center justify-between gap-3 px-3 py-1.5">
-							<dt class="text-ink-muted">Less: moved to the city ledger</dt>
+							<dt class="text-ink-muted">{data.ota ? `Less: owed by ${otaTitle} (paid at the OTA)` : 'Less: moved to the city ledger'}</dt>
 							<dd class="tabular-nums text-ink">−{peso(data.ledger.cityLedgerTotalCentavos)}</dd>
 						</div>
 						{#if data.cityLedgerAccount}
@@ -592,7 +599,7 @@
 								<dd class="tabular-nums text-ink">{peso(data.cityLedgerAccount.collectedCentavos)}</dd>
 							</div>
 							<div class="flex items-center justify-between gap-3 px-3 py-1.5 text-xs">
-								<dt class="text-ink-muted">… city ledger still to collect</dt>
+								<dt class="text-ink-muted">{data.ota ? '… still to collect from the OTA' : '… city ledger still to collect'}</dt>
 								<dd class="tabular-nums {data.cityLedgerAccount.outstandingCentavos > 0 ? 'text-danger' : 'text-ink'}">
 									{data.cityLedgerAccount.outstandingCentavos === 0 ? 'nothing' : peso(data.cityLedgerAccount.outstandingCentavos)}
 								</dd>
@@ -651,7 +658,7 @@
 					</div>
 					{#if data.ledger.cityLedgerTotalCentavos > 0}
 						<div class="flex justify-between">
-							<dt class="text-ink-muted">City ledger</dt>
+							<dt class="text-ink-muted">{data.ota ? `Owed by ${otaTitle}` : 'City ledger'}</dt>
 							<dd class="tabular-nums text-ink">−{peso(data.ledger.cityLedgerTotalCentavos)}</dd>
 						</div>
 					{/if}

@@ -18,6 +18,8 @@ import {
 	orderStatusHistory,
 	payments,
 	ratePlans,
+	receivableEntries,
+	receivables,
 	roomTypes
 } from './db/schema/index';
 import { writeAudit } from './audit';
@@ -32,6 +34,16 @@ import type { SessionUser } from './auth/session';
 import { nightsBetween } from './pricing';
 
 export class CancellationError extends Error {}
+
+/** OTA bookings are prepaid at the OTA: the guest is never refunded here, so they must not enter the
+ *  refund / no-show money flows. */
+async function assertNotOta(orderId: string): Promise<void> {
+	const [o] = await db.select({ otaName: orders.otaName }).from(orders).where(eq(orders.id, orderId)).limit(1);
+	if (o?.otaName)
+		throw new CancellationError(
+			'This is an OTA booking: cancel it with the OTA cancel, which settles with the OTA instead of refunding the guest.'
+		);
+}
 
 /** Refund tenders a cancellation payout may be issued as (a subset of `payment_method`),
  *  plus `paymongo` — a real refund back to the guest's original online payment method via
@@ -413,6 +425,7 @@ export async function cancelBooking(input: CancelBookingInput): Promise<CancelBo
 
 	const orderId = await getOrderIdForTarget(target);
 	if (!orderId) throw new CancellationError('Booking not found.');
+	await assertNotOta(orderId);
 
 	const [hotel] = await db
 		.select({ timezone: hotels.timezone })
@@ -825,6 +838,7 @@ export async function markNoShow(
 		if (booking.status !== 'confirmed') {
 			throw new CancellationError('Only a confirmed arrival can be marked no-show.');
 		}
+		await assertNotOta(booking.orderId);
 		const flipped = await tx
 			.update(bookings)
 			.set({ status: 'no_show', updatedAt: new Date() })
@@ -875,4 +889,93 @@ export async function markNoShow(
 		after: { keptCentavos }
 	});
 	return { keptCentavos };
+}
+
+/**
+ * Cancels (or marks no-show) one room of an OTA booking. The guest paid the OTA, so nothing is refunded
+ * here: the room is released and its share comes off the order's OTA receivable (the account closes as
+ * written off when nothing is left). Refused once the OTA has already paid that account out — reverse
+ * that payout by hand first.
+ */
+export async function cancelOtaBooking(input: {
+	hotelId: string;
+	bookingId: string;
+	reason: string;
+	outcome: 'cancelled' | 'no_show';
+	actor: SessionUser | null;
+}): Promise<{ orderCancelled: boolean }> {
+	const { hotelId, bookingId, outcome, actor } = input;
+	const reason = input.reason.trim();
+	if (!reason) throw new CancellationError('Enter a reason.');
+
+	const result = await db.transaction(async (tx) => {
+		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${hotelId}), hashtext(${'booking:' + bookingId}))`);
+		const [booking] = await tx.select().from(bookings).where(eq(bookings.id, bookingId)).limit(1);
+		if (!booking || booking.hotelId !== hotelId) throw new CancellationError('Booking not found.');
+		const [order] = await tx.select().from(orders).where(eq(orders.id, booking.orderId)).limit(1);
+		if (!order?.otaName) throw new CancellationError('This is not an OTA booking.');
+		if (booking.status !== 'confirmed')
+			throw new CancellationError(`A ${booking.status.replace(/_/g, ' ')} booking can't be cancelled here.`);
+
+		const [entry] = await tx.select().from(receivableEntries).where(eq(receivableEntries.bookingId, bookingId)).limit(1);
+		if (entry) {
+			const [acct] = await tx.select().from(receivables).where(eq(receivables.id, entry.receivableId)).for('update');
+			if (!acct || (acct.status !== 'open' && acct.status !== 'partial') || acct.outstandingCentavos < entry.amountCentavos)
+				throw new CancellationError('The OTA has already paid this booking out. Reverse that payout before cancelling.');
+			const left = acct.outstandingCentavos - entry.amountCentavos;
+			await tx
+				.update(receivables)
+				.set({
+					originalAmountCentavos: acct.originalAmountCentavos - entry.amountCentavos,
+					outstandingCentavos: left,
+					...(left === 0 && {
+						status: 'written_off' as const,
+						writeOffReason: `${outcome === 'no_show' ? 'No-show' : 'Cancelled'} at OTA — ${reason}`,
+						writtenOffByUserId: actor?.id ?? null
+					}),
+					updatedAt: new Date()
+				})
+				.where(eq(receivables.id, acct.id));
+			// The account total is the sum of its entries, so the room's entry goes with the room.
+			await tx.delete(receivableEntries).where(eq(receivableEntries.id, entry.id));
+		}
+
+		const flipped = await tx
+			.update(bookings)
+			.set({ status: outcome, updatedAt: new Date() })
+			.where(and(eq(bookings.id, bookingId), eq(bookings.status, 'confirmed')))
+			.returning({ id: bookings.id });
+		if (flipped.length === 0) throw new CancellationError('This booking just changed — reload and try again.');
+		await tx.insert(bookingStatusHistory).values({
+			bookingId,
+			fromStatus: 'confirmed',
+			toStatus: outcome,
+			note: `${outcome === 'no_show' ? 'No-show' : 'Cancelled'} at OTA (${order.otaName} ${order.otaReference}) — ${reason}`
+		});
+		await tx
+			.update(folios)
+			.set({ status: 'closed', closedAt: new Date(), updatedAt: new Date() })
+			.where(and(eq(folios.hotelId, hotelId), eq(folios.bookingId, bookingId)));
+
+		// Cancel the parent order once nothing live remains under it.
+		const [live] = await tx
+			.select({ id: bookings.id })
+			.from(bookings)
+			.where(and(eq(bookings.orderId, order.id), ne(bookings.status, 'cancelled'), ne(bookings.status, 'no_show')))
+			.limit(1);
+		if (live) return { orderCancelled: false };
+		await tx.update(orders).set({ status: 'cancelled', cancelledAt: new Date(), updatedAt: new Date() }).where(eq(orders.id, order.id));
+		await tx.insert(orderStatusHistory).values({ orderId: order.id, fromStatus: order.status, toStatus: 'cancelled', note: `All rooms cancelled at OTA — ${reason}` });
+		return { orderCancelled: true };
+	});
+
+	await writeAudit({
+		hotelId,
+		actor,
+		action: outcome === 'no_show' ? 'booking.ota_no_show' : 'booking.ota_cancel',
+		entityType: 'booking',
+		entityId: bookingId,
+		after: { reason, orderCancelled: result.orderCancelled }
+	});
+	return result;
 }

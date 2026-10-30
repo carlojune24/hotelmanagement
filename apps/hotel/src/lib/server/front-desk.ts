@@ -23,11 +23,12 @@ import { checkHallAvailability } from './hall-availability';
 import { wallTimeToUtcMs } from './cancellation';
 import { FolioError, addHallOvertimeCharge, closeFolio, closeHallFolio, getFolioDetail } from './folio';
 import { planInRoomOrder } from '$lib/allocation';
-import { splitRoomLine } from '$lib/room-split';
+import { splitProportional, splitRoomLine } from '$lib/room-split';
 import { lineBalances } from './order-balances';
 import { getSecurityDepositForTarget } from './security-deposits';
 import { recordWalkInPayment, resolvePaymentAccount, type PaymentMethod } from './finance/payments';
-import { openReceivable } from './finance/receivables';
+import { addToCityLedger, openReceivable } from './finance/receivables';
+import { OtaChannelError, resolveActiveOtaName } from './ota-channels';
 import { getBirSettings, issueInvoice } from './finance/documents';
 import { priceEventHall, type PriceBreakdown } from './pricing';
 import { addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
@@ -769,6 +770,14 @@ export async function previewWalkInAvailability(
  * paid amount on *every* line's individual folio — a pre-existing quirk of the
  * single-payment-per-order design, already present for multi-room online orders.
  */
+export interface WalkInOta {
+	/** One of the hotel's configured OTAs (matched case-insensitively, stored as configured). */
+	name: string;
+	reference: string;
+	grossCentavos: number;
+	commissionCentavos: number;
+}
+
 export interface WalkInPaymentInput {
 	/** Optional per-room split of the amount paid, one entry per cart line in cart order (centavos).
 	 *  Absent = filled in room order, first room fully first. */
@@ -848,6 +857,10 @@ export async function createWalkInBooking(params: {
 	rooms: WalkInRoomItem[];
 	/** How the full total is settled at the desk. Defaults to cash. */
 	payment?: WalkInPaymentInput;
+	/** A booking keyed in from an OTA, prepaid there: no desk payment, the booking total is the OTA's
+	 *  gross (not our rate plan's price), and each room's bill moves to the city-ledger account as an
+	 *  OTA receivable until the OTA pays out. */
+	ota?: WalkInOta;
 	actor: SessionUser | null;
 }): Promise<{ bookingIds: string[]; orderId: string }> {
 	// Destructured as `roomItems`, not `rooms` — this function needs the actual
@@ -859,13 +872,30 @@ export async function createWalkInBooking(params: {
 	if (roomItems.length === 0) {
 		throw new WalkInError('Add at least one room before creating the booking.');
 	}
+	const ota = params.ota ? { ...params.ota, reference: params.ota.reference.trim() } : null;
+	if (ota) {
+		if (!params.ota!.name.trim() || !ota.reference) throw new WalkInError('Pick the OTA and enter its booking reference.');
+		// Only an OTA set up for this hotel can take a booking, so one OTA is never spelt two ways.
+		try {
+			ota.name = await resolveActiveOtaName(hotelId, params.ota!.name);
+		} catch (e) {
+			if (e instanceof OtaChannelError) throw new WalkInError(e.message);
+			throw e;
+		}
+		if (!Number.isInteger(ota.grossCentavos) || ota.grossCentavos <= 0)
+			throw new WalkInError('Enter the total the guest paid the OTA.');
+		if (!Number.isInteger(ota.commissionCentavos) || ota.commissionCentavos < 0 || ota.commissionCentavos >= ota.grossCentavos)
+			throw new WalkInError('The commission must be less than the total.');
+	}
 	for (const item of roomItems) {
 		if (item.checkIn >= item.checkOut) throw new WalkInError('Check-out must be after check-in.');
 	}
 
 	// Resolve the receiving account (and open shift for cash) before the tx —
 	// `resolvePaymentAccount` throws a FinanceError the action turns into `walkInError`.
-	const { cashAccountId, shiftId } = await resolvePaymentAccount(hotelId, payment.method);
+	const { cashAccountId, shiftId } = ota
+		? { cashAccountId: null, shiftId: null }
+		: await resolvePaymentAccount(hotelId, payment.method);
 
 	const { bookingIds, totalPaidCentavos, orderId } = await db.transaction(async (tx) => {
 		for (const key of lockKeysForRooms(roomItems)) {
@@ -987,11 +1017,35 @@ export async function createWalkInBooking(params: {
 			.values({
 				hotelId,
 				fullName: guest.fullName.trim(),
-				email: guest.email.trim().toLowerCase(),
+				// The OTA often gives no real email; the column is not null, so use a recognisable placeholder.
+				email: guest.email.trim().toLowerCase() || (ota ? `ota-${ota.reference.toLowerCase()}@invalid` : ''),
 				phone: guest.phone?.trim() || null,
 				specialRequests: guest.specialRequests?.trim() || null
 			})
 			.returning({ id: guests.id });
+
+		// An OTA booking carries the OTA's price, not our rate plan's: the lines above only prove the rooms
+		// are free; the gross is then shared across the rooms in proportion to what our plan would charge.
+		// shortcut: no VAT/fee split on the OTA total (the OTA doesn't give one), so it is all subtotal.
+		// Revisit when the BIR treatment of OTA sales is settled.
+		const otaRoomTotals = ota
+			? splitProportional(
+					ota.grossCentavos,
+					lines.flatMap(({ item, price, extraBeds }) =>
+						splitRoomLine(
+							{
+								subtotalCentavos: price.subtotalCentavos,
+								feesCentavos: price.fees.reduce((sum, f) => sum + f.amountCentavos, 0),
+								vatCentavos: price.vatCentavos,
+								totalCentavos: price.totalCentavos
+							},
+							item.occupancy,
+							extraBeds,
+							item.roomCount
+						).map((share) => share.totalCentavos)
+					)
+				)
+			: null;
 
 		const [order] = await tx
 			.insert(orders)
@@ -999,11 +1053,18 @@ export async function createWalkInBooking(params: {
 				hotelId,
 				guestId: guestRow!.id,
 				status: 'confirmed',
-				subtotalCentavos,
-				feesCentavos,
-				vatCentavos,
-				totalCentavos,
-				accessToken: randomUUID()
+				subtotalCentavos: ota ? ota.grossCentavos : subtotalCentavos,
+				feesCentavos: ota ? 0 : feesCentavos,
+				vatCentavos: ota ? 0 : vatCentavos,
+				totalCentavos: ota ? ota.grossCentavos : totalCentavos,
+				accessToken: randomUUID(),
+				...(ota && {
+					otaName: ota.name,
+					otaReference: ota.reference,
+					otaGrossCentavos: ota.grossCentavos,
+					otaCommissionCentavos: ota.commissionCentavos,
+					otaNetCentavos: ota.grossCentavos - ota.commissionCentavos
+				})
 			})
 			.returning({ id: orders.id });
 
@@ -1011,7 +1072,7 @@ export async function createWalkInBooking(params: {
 			orderId: order!.id,
 			fromStatus: null,
 			toStatus: 'confirmed',
-			note: 'Walk-in — settled at front desk'
+			note: ota ? `OTA booking — ${ota.name} ${ota.reference}` : 'Walk-in — settled at front desk'
 		});
 
 		const bookingIds: string[] = [];
@@ -1033,7 +1094,12 @@ export async function createWalkInBooking(params: {
 				extraBeds,
 				item.roomCount
 			);
-			for (const [i, share] of shares.entries()) {
+			for (const [i, shareRaw] of shares.entries()) {
+				const otaTotal = otaRoomTotals?.[bookingIds.length];
+				const share =
+					otaTotal === undefined
+						? shareRaw
+						: { ...shareRaw, subtotalCentavos: otaTotal, feesCentavos: 0, vatCentavos: 0, totalCentavos: otaTotal };
 				const [booking] = await tx
 					.insert(bookings)
 					.values({
@@ -1091,6 +1157,22 @@ export async function createWalkInBooking(params: {
 
 		// Full settlement + its cash-ledger movement, in the same transaction — one
 		// payment for the whole sale, attached to the first line's booking/folio.
+		if (ota) {
+			// Prepaid at the OTA: no cash today. Each room's bill goes onto the order's city-ledger account
+			// (squaring the folio so check-out passes) until the OTA pays out.
+			for (const [i, bookingId] of bookingIds.entries()) {
+				await addToCityLedger(tx, {
+					hotelId,
+					target: { kind: 'room', bookingId },
+					orderId: order!.id,
+					amount: bookingTotals[i]!,
+					billToName: ota.name,
+					referenceNo: ota.reference,
+					actor
+				});
+			}
+			return { bookingIds, totalPaidCentavos: 0, orderId: order!.id };
+		}
 		await recordWalkInPayment(tx, {
 			hotelId,
 			orderId: order!.id,
@@ -1101,7 +1183,7 @@ export async function createWalkInBooking(params: {
 			referenceNo: payment.referenceNo ?? null,
 			bankName: payment.bankName ?? null,
 			chequeDate: payment.chequeDate ?? null,
-			cashAccountId,
+			cashAccountId: cashAccountId!,
 			shiftId,
 			businessDate,
 			guestName: guest.fullName.trim(),
@@ -1130,7 +1212,7 @@ export async function createWalkInBooking(params: {
 	await writeAudit({
 		hotelId,
 		actor,
-		action: 'booking.walk_in',
+		action: ota ? 'booking.ota' : 'booking.walk_in',
 		entityType: 'booking',
 		entityId: bookingIds[0]!,
 		after: {

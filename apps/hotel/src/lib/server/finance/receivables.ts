@@ -7,7 +7,9 @@ import {
 	cashMovements,
 	functionHalls,
 	hallBookings,
+	guests,
 	hotels,
+	orders,
 	payments,
 	receivableEntries,
 	receivables,
@@ -25,6 +27,102 @@ import { accountForMethod, getFinanceSettings } from './settings';
 import { getBirSettings } from './documents';
 import { getDefaultOpenShift } from './shifts';
 import type { PaymentMethod } from './payments';
+
+/** Squares one room's bill with a `house_use` payment and puts it on the booking's city-ledger
+ *  account (opening the account if it has none). Runs inside the caller's transaction, so a booking
+ *  created in the same transaction (an OTA booking) can be moved onto the ledger atomically. */
+export async function addToCityLedger(
+	tx: Tx,
+	input: {
+		hotelId: string;
+		target: FolioTarget;
+		orderId: string;
+		amount: number;
+		billToName?: string;
+		billToCompany?: string | null;
+		referenceNo?: string | null;
+		notes?: string | null;
+		actor: SessionUser | null;
+	}
+): Promise<{ receivableId: string; addedToExisting: boolean }> {
+	const { orderId, amount } = input;
+	const folioId = await ensureFolio(tx, input.hotelId, input.target);
+
+	// One ledger ACCOUNT per booking: another room joins the booking's active account
+	// (open / partial) as a new entry instead of opening a second account.
+	const [existing] = await tx
+		.select({ id: receivables.id })
+		.from(receivables)
+		.where(
+			and(
+				eq(receivables.hotelId, input.hotelId),
+				eq(receivables.orderId, orderId),
+				sql`${receivables.status} in ('open','partial')`
+			)
+		)
+		.orderBy(asc(receivables.openedAt))
+		.limit(1)
+		.for('update');
+	if (!existing && !input.billToName?.trim())
+		throw new FinanceError('Enter who the balance is billed to.');
+
+	// Square the room so its check-out balance gate passes — this isn't cash, so no
+	// cash_movements row; the debt is now carried by the ledger account.
+	await tx.insert(payments).values({
+		orderId,
+		provider: 'cash',
+		method: 'house_use',
+		purpose: 'settlement',
+		status: 'paid',
+		amountCentavos: amount,
+		folioId,
+		recordedByUserId: input.actor?.id ?? null,
+		paidAt: new Date()
+	});
+
+	let id: string;
+	if (existing) {
+		id = existing.id;
+		await tx
+			.update(receivables)
+			.set({
+				originalAmountCentavos: sql`${receivables.originalAmountCentavos} + ${amount}`,
+				outstandingCentavos: sql`${receivables.outstandingCentavos} + ${amount}`,
+				updatedAt: new Date()
+			})
+			.where(eq(receivables.id, id));
+	} else {
+		const [row] = await tx
+			.insert(receivables)
+			.values({
+				hotelId: input.hotelId,
+				orderId,
+				folioId,
+				bookingId: input.target.kind === 'room' ? input.target.bookingId : null,
+				hallBookingId: input.target.kind === 'hall' ? input.target.hallBookingId : null,
+				billToName: input.billToName!.trim(),
+				billToCompany: input.billToCompany?.trim() || null,
+				referenceNo: input.referenceNo?.trim() || null,
+				originalAmountCentavos: amount,
+				outstandingCentavos: amount,
+				openedByUserId: input.actor?.id ?? null,
+				notes: input.notes?.trim() || null
+			})
+			.returning({ id: receivables.id });
+		id = row!.id;
+	}
+
+	await tx.insert(receivableEntries).values({
+		receivableId: id,
+		bookingId: input.target.kind === 'room' ? input.target.bookingId : null,
+		hallBookingId: input.target.kind === 'hall' ? input.target.hallBookingId : null,
+		folioId,
+		amountCentavos: amount,
+		notes: input.notes?.trim() || null,
+		openedByUserId: input.actor?.id ?? null
+	});
+	return { receivableId: id, addedToExisting: !!existing };
+}
 
 /**
  * The "city ledger": a balance a guest or company still owes after checkout. Opened
@@ -44,6 +142,15 @@ export async function openReceivable(input: {
 	amountCentavos?: number;
 	actor: SessionUser | null;
 }): Promise<{ receivableId: string; amountCentavos: number; addedToExisting: boolean }> {
+	const orderIdFirst = await getOrderIdForTarget(input.target);
+	if (!orderIdFirst) throw new FinanceError('Booking not found.');
+	// The booking's ledger account IS the OTA's receivable: a guest's own unpaid extras must not join it
+	// (the payout would write them off as commission). The guest pays those, or the desk waits.
+	const [ord] = await db.select({ otaName: orders.otaName }).from(orders).where(eq(orders.id, orderIdFirst)).limit(1);
+	if (ord?.otaName)
+		throw new FinanceError('This is an OTA booking: the guest must pay their own extras. They cannot be moved to the city ledger.');
+
+
 	// The room's own balance (charges minus what THIS room has been paid) — never the booking's.
 	const folio = await getFolioDetail(input.hotelId, input.target);
 	if (folio.balanceCentavos <= 0)
@@ -59,84 +166,9 @@ export async function openReceivable(input: {
 	const orderId = await getOrderIdForTarget(input.target);
 	if (!orderId) throw new FinanceError('Booking not found.');
 
-	const { receivableId, addedToExisting } = await db.transaction(async (tx: Tx) => {
-		const folioId = await ensureFolio(tx, input.hotelId, input.target);
-
-		// One ledger ACCOUNT per booking: another room joins the booking's active account
-		// (open / partial) as a new entry instead of opening a second account.
-		const [existing] = await tx
-			.select({ id: receivables.id })
-			.from(receivables)
-			.where(
-				and(
-					eq(receivables.hotelId, input.hotelId),
-					eq(receivables.orderId, orderId),
-					sql`${receivables.status} in ('open','partial')`
-				)
-			)
-			.orderBy(asc(receivables.openedAt))
-			.limit(1)
-			.for('update');
-		if (!existing && !input.billToName?.trim())
-			throw new FinanceError('Enter who the balance is billed to.');
-
-		// Square the room so its check-out balance gate passes — this isn't cash, so no
-		// cash_movements row; the debt is now carried by the ledger account.
-		await tx.insert(payments).values({
-			orderId,
-			provider: 'cash',
-			method: 'house_use',
-			purpose: 'settlement',
-			status: 'paid',
-			amountCentavos: amount,
-			folioId,
-			recordedByUserId: input.actor?.id ?? null,
-			paidAt: new Date()
-		});
-
-		let id: string;
-		if (existing) {
-			id = existing.id;
-			await tx
-				.update(receivables)
-				.set({
-					originalAmountCentavos: sql`${receivables.originalAmountCentavos} + ${amount}`,
-					outstandingCentavos: sql`${receivables.outstandingCentavos} + ${amount}`,
-					updatedAt: new Date()
-				})
-				.where(eq(receivables.id, id));
-		} else {
-			const [row] = await tx
-				.insert(receivables)
-				.values({
-					hotelId: input.hotelId,
-					orderId,
-					folioId,
-					bookingId: input.target.kind === 'room' ? input.target.bookingId : null,
-					hallBookingId: input.target.kind === 'hall' ? input.target.hallBookingId : null,
-					billToName: input.billToName!.trim(),
-					billToCompany: input.billToCompany?.trim() || null,
-					referenceNo: input.referenceNo?.trim() || null,
-					originalAmountCentavos: amount,
-					outstandingCentavos: amount,
-					openedByUserId: input.actor?.id ?? null,
-					notes: input.notes?.trim() || null
-				})
-				.returning({ id: receivables.id });
-			id = row!.id;
-		}
-
-		await tx.insert(receivableEntries).values({
-			receivableId: id,
-			bookingId: input.target.kind === 'room' ? input.target.bookingId : null,
-			hallBookingId: input.target.kind === 'hall' ? input.target.hallBookingId : null,
-			folioId,
-			amountCentavos: amount,
-			notes: input.notes?.trim() || null,
-			openedByUserId: input.actor?.id ?? null
-		});
-		return { receivableId: id, addedToExisting: !!existing };
-	});
+	const { receivableId, addedToExisting } = await db.transaction(async (tx: Tx) =>
+		addToCityLedger(tx, { ...input, orderId, amount })
+	);
 
 	await writeAudit({
 		hotelId: input.hotelId,
@@ -210,7 +242,7 @@ export async function settleReceivable(input: {
 				sourceType: 'receivable_settlement',
 				sourceId: r.id,
 				shiftId,
-				memo: `City ledger collection — ${r.billToCompany || r.billToName}`,
+				memo: `City ledger collection — ${r.billToCompany || r.billToName}${input.referenceNo ? ` (${input.referenceNo})` : ''}`,
 				actor: input.actor
 			},
 			tx
@@ -342,9 +374,12 @@ export async function reopenReceivable(
 
 export async function listReceivables(
 	hotelId: string,
-	opts: { status?: Receivable['status'] | 'active' } = {}
+	/** `ota`: the city ledger leaves OTA accounts out (they have their own tab); the OTA tab asks for `'only'`. */
+	opts: { status?: Receivable['status'] | 'active'; ota?: 'only' | 'exclude' } = {}
 ) {
 	const conds = [eq(receivables.hotelId, hotelId)];
+	const isOta = sql`exists (select 1 from orders o where o.id = ${receivables.orderId} and o.ota_name is not null)`;
+	conds.push(opts.ota === 'only' ? isOta : sql`not ${isOta}`);
 	if (opts.status === 'active') conds.push(sql`${receivables.status} in ('open','partial')`);
 	else if (opts.status) conds.push(eq(receivables.status, opts.status));
 
@@ -393,6 +428,41 @@ export async function listReceivables(
 			.where(inArray(hallBookings.id, hallIds));
 		for (const h of hb) labelOf.set(h.id, h.name);
 	}
+	// OTA details + guest + stay, only for the OTA tab.
+	const otaBy = new Map<string, { name: string; reference: string; grossCentavos: number; commissionCentavos: number; netCentavos: number; guestName: string; checkIn: string; checkOut: string }>();
+	const orderIds = rows.map((r) => r.orderId).filter((v): v is string => !!v);
+	if (opts.ota === 'only' && orderIds.length > 0) {
+		const info = await db
+			.select({
+				id: orders.id,
+				name: orders.otaName,
+				reference: orders.otaReference,
+				gross: orders.otaGrossCentavos,
+				commission: orders.otaCommissionCentavos,
+				net: orders.otaNetCentavos,
+				guestName: guests.fullName
+			})
+			.from(orders)
+			.innerJoin(guests, eq(guests.id, orders.guestId))
+			.where(inArray(orders.id, orderIds));
+		const stays = await db
+			.select({ orderId: bookings.orderId, checkIn: sql<string>`min(${bookings.checkIn})`, checkOut: sql<string>`max(${bookings.checkOut})` })
+			.from(bookings)
+			.where(and(inArray(bookings.orderId, orderIds), sql`${bookings.status} not in ('cancelled','no_show')`))
+			.groupBy(bookings.orderId);
+		const stayOf = new Map(stays.map((x) => [x.orderId, x]));
+		for (const i of info)
+			otaBy.set(i.id, {
+				name: i.name ?? '',
+				reference: i.reference ?? '',
+				grossCentavos: i.gross ?? 0,
+				commissionCentavos: i.commission ?? 0,
+				netCentavos: i.net ?? 0,
+				guestName: i.guestName,
+				checkIn: stayOf.get(i.id)?.checkIn ?? '',
+				checkOut: stayOf.get(i.id)?.checkOut ?? ''
+			});
+	}
 	return rows.map((r) => {
 		const labels = entryRows
 			.filter((e) => e.receivableId === r.id)
@@ -404,7 +474,8 @@ export async function listReceivables(
 			orderCode: r.orderId ? r.orderId.slice(0, 8).toUpperCase() : null,
 			/** Every room/hall on this account, e.g. "Room D1, Room 101". */
 			roomLabel: labels.length ? labels.join(', ') : null,
-			entryCount: labels.length
+			entryCount: labels.length,
+			ota: (r.orderId && otaBy.get(r.orderId)) || null
 		};
 	});
 }

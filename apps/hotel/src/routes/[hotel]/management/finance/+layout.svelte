@@ -16,6 +16,7 @@
 				show: data.finance.canExpense || data.finance.canWrite
 			},
 			{ seg: '/receivables', label: 'City ledger' },
+			{ seg: '/ota', label: 'OTA payouts' },
 			{ seg: '/security-deposits', label: 'Security deposits' },
 			{ seg: '/shifts', label: 'Shifts' },
 			{ seg: '/reports', label: 'Reports' },

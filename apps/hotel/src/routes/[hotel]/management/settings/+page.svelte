@@ -12,6 +12,7 @@
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import CalendarOffIcon from '@lucide/svelte/icons/calendar-off';
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
+	import GlobeIcon from '@lucide/svelte/icons/globe';
 
 	const base = $derived(`/${page.params.hotel}/management`);
 
@@ -57,6 +58,12 @@
 			icon: CreditCardIcon,
 			label: 'Payments & email',
 			desc: 'Your PayMongo account for online payment, and the mailbox guest email comes from.'
+		},
+		{
+			href: 'ota',
+			icon: GlobeIcon,
+			label: 'OTA channels',
+			desc: 'Agoda, Booking.com and the other OTAs staff can key bookings in from.'
 		},
 		{
 			href: 'amenity-items',

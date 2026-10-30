@@ -753,7 +753,7 @@
 							<div class="flex flex-wrap items-center gap-1.5">
 								<Badge variant="outline" class={paymentStatusClass(p.status)}>{p.status}</Badge>
 								<span class="font-medium text-ink {p.voidedAt ? 'line-through' : ''}">
-									{paymentMethodLabel[p.method] ?? p.method}
+									{p.method === 'house_use' && data.ota ? 'Paid at OTA' : (paymentMethodLabel[p.method] ?? p.method)}
 								</span>
 								{#if p.purpose !== 'settlement'}
 									<Badge variant="outline" class="border-border bg-surface-2 text-ink-muted">
@@ -778,7 +778,7 @@
 							{/if}
 						</div>
 						<div class="flex shrink-0 items-center gap-2">
-							{#if !p.voidedAt && p.amountCentavos > 0}
+							{#if !p.voidedAt && p.amountCentavos > 0 && !(p.method === 'house_use' && data.ota)}
 								<a
 									href="{base}/print/receipt/{p.id}"
 									target="_blank"
@@ -804,7 +804,8 @@
 		{/if}
 	</div>
 
-	<!-- Confirmation email -->
+	<!-- Confirmation email (an OTA booking has no real guest address: the OTA emails the guest) -->
+	{#if !data.ota}
 	<div class="rounded-xl border border-border p-4">
 		<div class="mb-2 flex items-center justify-between gap-3">
 			<h2 class="flex items-center gap-1.5 text-sm font-semibold text-ink">
@@ -871,9 +872,10 @@
 			</div>
 		{/if}
 	</div>
+	{/if}
 
 	<!-- Cancel / no-show -->
-	{#if data.cancelQuote || data.canMarkNoShow}
+	{#if data.cancelQuote || data.canMarkNoShow || (data.ota && data.kind === 'room' && data.detail.booking.status === 'confirmed')}
 		<div class="rounded-xl border border-border border-l-4 border-l-danger/40 p-4">
 			<h2 class="mb-1 flex items-center gap-1.5 text-sm font-semibold text-ink">
 				<CircleXIcon class="size-4 text-danger" />
@@ -883,6 +885,8 @@
 				{#if data.cancelQuote}
 					Releases the {data.kind === 'room' ? 'room' : 'hall'} hold and, for a paid booking, records
 					the refund after any cancellation fee.
+				{:else if data.ota}
+					Releases the room and takes its share off what the OTA owes you.
 				{:else}
 					This arrival is past its check-in date.
 				{/if}
@@ -926,13 +930,27 @@
 				</div>
 			{/if}
 
+			{#if data.ota && data.kind === 'room' && (data.detail.booking.status === 'confirmed')}
+				<form method="POST" action="?/otaClose" use:enhance class="mb-3 flex flex-wrap items-end gap-2">
+					<div class="min-w-56 flex-1">
+						<Label for="otaReason" class="text-xs">
+							{data.ota.name} {data.ota.reference}: nothing is refunded here, the OTA owes you less
+						</Label>
+						<Input id="otaReason" name="reason" required maxlength={300} placeholder="Reason, e.g. guest cancelled on the OTA" class="mt-1 h-9" />
+					</div>
+					<Button type="submit" name="outcome" value="cancelled" variant="outline">Cancelled at OTA</Button>
+					{#if data.canMarkNoShow}
+						<Button type="submit" name="outcome" value="no_show" variant="outline">No-show</Button>
+					{/if}
+				</form>
+			{/if}
 			<div class="flex flex-wrap gap-2">
 				{#if data.cancelQuote}
 					<Button variant="outline" onclick={() => (cancelOpen = true)}>
 						Cancel {data.kind === 'room' ? 'booking' : 'event'}
 					</Button>
 				{/if}
-				{#if data.canMarkNoShow}
+				{#if data.canMarkNoShow && !data.ota}
 					{#if confirmingNoShow}
 						<form method="POST" action="?/markNoShow" use:enhance class="flex items-center gap-2">
 							<Button type="submit" variant="destructive">Confirm no-show</Button>

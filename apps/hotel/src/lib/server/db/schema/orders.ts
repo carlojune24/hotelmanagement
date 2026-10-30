@@ -1,5 +1,5 @@
-import { relations } from 'drizzle-orm';
-import { bigint, index, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { relations, sql } from 'drizzle-orm';
+import { bigint, boolean, index, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, pk, updatedAt } from './_shared';
 import { hotels } from './hotels';
 import { guests } from './bookings';
@@ -55,14 +55,48 @@ export const orders = pgTable(
 		accessToken: text('access_token').notNull(),
 		paymongoCheckoutSessionId: text('paymongo_checkout_session_id'),
 		cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+		/**
+		 * Set only on a booking keyed in from an OTA (Agoda, Booking.com…), prepaid at the OTA. Name is
+		 * trimmed + lower-cased on save so (hotel, name, reference) stays unique. Gross is what the guest
+		 * paid the OTA; net is what the OTA owes the hotel; all three are centavos. Null = not an OTA booking.
+		 */
+		otaName: text('ota_name'),
+		otaReference: text('ota_reference'),
+		otaGrossCentavos: bigint('ota_gross_centavos', { mode: 'number' }),
+		otaCommissionCentavos: bigint('ota_commission_centavos', { mode: 'number' }),
+		otaNetCentavos: bigint('ota_net_centavos', { mode: 'number' }),
 		createdAt: createdAt(),
 		updatedAt: updatedAt()
 	},
 	(t) => [
 		index('orders_hotel_idx').on(t.hotelId),
-		uniqueIndex('orders_access_token_idx').on(t.accessToken)
+		uniqueIndex('orders_access_token_idx').on(t.accessToken),
+		uniqueIndex('orders_ota_reference_idx')
+			.on(t.hotelId, t.otaName, t.otaReference)
+			.where(sql`${t.otaName} is not null`)
 	]
 );
+
+/**
+ * The OTAs a hotel takes bookings from (Agoda, Booking.com…). Staff pick from this list when keying in an
+ * OTA booking, so one OTA can never be spelt two ways. `orders.ota_name` holds the channel's name at the
+ * time; renaming a channel renames those orders with it. Never deleted, only switched off.
+ */
+export const otaChannels = pgTable(
+	'ota_channels',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		isActive: boolean('is_active').notNull().default(true),
+		createdAt: createdAt()
+	},
+	(t) => [uniqueIndex('ota_channels_hotel_name_idx').on(t.hotelId, sql`lower(${t.name})`)]
+);
+
+export type OtaChannel = typeof otaChannels.$inferSelect;
 
 export const orderStatusHistory = pgTable(
 	'order_status_history',
