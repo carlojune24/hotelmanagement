@@ -1,8 +1,9 @@
 import { error, fail, redirect } from '@sveltejs/kit';
-import { and, asc, eq, isNotNull } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
-import { amenityItems, cashAccounts, orders, roomTypes } from '$lib/server/db/schema/index';
+import { amenityItems, cashAccounts, roomTypes } from '$lib/server/db/schema/index';
+import { listOtaChannels } from '$lib/server/ota-channels';
 import { requireCap } from '$lib/server/auth/rbac';
 import { MAX_EXTENSION_HOURS } from '$lib/extension-hours';
 import { getHallBookingDetail, getRoomBookingDetail } from '$lib/server/reservations';
@@ -169,14 +170,8 @@ export const load: PageServerLoad = async ({ locals }) => {
 		drawers.find((d) => d.id === financeSettings.defaultDrawerAccountId) ??
 		(spareDrawers.length === 1 ? spareDrawers[0]! : null);
 
-	// Names the hotel already used for OTA bookings, offered as suggestions on the OTA form.
-	const otaNames = (
-		await db
-			.selectDistinct({ name: orders.otaName })
-			.from(orders)
-			.where(and(eq(orders.hotelId, hotel.id), isNotNull(orders.otaName)))
-			.orderBy(asc(orders.otaName))
-	).map((r) => r.name!);
+	// The OTAs this hotel takes bookings from: the OTA form offers exactly these.
+	const otaNames = (await listOtaChannels(hotel.id, { activeOnly: true })).map((c) => c.name);
 
 	return {
 		businessDate,
@@ -1120,7 +1115,7 @@ export const actions: Actions = {
 				phone: z.string().max(40).optional(),
 				specialRequests: z.string().max(1000).optional(),
 				itemsJson: z.string(),
-				otaName: z.string().trim().min(1).max(80),
+				otaName: z.string().trim().min(1).max(80, 'Pick the OTA.'),
 				otaReference: z.string().trim().min(1).max(80),
 				grossCentavos: z.coerce.number().int().positive(),
 				commissionCentavos: z.coerce.number().int().min(0)

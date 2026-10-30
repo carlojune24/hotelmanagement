@@ -12,7 +12,6 @@
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 	const peso = (c: number) => `₱${(c / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 	const toCentavos = (v: string) => Math.round(Number(v) * 100);
-	const otaLabel = (n: string) => n.charAt(0).toUpperCase() + n.slice(1);
 	/** 2026-10-30 -> Oct 30 */
 	const day = (iso?: string) => (iso ? new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '');
 
@@ -20,9 +19,27 @@
 	/** Ticked receivable ids → the amount typed as received (pesos), prefilled with the expected net. */
 	let received = $state<Record<string, string>>({});
 	let statementRef = $state('');
+	let search = $state('');
 	let confirming = $state(false);
 	let busy = $state(false);
 
+	/** The OTA whose tab is open (?ota=…), else the first one with bookings waiting, else the first tab. */
+	const selected = $derived.by(() => {
+		const asked = page.url.searchParams.get('ota');
+		if (asked && data.tabs.includes(asked)) return asked;
+		return data.tabs.find((t) => data.rows.some((r) => r.ota?.name === t)) ?? data.tabs[0] ?? '';
+	});
+	const countOf = (t: string) => data.rows.filter((r) => r.ota?.name === t).length;
+	const expectedOf = (t: string) => data.rows.filter((r) => r.ota?.name === t).reduce((n, r) => n + expected(r), 0);
+
+	// One statement is one OTA's: nothing ticked or typed carries over to another tab.
+	$effect(() => {
+		void selected;
+		received = {};
+		statementRef = '';
+		search = '';
+		confirming = false;
+	});
 	$effect(() => {
 		if (form && 'ok' in form && form.ok) {
 			toast.success(form.ok);
@@ -33,17 +50,13 @@
 		if (form && 'error' in form && form.error) toast.error(form.error);
 	});
 
-	const groups = $derived.by(() => {
-		const by = new Map<string, Row[]>();
-		for (const r of data.rows) {
-			const k = r.ota?.name ?? 'other';
-			by.set(k, [...(by.get(k) ?? []), r]);
-		}
-		return [...by.entries()].map(([name, rows]) => ({
-			name,
-			rows,
-			expectedNet: rows.reduce((n, r) => n + expected(r), 0)
-		}));
+	const tabRows = $derived(data.rows.filter((r) => r.ota?.name === selected));
+	const shown = $derived.by(() => {
+		const q = search.trim().toLowerCase();
+		if (!q) return tabRows;
+		return tabRows.filter((r) =>
+			[r.ota?.guestName, r.ota?.reference, r.orderCode, r.roomLabel].some((v) => (v ?? '').toLowerCase().includes(q))
+		);
 	});
 
 	const ticked = (r: Row) => r.id in received;
@@ -64,7 +77,7 @@
 		received = next;
 		confirming = false;
 	}
-	function toggleGroup(rows: Row[], on: boolean) {
+	function toggleAll(rows: Row[], on: boolean) {
 		const next = { ...received };
 		for (const r of rows) {
 			if (on) next[r.id] ??= (expected(r) / 100).toFixed(2);
@@ -74,7 +87,7 @@
 		confirming = false;
 	}
 
-	const tickedRows = $derived(data.rows.filter(ticked));
+	const tickedRows = $derived(tabRows.filter(ticked));
 	const totalReceived = $derived(tickedRows.reduce((n, r) => n + (gotCentavos(r) || 0), 0));
 	const totalCommission = $derived(tickedRows.reduce((n, r) => n + (r.outstandingCentavos - (gotCentavos(r) || 0)), 0));
 	const blocked = $derived(
@@ -86,32 +99,59 @@
 </script>
 
 <div class="mx-auto w-full max-w-5xl px-4 py-6 pb-32 sm:px-6">
-	<div class="mb-5">
+	<div class="mb-4">
 		<h1 class="text-xl font-semibold tracking-tight text-ink">OTA payouts</h1>
-		<p class="text-sm text-ink-muted">Bookings the OTA collected from guests and still owes you, net of its commission.</p>
+		<p class="text-sm text-ink-muted">Bookings the OTA collected from guests and still owes you, net of its commission. Open the OTA's tab, tick what its statement covers.</p>
 	</div>
 
-	{#if groups.length > 0}
-		<div class="mb-6 flex flex-wrap gap-3">
-			{#each groups as g (g.name)}
-				<div class="rounded-xl border border-border px-4 py-3">
-					<div class="text-xs text-ink-muted">{otaLabel(g.name)}</div>
-					<div class="mt-1 text-lg font-semibold text-ink tabular-nums">{peso(g.expectedNet)}</div>
-					<div class="text-xs text-ink-muted">{g.rows.length} booking(s) awaiting payout</div>
-				</div>
-			{/each}
+	{#if data.tabs.length === 0}
+		<div class="rounded-xl border border-border p-8 text-center">
+			<p class="font-medium text-ink">No OTA is set up yet.</p>
+			<p class="mt-1 text-sm text-ink-muted">A hotel admin adds the OTAs in Settings.</p>
 		</div>
-	{/if}
+	{:else}
+		<nav class="mb-5 flex gap-1 overflow-x-auto border-b border-border" aria-label="OTAs">
+			{#each data.tabs as t (t)}
+				<a
+					href="?ota={encodeURIComponent(t)}"
+					data-sveltekit-noscroll
+					aria-current={t === selected ? 'page' : undefined}
+					class="-mb-px border-b-2 px-3 py-2 text-sm font-medium whitespace-nowrap {t === selected
+						? 'border-ink text-ink'
+						: 'border-transparent text-ink-muted hover:text-ink'}"
+				>
+					{t}
+					<span class="ml-1 rounded-full bg-surface-2 px-1.5 py-0.5 text-xs tabular-nums text-ink-muted">{countOf(t)}</span>
+				</a>
+			{/each}
+		</nav>
 
-	{#each groups as g (g.name)}
-		<section class="mb-6">
-			<h2 class="mb-2 text-sm font-semibold text-ink">{otaLabel(g.name)}</h2>
+		{#if tabRows.length === 0}
+			<div class="rounded-xl border border-border p-8 text-center">
+				<p class="font-medium text-ink">Nothing is waiting for a payout from {selected}.</p>
+				<p class="mt-1 text-sm text-ink-muted">
+					Add one from Front desk → Walk-in → OTA booking. It shows up here until {selected} pays it out.
+				</p>
+			</div>
+		{:else}
+			<div class="mb-3 flex flex-wrap items-end justify-between gap-3">
+				<div>
+					<div class="text-xs text-ink-muted">{selected} owes you</div>
+					<div class="text-lg font-semibold text-ink tabular-nums">{peso(expectedOf(selected))}</div>
+					<div class="text-xs text-ink-muted">{tabRows.length} booking(s) awaiting payout</div>
+				</div>
+				<div class="w-full sm:w-72">
+					<Label for="otaSearch" class="text-xs">Find a booking</Label>
+					<Input id="otaSearch" type="search" bind:value={search} placeholder="Guest, OTA reference or booking code" class="mt-1 h-9" />
+				</div>
+			</div>
+
 			<div class="overflow-x-auto rounded-xl border border-border">
 				<Table.Root>
 					<Table.Header>
 						<Table.Row>
 							<Table.Head class="w-10">
-								<Checkbox checked={g.rows.every(ticked)} onCheckedChange={(v) => toggleGroup(g.rows, v === true)} aria-label="Select all {g.name} bookings" />
+								<Checkbox checked={shown.length > 0 && shown.every(ticked)} onCheckedChange={(v) => toggleAll(shown, v === true)} aria-label="Select all shown {selected} bookings" />
 							</Table.Head>
 							<Table.Head>Booking</Table.Head>
 							<Table.Head class="text-right">Expected</Table.Head>
@@ -122,7 +162,7 @@
 						</Table.Row>
 					</Table.Header>
 					<Table.Body>
-						{#each g.rows as r (r.id)}
+						{#each shown as r (r.id)}
 							{@const short = ticked(r) && !problem(r) ? expected(r) - gotCentavos(r) : 0}
 							<Table.Row>
 								<Table.Cell>
@@ -161,29 +201,26 @@
 								<Table.Cell class="text-right tabular-nums text-ink-muted">{peso(r.ota?.grossCentavos ?? 0)}</Table.Cell>
 								<Table.Cell class="text-right tabular-nums text-ink-muted">{peso(r.ota?.commissionCentavos ?? 0)}</Table.Cell>
 							</Table.Row>
+						{:else}
+							<Table.Row>
+								<Table.Cell colspan={7} class="py-6 text-center text-ink-muted">No booking matches “{search}”.</Table.Cell>
+							</Table.Row>
 						{/each}
 					</Table.Body>
 				</Table.Root>
 			</div>
-		</section>
-	{:else}
-		<div class="rounded-xl border border-border p-8 text-center">
-			<p class="font-medium text-ink">No OTA bookings are waiting for a payout.</p>
-			<p class="mt-1 text-sm text-ink-muted">
-				Add one from Front desk → Walk-in → OTA booking. It shows up here until the OTA pays it out.
-			</p>
-		</div>
-	{/each}
+		{/if}
+	{/if}
 </div>
 
-{#if data.rows.length > 0 && data.finance.canReceivable}
+{#if tabRows.length > 0 && data.finance.canReceivable}
 	<form
 		method="POST"
 		action="?/record"
 		use:enhance={() => {
 			busy = true;
 			return async ({ update }) => {
-				await update();
+				await update({ reset: false });
 				busy = false;
 			};
 		}}
@@ -192,7 +229,7 @@
 		<input type="hidden" name="itemsJson" value={itemsJson} />
 		<div class="mx-auto flex w-full max-w-5xl flex-wrap items-end gap-3">
 			<div class="min-w-52 flex-1">
-				<Label for="otaStatementRef" class="text-xs">OTA statement or payment reference</Label>
+				<Label for="otaStatementRef" class="text-xs">{selected} statement or payment reference</Label>
 				<Input id="otaStatementRef" name="statementRef" bind:value={statementRef} oninput={() => (confirming = false)} maxlength={120} class="mt-1 h-9" />
 			</div>
 			<div class="text-sm tabular-nums">

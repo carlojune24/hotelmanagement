@@ -4,12 +4,20 @@ import { requireCap } from '$lib/server/auth/rbac';
 import { FinanceError } from '$lib/server/finance/shared';
 import { listReceivables } from '$lib/server/finance/receivables';
 import { recordOtaPayout } from '$lib/server/finance/ota';
+import { listOtaChannels } from '$lib/server/ota-channels';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
 	requireCap(locals.user, locals.role, 'finance:read');
-	const rows = await listReceivables(locals.hotel!.id, { status: 'active', ota: 'only' });
-	return { rows };
+	const hotelId = locals.hotel!.id;
+	const [rows, channels] = await Promise.all([
+		listReceivables(hotelId, { status: 'active', ota: 'only' }),
+		listOtaChannels(hotelId)
+	]);
+	// One tab per OTA: every active one, plus any switched-off OTA that still has bookings waiting.
+	const waiting = new Set(rows.map((r) => r.ota?.name));
+	const tabs = channels.filter((c) => c.isActive || waiting.has(c.name)).map((c) => c.name);
+	return { rows, tabs };
 };
 
 export const actions: Actions = {

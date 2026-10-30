@@ -142,6 +142,15 @@ export async function openReceivable(input: {
 	amountCentavos?: number;
 	actor: SessionUser | null;
 }): Promise<{ receivableId: string; amountCentavos: number; addedToExisting: boolean }> {
+	const orderIdFirst = await getOrderIdForTarget(input.target);
+	if (!orderIdFirst) throw new FinanceError('Booking not found.');
+	// The booking's ledger account IS the OTA's receivable: a guest's own unpaid extras must not join it
+	// (the payout would write them off as commission). The guest pays those, or the desk waits.
+	const [ord] = await db.select({ otaName: orders.otaName }).from(orders).where(eq(orders.id, orderIdFirst)).limit(1);
+	if (ord?.otaName)
+		throw new FinanceError('This is an OTA booking: the guest must pay their own extras. They cannot be moved to the city ledger.');
+
+
 	// The room's own balance (charges minus what THIS room has been paid) — never the booking's.
 	const folio = await getFolioDetail(input.hotelId, input.target);
 	if (folio.balanceCentavos <= 0)

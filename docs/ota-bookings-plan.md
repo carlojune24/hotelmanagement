@@ -15,13 +15,16 @@ cash choke point). Pay at Hotel and virtual-credit-card bookings are out of scop
 
 ## Decisions
 
-- **Multiple OTAs from v1.** OTA name is free text with suggestions from names the hotel already used
-  (no settings screen, no list table). Trim and case-normalise on save so the OTA reference stays unique per
-  hotel + OTA. A settings-managed list can be added later without changing stored data.
+- **Multiple OTAs from v1, from a configured list.** Hotel admins manage the OTAs in Settings → OTA channels
+  (add, rename, turn off, never delete). Staff pick one in a dropdown: no typing, so one OTA is never spelt two
+  ways. The server refuses any name not on the active list. Renaming carries through to bookings and ledger
+  accounts. The OTA reference is unique per hotel + OTA. (An earlier draft used free text with suggestions; typos
+  would have split one OTA into several and made payouts hard to assign.)
 - **Net revenue basis.** Revenue reported is what the OTA actually pays (the net). Commission is not its own
   report line in v1. Gross, commission and net are still stored on each booking, so a commission line can be
   added later with a one-off backfill.
-- **Payout matching by hand** in v1: staff tick the bookings a deposit covers. Statement import deferred.
+- **Payout matching by hand** in v1: Finance → OTA payouts has one tab per OTA; staff tick the bookings that OTA's
+  statement covers (search by guest, reference or code). One payout covers one OTA. Statement import deferred.
 - **No payment-mode field** on the form: every OTA booking is an OTA receivable.
 
 ## Accounting design

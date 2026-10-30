@@ -34,11 +34,14 @@ export async function recordOtaPayout(input: {
 
 	// Validate everything before moving any money.
 	const rows = await db
-		.select({ id: receivables.id, status: receivables.status, outstanding: receivables.outstandingCentavos, billToName: receivables.billToName })
+		.select({ id: receivables.id, status: receivables.status, outstanding: receivables.outstandingCentavos, billToName: receivables.billToName, otaName: orders.otaName })
 		.from(receivables)
 		.innerJoin(orders, eq(orders.id, receivables.orderId))
 		.where(and(eq(receivables.hotelId, input.hotelId), inArray(receivables.id, ids), isNotNull(orders.otaName)));
 	const byId = new Map(rows.map((r) => [r.id, r]));
+	// One statement is one OTA's: a payout never mixes OTAs.
+	const names = new Set(rows.map((r) => r.otaName));
+	if (names.size > 1) throw new FinanceError('A payout covers one OTA. Record each statement separately.');
 	for (const item of input.items) {
 		const r = byId.get(item.receivableId);
 		if (!r) throw new FinanceError('One of the bookings is not an OTA receivable of this hotel.');

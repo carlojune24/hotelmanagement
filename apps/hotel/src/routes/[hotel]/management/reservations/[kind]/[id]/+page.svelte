@@ -738,7 +738,7 @@
 							<div class="flex flex-wrap items-center gap-1.5">
 								<Badge variant="outline" class={paymentStatusClass(p.status)}>{p.status}</Badge>
 								<span class="font-medium text-ink {p.voidedAt ? 'line-through' : ''}">
-									{paymentMethodLabel[p.method] ?? p.method}
+									{p.method === 'house_use' && data.ota ? 'Paid at OTA' : (paymentMethodLabel[p.method] ?? p.method)}
 								</span>
 								{#if p.purpose !== 'settlement'}
 									<Badge variant="outline" class="border-border bg-surface-2 text-ink-muted">
@@ -763,7 +763,7 @@
 							{/if}
 						</div>
 						<div class="flex shrink-0 items-center gap-2">
-							{#if !p.voidedAt && p.amountCentavos > 0}
+							{#if !p.voidedAt && p.amountCentavos > 0 && !(p.method === 'house_use' && data.ota)}
 								<a
 									href="{base}/print/receipt/{p.id}"
 									target="_blank"
@@ -919,7 +919,7 @@
 				<form method="POST" action="?/otaClose" use:enhance class="mb-3 flex flex-wrap items-end gap-2">
 					<div class="min-w-56 flex-1">
 						<Label for="otaReason" class="text-xs">
-							{data.ota.name.charAt(0).toUpperCase() + data.ota.name.slice(1)} {data.ota.reference}: nothing is refunded here, the OTA owes you less
+							{data.ota.name} {data.ota.reference}: nothing is refunded here, the OTA owes you less
 						</Label>
 						<Input id="otaReason" name="reason" required maxlength={300} placeholder="Reason, e.g. guest cancelled on the OTA" class="mt-1 h-9" />
 					</div>

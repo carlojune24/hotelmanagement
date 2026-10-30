@@ -1238,12 +1238,12 @@
 	};
 </script>
 
-{#snippet paymentRow(p: any, kind: 'room' | 'hall', id: string)}
+{#snippet paymentRow(p: any, kind: 'room' | 'hall', id: string, ota = false)}
 	<div class="flex items-start justify-between gap-2 text-sm {p.voidedAt ? 'opacity-50' : ''}">
 		<div class="min-w-0">
 			<div class="flex flex-wrap items-center gap-1.5">
 				<span class="font-medium text-ink {p.voidedAt ? 'line-through' : ''}">
-					{methodLabels[p.method] ?? p.method}
+					{p.method === 'house_use' && ota ? 'Paid at OTA' : (methodLabels[p.method] ?? p.method)}
 				</span>
 				{#if p.purpose === 'deposit'}<Badge
 						variant="outline"
@@ -2920,7 +2920,7 @@
 								{:else}
 									<div class="space-y-2">
 										{#each formRoomDetail.payments as p (p.id)}
-											{@render paymentRow(p, 'room', o.bookingId)}
+											{@render paymentRow(p, 'room', o.bookingId, !!formRoomDetail.order?.otaName)}
 										{/each}
 									</div>
 								{/if}
@@ -3450,11 +3450,20 @@
 								<h3 class="text-sm font-semibold text-ink">OTA</h3>
 								<div class="grid grid-cols-2 gap-3">
 									<div>
-										<Label for="otaName">OTA name</Label>
-										<Input id="otaName" name="otaName" list="otaNameList" bind:value={otaName} required maxlength={80} autocomplete="off" placeholder="e.g. Agoda" />
-										<datalist id="otaNameList">
-											{#each data.otaNames as n (n)}<option value={n}></option>{/each}
-										</datalist>
+										<Label for="otaName">OTA</Label>
+										<select
+											id="otaName"
+											name="otaName"
+											bind:value={otaName}
+											required
+											class="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+										>
+											<option value="" disabled>Select the OTA…</option>
+											{#each data.otaNames as n (n)}<option value={n}>{n}</option>{/each}
+										</select>
+										{#if data.otaNames.length === 0}
+											<p class="mt-1 text-xs text-danger">No OTA is set up yet. A hotel admin adds them in Settings.</p>
+										{/if}
 									</div>
 									<div>
 										<Label for="otaRef">OTA reference</Label>

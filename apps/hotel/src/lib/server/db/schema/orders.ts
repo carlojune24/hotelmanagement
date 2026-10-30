@@ -1,5 +1,5 @@
 import { relations, sql } from 'drizzle-orm';
-import { bigint, index, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, index, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, pk, updatedAt } from './_shared';
 import { hotels } from './hotels';
 import { guests } from './bookings';
@@ -76,6 +76,27 @@ export const orders = pgTable(
 			.where(sql`${t.otaName} is not null`)
 	]
 );
+
+/**
+ * The OTAs a hotel takes bookings from (Agoda, Booking.com…). Staff pick from this list when keying in an
+ * OTA booking, so one OTA can never be spelt two ways. `orders.ota_name` holds the channel's name at the
+ * time; renaming a channel renames those orders with it. Never deleted, only switched off.
+ */
+export const otaChannels = pgTable(
+	'ota_channels',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		isActive: boolean('is_active').notNull().default(true),
+		createdAt: createdAt()
+	},
+	(t) => [uniqueIndex('ota_channels_hotel_name_idx').on(t.hotelId, sql`lower(${t.name})`)]
+);
+
+export type OtaChannel = typeof otaChannels.$inferSelect;
 
 export const orderStatusHistory = pgTable(
 	'order_status_history',

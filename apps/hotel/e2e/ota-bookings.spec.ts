@@ -56,7 +56,7 @@ async function fillOta(
 ) {
 	await sheet.getByRole('button', { name: 'OTA booking' }).click();
 	await sheet.locator('#wiFullName').fill(f.guest);
-	await sheet.locator('#otaName').fill(f.ota);
+	await sheet.locator('#otaName').selectOption({ label: f.ota });
 	await sheet.locator('#otaRef').fill(f.ref);
 	await sheet.locator('#otaGross').fill(f.gross);
 	if (f.pct) await sheet.locator('#otaPct').fill(f.pct);
@@ -109,8 +109,12 @@ test.describe('OTA bookings · end to end', () => {
 		const create = sheet.getByRole('button', { name: 'Create OTA booking' });
 		await expect(create).toBeDisabled();
 
+		// The OTA is a pick from the hotel's list: typing a name is not possible.
+		const options = await sheet.locator('#otaName option:not([disabled])').allInnerTexts();
+		expect(options).toEqual(expect.arrayContaining(['Agoda', 'Booking.com']));
+		await expect(sheet.locator('#otaName')).toHaveJSProperty('tagName', 'SELECT');
 		await sheet.locator('#wiFullName').fill('DUMMY OTA Form Check');
-		await sheet.locator('#otaName').fill('Agoda');
+		await sheet.locator('#otaName').selectOption({ label: 'Agoda' });
 		await sheet.locator('#otaRef').fill(ref('FORM'));
 		await sheet.locator('#otaGross').fill('10000');
 		await sheet.locator('#otaPct').fill('15');
@@ -135,10 +139,17 @@ test.describe('OTA bookings · end to end', () => {
 	test('create Agoda A: no cash moves, the receivable carries the gross, the detail page says OTA', async ({ page }) => {
 		const orderId = await createOta(page, 'A', { startOffset: B, ota: 'Agoda', gross: '10000', pct: '15' });
 		await expect(page.getByText('Awaiting OTA payout').first()).toBeVisible();
+		// The OTA's bill is "owed by the OTA", not "moved to the city ledger", and cannot be moved there.
+		await expect(page.getByText(/Less: owed by Agoda \(paid at the OTA\)/).first()).toBeVisible();
+		await expect(page.getByText('Paid at OTA').first()).toBeVisible();
+		await expect(page.getByText(/moved to the city ledger/i)).toHaveCount(0);
+		await expect(page.getByText('City ledger account')).toHaveCount(0);
+		await expect(page.getByRole('button', { name: /Move to city ledger/ })).toHaveCount(0);
+		await expect(page.getByRole('link', { name: 'OTA payouts' }).first()).toBeVisible();
 		await expect(page.getByText('OTA', { exact: true }).first()).toBeVisible();
 
 		expect(await orderRow(orderId)).toMatchObject({
-			ota_name: 'agoda',
+			ota_name: 'Agoda',
 			ota_reference: ref('A'),
 			g: 1_000_000,
 			c: 150_000,
@@ -155,13 +166,13 @@ test.describe('OTA bookings · end to end', () => {
 
 	test('create Agoda B (second room type) and Booking.com C', async ({ page }) => {
 		await createOta(page, 'B', { startOffset: B, row: 1, ota: 'Agoda', gross: '6000', pct: '15' });
-		await createOta(page, 'C', { startOffset: B + 2, ota: ' Booking.com ', gross: '8000', pct: '18' });
-		expect((await orderRow(made.C!.orderId)).ota_name).toBe('booking.com'); // trimmed and lower-cased
+		await createOta(page, 'C', { startOffset: B + 2, ota: 'Booking.com', gross: '8000', pct: '18' });
+		expect((await orderRow(made.C!.orderId)).ota_name).toBe('Booking.com');
 	});
 
 	test('the same OTA reference twice is refused with a plain message', async ({ page }) => {
 		const sheet = await addRoom(page, B + 4, 2);
-		await fillOta(sheet, { guest: 'DUMMY OTA Duplicate', ota: 'AGODA', ref: ref('A'), gross: '5000', pct: '10' });
+		await fillOta(sheet, { guest: 'DUMMY OTA Duplicate', ota: 'Agoda', ref: ref('A'), gross: '5000', pct: '10' });
 		await sheet.getByRole('button', { name: 'Create OTA booking' }).click();
 		await expect(page.getByText(/already booked here/)).toBeVisible(); // shown as a toast, outside the drawer
 		await expect(page).not.toHaveURL(/\/transactions\//);
@@ -185,12 +196,31 @@ test.describe('OTA bookings · end to end', () => {
 		await expect(page.locator('body')).not.toContainText(ref('A'));
 		await expect(page.locator('body')).not.toContainText('DUMMY OTA Guest A');
 
-		await page.goto(`/${SLUG}/management/finance/ota`);
+		await page.goto(`/${SLUG}/management/finance/ota?ota=Agoda`);
+		await page.waitForLoadState('networkidle');
 		await expect(page.getByRole('link', { name: 'OTA payouts' })).toBeVisible();
-		await expect(page.getByRole('heading', { name: 'agoda' })).toBeVisible();
-		await expect(page.getByRole('heading', { name: 'booking.com' })).toBeVisible();
-		for (const k of ['A', 'B', 'C']) await expect(page.locator('body')).toContainText(`Ref ${ref(k)}`);
+		const tabs = page.getByRole('navigation', { name: 'OTAs' });
+		await expect(tabs.getByRole('link', { name: /^Agoda/ })).toHaveAttribute('aria-current', 'page');
+		await expect(tabs.getByRole('link', { name: /^Booking\.com/ })).toBeVisible();
+		// Agoda's tab holds Agoda's bookings only.
+		for (const k of ['A', 'B']) await expect(page.locator('body')).toContainText(`Ref ${ref(k)}`);
+		await expect(page.locator('body')).not.toContainText(`Ref ${ref('C')}`);
 		await expect(page.getByRole('button', { name: 'Record payout' })).toBeDisabled();
+
+		// Search finds a booking by its OTA reference or guest.
+		await page.locator('#otaSearch').fill(ref('A'));
+		await expect(page.locator('tbody tr')).toHaveCount(1);
+		await page.locator('#otaSearch').fill('no such booking');
+		await expect(page.getByText(/No booking matches/)).toBeVisible();
+		await page.locator('#otaSearch').fill('');
+
+		// Nothing ticked carries over to another OTA's tab.
+		await page.locator('tr', { hasText: `Ref ${ref('A')}` }).getByRole('checkbox').check();
+		await expect(page.getByText('1 ticked')).toBeVisible();
+		await tabs.getByRole('link', { name: /^Booking\.com/ }).click();
+		await expect(page.locator('body')).toContainText(`Ref ${ref('C')}`);
+		await expect(page.locator('body')).not.toContainText(`Ref ${ref('A')}`);
+		await expect(page.getByText('0 ticked')).toBeVisible();
 	});
 
 	test('cancel at the OTA: no refund screen, the room is released, the receivable closes', async ({ page }) => {
@@ -213,12 +243,12 @@ test.describe('OTA bookings · end to end', () => {
 		expect((await orderRow(orderId)).status).toBe('cancelled');
 
 		// It no longer waits for a payout.
-		await page.goto(`/${SLUG}/management/finance/ota`);
+		await page.goto(`/${SLUG}/management/finance/ota?ota=Agoda`);
 		await expect(page.locator('body')).not.toContainText(`Ref ${ref('D')}`);
 	});
 
 	test('payout: tick two Agoda bookings, one short-paid, confirm; cash in net, commission closed', async ({ page }) => {
-		await page.goto(`/${SLUG}/management/finance/ota`);
+		await page.goto(`/${SLUG}/management/finance/ota?ota=Agoda`);
 		await page.waitForLoadState('networkidle');
 		const rowA = page.locator('tr', { hasText: `Ref ${ref('A')}` });
 		const rowB = page.locator('tr', { hasText: `Ref ${ref('B')}` });
@@ -245,9 +275,10 @@ test.describe('OTA bookings · end to end', () => {
 		await page.getByRole('button', { name: 'Confirm' }).click();
 		await expect(page.getByText(/Payout recorded: ₱13,500\.00 received, ₱2,500\.00 commission/)).toBeVisible();
 
-		// Both rows are gone; C is still waiting.
+		// Both rows are gone from Agoda's tab; C is still waiting on Booking.com's.
 		await expect(page.locator('body')).not.toContainText(`Ref ${ref('A')}`);
 		await expect(page.locator('body')).not.toContainText(`Ref ${ref('B')}`);
+		await page.getByRole('navigation', { name: 'OTAs' }).getByRole('link', { name: /^Booking\.com/ }).click();
 		await expect(page.locator('body')).toContainText(`Ref ${ref('C')}`);
 
 		// Money: one cash-in per booking, room revenue, into the bank; commission written off, nothing else moved.
@@ -313,5 +344,62 @@ test.describe('OTA bookings · end to end', () => {
 			.toBe('checked_out');
 		// Still owed by the OTA, not by the guest.
 		expect(await receivableOf(orderId)).toMatchObject({ status: 'open', outstanding: 300_000 });
+	});
+
+	test('Settings → OTA channels: add, refuse a duplicate, rename, and turn off / on', async ({ page }) => {
+		const settings = `/${SLUG}/management/settings/ota`;
+		await page.goto(settings);
+		await page.waitForLoadState('networkidle');
+		await expect(page.getByRole('heading', { name: 'OTA channels' })).toBeVisible();
+		await expect(page.locator('li', { hasText: 'Agoda' })).toBeVisible();
+		await expect(page.locator('li', { hasText: 'Booking.com' })).toBeVisible();
+		await expect(page.getByRole('button', { name: /delete/i })).toHaveCount(0); // an OTA is never deleted
+
+		// Add once (idempotent across reruns), then refuse the same name in any case.
+		if ((await page.locator('li', { hasText: /^Expedia/ }).count()) === 0) {
+			await page.locator('#otaNewName').fill('  Expedia ');
+			await page.getByRole('button', { name: 'Add', exact: true }).click();
+			await expect(page.getByText('Expedia added.')).toBeVisible();
+		}
+		await page.locator('#otaNewName').fill('EXPEDIA');
+		await page.getByRole('button', { name: 'Add', exact: true }).click();
+		await expect(page.getByText(/already in the list/)).toBeVisible();
+
+		// Rename, then put it back: its bookings follow.
+		const row = () => page.locator('li', { hasText: /Expedia/ }).first();
+		// While a row is being renamed its text is the form, so find it by the input.
+		const editing = () => page.locator('li').filter({ has: page.locator('input[name="name"]') });
+		await row().getByRole('button', { name: 'Rename' }).click();
+		await editing().locator('input[name="name"]').fill('Expedia Group');
+		await editing().getByRole('button', { name: 'Save' }).click();
+		await expect(page.getByText(/Renamed/)).toBeVisible();
+		await expect(page.locator('li', { hasText: 'Expedia Group' })).toBeVisible();
+		await page.locator('li', { hasText: 'Expedia Group' }).getByRole('button', { name: 'Rename' }).click();
+		await editing().locator('input[name="name"]').fill('Expedia');
+		await editing().getByRole('button', { name: 'Save' }).click();
+		await expect(page.locator('li', { hasText: /^Expedia\s/ })).toBeVisible();
+
+		// A booking under Expedia, then switch Expedia off: staff cannot pick it, but its payout tab stays while it is owed.
+		await createOta(page, 'X', { startOffset: B + 20, ota: 'Expedia', gross: '5000', pct: '12' });
+		expect((await orderRow(made.X!.orderId)).ota_name).toBe('Expedia');
+
+		await page.goto(settings);
+		await page.waitForLoadState('networkidle');
+		await row().getByRole('button', { name: 'Turn off' }).click();
+		await expect(page.getByText(/Turned off/)).toBeVisible();
+		await expect(row().getByText('off', { exact: true })).toBeVisible();
+
+		const sheet = await addRoom(page, B + 24, 2);
+		await sheet.getByRole('button', { name: 'OTA booking' }).click();
+		expect(await sheet.locator('#otaName option:not([disabled])').allInnerTexts()).not.toContain('Expedia');
+
+		await page.goto(`/${SLUG}/management/finance/ota?ota=Expedia`);
+		await expect(page.getByRole('navigation', { name: 'OTAs' }).getByRole('link', { name: /^Expedia/ })).toBeVisible();
+		await expect(page.locator('body')).toContainText(`Ref ${ref('X')}`);
+
+		await page.goto(settings);
+		await page.waitForLoadState('networkidle');
+		await row().getByRole('button', { name: 'Turn on' }).click();
+		await expect(page.getByText(/Turned on/)).toBeVisible();
 	});
 });

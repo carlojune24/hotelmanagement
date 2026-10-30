@@ -28,6 +28,7 @@ import { lineBalances } from './order-balances';
 import { getSecurityDepositForTarget } from './security-deposits';
 import { recordWalkInPayment, resolvePaymentAccount, type PaymentMethod } from './finance/payments';
 import { addToCityLedger, openReceivable } from './finance/receivables';
+import { OtaChannelError, resolveActiveOtaName } from './ota-channels';
 import { getBirSettings, issueInvoice } from './finance/documents';
 import { priceEventHall, type PriceBreakdown } from './pricing';
 import { addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
@@ -770,7 +771,7 @@ export async function previewWalkInAvailability(
  * single-payment-per-order design, already present for multi-room online orders.
  */
 export interface WalkInOta {
-	/** Trimmed + lower-cased on save so (hotel, name, reference) stays unique. */
+	/** One of the hotel's configured OTAs (matched case-insensitively, stored as configured). */
 	name: string;
 	reference: string;
 	grossCentavos: number;
@@ -871,11 +872,16 @@ export async function createWalkInBooking(params: {
 	if (roomItems.length === 0) {
 		throw new WalkInError('Add at least one room before creating the booking.');
 	}
-	const ota = params.ota
-		? { ...params.ota, name: params.ota.name.trim().toLowerCase(), reference: params.ota.reference.trim() }
-		: null;
+	const ota = params.ota ? { ...params.ota, reference: params.ota.reference.trim() } : null;
 	if (ota) {
-		if (!ota.name || !ota.reference) throw new WalkInError('Enter the OTA name and its booking reference.');
+		if (!params.ota!.name.trim() || !ota.reference) throw new WalkInError('Pick the OTA and enter its booking reference.');
+		// Only an OTA set up for this hotel can take a booking, so one OTA is never spelt two ways.
+		try {
+			ota.name = await resolveActiveOtaName(hotelId, params.ota!.name);
+		} catch (e) {
+			if (e instanceof OtaChannelError) throw new WalkInError(e.message);
+			throw e;
+		}
 		if (!Number.isInteger(ota.grossCentavos) || ota.grossCentavos <= 0)
 			throw new WalkInError('Enter the total the guest paid the OTA.');
 		if (!Number.isInteger(ota.commissionCentavos) || ota.commissionCentavos < 0 || ota.commissionCentavos >= ota.grossCentavos)

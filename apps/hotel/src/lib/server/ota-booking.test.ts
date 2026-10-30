@@ -28,6 +28,7 @@ describe.skipIf(!hasDb)('OTA booking (live DB)', async () => {
 	const { openReceivable } = await import('./finance/receivables');
 	const { openShift } = await import('./finance/shifts');
 	const { recordOtaPayout } = await import('./finance/ota');
+	const { listOtaChannels, addOtaChannel, renameOtaChannel, setOtaChannelActive } = await import('./ota-channels');
 	const { listReceivables } = await import('./finance/receivables');
 	const { cancelBooking, cancelOtaBooking, markNoShow } = await import('./cancellation');
 
@@ -60,20 +61,20 @@ describe.skipIf(!hasDb)('OTA booking (live DB)', async () => {
 		await db.delete(s.hotels).where(eq(s.hotels.id, hotelId));
 	});
 
-	const book = (reference: string, grossCentavos: number, commissionCentavos: number, roomCount = 1, start = 1) =>
+	const book = (reference: string, grossCentavos: number, commissionCentavos: number, roomCount = 1, start = 1, otaName = ' agoda ') =>
 		createWalkInBooking({
 			hotelId,
 			businessDate: today,
 			guest: { fullName: 'Agoda Guest', email: '', phone: null, specialRequests: null },
 			rooms: [{ roomTypeId, ratePlanId, checkIn: day(start), checkOut: day(start + 2), occupancy: 2, roomCount } as never],
-			ota: { name: ' Agoda ', reference, grossCentavos, commissionCentavos },
+			ota: { name: otaName, reference, grossCentavos, commissionCentavos },
 			actor: null
 		});
 
 	it('stores the OTA gross, books no cash, and leaves the receivable at the gross', async () => {
 		const { orderId, bookingIds } = await book('AG-1', 777_777, 116_667);
 		const [order] = await db.select().from(s.orders).where(eq(s.orders.id, orderId));
-		expect(order).toMatchObject({ otaName: 'agoda', otaReference: 'AG-1', totalCentavos: 777_777, otaNetCentavos: 661_110 });
+		expect(order).toMatchObject({ otaName: 'Agoda', otaReference: 'AG-1', totalCentavos: 777_777, otaNetCentavos: 661_110 });
 
 		expect(await db.select().from(s.cashMovements).where(eq(s.cashMovements.hotelId, hotelId))).toHaveLength(0);
 
@@ -200,6 +201,56 @@ describe.skipIf(!hasDb)('OTA booking (live DB)', async () => {
 		expect(ledger.some((r) => r.orderId === o.orderId)).toBe(false);
 		const ota = await listReceivables(hotelId, { status: 'active', ota: 'only' });
 		const row = ota.find((r) => r.orderId === o.orderId);
-		expect(row?.ota).toMatchObject({ name: 'agoda', reference: 'AG-9', grossCentavos: 250_000, netCentavos: 225_000, guestName: 'Agoda Guest', checkIn: day(70), checkOut: day(72) });
+		expect(row?.ota).toMatchObject({ name: 'Agoda', reference: 'AG-9', grossCentavos: 250_000, netCentavos: 225_000, guestName: 'Agoda Guest', checkIn: day(70), checkOut: day(72) });
+	});
+
+	it('refuses the city-ledger override on an OTA booking, so the guest extras never join the OTA receivable', async () => {
+		const { orderId, bookingIds } = await book('AG-10', 300_000, 30_000, 1, 80);
+		const target = { kind: 'room' as const, bookingId: bookingIds[0]! };
+		await expect(openReceivable({ hotelId, target, billToName: 'Guest', actor: null })).rejects.toThrow(/OTA booking/);
+		const [acct] = await db.select().from(s.receivables).where(eq(s.receivables.orderId, orderId));
+		expect(acct).toMatchObject({ billToName: 'Agoda', outstandingCentavos: 300_000 });
+	});
+
+	it('only an OTA on the hotel list can take a booking (any case), and a switched-off one cannot', async () => {
+		await expect(book('AG-11', 100_000, 10_000, 1, 90, 'Agodaa')).rejects.toThrow(/Pick one of the OTAs/);
+		await expect(book('AG-12', 100_000, 10_000, 1, 90, '  BOOKING.COM ')).resolves.toBeDefined();
+		const ch = (await listOtaChannels(hotelId)).find((c) => c.name === 'Booking.com')!;
+		await setOtaChannelActive(hotelId, ch.id, false);
+		await expect(book('AG-13', 100_000, 10_000, 1, 92, 'Booking.com')).rejects.toThrow(/Pick one of the OTAs/);
+		await setOtaChannelActive(hotelId, ch.id, true);
+	});
+
+	it('adds an OTA once (any case) and renaming one carries through its bookings and ledger account', async () => {
+		const added = await addOtaChannel(hotelId, '  Trip.com ');
+		expect(added.name).toBe('Trip.com');
+		await expect(addOtaChannel(hotelId, 'TRIP.COM')).rejects.toThrow(/already in the list/);
+
+		const o = await book('TR-1', 200_000, 20_000, 1, 100, 'trip.com');
+		await renameOtaChannel(hotelId, added.id, 'Trip.com Group');
+		const [ord] = await db.select().from(s.orders).where(eq(s.orders.id, o.orderId));
+		expect(ord!.otaName).toBe('Trip.com Group');
+		const [acct] = await db.select().from(s.receivables).where(eq(s.receivables.orderId, o.orderId));
+		expect(acct!.billToName).toBe('Trip.com Group');
+		await expect(renameOtaChannel(hotelId, added.id, 'agoda')).rejects.toThrow(/already in the list/);
+	});
+
+	it('one payout never mixes OTAs', async () => {
+		const a = await book('MX-1', 100_000, 10_000, 1, 110, 'Agoda');
+		const b = await book('MX-2', 100_000, 10_000, 1, 112, 'Booking.com');
+		const ra = (await db.select().from(s.receivables).where(eq(s.receivables.orderId, a.orderId)))[0]!;
+		const rb = (await db.select().from(s.receivables).where(eq(s.receivables.orderId, b.orderId)))[0]!;
+		await expect(
+			recordOtaPayout({
+				hotelId,
+				statementRef: 'MIX',
+				items: [
+					{ receivableId: ra.id, netReceivedCentavos: 90_000 },
+					{ receivableId: rb.id, netReceivedCentavos: 90_000 }
+				],
+				actor: null
+			})
+		).rejects.toThrow(/one OTA/);
+		expect(await db.select().from(s.cashMovements).where(eq(s.cashMovements.sourceId, ra.id))).toHaveLength(0);
 	});
 });

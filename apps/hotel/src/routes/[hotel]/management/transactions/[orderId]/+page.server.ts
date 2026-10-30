@@ -580,6 +580,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		today: businessDateFor(hotel.timezone),
 		defaultBillTo: guest?.fullName ?? '',
 		/** The booking's one city-ledger account, if any: new rooms join it instead of opening another. */
+		ota: order.otaName ? { name: order.otaName, reference: order.otaReference ?? '' } : null,
 		cityLedgerAccount: accounts.length
 			? {
 					id: (activeAccount ?? accounts[0]!).id,

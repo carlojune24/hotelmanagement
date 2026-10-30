@@ -8,6 +8,13 @@
 // (e.g. "finance.void_expense" becomes "Void expense").
 export const ACTION_LABELS: Record<string, string> = {
 	'booking.walk_in': 'Booked a walk-in room',
+	'booking.ota': 'Keyed in an OTA booking',
+	'booking.ota_cancel': 'Cancelled an OTA booking',
+	'booking.ota_no_show': 'Marked an OTA booking no-show',
+	'ota_channel.add': 'Added an OTA',
+	'ota_channel.rename': 'Renamed an OTA',
+	'ota_channel.turn_on': 'Turned an OTA on',
+	'ota_channel.turn_off': 'Turned an OTA off',
 	'hall_booking.walk_in': 'Booked a walk-in function hall',
 	'payment.paymongo_confirmed': 'Guest paid online (PayMongo)',
 	'booking.check_in': 'Checked in',
