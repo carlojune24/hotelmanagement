@@ -2223,15 +2223,14 @@ html:has(.woven-ledger) {
 	position: relative;
 	flex: none;
 	aspect-ratio: 4 / 3;
-	background: var(--ledger-paper-2) var(--hotel-woven-pattern);
-	background-size: 20px 20px;
+	background: #000;
 }
 .woven-ledger .sf-qv-gallery img {
 	position: absolute;
 	inset: 0;
 	width: 100%;
 	height: 100%;
-	/* contain: a non-4:3 photo shows whole, on the woven backdrop, instead of being cropped. */
+	/* contain: a non-4:3 photo shows whole, on black, instead of being cropped. */
 	object-fit: contain;
 }
 .woven-ledger .sf-qv-thumbs {
