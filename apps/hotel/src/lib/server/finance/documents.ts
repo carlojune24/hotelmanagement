@@ -716,6 +716,8 @@ export async function buildReceiptSnapshot(
 
 	const go = await guestAndOrder(pay.orderId);
 	if (!go || go.order.hotelId !== hotelId) throw new DocumentError('Payment not found.');
+	// An OTA booking's squared bill is owed by the OTA, not the city ledger.
+	const methodLabel = pay.method === 'house_use' && go.order.otaName ? 'Paid at OTA' : (METHOD_LABEL[pay.method] ?? pay.method);
 
 	// Balance still owed after this payment: the room it was posted on, or — for a payment split
 	// across rooms — the rooms it paid toward.
@@ -769,8 +771,8 @@ export async function buildReceiptSnapshot(
 		lines: [
 			{
 				description: isRefund
-					? `Refund — ${METHOD_LABEL[pay.method] ?? pay.method}`
-					: `Payment received — ${METHOD_LABEL[pay.method] ?? pay.method}`,
+					? `Refund — ${methodLabel}`
+					: `Payment received — ${methodLabel}`,
 				quantity: 1,
 				unitPriceCentavos: amount,
 				amountCentavos: amount,
@@ -786,7 +788,7 @@ export async function buildReceiptSnapshot(
 			lessPaymentsCentavos: null,
 			balanceDueCentavos: null,
 			amountPaidCentavos: pay.amountCentavos,
-			paymentMethod: METHOD_LABEL[pay.method] ?? pay.method,
+			paymentMethod: methodLabel,
 			paymentReferenceNo: pay.referenceNo ?? null,
 			tenderedCentavos: pay.tenderedCentavos ?? null,
 			changeCentavos: pay.changeCentavos ?? null,

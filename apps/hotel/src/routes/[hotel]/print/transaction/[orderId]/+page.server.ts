@@ -31,6 +31,7 @@ export const load: PageServerLoad = async (event) => {
 			lines: t.lines,
 			payments: t.payments,
 			ledger: t.ledger,
+			ota: t.ota,
 			cityLedgerAccount: t.cityLedgerAccount
 		},
 		paper: paperFrom(event.url.searchParams.get('paper')),

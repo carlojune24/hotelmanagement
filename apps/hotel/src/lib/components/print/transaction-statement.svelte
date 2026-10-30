@@ -72,6 +72,8 @@
 			cityLedgerTotalCentavos: number;
 			paymentsReceivedCentavos: number;
 		};
+		/** Set on an OTA booking: the squared bill is owed by the OTA, not moved to the city ledger. */
+		ota?: { name: string; reference: string } | null;
 		cityLedgerAccount: {
 			billToName: string;
 			billToCompany: string | null;
@@ -86,6 +88,7 @@
 
 	let { data, printedAt, paper = 'a4' }: { data: Data; printedAt: string; paper?: PaperKey } = $props();
 	const d = $derived(data);
+	const lessMoved = $derived(d.ota ? `Less: owed by ${d.ota.name} (paid at the OTA)` : 'Less: moved to the city ledger');
 	const sheet = $derived(PAPER[paper]);
 
 	const peso = (c: number) =>
@@ -187,7 +190,7 @@
 						{/if}
 						<tr><td>Less: payments received on this room</td><td class="ts-num">−{peso(l.paymentsCentavos)}</td></tr>
 						{#if l.cityLedgerMovedCentavos > 0}
-							<tr><td>Less: moved to the city ledger</td><td class="ts-num">−{peso(l.cityLedgerMovedCentavos)}</td></tr>
+							<tr><td>{lessMoved}</td><td class="ts-num">−{peso(l.cityLedgerMovedCentavos)}</td></tr>
 						{/if}
 						<tr class="ts-total">
 							<td>{l.balanceCentavos < 0 ? 'Room credit' : 'Room balance'}</td>
@@ -207,7 +210,7 @@
 					{#each d.payments as p (p.id)}
 						<tr class:ts-void={!!p.voidedAt}>
 							<td>
-								{METHOD[p.method] ?? p.method}{p.purpose === 'refund' ? ' (refund)' : ''}{p.voidedAt ? ' — voided' : ''}
+								{p.method === 'house_use' && d.ota ? 'Paid at OTA' : (METHOD[p.method] ?? p.method)}{p.purpose === 'refund' ? ' (refund)' : ''}{p.voidedAt ? ' — voided' : ''}
 								<div class="ts-soft">
 									{when(p.paidAt)}{p.referenceNo ? ` · Ref ${p.referenceNo}` : ''}{p.lineTitle ? ` · ${p.lineTitle}` : ''}
 									{#if p.allocations.length}
@@ -223,10 +226,14 @@
 		{/if}
 
 		{#if d.cityLedgerAccount}
-			<div class="ts-label">City ledger account</div>
+			<div class="ts-label">{d.ota ? `${d.ota.name} receivable` : 'City ledger account'}</div>
 			<p>
-				Bill to <strong>{d.cityLedgerAccount.billToName}</strong>{d.cityLedgerAccount.billToCompany ? ` · ${d.cityLedgerAccount.billToCompany}` : ''}
-				— moved from the rooms {peso(d.cityLedgerAccount.originalCentavos)}.
+				{#if d.ota}
+					Booking reference <strong>{d.ota.reference}</strong> — room price owed by {d.ota.name} (paid at the OTA) {peso(d.cityLedgerAccount.originalCentavos)}.
+				{:else}
+					Bill to <strong>{d.cityLedgerAccount.billToName}</strong>{d.cityLedgerAccount.billToCompany ? ` · ${d.cityLedgerAccount.billToCompany}` : ''}
+					— moved from the rooms {peso(d.cityLedgerAccount.originalCentavos)}.
+				{/if}
 			</p>
 			{#if d.cityLedgerAccount.collections.length}
 				<table class="ts-pay">
@@ -276,7 +283,7 @@
 				{/if}
 				<tr><td>Less: payments received</td><td class="ts-num">−{peso(d.ledger.paymentsReceivedCentavos)}</td></tr>
 				{#if d.ledger.cityLedgerTotalCentavos > 0}
-					<tr><td>Less: moved to the city ledger</td><td class="ts-num">−{peso(d.ledger.cityLedgerTotalCentavos)}</td></tr>
+					<tr><td>{lessMoved}</td><td class="ts-num">−{peso(d.ledger.cityLedgerTotalCentavos)}</td></tr>
 				{/if}
 				<tr class="ts-grand">
 					<td>{balance < 0 ? 'Credit owed to guest' : balance === 0 ? 'Balance' : 'BALANCE STILL OWED BY THE GUEST'}</td>
