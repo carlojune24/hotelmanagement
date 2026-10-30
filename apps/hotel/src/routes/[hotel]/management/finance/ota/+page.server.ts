@@ -3,21 +3,25 @@ import { z } from 'zod';
 import { requireCap } from '$lib/server/auth/rbac';
 import { FinanceError } from '$lib/server/finance/shared';
 import { listReceivables } from '$lib/server/finance/receivables';
-import { recordOtaPayout } from '$lib/server/finance/ota';
+import { listOtaPayouts, recordOtaPayout } from '$lib/server/finance/ota';
 import { listOtaChannels } from '$lib/server/ota-channels';
 import type { Actions, PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ locals }) => {
+export const load: PageServerLoad = async ({ locals, url }) => {
 	requireCap(locals.user, locals.role, 'finance:read');
 	const hotelId = locals.hotel!.id;
-	const [rows, channels] = await Promise.all([
+	const view = url.searchParams.get('view') === 'paid' ? 'paid' : 'waiting';
+	const [rows, channels, paid] = await Promise.all([
 		listReceivables(hotelId, { status: 'active', ota: 'only' }),
-		listOtaChannels(hotelId)
+		listOtaChannels(hotelId),
+		// The history is only read when its view is open.
+		view === 'paid' ? listOtaPayouts(hotelId) : Promise.resolve([])
 	]);
-	// One tab per OTA: every active one, plus any switched-off OTA that still has bookings waiting.
+	// One tab per OTA: every active one, plus any switched-off OTA that still has bookings waiting
+	// (or, in the paid-out view, any OTA at all, so an old OTA's history stays reachable).
 	const waiting = new Set(rows.map((r) => r.ota?.name));
-	const tabs = channels.filter((c) => c.isActive || waiting.has(c.name)).map((c) => c.name);
-	return { rows, tabs };
+	const tabs = channels.filter((c) => c.isActive || waiting.has(c.name) || view === 'paid').map((c) => c.name);
+	return { rows, tabs, view, paid };
 };
 
 export const actions: Actions = {

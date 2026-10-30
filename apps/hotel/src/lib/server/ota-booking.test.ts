@@ -27,7 +27,7 @@ describe.skipIf(!hasDb)('OTA booking (live DB)', async () => {
 	const { getFolioDetail } = await import('./folio');
 	const { openReceivable } = await import('./finance/receivables');
 	const { openShift } = await import('./finance/shifts');
-	const { recordOtaPayout } = await import('./finance/ota');
+	const { recordOtaPayout, listOtaPayouts } = await import('./finance/ota');
 	const { listOtaChannels, addOtaChannel, renameOtaChannel, setOtaChannelActive } = await import('./ota-channels');
 	const { listReceivables } = await import('./finance/receivables');
 	const { cancelBooking, cancelOtaBooking, markNoShow } = await import('./cancellation');
@@ -190,6 +190,12 @@ describe.skipIf(!hasDb)('OTA booking (live DB)', async () => {
 		expect(moves.every((m) => m.direction === 'in' && m.category === 'room_revenue')).toBe(true);
 		expect(moves.reduce((n, m) => n + m.amountCentavos, 0)).toBe(679_500);
 		expect(await recv(a.orderId)).toMatchObject({ status: 'written_off', outstandingCentavos: 0 });
+
+		// The history reads it back: one statement, both bookings, what was received and what was left as commission.
+		const st = (await listOtaPayouts(hotelId)).find((x) => x.statementRef === 'ST-1' && x.bookings.some((b) => b.receivableId === ra.id));
+		expect(st).toMatchObject({ otaName: 'Agoda', receivedCentavos: 679_500, commissionCentavos: 120_500 });
+		expect(st!.bookings.map((b) => b.reference).sort()).toEqual(['AG-7', 'AG-8']);
+		expect(st!.bookings.find((b) => b.reference === 'AG-8')).toMatchObject({ receivedCentavos: 254_500, commissionCentavos: 45_500 });
 		await expect(
 			recordOtaPayout({ hotelId, statementRef: 'ST-2', items: [{ receivableId: ra.id, netReceivedCentavos: 1 }], actor: null })
 		).rejects.toThrow(/closed/);
@@ -252,5 +258,18 @@ describe.skipIf(!hasDb)('OTA booking (live DB)', async () => {
 			})
 		).rejects.toThrow(/one OTA/);
 		expect(await db.select().from(s.cashMovements).where(eq(s.cashMovements.sourceId, ra.id))).toHaveLength(0);
+	});
+
+	it('payout history: a reference with brackets reads back whole, and a booking paid in full shows no commission', async () => {
+		const o = await book('HI-1', 100_000, 10_000, 1, 120);
+		const r = (await db.select().from(s.receivables).where(eq(s.receivables.orderId, o.orderId)))[0]!;
+		await recordOtaPayout({ hotelId, statementRef: 'NOV (batch 2)', items: [{ receivableId: r.id, netReceivedCentavos: 100_000 }], actor: null });
+		const st = (await listOtaPayouts(hotelId)).find((x) => x.bookings.some((b) => b.receivableId === r.id))!;
+		expect(st.statementRef).toBe('NOV (batch 2)');
+		expect(st).toMatchObject({ receivedCentavos: 100_000, commissionCentavos: 0 });
+		// A booking cancelled at the OTA never paid out, so it is not in the history.
+		const c = await book('HI-2', 100_000, 10_000, 1, 122);
+		await cancelOtaBooking({ hotelId, bookingId: c.bookingIds[0]!, reason: 'x', outcome: 'cancelled', actor: null });
+		expect((await listOtaPayouts(hotelId)).some((x) => x.bookings.some((b) => b.reference === 'HI-2'))).toBe(false);
 	});
 });

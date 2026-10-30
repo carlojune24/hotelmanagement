@@ -292,6 +292,24 @@ test.describe('OTA bookings · end to end', () => {
 		}
 		// C is untouched.
 		expect(await receivableOf(made.C!.orderId)).toMatchObject({ status: 'open', outstanding: 800_000 });
+		// Paid out: Agoda's tab lists this statement with both bookings, what came in and the commission.
+		await page.goto(`/${SLUG}/management/finance/ota?ota=Agoda&view=paid`);
+		const block = page.locator('section', { hasText: `DUMMY-STMT-${RUN}` });
+		await expect(block.getByRole('heading', { name: `Statement DUMMY-STMT-${RUN}` })).toBeVisible();
+		await expect(block).toContainText(`Ref ${ref('A')}`);
+		await expect(block).toContainText(`Ref ${ref('B')}`);
+		await expect(block).toContainText('received ₱13,500.00');
+		await expect(block).toContainText('commission ₱2,500.00');
+		// Search by a booking finds its statement; Booking.com has not paid anything of ours here.
+		await page.locator('#otaSearch').fill(ref('B'));
+		await expect(block.locator('tbody tr')).toHaveCount(1);
+		await page.locator('#otaSearch').fill('');
+		await page.getByRole('navigation', { name: 'OTAs' }).getByRole('link', { name: /^Booking\.com/ }).click();
+		await expect(page.locator('body')).not.toContainText(`DUMMY-STMT-${RUN}`);
+		// Back to Awaiting payout: C is still there.
+		await page.getByRole('link', { name: 'Awaiting payout' }).click();
+		await expect(page.locator('body')).toContainText(`Ref ${ref('C')}`);
+
 		// The ledger still balances: every journal entry's debits equal its credits.
 		const unbalanced =
 			await sql`select count(*)::int n from (select journal_entry_id from journal_lines group by journal_entry_id having sum(debit_centavos) <> sum(credit_centavos)) x`;
