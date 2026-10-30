@@ -2223,14 +2223,22 @@ html:has(.woven-ledger) {
 	position: relative;
 	flex: none;
 	aspect-ratio: 4 / 3;
+	background: #fff;
+}
+.woven-ledger[data-mode='dark'] .sf-qv-gallery {
 	background: #000;
+}
+@media (prefers-color-scheme: dark) {
+	.woven-ledger[data-mode='system'] .sf-qv-gallery {
+		background: #000;
+	}
 }
 .woven-ledger .sf-qv-gallery img {
 	position: absolute;
 	inset: 0;
 	width: 100%;
 	height: 100%;
-	/* contain: a non-4:3 photo shows whole, on black, instead of being cropped. */
+	/* contain: a non-4:3 photo shows whole, on white (black in dark mode), instead of being cropped. */
 	object-fit: contain;
 }
 .woven-ledger .sf-qv-thumbs {
