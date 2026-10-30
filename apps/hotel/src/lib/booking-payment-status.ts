@@ -2,15 +2,16 @@
  * How a booking was made and how far it is paid, in the words staff use. Pure (no database) so the
  * Booking transactions list, its print/CSV and the detail page all say the same thing.
  *
- *  - channel  `online` when the guest booked through the website and paid with PayMongo; `walkin`
- *             for anything made at the desk or by staff.
+ *  - channel  `online` when the guest booked through the website and paid with PayMongo; `ota` for a
+ *             booking keyed in from an OTA (prepaid there, the OTA pays the hotel later); `walkin`
+ *             for anything else made at the desk or by staff.
  *  - state    where the money stands against the booking's charges *now* (after any SC/PWD discount).
  */
 
-export type BookingChannel = 'online' | 'walkin';
-export type BookingPaymentState = 'paid' | 'downpayment' | 'balance' | 'credit' | 'unpaid';
+export type BookingChannel = 'online' | 'walkin' | 'ota';
+export type BookingPaymentState = 'paid' | 'downpayment' | 'balance' | 'credit' | 'unpaid' | 'ota_receivable';
 
-export const CHANNEL_LABEL: Record<BookingChannel, string> = { online: 'Online', walkin: 'Walk-in' };
+export const CHANNEL_LABEL: Record<BookingChannel, string> = { online: 'Online', walkin: 'Walk-in', ota: 'OTA' };
 
 export interface BookingPaymentInput {
 	channel: BookingChannel;
@@ -22,6 +23,8 @@ export interface BookingPaymentInput {
 	onlinePaidCentavos: number;
 	/** The order total at the time of booking, before any SC/PWD discount. */
 	orderTotalCentavos: number;
+	/** OTA bookings only: the OTA has not paid the hotel yet (its receivable is still open). */
+	otaPayoutPending?: boolean;
 }
 
 export interface BookingPaymentSummary {
@@ -32,6 +35,9 @@ export interface BookingPaymentSummary {
 }
 
 export function summariseBookingPayment(i: BookingPaymentInput): BookingPaymentSummary {
+	if (i.channel === 'ota' && i.otaPayoutPending) {
+		return { state: 'ota_receivable', label: 'Awaiting OTA payout', percent: null };
+	}
 	if (i.balanceCentavos < 0) return { state: 'credit', label: 'Credit owed', percent: null };
 
 	if (i.balanceCentavos === 0) {
@@ -56,14 +62,16 @@ export const PAYMENT_FILTERS = [
 	{ key: 'downpayment', label: 'Downpayment' },
 	{ key: 'balance', label: 'Balance due' },
 	{ key: 'credit', label: 'Credit owed' },
-	{ key: 'unpaid', label: 'Unpaid' }
+	{ key: 'unpaid', label: 'Unpaid' },
+	{ key: 'ota_receivable', label: 'Awaiting OTA payout' }
 ] as const;
 export type PaymentFilter = (typeof PAYMENT_FILTERS)[number]['key'];
 
 export const SOURCE_FILTERS = [
 	{ key: 'all', label: 'All sources' },
 	{ key: 'walkin', label: 'Walk-in' },
-	{ key: 'online', label: 'Online' }
+	{ key: 'online', label: 'Online' },
+	{ key: 'ota', label: 'OTA' }
 ] as const;
 export type SourceFilter = (typeof SOURCE_FILTERS)[number]['key'];
 

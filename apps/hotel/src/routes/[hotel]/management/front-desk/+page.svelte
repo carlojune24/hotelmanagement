@@ -682,6 +682,29 @@
 	};
 	let walkInOpen = $state(false);
 	let walkInCart = $state<WalkInCartLine[]>([]);
+	// A prepaid OTA booking is keyed in through the same cart; only the payment step differs.
+	let walkInMode = $state<'walkin' | 'ota'>('walkin');
+	let otaName = $state('');
+	let otaRef = $state('');
+	let otaGross = $state(''); // pesos, as typed
+	let otaPct = $state('');
+	let otaCommission = $state(''); // pesos, as typed
+	const otaGrossC = $derived(Math.round(Number(otaGross) * 100) || 0);
+	const otaCommissionC = $derived(Math.round(Number(otaCommission) * 100) || 0);
+	const otaNetC = $derived(otaGrossC - otaCommissionC);
+	const otaInvalid = $derived(
+		!otaName.trim() || !otaRef.trim() || otaGrossC <= 0 || otaCommissionC < 0 || otaCommissionC >= otaGrossC
+	);
+	/** Typing either commission field fills the other from the guest total. */
+	function onOtaPct() {
+		otaCommission = otaGrossC > 0 && otaPct !== '' ? ((otaGrossC * Number(otaPct)) / 10000).toFixed(2) : '';
+	}
+	function onOtaCommission() {
+		otaPct = otaGrossC > 0 && otaCommission !== '' ? ((Number(otaCommission) * 100 * 100) / otaGrossC).toFixed(2) : '';
+	}
+	function onOtaGross() {
+		if (otaPct !== '') onOtaPct();
+	}
 	// Which entry point built the current cart — lets the sheet hide the date-search
 	// form/results-list entirely when the cart came from picking rooms on the grid
 	// (availability was already checked there, so re-showing an unrelated search
@@ -3365,7 +3388,7 @@
 			{#if walkInCart.length > 0}
 				<form
 						method="POST"
-						action="?/walkInCreate"
+						action={walkInMode === 'ota' ? '?/otaCreate' : '?/walkInCreate'}
 						use:enhance
 						class="mt-4 space-y-3 border-t border-border pt-4"
 							>
@@ -3385,14 +3408,27 @@
 							)}
 						/>
 						<input type="hidden" name="originRoomId" value={selectedRoomId ?? ''} />
+						<div class="grid grid-cols-2 gap-1 rounded-lg bg-surface-2 p-1 text-sm" role="group" aria-label="Booking type">
+							{#each [['walkin', 'Walk-in'], ['ota', 'OTA booking']] as [key, label] (key)}
+								<button
+									type="button"
+									aria-pressed={walkInMode === key}
+									onclick={() => (walkInMode = key as 'walkin' | 'ota')}
+									class="rounded-md px-3 py-1.5 font-medium {walkInMode === key ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink'}"
+								>
+									{label}
+								</button>
+							{/each}
+						</div>
 						<div>
 							<Label for="wiFullName">Full name</Label>
 							<Input id="wiFullName" name="fullName" required maxlength={160} />
 						</div>
 						<div class="grid grid-cols-2 gap-3">
 							<div>
-								<Label for="wiEmail">Email</Label>
-								<Input id="wiEmail" name="email" type="email" required />
+								<Label for="wiEmail">Email{walkInMode === 'ota' ? ' (optional)' : ''}</Label>
+								<Input id="wiEmail" name="email" type="email" required={walkInMode === 'walkin'} />
+								{#if walkInMode === 'ota'}<p class="mt-1 text-xs text-ink-muted">Agoda often hides this.</p>{/if}
 							</div>
 							<div>
 								<Label for="wiPhone">Phone</Label>
@@ -3409,6 +3445,54 @@
 								class="w-full min-w-0 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
 							></textarea>
 						</div>
+						{#if walkInMode === 'ota'}
+							<div class="space-y-3 border-t border-border pt-3">
+								<h3 class="text-sm font-semibold text-ink">OTA</h3>
+								<div class="grid grid-cols-2 gap-3">
+									<div>
+										<Label for="otaName">OTA name</Label>
+										<Input id="otaName" name="otaName" list="otaNameList" bind:value={otaName} required maxlength={80} autocomplete="off" placeholder="e.g. Agoda" />
+										<datalist id="otaNameList">
+											{#each data.otaNames as n (n)}<option value={n}></option>{/each}
+										</datalist>
+									</div>
+									<div>
+										<Label for="otaRef">OTA reference</Label>
+										<Input id="otaRef" name="otaReference" bind:value={otaRef} required maxlength={80} autocomplete="off" />
+									</div>
+								</div>
+								<div>
+									<Label for="otaGross">Total the guest paid the OTA (₱)</Label>
+									<Input id="otaGross" type="number" min="0.01" step="0.01" inputmode="decimal" bind:value={otaGross} oninput={onOtaGross} required class="tabular-nums" />
+									<input type="hidden" name="grossCentavos" value={otaGrossC} />
+								</div>
+								<div class="grid grid-cols-2 gap-3">
+									<div>
+										<Label for="otaPct">Commission (%)</Label>
+										<Input id="otaPct" type="number" min="0" step="0.01" inputmode="decimal" bind:value={otaPct} oninput={onOtaPct} class="tabular-nums" />
+									</div>
+									<div>
+										<Label for="otaCommission">Commission (₱)</Label>
+										<Input id="otaCommission" type="number" min="0" step="0.01" inputmode="decimal" bind:value={otaCommission} oninput={onOtaCommission} class="tabular-nums" />
+										<input type="hidden" name="commissionCentavos" value={otaCommissionC} />
+									</div>
+								</div>
+								{#if otaGrossC > 0 && otaCommissionC >= otaGrossC}
+									<p class="text-xs text-danger">The commission must be less than the total.</p>
+								{/if}
+								<div class="rounded-lg bg-surface-2 px-3 py-2 text-sm">
+									<div class="flex items-center justify-between">
+										<span class="font-medium text-ink">You receive (net)</span>
+										<span class="font-semibold text-ink tabular-nums">{peso(Math.max(otaNetC, 0))}</span>
+									</div>
+									<div class="mt-1 flex items-center justify-between text-xs text-ink-muted">
+										<span>Our rate for these rooms</span>
+										<span class="tabular-nums">{peso(walkInCartGrandTotal)}</span>
+									</div>
+								</div>
+								<p class="text-xs text-ink-muted">Prepaid at the OTA: no payment is taken here. The net shows under Finance → OTA payouts until the OTA pays it out.</p>
+							</div>
+						{:else}
 						<WalkinPaymentFields
 						totalCentavos={walkInCartGrandTotal}
 						cashier={data.cashier}
@@ -3417,7 +3501,10 @@
 							totalCentavos: walkInCartLineTotal(l)
 						}))}
 					/>
-						<Button type="submit" class="w-full">Create booking &amp; record payment</Button>
+						{/if}
+						<Button type="submit" class="w-full" disabled={walkInMode === 'ota' && otaInvalid}>
+							{walkInMode === 'ota' ? 'Create OTA booking' : 'Create booking & record payment'}
+						</Button>
 							</form>
 			{/if}
 		</div>

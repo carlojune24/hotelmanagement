@@ -76,7 +76,8 @@
 		downpayment: 'border-transparent bg-warning/15 text-warning',
 		balance: 'border-transparent bg-danger/15 text-danger',
 		credit: 'border-transparent bg-warning/15 text-warning',
-		unpaid: 'border-border bg-surface-2 text-ink-muted'
+		unpaid: 'border-border bg-surface-2 text-ink-muted',
+		ota_receivable: 'border-transparent bg-warning/15 text-warning'
 	};
 	const filtering = $derived(data.filters.source !== 'all' || data.filters.pay !== 'all' || data.filters.scpwd);
 	const rangeLabel = $derived(

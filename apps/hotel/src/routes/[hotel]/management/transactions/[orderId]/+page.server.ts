@@ -451,14 +451,19 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 	const onlinePaid = paymentRows
 		.filter((p) => p.status === 'paid' && !p.voidedAt && p.purpose !== 'refund' && p.provider === 'paymongo')
 		.reduce((s, p) => s + p.amountCentavos, 0);
-	const channel: BookingChannel = order.paymongoCheckoutSessionId || onlinePaid > 0 ? 'online' : 'walkin';
+	const channel: BookingChannel = order.otaName
+		? 'ota'
+		: order.paymongoCheckoutSessionId || onlinePaid > 0
+			? 'online'
+			: 'walkin';
 	const paySummary = summariseBookingPayment({
 		channel,
 		chargesCentavos: ledger.chargesTotalCentavos,
 		paidCentavos: ledger.paidTotalCentavos,
 		balanceCentavos: ledger.balanceCentavos,
 		onlinePaidCentavos: onlinePaid,
-		orderTotalCentavos: order.totalCentavos
+		orderTotalCentavos: order.totalCentavos,
+		otaPayoutPending: accounts.some((a) => a.status === 'open' || a.status === 'partial')
 	});
 	const scPwdLines = lines.filter((l) => l.scPwd);
 

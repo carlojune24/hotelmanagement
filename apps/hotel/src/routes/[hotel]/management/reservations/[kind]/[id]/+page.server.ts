@@ -15,6 +15,7 @@ import { sendBookingCancellation } from '$lib/server/email/send-booking-cancella
 import {
 	CancellationError,
 	cancelBooking,
+	cancelOtaBooking,
 	getCancellationQuote,
 	markNoShow,
 	REFUND_METHODS
@@ -85,9 +86,12 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 				: [];
 
 		const cancellable = ['confirmed', 'pending_payment'].includes(detail.booking.status);
-		const cancelQuote = cancellable
-			? await getCancellationQuote(hotelId, { kind: 'room', bookingId: params.id })
+		// An OTA booking is prepaid at the OTA: no policy fee or guest refund, so it has its own cancel.
+		const ota = detail.order.otaName
+			? { name: detail.order.otaName, reference: detail.order.otaReference ?? '' }
 			: null;
+		const cancelQuote =
+			cancellable && !ota ? await getCancellationQuote(hotelId, { kind: 'room', bookingId: params.id }) : null;
 		const canMarkNoShow =
 			detail.booking.status === 'confirmed' &&
 			detail.booking.checkIn < todayInTimezone(hotel.timezone);
@@ -116,6 +120,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		return {
 			kind: 'room' as const,
 			detail,
+			ota,
 			eligibleRooms,
 			cancelQuote,
 			canMarkNoShow,
@@ -350,6 +355,24 @@ export const actions: Actions = {
 			if (res.refundCentavos > 0)
 				bits.push(`Refund ₱${(res.refundCentavos / 100).toFixed(2)} recorded.`);
 			return { ok: bits.join(' ') };
+		} catch (e) {
+			if (e instanceof CancellationError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
+	/** Cancelled or no-show at the OTA: releases the room and takes its share off the OTA receivable; no refund. */
+	otaClose: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		const hotelId = event.locals.hotel!.id;
+		if (event.params.kind !== 'room') return fail(400, { error: 'Only room bookings can be closed here.' });
+		const parsed = z
+			.object({ outcome: z.enum(['cancelled', 'no_show']), reason: z.string().trim().min(1, 'Enter a reason.').max(300) })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: parsed.error.issues[0]?.message ?? 'Enter a reason.' });
+		try {
+			await cancelOtaBooking({ hotelId, bookingId: event.params.id, ...parsed.data, actor: event.locals.user });
+			return { ok: parsed.data.outcome === 'no_show' ? 'Marked as no-show. The room is released.' : 'Cancelled. The room is released.' };
 		} catch (e) {
 			if (e instanceof CancellationError) return fail(400, { error: e.message });
 			throw e;

@@ -8,6 +8,7 @@ import {
 	hallBookings,
 	orders,
 	payments,
+	receivables,
 	roomAssignments,
 	roomTypes,
 	rooms,
@@ -114,7 +115,8 @@ export async function listBookingTransactions(
 				guestName: guests.fullName,
 				guestEmail: guests.email,
 				session: orders.paymongoCheckoutSessionId,
-				totalCentavos: orders.totalCentavos
+				totalCentavos: orders.totalCentavos,
+				otaName: orders.otaName
 			})
 			.from(orders)
 			.innerJoin(guests, eq(guests.id, orders.guestId))
@@ -167,6 +169,14 @@ export async function listBookingTransactions(
 			.innerJoin(bookings, eq(bookings.id, scPwdDiscounts.bookingId))
 			.where(and(inArray(bookings.orderId, orderIds), isNull(scPwdDiscounts.reversedAt)))
 	]);
+	const otaPending = new Set(
+		(
+			await db
+				.select({ orderId: receivables.orderId })
+				.from(receivables)
+				.where(and(inArray(receivables.orderId, orderIds), inArray(receivables.status, ['open', 'partial'])))
+		).map((r) => r.orderId)
+	);
 	const onlinePaidBy = new Map<string, number>();
 	for (const p of onlinePays) onlinePaidBy.set(p.orderId, (onlinePaidBy.get(p.orderId) ?? 0) + p.amount);
 	const claimTypesBy = new Map<string, Set<string>>();
@@ -214,14 +224,15 @@ export async function listBookingTransactions(
 		const ledger = ledgers.get(o.id);
 		const onlinePaid = onlinePaidBy.get(o.id) ?? 0;
 		// Online = the guest checked out on the website (a PayMongo session) or has a PayMongo payment.
-		const channel: BookingChannel = o.session || onlinePaid > 0 ? 'online' : 'walkin';
+		const channel: BookingChannel = o.otaName ? 'ota' : o.session || onlinePaid > 0 ? 'online' : 'walkin';
 		const pay = summariseBookingPayment({
 			channel,
 			chargesCentavos: ledger?.chargesTotalCentavos ?? 0,
 			paidCentavos: ledger?.paidTotalCentavos ?? 0,
 			balanceCentavos: ledger?.balanceCentavos ?? 0,
 			onlinePaidCentavos: onlinePaid,
-			orderTotalCentavos: o.totalCentavos
+			orderTotalCentavos: o.totalCentavos,
+			otaPayoutPending: otaPending.has(o.id)
 		});
 		const types = claimTypesBy.get(o.id);
 		const scPwdLabel = types
@@ -258,7 +269,7 @@ export async function listBookingTransactions(
 /** A register row with the columns an exported/printed register needs on top of the list's. */
 export interface BookingTransactionExportRow extends BookingTransactionRow {
 	/** `Online` when the guest booked and paid through PayMongo; otherwise made at the desk. */
-	source: 'Online' | 'Walk-in / staff';
+	source: 'Online' | 'OTA' | 'Walk-in / staff';
 	/** Distinct tenders actually used (cash, gcash, …), voided and refund rows left out. */
 	methods: string[];
 	/** Card approval codes, e-wallet references and cheque numbers recorded on those payments. */
@@ -330,7 +341,7 @@ export async function listBookingTransactionsForExport(
 
 	return rows.map((r) => ({
 		...r,
-		source: r.channel === 'online' ? 'Online' : 'Walk-in / staff',
+		source: r.channel === 'online' ? 'Online' : r.channel === 'ota' ? 'OTA' : 'Walk-in / staff',
 		methods: [...(methodsBy.get(r.orderId) ?? [])],
 		references: [...(refsBy.get(r.orderId) ?? [])],
 		depositCentavos: depositBy.get(r.orderId) ?? 0
