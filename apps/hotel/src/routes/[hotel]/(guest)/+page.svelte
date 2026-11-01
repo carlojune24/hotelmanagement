@@ -514,7 +514,13 @@
 								{#each group.items as a (a.name)}
 									<li>
 										{a.name}
-										{#if a.note}<small>{a.note}</small>{/if}
+										{#if a.note}
+											<ul class="sf-amen-note">
+												{#each a.note.split(',').map((s) => s.trim()).filter(Boolean) as part}
+													<li>{part}</li>
+												{/each}
+											</ul>
+										{/if}
 									</li>
 								{/each}
 							</ul>

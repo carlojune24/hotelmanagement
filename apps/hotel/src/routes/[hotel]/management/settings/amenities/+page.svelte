@@ -59,6 +59,7 @@
 	let fScope = $state<string>('both');
 	let fIcon = $state('');
 	let fDescription = $state('');
+	let fNote = $state('');
 	let fActive = $state(true);
 
 	function openAdd() {
@@ -68,6 +69,7 @@
 		fScope = 'both';
 		fIcon = '';
 		fDescription = '';
+		fNote = '';
 		fActive = true;
 		dialogOpen = true;
 	}
@@ -78,6 +80,7 @@
 		fScope = row.scope;
 		fIcon = row.icon ?? '';
 		fDescription = row.description ?? '';
+		fNote = row.note ?? '';
 		fActive = row.isActive;
 		dialogOpen = true;
 	}
@@ -381,6 +384,20 @@
 				<Label for="amDesc">Description <span class="text-ink-muted">(optional)</span></Label>
 				<Input id="amDesc" name="description" bind:value={fDescription} class="mt-1" />
 			</div>
+			{#if editing?.hotelWide}
+				<div>
+					<Label for="amNote">Guest-facing detail <span class="text-ink-muted">(hours, etc.)</span></Label>
+					<Input
+						id="amNote"
+						name="note"
+						bind:value={fNote}
+						maxlength={200}
+						placeholder="Breakfast 7:30–10am · Coffee shop from 6:30am"
+						class="mt-1"
+					/>
+					<p class="mt-1 text-xs text-ink-muted">Shown under the amenity on your booking site.</p>
+				</div>
+			{/if}
 			{#if editing}
 				<label class="flex items-center gap-2 text-sm text-ink">
 					<input type="checkbox" name="isActive" bind:checked={fActive} class="size-4" />

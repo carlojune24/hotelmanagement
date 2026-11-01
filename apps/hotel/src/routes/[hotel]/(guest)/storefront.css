@@ -1343,8 +1343,14 @@ html:has(.woven-ledger) {
 	line-height: 1.45;
 	border-bottom: 1px solid var(--sf-night-rule);
 }
-.woven-ledger .sf-amen-group li small {
-	display: block;
+.woven-ledger .sf-amen-group li .sf-amen-note {
+	margin: 0.35rem 0 0;
+	padding-left: 1.1rem;
+	list-style: disc;
+}
+.woven-ledger .sf-amen-group li .sf-amen-note li {
+	padding: 0.1rem 0;
+	border: 0;
 	color: var(--sf-on-night-muted);
 	font-size: 0.8125rem;
 }

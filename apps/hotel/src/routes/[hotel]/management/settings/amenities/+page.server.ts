@@ -35,7 +35,8 @@ export const load: PageServerLoad = async ({ locals }) => {
 			description: amenities.description,
 			isActive: amenities.isActive,
 			sortOrder: amenities.sortOrder,
-			hotelWide: sql<boolean>`${hotelAmenities.id} is not null`
+			hotelWide: sql<boolean>`${hotelAmenities.id} is not null`,
+			note: hotelAmenities.note
 		})
 		.from(amenities)
 		.leftJoin(
@@ -91,7 +92,9 @@ const upsertSchema = z.object({
 	category: z.enum(amenityCategory.enumValues),
 	scope: z.enum(amenityScope.enumValues),
 	icon: z.string().trim().max(40).optional(),
-	description: z.string().trim().max(300).optional()
+	description: z.string().trim().max(300).optional(),
+	// Storefront sub-line (hours etc.); only stored when the amenity is offered hotel-wide.
+	note: z.string().trim().max(200).optional()
 });
 
 export const actions: Actions = {
@@ -164,6 +167,14 @@ export const actions: Actions = {
 			.where(and(eq(amenities.id, id.data), eq(amenities.hotelId, hotelId)))
 			.returning({ id: amenities.id });
 		if (res.length === 0) return fail(404, { error: 'Amenity not found.' });
+
+		// Only when the form sent the field (it's hidden for non-hotel-wide amenities).
+		if (parsed.data.note !== undefined) {
+			await db
+				.update(hotelAmenities)
+				.set({ note: parsed.data.note || null })
+				.where(and(eq(hotelAmenities.hotelId, hotelId), eq(hotelAmenities.amenityId, id.data)));
+		}
 
 		await writeAudit({
 			hotelId,
