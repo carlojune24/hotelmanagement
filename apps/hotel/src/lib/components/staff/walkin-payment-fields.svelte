@@ -6,8 +6,11 @@
 	let {
 		totalCentavos,
 		cashier,
-		rooms = []
+		rooms = [],
+		canCityLedger = false
 	}: {
+		/** Only a hotel admin may charge the booking to the city ledger (re-checked on the server). */
+		canCityLedger?: boolean;
 		/** The rooms being booked (cart order). With more than one, the payment can be split across
 		 *  them — filled in room order by default, every amount editable. */
 		rooms?: { label: string; totalCentavos: number }[];
@@ -21,7 +24,9 @@
 	} = $props();
 
 	const peso = (c: number) => `₱${(c / 100).toFixed(2)}`;
-	let method = $state<'cash' | 'card' | 'gcash' | 'maya' | 'bank_transfer' | 'cheque'>('cash');
+	let method = $state<'cash' | 'card' | 'gcash' | 'maya' | 'bank_transfer' | 'cheque' | 'city_ledger'>(
+		'cash'
+	);
 	let tendered = $state('');
 
 	const tenderedCentavos = $derived(Math.round(parseFloat(tendered || '0') * 100));
@@ -83,6 +88,7 @@
 				<option value="maya">Maya</option>
 				<option value="bank_transfer">Bank transfer</option>
 				<option value="cheque">Cheque</option>
+				{#if canCityLedger}<option value="city_ledger">Move to city ledger</option>{/if}
 			</select>
 		</div>
 		{#if method === 'cash'}
@@ -160,7 +166,28 @@
 		</div>
 	{/if}
 
-	{#if multi}
+	{#if method === 'city_ledger'}
+		<div class="grid grid-cols-2 gap-2">
+			<div class="col-span-2">
+				<Label class="text-xs">Bill to</Label>
+				<Input name="billToName" maxlength={160} class="mt-1" required />
+			</div>
+			<div>
+				<Label class="text-xs">Company</Label>
+				<Input name="billToCompany" maxlength={160} class="mt-1" />
+			</div>
+			<div>
+				<Label class="text-xs">Reference no.</Label>
+				<Input name="billReference" maxlength={120} class="mt-1" />
+			</div>
+		</div>
+		<p class="text-xs text-ink-muted">
+			Authorised by the hotel admin. The whole {totalCentavos != null ? peso(totalCentavos) : 'bill'}
+			is charged to the city ledger — no payment is taken now.
+		</p>
+	{/if}
+
+	{#if multi && method !== 'city_ledger'}
 		<div>
 			<div class="mb-1 text-xs font-semibold tracking-wide text-ink-muted uppercase">
 				Which room does each part pay?

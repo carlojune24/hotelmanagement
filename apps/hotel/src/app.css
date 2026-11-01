@@ -116,9 +116,17 @@
 	--border: oklch(0.32 0.014 260);
 	--brand: oklch(0.7 0.13 250);
 	--brand-ink: oklch(0.18 0.02 250);
+	/* Follow the app's theme, not the OS: native pickers (select lists, date pickers) otherwise render light. */
+	color-scheme: dark;
 }
 
 @layer base {
+	/* Native <select> lists ignore a transparent background; give them the theme's own colours. */
+	option,
+	optgroup {
+		background-color: var(--surface);
+		color: var(--ink);
+	}
 	* {
 		@apply border-border outline-ring/50;
 	}

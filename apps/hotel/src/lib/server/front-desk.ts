@@ -861,6 +861,9 @@ export async function createWalkInBooking(params: {
 	 *  gross (not our rate plan's price), and each room's bill moves to the city-ledger account as an
 	 *  OTA receivable until the OTA pays out. */
 	ota?: WalkInOta;
+	/** Charge to the city ledger instead of taking payment at the desk. Authorised by the caller
+	 *  (hotel admin only — enforced in the route action, as at check-out). */
+	cityLedger?: CityLedgerHandoff;
 	actor: SessionUser | null;
 }): Promise<{ bookingIds: string[]; orderId: string }> {
 	// Destructured as `roomItems`, not `rooms` — this function needs the actual
@@ -893,7 +896,7 @@ export async function createWalkInBooking(params: {
 
 	// Resolve the receiving account (and open shift for cash) before the tx —
 	// `resolvePaymentAccount` throws a FinanceError the action turns into `walkInError`.
-	const { cashAccountId, shiftId } = ota
+	const { cashAccountId, shiftId } = ota || params.cityLedger
 		? { cashAccountId: null, shiftId: null }
 		: await resolvePaymentAccount(hotelId, payment.method);
 
@@ -1157,17 +1160,24 @@ export async function createWalkInBooking(params: {
 
 		// Full settlement + its cash-ledger movement, in the same transaction — one
 		// payment for the whole sale, attached to the first line's booking/folio.
-		if (ota) {
-			// Prepaid at the OTA: no cash today. Each room's bill goes onto the order's city-ledger account
-			// (squaring the folio so check-out passes) until the OTA pays out.
+		if (ota || params.cityLedger) {
+			// Prepaid at the OTA, or charged to the city ledger by an admin: no cash today. Each room's bill
+			// goes onto the order's city-ledger account (squaring the folio so check-out passes) until paid.
+			const bill = ota
+				? { billToName: ota.name, referenceNo: ota.reference }
+				: {
+						billToName: params.cityLedger!.billToName,
+						billToCompany: params.cityLedger!.billToCompany ?? null,
+						referenceNo: params.cityLedger!.referenceNo ?? null,
+						notes: params.cityLedger!.notes ?? null
+					};
 			for (const [i, bookingId] of bookingIds.entries()) {
 				await addToCityLedger(tx, {
 					hotelId,
 					target: { kind: 'room', bookingId },
 					orderId: order!.id,
 					amount: bookingTotals[i]!,
-					billToName: ota.name,
-					referenceNo: ota.reference,
+					...bill,
 					actor
 				});
 			}
@@ -1218,7 +1228,7 @@ export async function createWalkInBooking(params: {
 		after: {
 			rooms: roomItems,
 			bookingIds,
-			paymentMethod: payment.method,
+			paymentMethod: params.cityLedger ? 'city_ledger' : payment.method,
 			amountCentavos: totalPaidCentavos,
 			tenderedCentavos: payment.tenderedCentavos ?? null
 		}

@@ -285,9 +285,14 @@ const createSchema = z
 		email: z.string().email(),
 		phone: z.string().max(40).optional(),
 		specialRequests: z.string().max(1000).optional(),
-		itemsJson: z.string()
+		itemsJson: z.string(),
+		// Charge the whole booking to the city ledger instead of taking payment (hotel admin only).
+		billToName: z.string().max(160).optional(),
+		billToCompany: z.string().max(160).optional(),
+		billReference: z.string().max(120).optional(),
+		billNotes: z.string().max(500).optional()
 	})
-	.merge(paymentFieldsSchema);
+	.merge(paymentFieldsSchema.extend({ method: z.enum([...PAYMENT_METHODS, 'city_ledger']) }));
 
 const hallCreateSchema = z
 	.object({
@@ -1070,6 +1075,16 @@ export const actions: Actions = {
 			});
 		}
 
+		const toLedger = d.method === 'city_ledger';
+		if (toLedger) {
+			try {
+				requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+			} catch {
+				return fail(403, { walkInError: 'Only a hotel admin can charge a booking to the city ledger.' });
+			}
+			if (!d.billToName?.trim()) return fail(400, { walkInError: 'Enter who the booking is billed to.' });
+		}
+
 		let orderId: string;
 		try {
 			const result = await createWalkInBooking({
@@ -1082,7 +1097,16 @@ export const actions: Actions = {
 					specialRequests: d.specialRequests ?? null
 				},
 				rooms: items,
-				payment: walkInPaymentFrom(d, raw.allocationsJson),
+				// A city-ledger booking takes no desk payment; the method is only a placeholder here.
+				payment: walkInPaymentFrom({ ...d, method: d.method === 'city_ledger' ? 'cash' : d.method }, raw.allocationsJson),
+				cityLedger: toLedger
+					? {
+							billToName: d.billToName!.trim(),
+							billToCompany: d.billToCompany?.trim() || null,
+							referenceNo: d.billReference?.trim() || null,
+							notes: d.billNotes?.trim() || null
+						}
+					: undefined,
 				actor: event.locals.user
 			});
 			orderId = result.orderId;

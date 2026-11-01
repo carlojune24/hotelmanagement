@@ -3471,7 +3471,7 @@
 									</div>
 								</div>
 								<div>
-									<Label for="otaGross">Total the guest paid the OTA (₱)</Label>
+									<Label for="otaGross">Gross / sell rate on the OTA voucher (₱)</Label>
 									<Input id="otaGross" type="number" min="0.01" step="0.01" inputmode="decimal" bind:value={otaGross} oninput={onOtaGross} required class="tabular-nums" />
 									<input type="hidden" name="grossCentavos" value={otaGrossC} />
 								</div>
@@ -3481,7 +3481,7 @@
 										<Input id="otaPct" type="number" min="0" step="0.01" inputmode="decimal" bind:value={otaPct} oninput={onOtaPct} class="tabular-nums" />
 									</div>
 									<div>
-										<Label for="otaCommission">Commission (₱)</Label>
+										<Label for="otaCommission">Commission + programs (₱)</Label>
 										<Input id="otaCommission" type="number" min="0" step="0.01" inputmode="decimal" bind:value={otaCommission} oninput={onOtaCommission} class="tabular-nums" />
 										<input type="hidden" name="commissionCentavos" value={otaCommissionC} />
 									</div>
@@ -3505,6 +3505,7 @@
 						<WalkinPaymentFields
 						totalCentavos={walkInCartGrandTotal}
 						cashier={data.cashier}
+						canCityLedger={canChargeCityLedger}
 						rooms={walkInCart.map((l) => ({
 							label: `${l.roomNumber ? `Room ${l.roomNumber} · ` : ''}${l.roomTypeName}${l.roomCount > 1 ? ` × ${l.roomCount}` : ''}`,
 							totalCentavos: walkInCartLineTotal(l)
