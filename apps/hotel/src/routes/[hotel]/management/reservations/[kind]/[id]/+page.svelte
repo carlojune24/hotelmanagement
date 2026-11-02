@@ -49,6 +49,8 @@
 	let reinstateOpen = $state(false);
 	let renameOpen = $state(false);
 	let renameName = $state('');
+	let requestsOpen = $state(false);
+	let requestsText = $state('');
 	let manualConfirmReason = $state('');
 	let reinstateReason = $state('');
 	let overrideSubmitting = $state(false);
@@ -349,9 +351,21 @@
 				<span class="truncate">{data.detail.guest.email}</span>
 				{#if data.detail.guest.phone}<span>{data.detail.guest.phone}</span>{/if}
 			</div>
-			{#if data.detail.guest.specialRequests}
+			{#if data.detail.guest.specialRequests || data.canAdmin}
 				<p class="mt-1.5 text-xs text-ink-muted">
-					Special requests: {data.detail.guest.specialRequests}
+					Special requests: {data.detail.guest.specialRequests ?? 'none'}
+					{#if data.canAdmin}
+						<button
+							type="button"
+							class="ml-1 underline underline-offset-2 hover:text-ink"
+							onclick={() => {
+								requestsText = data.detail.guest.specialRequests ?? '';
+								requestsOpen = true;
+							}}
+						>
+							{data.detail.guest.specialRequests ? 'Edit' : 'Add'}
+						</button>
+					{/if}
 				</p>
 			{/if}
 		</div>
@@ -1539,6 +1553,40 @@
 				<Button type="submit" disabled={overrideSubmitting || reinstateReason.trim().length === 0}>
 					{overrideSubmitting ? 'Reinstating…' : 'Reinstate'}
 				</Button>
+			</div>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={requestsOpen}>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>Special requests</Dialog.Title>
+			<Dialog.Description>
+				Notes for this booking (catering, setup, allergies…). Changes are recorded in the audit log.
+			</Dialog.Description>
+		</Dialog.Header>
+		<form
+			method="POST"
+			action="?/updateSpecialRequests"
+			use:enhance={() => {
+				return async ({ update, result }) => {
+					await update({ reset: false });
+					if (result.type === 'success') requestsOpen = false;
+				};
+			}}
+			class="space-y-4"
+		>
+			<textarea
+				name="specialRequests"
+				bind:value={requestsText}
+				maxlength={1000}
+				rows="5"
+				class="w-full min-w-0 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+			></textarea>
+			<div class="flex justify-end gap-2 pt-1">
+				<Button type="button" variant="ghost" onclick={() => (requestsOpen = false)}>Never mind</Button>
+				<Button type="submit">Save</Button>
 			</div>
 		</form>
 	</Dialog.Content>

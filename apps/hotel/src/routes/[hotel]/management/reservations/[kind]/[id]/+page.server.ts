@@ -493,6 +493,39 @@ export const actions: Actions = {
 		return { ok: 'Guest name updated.' };
 	},
 
+	updateSpecialRequests: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'booking:write');
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		const hotelId = event.locals.hotel!.id;
+
+		const detail =
+			event.params.kind === 'room'
+				? await getRoomBookingDetail(hotelId, event.params.id)
+				: await getHallBookingDetail(hotelId, event.params.id);
+		if (!detail) return fail(404, { error: 'Booking not found.' });
+
+		const parsed = z
+			.object({ specialRequests: z.string().trim().max(1000) })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: 'Keep special requests under 1000 characters.' });
+
+		const next = parsed.data.specialRequests || null;
+		await db
+			.update(guests)
+			.set({ specialRequests: next })
+			.where(and(eq(guests.id, detail.order.guestId), eq(guests.hotelId, hotelId)));
+		await writeAudit({
+			hotelId,
+			actor: event.locals.user,
+			action: 'guest.special_requests',
+			entityType: 'guest',
+			entityId: detail.order.guestId,
+			before: { specialRequests: detail.guest.specialRequests ?? null },
+			after: { specialRequests: next }
+		});
+		return { ok: 'Special requests updated.' };
+	},
+
 	manualConfirm: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'booking:write');
 		requireCap(event.locals.user, event.locals.role, 'hotel:admin');

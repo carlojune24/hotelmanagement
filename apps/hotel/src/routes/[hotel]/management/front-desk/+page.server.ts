@@ -69,6 +69,7 @@ import {
 import { getFinanceSettings } from '$lib/server/finance/settings';
 import { getDefaultOpenShift } from '$lib/server/finance/shifts';
 import { openShift as openShiftFn } from '$lib/server/finance/shifts';
+import { emailCheck, nameError, phoneError } from '$lib/guest-validation';
 import { MAX_ROOMS_PER_LINE } from '$lib/pricing-utils';
 import { expirePendingOrders, listUnpaidHolds } from '$lib/server/orders';
 import type { Actions, PageServerLoad } from './$types';
@@ -281,9 +282,9 @@ const walkInCheckItemSchema = z.object({
 
 const createSchema = z
 	.object({
-		fullName: z.string().min(2).max(160),
-		email: z.string().email(),
-		phone: z.string().max(40).optional(),
+		fullName: z.string().min(2).max(160).refine((v) => !nameError(v), 'Check the guest name.'),
+		email: z.string().email().refine((v) => !emailCheck(v).error, 'Check the email address.'),
+		phone: z.string().max(40).refine((v) => !phoneError(v), 'Check the phone number.').optional(),
 		specialRequests: z.string().max(1000).optional(),
 		itemsJson: z.string(),
 		// Charge the whole booking to the city ledger instead of taking payment (hotel admin only).
@@ -302,9 +303,9 @@ const hallCreateSchema = z
 		endTime: z.string().regex(/^\d{2}:\d{2}$/),
 		eventType: z.string().min(1).max(80),
 		guestCount: z.coerce.number().int().min(1),
-		fullName: z.string().min(2).max(160),
-		email: z.string().email(),
-		phone: z.string().max(40).optional(),
+		fullName: z.string().min(2).max(160).refine((v) => !nameError(v), 'Check the guest name.'),
+		email: z.string().email().refine((v) => !emailCheck(v).error, 'Check the email address.'),
+		phone: z.string().max(40).refine((v) => !phoneError(v), 'Check the phone number.').optional(),
 		specialRequests: z.string().max(1000).optional(),
 		// JSON array of extras (catering, lechon, corkage…); catalog lines are re-priced server-side.
 		extrasJson: z.string().max(20000).optional()
@@ -1149,9 +1150,9 @@ export const actions: Actions = {
 		const raw = Object.fromEntries(await event.request.formData());
 		const parsed = z
 			.object({
-				fullName: z.string().min(2).max(160),
-				email: z.union([z.string().email(), z.literal('')]).default(''),
-				phone: z.string().max(40).optional(),
+				fullName: z.string().min(2).max(160).refine((v) => !nameError(v), 'Check the guest name.'),
+				email: z.union([z.string().email().refine((v) => !emailCheck(v).error, 'Check the email address.'), z.literal('')]).default(''),
+				phone: z.string().max(40).refine((v) => !phoneError(v), 'Check the phone number.').optional(),
 				specialRequests: z.string().max(1000).optional(),
 				itemsJson: z.string(),
 				otaName: z.string().trim().min(1).max(80, 'Pick the OTA.'),

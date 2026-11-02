@@ -26,6 +26,7 @@
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
 	import PaymentFields from '$lib/components/staff/payment-fields.svelte';
 	import WalkinPaymentFields from '$lib/components/staff/walkin-payment-fields.svelte';
+	import GuestContactFields from '$lib/components/staff/guest-contact-fields.svelte';
 	import FolioPromoTrail from '$lib/components/staff/folio-promo-trail.svelte';
 	import IdCameraCapture from '$lib/components/staff/id-camera-capture.svelte';
 	import AvailabilityCalendarSheet, {
@@ -1151,6 +1152,8 @@
 		unitPriceCentavos: number;
 	};
 	let hallExtras = $state<HallExtra[]>([]);
+	let walkInContactValid = $state(true);
+	let hallContactValid = $state(true);
 	let extraKey = 0;
 	let customName = $state('');
 	let customPrice = $state('');
@@ -3478,21 +3481,12 @@
 								</button>
 							{/each}
 						</div>
-						<div>
-							<Label for="wiFullName">Full name</Label>
-							<Input id="wiFullName" name="fullName" required maxlength={160} />
-						</div>
-						<div class="grid grid-cols-2 gap-3">
-							<div>
-								<Label for="wiEmail">Email{walkInMode === 'ota' ? ' (optional)' : ''}</Label>
-								<Input id="wiEmail" name="email" type="email" required={walkInMode === 'walkin'} />
-								{#if walkInMode === 'ota'}<p class="mt-1 text-xs text-ink-muted">Agoda often hides this.</p>{/if}
-							</div>
-							<div>
-								<Label for="wiPhone">Phone</Label>
-								<Input id="wiPhone" name="phone" maxlength={40} />
-							</div>
-						</div>
+						<GuestContactFields
+							prefix="wi"
+							emailOptional={walkInMode === 'ota'}
+							bind:valid={walkInContactValid}
+						/>
+						{#if walkInMode === 'ota'}<p class="-mt-2 text-xs text-ink-muted">Agoda often hides the email.</p>{/if}
 						<div>
 							<Label for="wiSpecialRequests">Special requests</Label>
 							<textarea
@@ -3570,7 +3564,7 @@
 						}))}
 					/>
 						{/if}
-						<Button type="submit" class="w-full" disabled={walkInMode === 'ota' && otaInvalid}>
+						<Button type="submit" class="w-full" disabled={(walkInMode === 'ota' && otaInvalid) || !walkInContactValid}>
 							{walkInMode === 'ota' ? 'Create OTA booking' : 'Create booking & record payment'}
 						</Button>
 							</form>
@@ -4198,19 +4192,8 @@
 					<input type="hidden" name="extrasJson" value={hallExtrasJson} />
 				</div>
 
-				<div class="border-t border-border pt-3">
-					<Label for="heFullName">Full name</Label>
-					<Input id="heFullName" name="fullName" required maxlength={160} class="mt-1" />
-				</div>
-				<div class="grid grid-cols-2 gap-3">
-					<div>
-						<Label for="heEmail">Email</Label>
-						<Input id="heEmail" name="email" type="email" required />
-					</div>
-					<div>
-						<Label for="hePhone">Phone</Label>
-						<Input id="hePhone" name="phone" maxlength={40} />
-					</div>
+				<div class="space-y-3 border-t border-border pt-3">
+					<GuestContactFields prefix="he" bind:valid={hallContactValid} />
 				</div>
 				<div>
 					<Label for="heSpecialRequests">Special requests</Label>
@@ -4227,7 +4210,7 @@
 					cashier={data.cashier}
 					presetPercents={[25, 50, 75, 100]}
 				/>
-				<Button type="submit" class="w-full" disabled={!hallQuote || hallQuoteLoading}>
+				<Button type="submit" class="w-full" disabled={!hallQuote || hallQuoteLoading || !hallContactValid}>
 					Create &amp; settle booking
 				</Button>
 			</form>
