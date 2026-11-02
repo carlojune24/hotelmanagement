@@ -305,9 +305,24 @@ const hallCreateSchema = z
 		fullName: z.string().min(2).max(160),
 		email: z.string().email(),
 		phone: z.string().max(40).optional(),
-		specialRequests: z.string().max(1000).optional()
+		specialRequests: z.string().max(1000).optional(),
+		// JSON array of extras (catering, lechon, corkage…); catalog lines are re-priced server-side.
+		extrasJson: z.string().max(20000).optional()
 	})
 	.merge(paymentFieldsSchema);
+
+const hallExtrasSchema = z
+	.array(
+		z.union([
+			z.object({ amenityItemId: z.string().uuid(), quantity: z.number().int().min(1).max(999) }),
+			z.object({
+				description: z.string().min(1).max(160),
+				quantity: z.number().int().min(1).max(999),
+				unitPriceCentavos: z.number().int().min(1).max(1_000_000_000)
+			})
+		])
+	)
+	.max(30);
 
 const centavos = (pesos: number | undefined) => (pesos == null ? null : Math.round(pesos * 100));
 
@@ -1492,6 +1507,13 @@ export const actions: Actions = {
 			return fail(400, { hallWalkInError: 'End time must be after start time.' });
 		}
 
+		let extras: z.infer<typeof hallExtrasSchema> = [];
+		try {
+			extras = hallExtrasSchema.parse(JSON.parse(d.extrasJson || '[]'));
+		} catch {
+			return fail(400, { hallWalkInError: 'Check the extras and try again.' });
+		}
+
 		try {
 			await createWalkInHallBooking({
 				hotelId: hotel.id,
@@ -1508,6 +1530,7 @@ export const actions: Actions = {
 				endTime: d.endTime,
 				eventType: d.eventType,
 				guestCount: d.guestCount,
+				extras,
 				payment: walkInPaymentFrom(d),
 				actor: event.locals.user
 			});

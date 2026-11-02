@@ -1142,6 +1142,62 @@
 	let hallQuoteError = $state<string | null>(null);
 	let hallQuoteLoading = $state(false);
 
+	// Extras (catering, lechon, corkage…) added at the desk; catalog lines are re-priced server-side.
+	type HallExtra = {
+		key: number;
+		amenityItemId?: string;
+		description: string;
+		quantity: number;
+		unitPriceCentavos: number;
+	};
+	let hallExtras = $state<HallExtra[]>([]);
+	let extraKey = 0;
+	let customName = $state('');
+	let customPrice = $state('');
+	let customQty = $state('1');
+	const extraLineCentavos = (x: HallExtra) => x.quantity * x.unitPriceCentavos;
+	const extrasTotalCentavos = $derived(hallExtras.reduce((n, x) => n + extraLineCentavos(x), 0));
+	const hallGrandCentavos = $derived(
+		hallQuote ? hallQuote.totalCentavos + extrasTotalCentavos : null
+	);
+	function addCatalogExtra(item: { id: string; name: string; priceCentavos: number }) {
+		const hit = hallExtras.find((x) => x.amenityItemId === item.id);
+		if (hit) return void (hit.quantity += 1);
+		hallExtras.push({
+			key: ++extraKey,
+			amenityItemId: item.id,
+			description: item.name,
+			quantity: 1,
+			unitPriceCentavos: item.priceCentavos
+		});
+	}
+	function addCustomExtra() {
+		const cents = Math.round(parseFloat(customPrice || '0') * 100);
+		if (!customName.trim() || !(cents > 0)) return;
+		hallExtras.push({
+			key: ++extraKey,
+			description: customName.trim(),
+			quantity: Math.min(999, Math.max(1, Math.floor(Number(customQty) || 1))),
+			unitPriceCentavos: cents
+		});
+		customName = '';
+		customPrice = '';
+		customQty = '1';
+	}
+	const hallExtrasJson = $derived(
+		JSON.stringify(
+			hallExtras.map((x) =>
+				x.amenityItemId
+					? { amenityItemId: x.amenityItemId, quantity: x.quantity }
+					: {
+							description: x.description,
+							quantity: x.quantity,
+							unitPriceCentavos: x.unitPriceCentavos
+						}
+			)
+		)
+	);
+
 	/** Same wraparound-safe hour math the storefront's hall mini-form already uses. */
 	function addHours(time: string, hours: number): string {
 		const [h, m] = time.split(':').map(Number);
@@ -1156,6 +1212,7 @@
 		heEndTime = addHours('09:00', hall.baseHours);
 		hallQuote = null;
 		hallQuoteError = null;
+		hallExtras = [];
 		hallWalkInOpen = true;
 		fetchHallQuote();
 	}
@@ -4070,12 +4127,74 @@
 								<span class="text-ink-muted">VAT</span>
 								<span class="text-ink">{peso(hallQuote.vatCentavos)}</span>
 							</div>
+							{#if extrasTotalCentavos > 0}
+								<div class="flex justify-between">
+									<span class="text-ink-muted">Extras (no VAT)</span>
+									<span class="text-ink">{peso(extrasTotalCentavos)}</span>
+								</div>
+							{/if}
 							<div class="flex justify-between border-t border-border pt-1.5 font-semibold">
 								<span class="text-ink">Total</span>
-								<span class="text-ink">{peso(hallQuote.totalCentavos)}</span>
+								<span class="text-ink">{peso(hallGrandCentavos ?? hallQuote.totalCentavos)}</span>
 							</div>
 						</div>
 					{/if}
+				</div>
+
+				<div class="space-y-2 rounded-lg border border-border p-3">
+					<h3 class="text-sm font-semibold text-ink">Extras</h3>
+					{#if data.amenityItemOptions.length > 0}
+						<div class="flex flex-wrap gap-1">
+							{#each data.amenityItemOptions as item (item.id)}
+								<button
+									type="button"
+									onclick={() => addCatalogExtra(item)}
+									class="rounded border border-border px-2 py-1 text-xs hover:bg-surface-2"
+								>
+									+ {item.name} <span class="tabular-nums text-ink-muted">{peso(item.priceCentavos)}</span>
+								</button>
+							{/each}
+						</div>
+					{/if}
+					{#each hallExtras as x (x.key)}
+						<div class="flex items-center gap-2 text-sm">
+							<span class="min-w-0 flex-1 truncate text-ink">
+								{x.description}
+							</span>
+							<Input
+								type="number"
+								min="1"
+								max="999"
+								step="1"
+								bind:value={x.quantity}
+								aria-label="Quantity"
+								class="h-8 w-16 text-right"
+							/>
+							<span class="w-24 text-right tabular-nums text-ink">{peso(extraLineCentavos(x))}</span>
+							<button
+								type="button"
+								aria-label="Remove {x.description}"
+								onclick={() => (hallExtras = hallExtras.filter((y) => y.key !== x.key))}
+								class="text-ink-muted hover:text-danger">✕</button
+							>
+						</div>
+					{/each}
+					<div class="flex items-end gap-2">
+						<div class="min-w-0 flex-1">
+							<Label for="heExtraName" class="text-xs">Custom item</Label>
+							<Input id="heExtraName" bind:value={customName} placeholder="e.g. Lechon" maxlength={160} />
+						</div>
+						<div class="w-16">
+							<Label for="heExtraQty" class="text-xs">Qty</Label>
+							<Input id="heExtraQty" type="number" min="1" max="999" step="1" bind:value={customQty} />
+						</div>
+						<div class="w-24">
+							<Label for="heExtraPrice" class="text-xs">Price (₱)</Label>
+							<Input id="heExtraPrice" type="number" min="0" step="0.01" bind:value={customPrice} />
+						</div>
+						<Button type="button" variant="outline" onclick={addCustomExtra}>Add</Button>
+					</div>
+					<input type="hidden" name="extrasJson" value={hallExtrasJson} />
 				</div>
 
 				<div class="border-t border-border pt-3">
@@ -4103,8 +4222,9 @@
 					></textarea>
 				</div>
 				<WalkinPaymentFields
-					totalCentavos={hallQuote?.totalCentavos ?? null}
+					totalCentavos={hallGrandCentavos}
 					cashier={data.cashier}
+					presetPercents={[25, 50, 75, 100]}
 				/>
 				<Button type="submit" class="w-full" disabled={!hallQuote || hallQuoteLoading}>
 					Create &amp; settle booking

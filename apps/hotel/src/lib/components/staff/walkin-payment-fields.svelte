@@ -7,8 +7,11 @@
 		totalCentavos,
 		cashier,
 		rooms = [],
-		canCityLedger = false
+		canCityLedger = false,
+		presetPercents = []
 	}: {
+		/** One-tap downpayment chips (e.g. 25/50/75/100) that fill Cash tendered with that share of the total. */
+		presetPercents?: number[];
 		/** Only a hotel admin may charge the booking to the city ledger (re-checked on the server). */
 		canCityLedger?: boolean;
 		/** The rooms being booked (cart order). With more than one, the payment can be split across
@@ -108,6 +111,17 @@
 
 	{#if method === 'cash'}
 		<div class="flex flex-wrap gap-1">
+			{#if totalCentavos != null}
+				{#each presetPercents as pct (pct)}
+					<button
+						type="button"
+						onclick={() => (tendered = (Math.round((totalCentavos * pct) / 100) / 100).toFixed(2))}
+						class="rounded border border-border px-1.5 py-0.5 text-[11px] font-semibold tabular-nums hover:bg-surface"
+					>
+						{pct}%
+					</button>
+				{/each}
+			{/if}
 			{#each [1000, 500, 200, 100, 50, 20] as d (d)}
 				<button
 					type="button"

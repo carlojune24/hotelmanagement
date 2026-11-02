@@ -421,48 +421,105 @@ export async function loadFolioPromo(hotelId: string, bookingId: string): Promis
 	};
 }
 
+type ChargeInput = {
+	description: string;
+	quantity: number;
+	unitPriceCentavos: number;
+	taxable: boolean;
+	amenityItemId?: string;
+};
+
+async function insertChargeTx(
+	tx: Tx,
+	hotelId: string,
+	target: FolioTarget,
+	input: ChargeInput,
+	actor: SessionUser | null
+): Promise<{ chargeId: string; totalCentavos: number }> {
+	const folioId = await ensureFolio(tx, hotelId, target);
+	const [hotel] = await tx
+		.select({ vatRateBps: hotels.vatRateBps })
+		.from(hotels)
+		.where(eq(hotels.id, hotelId))
+		.limit(1);
+
+	const subtotalCentavos = input.quantity * input.unitPriceCentavos;
+	const taxCentavos = input.taxable
+		? Math.round((subtotalCentavos * (hotel?.vatRateBps ?? 0)) / 10000)
+		: 0;
+
+	const [charge] = await tx
+		.insert(folioCharges)
+		.values({
+			folioId,
+			amenityItemId: input.amenityItemId ?? null,
+			description: input.description,
+			quantity: input.quantity,
+			unitPriceCentavos: input.unitPriceCentavos,
+			taxCentavos,
+			totalCentavos: subtotalCentavos + taxCentavos,
+			addedByUserId: actor?.id ?? null
+		})
+		.returning({ id: folioCharges.id });
+	if (!charge) throw new FolioError('Could not post the charge.');
+
+	return { chargeId: charge.id, totalCentavos: subtotalCentavos + taxCentavos };
+}
+
 async function insertCharge(
 	hotelId: string,
 	target: FolioTarget,
-	input: {
-		description: string;
-		quantity: number;
-		unitPriceCentavos: number;
-		taxable: boolean;
-		amenityItemId?: string;
-	},
+	input: ChargeInput,
 	actor: SessionUser | null
 ): Promise<{ chargeId: string }> {
-	return await db.transaction(async (tx) => {
-		const folioId = await ensureFolio(tx, hotelId, target);
-		const [hotel] = await tx
-			.select({ vatRateBps: hotels.vatRateBps })
-			.from(hotels)
-			.where(eq(hotels.id, hotelId))
-			.limit(1);
+	return await db.transaction((tx) => insertChargeTx(tx, hotelId, target, input, actor));
+}
 
-		const subtotalCentavos = input.quantity * input.unitPriceCentavos;
-		const taxCentavos = input.taxable
-			? Math.round((subtotalCentavos * (hotel?.vatRateBps ?? 0)) / 10000)
-			: 0;
+export type WalkInExtra =
+	| { amenityItemId: string; quantity: number }
+	| { description: string; quantity: number; unitPriceCentavos: number };
 
-		const [charge] = await tx
-			.insert(folioCharges)
-			.values({
-				folioId,
-				amenityItemId: input.amenityItemId ?? null,
-				description: input.description,
-				quantity: input.quantity,
-				unitPriceCentavos: input.unitPriceCentavos,
-				taxCentavos,
-				totalCentavos: subtotalCentavos + taxCentavos,
-				addedByUserId: actor?.id ?? null
-			})
-			.returning({ id: folioCharges.id });
-		if (!charge) throw new FolioError('Could not post the charge.');
-
-		return { chargeId: charge.id };
-	});
+/** Posts walk-in extras (catering, lechon, corkage…) to a folio inside the caller's transaction.
+ *  Extras carry no VAT. Catalog lines are re-priced from `amenity_items` — the client's price is never trusted.
+ *  Returns what was added (VAT included) so the caller can size the payment. */
+export async function addWalkInExtras(
+	tx: Tx,
+	hotelId: string,
+	target: FolioTarget,
+	extras: WalkInExtra[],
+	actor: SessionUser | null
+): Promise<number> {
+	let total = 0;
+	for (const x of extras) {
+		let input: ChargeInput;
+		if ('amenityItemId' in x) {
+			const [item] = await tx
+				.select()
+				.from(amenityItems)
+				.where(
+					and(
+						eq(amenityItems.id, x.amenityItemId),
+						eq(amenityItems.hotelId, hotelId),
+						eq(amenityItems.isActive, true),
+						isNull(amenityItems.deletedAt)
+					)
+				)
+				.limit(1);
+			if (!item) throw new FolioError('An extra is no longer available.');
+			input = {
+				description: item.name,
+				quantity: x.quantity,
+				unitPriceCentavos: item.priceCentavos,
+				taxable: false,
+				amenityItemId: item.id
+			};
+		} else {
+			if (!x.description.trim()) throw new FolioError('Enter a name for each custom extra.');
+			input = { ...x, description: x.description.trim(), taxable: false };
+		}
+		total += (await insertChargeTx(tx, hotelId, target, input, actor)).totalCentavos;
+	}
+	return total;
 }
 
 /** Adds a catalog item to a folio (room or hall) — the priced/taxable posture front desk works from. */

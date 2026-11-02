@@ -21,7 +21,15 @@ import {
 import { ACTIVE_BOOKING_STATUSES, getAvailableRoomType, roomHeldUntil } from './availability';
 import { checkHallAvailability } from './hall-availability';
 import { wallTimeToUtcMs } from './cancellation';
-import { FolioError, addHallOvertimeCharge, closeFolio, closeHallFolio, getFolioDetail } from './folio';
+import {
+	FolioError,
+	type WalkInExtra,
+	addHallOvertimeCharge,
+	addWalkInExtras,
+	closeFolio,
+	closeHallFolio,
+	getFolioDetail
+} from './folio';
 import { planInRoomOrder } from '$lib/allocation';
 import { splitProportional, splitRoomLine } from '$lib/room-split';
 import { lineBalances } from './order-balances';
@@ -1559,6 +1567,7 @@ export async function createWalkInHallBooking(params: {
 	endTime: string;
 	eventType: string;
 	guestCount: number;
+	extras?: WalkInExtra[];
 	payment?: WalkInPaymentInput;
 	actor: SessionUser | null;
 }): Promise<{ hallBookingId: string }> {
@@ -1652,12 +1661,22 @@ export async function createWalkInHallBooking(params: {
 			note: 'Walk-in booking'
 		});
 
+		// Extras ride on the folio (hall total seeds its base line), so the ledger balance is hall + extras.
+		const extrasCentavos = await addWalkInExtras(
+			tx,
+			hotelId,
+			{ kind: 'hall', hallBookingId: hallBooking!.id },
+			params.extras ?? [],
+			actor
+		);
+		const grandTotal = price.totalCentavos + extrasCentavos;
+
 		await recordWalkInPayment(tx, {
 			hotelId,
 			orderId: order!.id,
 			target: { kind: 'hall', hallBookingId: hallBooking!.id },
 			method: payment.method,
-			amountCentavos: walkInAmountPaid(price.totalCentavos, payment),
+			amountCentavos: walkInAmountPaid(grandTotal, payment),
 			tenderedCentavos: payment.tenderedCentavos ?? null,
 			referenceNo: payment.referenceNo ?? null,
 			bankName: payment.bankName ?? null,
@@ -1671,7 +1690,7 @@ export async function createWalkInHallBooking(params: {
 
 		return {
 			hallBookingId: hallBooking!.id,
-			totalPaidCentavos: walkInAmountPaid(price.totalCentavos, payment)
+			totalPaidCentavos: walkInAmountPaid(grandTotal, payment)
 		};
 	});
 
@@ -1688,6 +1707,7 @@ export async function createWalkInHallBooking(params: {
 			endTime,
 			eventType,
 			guestCount,
+			extras: params.extras ?? [],
 			paymentMethod: payment.method,
 			amountCentavos: totalPaidCentavos,
 			tenderedCentavos: payment.tenderedCentavos ?? null
