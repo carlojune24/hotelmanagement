@@ -803,9 +803,9 @@ export interface WalkInPaymentInput {
  *  method has no "amount received" field, so it settles the full total; cash tendered at or
  *  above the total settles it too (the difference is change). */
 export function walkInAmountPaid(totalCentavos: number, payment: WalkInPaymentInput): number {
-	if (payment.method !== 'cash' || payment.tenderedCentavos == null) return totalCentavos;
+	if (payment.tenderedCentavos == null) return totalCentavos;
 	if (payment.tenderedCentavos <= 0) {
-		throw new WalkInError('Enter the cash received, or leave it blank to take the full amount.');
+		throw new WalkInError('Enter the amount received, or leave it blank to take the full amount.');
 	}
 	return Math.min(totalCentavos, payment.tenderedCentavos);
 }

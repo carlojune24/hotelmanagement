@@ -41,7 +41,7 @@
 	);
 	// What this walk-in actually pays now: everything, or (cash) what was handed over, up to the total.
 	const paidNowCentavos = $derived(
-		method === 'cash' && tendered !== '' && totalCentavos != null
+		method !== 'city_ledger' && tendered !== '' && totalCentavos != null
 			? Math.min(totalCentavos, Math.max(0, tenderedCentavos))
 			: (totalCentavos ?? 0)
 	);
@@ -94,9 +94,9 @@
 				{#if canCityLedger}<option value="city_ledger">Move to city ledger</option>{/if}
 			</select>
 		</div>
-		{#if method === 'cash'}
+		{#if method !== 'city_ledger'}
 			<div>
-				<Label class="text-xs">Cash tendered (₱)</Label>
+				<Label class="text-xs">{method === 'cash' ? 'Cash tendered (₱)' : 'Amount paid (₱)'}</Label>
 				<Input
 					name="tendered"
 					type="number"
@@ -109,7 +109,7 @@
 		{/if}
 	</div>
 
-	{#if method === 'cash'}
+	{#if method !== 'city_ledger'}
 		<div class="flex flex-wrap gap-1">
 			{#if totalCentavos != null}
 				{#each presetPercents as pct (pct)}
@@ -122,7 +122,7 @@
 					</button>
 				{/each}
 			{/if}
-			{#each [1000, 500, 200, 100, 50, 20] as d (d)}
+			{#each method === 'cash' ? [1000, 500, 200, 100, 50, 20] : [] as d (d)}
 				<button
 					type="button"
 					onclick={() => addTender(d)}
@@ -141,7 +141,7 @@
 		</div>
 	{/if}
 
-	{#if method === 'cash' && tendered !== '' && totalCentavos != null}
+	{#if method !== 'city_ledger' && tendered !== '' && totalCentavos != null && (method === 'cash' || changeCentavos < 0)}
 		<p class="text-sm font-semibold {changeCentavos < 0 ? 'text-danger' : 'text-ok'}">
 			{changeCentavos < 0 ? 'Balance still due ' : 'Change due '}{peso(Math.abs(changeCentavos))}
 		</p>
