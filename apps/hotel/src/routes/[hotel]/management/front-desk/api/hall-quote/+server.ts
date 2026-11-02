@@ -9,7 +9,7 @@ const quoteSchema = z.object({
 	functionHallId: z.string().uuid(),
 	eventDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 	startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM'),
-	endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM')
+	endTime: z.string().regex(/^(([01]\d|2[0-3]):[0-5]\d|24:00)$/, 'Use HH:MM')
 });
 
 /**
@@ -26,7 +26,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const hotelId = locals.hotel!.id;
 	const parsed = quoteSchema.safeParse(await request.json().catch(() => null));
 	if (!parsed.success) error(400, 'Invalid quote request.');
-	const { functionHallId, eventDate, startTime, endTime } = parsed.data;
+	const { functionHallId, eventDate, startTime } = parsed.data;
+	const endTime = parsed.data.endTime === '00:00' ? '24:00' : parsed.data.endTime; // midnight = end of day
 	if (startTime >= endTime) error(400, 'End time must be after start time.');
 
 	// Name what is holding the slot: a closed event still blocks it but no longer shows on the board.

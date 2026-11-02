@@ -37,6 +37,6 @@ export const nightsLabel = (n: number) => `${n} night${n === 1 ? '' : 's'}`;
 export function formatClockTime(time: string): string {
 	const m = /^(\d{1,2}):(\d{2})/.exec(time);
 	if (!m) return time;
-	const h = Number(m[1]);
+	const h = Number(m[1]) % 24; // 24:00 = midnight ending the day
 	return `${h % 12 === 0 ? 12 : h % 12}:${m[2]} ${h < 12 ? 'AM' : 'PM'}`;
 }

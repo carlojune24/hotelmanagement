@@ -1502,7 +1502,7 @@ export const actions: Actions = {
 		if (!parsed.success) {
 			return fail(400, { hallWalkInError: 'Check the event details and try again.' });
 		}
-		const d = parsed.data;
+		const d = { ...parsed.data, endTime: parsed.data.endTime === '00:00' ? '24:00' : parsed.data.endTime }; // midnight = end of day
 		if (d.startTime >= d.endTime) {
 			return fail(400, { hallWalkInError: 'End time must be after start time.' });
 		}

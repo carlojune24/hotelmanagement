@@ -1222,7 +1222,8 @@
 	 *  happens client-side, so what's quoted here can never drift from what actually gets charged. */
 	async function fetchHallQuote() {
 		if (!hallWalkInHall) return;
-		if (heStartTime >= heEndTime) {
+		const endT = heEndTime === '00:00' ? '24:00' : heEndTime; // midnight closes the event day
+		if (heStartTime >= endT) {
 			hallQuote = null;
 			hallQuoteError = 'End time must be after start time.';
 			return;
@@ -1237,7 +1238,7 @@
 					functionHallId: hallWalkInHall.functionHallId,
 					eventDate: heEventDate,
 					startTime: heStartTime,
-					endTime: heEndTime
+					endTime: endT
 				})
 			});
 			if (!res.ok) {
