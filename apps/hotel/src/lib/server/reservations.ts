@@ -336,6 +336,18 @@ async function folioSummary(
 		promo: f.promo,
 		/** This room's own charges. */
 		chargesTotalCentavos: f.chargesTotalCentavos,
+		/** Add-on charges (extras) within that total. */
+		extrasCentavos: f.extrasCentavos,
+		/** Each add-on line (non-base, non-voided) for the itemised Bill. */
+		extras: f.charges
+			.filter((c) => !c.isBaseCharge && !c.voidedAt)
+			.map((c) => ({
+				id: c.id,
+				description: c.description,
+				quantity: c.quantity,
+				unitPriceCentavos: c.unitPriceCentavos,
+				totalCentavos: c.totalCentavos
+			})),
 		/** THIS room's own paid amount and balance. */
 		paidTotalCentavos: f.paidTotalCentavos,
 		balanceCentavos: f.balanceCentavos,

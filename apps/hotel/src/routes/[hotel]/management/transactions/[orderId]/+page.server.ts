@@ -39,6 +39,7 @@ import {
 	type FolioTarget
 } from '$lib/server/folio';
 import { summariseRefund } from '$lib/refund-status';
+import { formatClockTime } from '$lib/stay-dates';
 import { getActiveScPwdClaimsForBookings } from '$lib/server/sc-pwd-discount';
 import { CHANNEL_LABEL, summariseBookingPayment, type BookingChannel } from '$lib/booking-payment-status';
 import type { Actions, PageServerLoad } from './$types';
@@ -106,6 +107,8 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 				status: hallBookings.status,
 				eventDate: hallBookings.eventDate,
 				eventType: hallBookings.eventType,
+				startTime: hallBookings.startTime,
+				endTime: hallBookings.endTime,
 				hallName: functionHalls.name
 			})
 			.from(hallBookings)
@@ -383,12 +386,18 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 				assigned[i]!.length
 					? `Room ${assigned[i]!.map((a) => a.roomNumber).join(', ')} · ${r.roomTypeName}`
 					: `${r.roomTypeName}${r.quantity > 1 ? ` × ${r.quantity}` : ''}`,
-				`${r.checkIn} → ${r.checkOut}`,
+				`${r.checkIn} ${formatClockTime(hotel.checkInTime)} → ${r.checkOut} ${formatClockTime(hotel.checkOutTime)}`,
 				'Room stay'
 			)
 		),
 		...hallRows.map((h) =>
-			buildLine(h, 'hall', h.hallName, `${h.eventType} · ${h.eventDate}`, 'Event')
+			buildLine(
+				h,
+				'hall',
+				h.hallName,
+				`${h.eventType} · ${h.eventDate} · ${formatClockTime(h.startTime)} – ${formatClockTime(h.endTime)}`,
+				'Event'
+			)
 		)
 	];
 

@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm';
 import { lineChargesCentavos, type OrderLedgerTotals } from '$lib/ledger';
 import { roomPaidCentavos, type RoomPayRow } from '$lib/allocation';
+import { formatClockTime } from '$lib/stay-dates';
 import { db } from './db/index';
 import {
 	amenityItems,
@@ -254,7 +255,7 @@ export async function ensureFolio(tx: Tx, hotelId: string, target: FolioTarget):
 			.where(eq(hallBookings.id, target.hallBookingId))
 			.limit(1);
 		if (!row || row.hotelId !== hotelId) throw new FolioError('Hall booking not found.');
-		seedDescription = `Function hall: ${row.hallName} (${row.hallBooking.eventDate})`;
+		seedDescription = `Function hall: ${row.hallName} (${row.hallBooking.eventDate}, ${formatClockTime(row.hallBooking.startTime)} – ${formatClockTime(row.hallBooking.endTime)})`;
 		seedTotalCentavos = row.hallBooking.totalCentavos;
 	}
 
@@ -318,6 +319,8 @@ export interface FolioDetail {
 	charges: FolioChargeLine[];
 	/** THIS room's / hall's own charges. */
 	chargesTotalCentavos: number;
+	/** The part of `chargesTotalCentavos` that is add-ons (everything but the seeded base charge). */
+	extrasCentavos: number;
 	/** What THIS room has been paid (its share of every payment — see `roomPaidCentavos`). */
 	paidTotalCentavos: number;
 	/** What THIS room still owes; zero or less = settled. Every consumer that gates on "is this
@@ -376,6 +379,9 @@ export async function getFolioDetail(hotelId: string, target: FolioTarget): Prom
 			createdAt: c.createdAt
 		})),
 		chargesTotalCentavos,
+		extrasCentavos: chargeRows
+			.filter((c) => !c.voidedAt && !c.isBaseCharge)
+			.reduce((sum, c) => sum + c.totalCentavos, 0),
 		paidTotalCentavos: thisLine?.paidCentavos ?? 0,
 		balanceCentavos: chargesTotalCentavos - (thisLine?.paidCentavos ?? 0),
 		orderPaidTotalCentavos: ledger?.paidTotalCentavos ?? 0,

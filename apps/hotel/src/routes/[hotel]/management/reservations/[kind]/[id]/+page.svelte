@@ -22,6 +22,7 @@
 	import CancelBookingDialog from '$lib/components/staff/cancel-booking-dialog.svelte';
 	import IdCameraCapture from '$lib/components/staff/id-camera-capture.svelte';
 	import FolioPromoTrail from '$lib/components/staff/folio-promo-trail.svelte';
+	import { formatClockTime } from '$lib/stay-dates';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -215,6 +216,40 @@
 	);
 	const otherFeesTotal = $derived(
 		data.kind === 'room' ? data.detail.booking.feesCentavos - extraBedFeeTotal : 0
+	);
+	// The booking row is the rental only; walk-in extras live on the folio. Once a folio exists its
+	// charges total is the real bill (and matches the Payments card).
+	const hrs = (t: string) => {
+		const [h, m] = t.split(':').map(Number);
+		return h! + (m ?? 0) / 60;
+	};
+	// Event length and the base-block / extra-hour split. The split is re-derived from the hall's
+	// *current* rates, so it is only shown when it still adds up to the stored subtotal.
+	const hallHours = $derived.by(() => {
+		if (data.kind !== 'hall') return null;
+		const { startTime, endTime, subtotalCentavos } = data.detail.hallBooking;
+		const hall = data.detail.hall;
+		const hours = hrs(endTime) - hrs(startTime);
+		const extraHours = Math.max(0, hours - hall.baseHours);
+		const extraCost = Math.round(extraHours * hall.extraHourFeeCentavos);
+		return {
+			hours,
+			baseHours: hall.baseHours,
+			extraHours,
+			baseCentavos: hall.basePriceCentavos,
+			extraCost,
+			rate: hall.extraHourFeeCentavos,
+			splits: hall.basePriceCentavos + extraCost === subtotalCentavos
+		};
+	});
+	const hoursLabel = (n: number) => `${+n.toFixed(2)} hr${n === 1 ? '' : 's'}`;
+	const billExtras = $derived(data.detail.folio?.extrasCentavos ?? 0);
+	const billTotal = $derived(
+		data.detail.folio
+			? data.detail.folio.chargesTotalCentavos
+			: data.kind === 'room'
+				? data.detail.booking.totalCentavos
+				: data.detail.hallBooking.totalCentavos
 	);
 
 	$effect(() => {
@@ -626,7 +661,9 @@
 				<div>
 					<div class="text-xs text-ink-muted">Time</div>
 					<div class="text-ink">
-						{data.detail.hallBooking.startTime}–{data.detail.hallBooking.endTime}
+						{formatClockTime(data.detail.hallBooking.startTime)} – {formatClockTime(
+							data.detail.hallBooking.endTime
+						)}{hallHours ? ` · ${hoursLabel(hallHours.hours)}` : ''}
 					</div>
 				</div>
 				<div>
@@ -673,19 +710,41 @@
 							>{peso(data.detail.booking.vatCentavos)}</Table.Cell
 						>
 					</Table.Row>
+					{#if billExtras > 0}
+						<Table.Row>
+							<Table.Cell class="text-ink-muted">Extras &amp; add-ons</Table.Cell>
+							<Table.Cell class="text-right text-ink">{peso(billExtras)}</Table.Cell>
+						</Table.Row>
+					{/if}
 					<Table.Row>
 						<Table.Cell class="font-semibold text-ink">Total</Table.Cell>
-						<Table.Cell class="text-right font-semibold text-ink"
-							>{peso(data.detail.booking.totalCentavos)}</Table.Cell
-						>
+						<Table.Cell class="text-right font-semibold text-ink">{peso(billTotal)}</Table.Cell>
 					</Table.Row>
 				</Table.Body>
 			</Table.Root>
 		{:else}
 			<Table.Root>
 				<Table.Body>
+					{#if hallHours?.splits}
+						<Table.Row>
+							<Table.Cell class="text-ink-muted"
+								>Hall rental — {hoursLabel(hallHours.baseHours)} included</Table.Cell
+							>
+							<Table.Cell class="text-right text-ink">{peso(hallHours.baseCentavos)}</Table.Cell>
+						</Table.Row>
+						{#if hallHours.extraHours > 0}
+							<Table.Row>
+								<Table.Cell class="text-ink-muted"
+									>Extra time — {hoursLabel(hallHours.extraHours)} × {peso(hallHours.rate)}</Table.Cell
+								>
+								<Table.Cell class="text-right text-ink">{peso(hallHours.extraCost)}</Table.Cell>
+							</Table.Row>
+						{/if}
+					{/if}
 					<Table.Row>
-						<Table.Cell class="text-ink-muted">Subtotal</Table.Cell>
+						<Table.Cell class="text-ink-muted"
+							>{hallHours?.splits ? 'Rental subtotal' : 'Subtotal'}</Table.Cell
+						>
 						<Table.Cell class="text-right text-ink"
 							>{peso(data.detail.hallBooking.subtotalCentavos)}</Table.Cell
 						>
@@ -704,11 +763,19 @@
 							>{peso(data.detail.hallBooking.vatCentavos)}</Table.Cell
 						>
 					</Table.Row>
+					{#each data.detail.folio?.extras ?? [] as x (x.id)}
+						<Table.Row>
+							<Table.Cell class="text-ink-muted"
+								>Add-on: {x.description}{x.quantity > 1
+									? ` × ${x.quantity} @ ${peso(x.unitPriceCentavos)}`
+									: ''}</Table.Cell
+							>
+							<Table.Cell class="text-right text-ink">{peso(x.totalCentavos)}</Table.Cell>
+						</Table.Row>
+					{/each}
 					<Table.Row>
 						<Table.Cell class="font-semibold text-ink">Total</Table.Cell>
-						<Table.Cell class="text-right font-semibold text-ink"
-							>{peso(data.detail.hallBooking.totalCentavos)}</Table.Cell
-						>
+						<Table.Cell class="text-right font-semibold text-ink">{peso(billTotal)}</Table.Cell>
 					</Table.Row>
 				</Table.Body>
 			</Table.Root>
@@ -1136,11 +1203,7 @@
 				<div class="flex items-center justify-between text-sm">
 					<span class="text-ink-muted">Total</span>
 					<span class="font-semibold text-ink">
-						{peso(
-							data.kind === 'room'
-								? data.detail.booking.totalCentavos
-								: data.detail.hallBooking.totalCentavos
-						)}
+						{peso(billTotal)}
 					</span>
 				</div>
 				{#if data.detail.folio}

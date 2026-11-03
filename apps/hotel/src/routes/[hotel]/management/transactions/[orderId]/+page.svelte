@@ -254,11 +254,14 @@
 							</div>
 						{/if}
 						<div class="divide-y divide-border text-sm">
-							{#each l.charges as c (c.id)}
+							{#each l.charges as c, i (c.id)}
+								{#if !c.isBase && i === l.charges.findIndex((x) => !x.isBase)}
+									<p class="bg-surface-2 px-3 py-1 text-xs font-medium text-ink-muted">Add-ons</p>
+								{/if}
 								<div
-									class="flex items-start justify-between gap-3 px-3 py-1.5 {c.voided
-										? 'opacity-50'
-										: ''}"
+									class="flex items-start justify-between gap-3 py-1.5 pr-3 {c.isBase
+										? 'pl-3'
+										: 'pl-6'} {c.voided ? 'opacity-50' : ''}"
 								>
 									<div class="min-w-0">
 										<span class="text-ink {c.voided ? 'line-through' : ''}">
