@@ -226,7 +226,11 @@
 		if (form && 'error' in form && form.error) toast.error(form.error);
 		if (form && 'byEmail' in form && form.byEmail)
 			toast[form.emailed ? 'success' : 'error'](
-				form.emailed ? 'Reply sent by email.' : 'Reply saved, but the email could not be sent.'
+				form.emailed
+					? 'Reply sent by email.'
+					: 'emailOnly' in form
+						? 'The email could not be sent.'
+						: 'Reply saved, but the email could not be sent.'
 			);
 	});
 </script>
@@ -522,7 +526,14 @@
 									<p class="text-xs text-ink-muted">
 										{isOffline ? 'Sent to their email address, then the message is closed.' : 'Enter sends, Shift+Enter adds a line. Appears in the guest\'s chat window straight away.'}
 									</p>
-									<Button type="submit" disabled={sending || !draft.trim()}>{sending ? 'Sending…' : 'Send reply'}</Button>
+									<div class="flex shrink-0 gap-2">
+										{#if !isOffline && detail.guestEmail}
+											<Button type="submit" variant="outline" formaction="?/emailReply" disabled={sending || !draft.trim()}>
+												<MailIcon class="size-4" aria-hidden="true" /> Send by email
+											</Button>
+										{/if}
+										<Button type="submit" disabled={sending || !draft.trim()}>{sending ? 'Sending…' : 'Send reply'}</Button>
+										</div>
 								</div>
 							</form>
 						{/if}

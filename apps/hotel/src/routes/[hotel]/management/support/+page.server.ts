@@ -8,6 +8,7 @@ import {
 	claimSupportConversation,
 	closeSupportConversation,
 	countSupportAttention,
+	emailSupportGuest,
 	getAgentState,
 	getSupportConversation,
 	listSupportCannedReplies,
@@ -151,6 +152,30 @@ export const actions: Actions = {
 				actor: locals.user!
 			});
 			return { replied: true, emailed: res.emailed, byEmail: res.byEmail };
+		} catch (e) {
+			if (e instanceof SupportError) return fail(400, { error: e.message });
+			throw e;
+		}
+	},
+
+	/** Email the typed reply to a live chat's guest (offline messages already go by email via `reply`). */
+	emailReply: async ({ locals, request }) => {
+		requireCap(locals.user, locals.role, 'support:read');
+		const parsed = z
+			.object({
+				conversationId: idField,
+				body: z.string().trim().min(1, 'Type a message first.').max(1000, 'Please keep messages under 1,000 characters.')
+			})
+			.safeParse(Object.fromEntries(await request.formData()));
+		if (!parsed.success) return fail(400, { error: parsed.error.issues[0]?.message ?? 'Type a message first.' });
+		try {
+			const res = await emailSupportGuest({
+				hotelId: locals.hotel!.id,
+				conversationId: parsed.data.conversationId,
+				body: parsed.data.body,
+				actor: locals.user!
+			});
+			return { byEmail: true, emailed: res.emailed, emailOnly: true };
 		} catch (e) {
 			if (e instanceof SupportError) return fail(400, { error: e.message });
 			throw e;

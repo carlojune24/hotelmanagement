@@ -885,6 +885,46 @@ export async function postSupportStaffMessage(args: {
 	return { byEmail: false, emailed: false };
 }
 
+/**
+ * Emails a live (not offline-message) chat's guest from the inbox. Leaves the chat as it is: not
+ * claimed, not closed, nothing added to the thread. Only the audit trail records it (length, not text).
+ */
+export async function emailSupportGuest(args: {
+	hotelId: string;
+	conversationId: string;
+	body: string;
+	actor: Actor;
+}): Promise<{ emailed: boolean }> {
+	const text = cleanBody(args.body);
+	const conv = await db.transaction(async (tx) => loadStaffConversation(tx, args.hotelId, args.conversationId));
+	if (conv.status === 'closed') throw new SupportError('That chat has ended.', 'closed');
+	if (!conv.guestEmail) throw new SupportError('This guest left no email address to reply to.');
+	const [last] = await db
+		.select({ body: m.body })
+		.from(m)
+		.where(and(eq(m.conversationId, conv.id), eq(m.direction, 'guest')))
+		.orderBy(desc(m.createdAt))
+		.limit(1);
+	const res = await sendSupportReply({
+		hotelId: args.hotelId,
+		to: conv.guestEmail,
+		guestName: conv.guestName ?? 'there',
+		originalMessage: last?.body ?? '',
+		replyBody: text,
+		staffName: args.actor.name
+	});
+	await writeAudit({
+		hotelId: args.hotelId,
+		actor: args.actor,
+		action: 'support_chat.email',
+		entityType: 'support_conversation',
+		entityId: conv.id,
+		refCode: refOf(conv.id),
+		after: { chars: text.length, ok: res.ok }
+	});
+	return { emailed: res.ok };
+}
+
 export async function closeSupportConversation(args: {
 	hotelId: string;
 	conversationId: string;
