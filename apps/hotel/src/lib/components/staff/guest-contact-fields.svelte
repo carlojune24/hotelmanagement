@@ -6,10 +6,14 @@
 	let {
 		prefix,
 		emailOptional = false,
+		splitName = false,
 		valid = $bindable(true)
-	}: { prefix: string; emailOptional?: boolean; valid?: boolean } = $props();
+	}: { prefix: string; emailOptional?: boolean; /** First + last name inputs, as an OTA voucher prints them. */ splitName?: boolean; valid?: boolean } = $props();
 
-	let name = $state('');
+	let first = $state('');
+	let last = $state('');
+	let full = $state('');
+	const name = $derived(splitName ? `${first.trim()} ${last.trim()}`.trim() : full);
 	let email = $state('');
 	let phone = $state('');
 	let touched = $state({ name: false, email: false, phone: false });
@@ -24,20 +28,35 @@
 	const bad = 'border-danger focus-visible:ring-danger/30';
 </script>
 
-<div>
-	<Label for="{prefix}FullName">Full name</Label>
-	<Input
-		id="{prefix}FullName"
-		name="fullName"
-		required
-		maxlength={160}
-		bind:value={name}
-		onblur={() => (touched.name = true)}
-		aria-invalid={touched.name && !!nErr}
-		class="mt-1 {touched.name && nErr ? bad : ''}"
-	/>
-	{#if touched.name && nErr}<p class="mt-1 text-xs text-danger" role="alert">{nErr}</p>{/if}
-</div>
+{#if splitName}
+	<div class="grid grid-cols-2 gap-3">
+		<div>
+			<Label for="{prefix}FirstName">First name</Label>
+			<Input id="{prefix}FirstName" required maxlength={80} bind:value={first} onblur={() => (touched.name = true)} aria-invalid={touched.name && !!nErr} class="mt-1 {touched.name && nErr ? bad : ''}" />
+		</div>
+		<div>
+			<Label for="{prefix}LastName">Last name</Label>
+			<Input id="{prefix}LastName" required maxlength={80} bind:value={last} onblur={() => (touched.name = true)} aria-invalid={touched.name && !!nErr} class="mt-1 {touched.name && nErr ? bad : ''}" />
+		</div>
+	</div>
+	<input type="hidden" name="fullName" value={name} />
+	{#if touched.name && nErr}<p class="-mt-2 text-xs text-danger" role="alert">{nErr}</p>{/if}
+{:else}
+	<div>
+		<Label for="{prefix}FullName">Full name</Label>
+		<Input
+			id="{prefix}FullName"
+			name="fullName"
+			required
+			maxlength={160}
+			bind:value={full}
+			onblur={() => (touched.name = true)}
+			aria-invalid={touched.name && !!nErr}
+			class="mt-1 {touched.name && nErr ? bad : ''}"
+		/>
+		{#if touched.name && nErr}<p class="mt-1 text-xs text-danger" role="alert">{nErr}</p>{/if}
+	</div>
+{/if}
 <div class="grid grid-cols-2 gap-3">
 	<div>
 		<Label for="{prefix}Email">Email{emailOptional ? ' (optional)' : ''}</Label>

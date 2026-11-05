@@ -1,8 +1,17 @@
 import { relations, sql } from 'drizzle-orm';
-import { bigint, boolean, index, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, index, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, pk, updatedAt } from './_shared';
 import { hotels } from './hotels';
 import { guests } from './bookings';
+
+/** The voucher's guest/stay details. Its money is only the net (`orders.ota_net_centavos`). */
+export type OtaVoucher = {
+	country: string | null;
+	otherGuests: string | null;
+	ratePlanName: string | null;
+	benefits: string | null;
+	cancellationPolicy: string | null;
+};
 
 /** Payment-lifecycle state only. Front-desk-specific states (checked_in, no_show, …)
  *  live on the child rows (bookings/hallBookings), not here. */
@@ -65,6 +74,9 @@ export const orders = pgTable(
 		otaGrossCentavos: bigint('ota_gross_centavos', { mode: 'number' }),
 		otaCommissionCentavos: bigint('ota_commission_centavos', { mode: 'number' }),
 		otaNetCentavos: bigint('ota_net_centavos', { mode: 'number' }),
+		/** The OTA voucher as keyed in (country, other guests, rate plan, per-line rates…), shown back
+		 *  on the booking as the voucher card. Null on OTA bookings made before it existed. */
+		otaVoucher: jsonb('ota_voucher').$type<OtaVoucher>(),
 		createdAt: createdAt(),
 		updatedAt: updatedAt()
 	},

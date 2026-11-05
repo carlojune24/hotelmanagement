@@ -37,9 +37,10 @@ async function openWalkIn(page: Page) {
 }
 
 /** Opens the drawer, searches `nights` nights from `startOffset` days out and adds the `row`th result. */
-async function addRoom(page: Page, startOffset: number, nights: number, row = 0) {
+async function addRoom(page: Page, startOffset: number, nights: number, row = 0, guests?: number) {
 	await openWalkIn(page);
 	const sheet = page.locator('[data-slot="sheet-content"]');
+	if (guests) await sheet.locator('#wiOccupancy').fill(String(guests));
 	await sheet.locator('input[name="checkIn"]').fill(day(startOffset));
 	await sheet.locator('input[name="checkOut"]').fill(day(startOffset + nights));
 	await sheet.getByRole('button', { name: 'Check availability' }).click();
@@ -52,25 +53,31 @@ async function addRoom(page: Page, startOffset: number, nights: number, row = 0)
 
 async function fillOta(
 	sheet: ReturnType<Page['locator']>,
-	f: { guest: string; ota: string; ref: string; gross: string; pct?: string; commission?: string }
+	f: { guest: string; ota: string; ref: string; net: string }
 ) {
 	await sheet.getByRole('button', { name: 'OTA booking' }).click();
-	await sheet.locator('#wiFullName').fill(f.guest);
+	await fillName(sheet, f.guest);
 	await sheet.locator('#otaName').selectOption({ label: f.ota });
 	await sheet.locator('#otaRef').fill(f.ref);
-	await sheet.locator('#otaGross').fill(f.gross);
-	if (f.pct) await sheet.locator('#otaPct').fill(f.pct);
-	if (f.commission) await sheet.locator('#otaCommission').fill(f.commission);
+	await sheet.locator('#otaNet').fill(f.net);
 }
+
+/** The voucher prints first and last name apart; the guest's full name is the two joined. */
+async function fillName(sheet: ReturnType<Page['locator']>, full: string) {
+	const [first, ...rest] = full.split(' ');
+	await sheet.locator('#wiFirstName').fill(first!);
+	await sheet.locator('#wiLastName').fill(rest.join(' '));
+}
+
 
 /** One full OTA booking through the drawer; returns where staff land. */
 async function createOta(
 	page: Page,
 	key: string,
-	o: { startOffset: number; nights?: number; row?: number; ota: string; gross: string; pct: string }
+	o: { startOffset: number; nights?: number; row?: number; ota: string; net: string }
 ) {
 	const sheet = await addRoom(page, o.startOffset, o.nights ?? 2, o.row ?? 0);
-	await fillOta(sheet, { guest: `DUMMY OTA Guest ${key}`, ota: o.ota, ref: ref(key), gross: o.gross, pct: o.pct });
+	await fillOta(sheet, { guest: `DUMMY OTA Guest ${key}`, ota: o.ota, ref: ref(key), net: o.net });
 	await sheet.getByRole('button', { name: 'Create OTA booking' }).click();
 	await expect(page).toHaveURL(/\/management\/transactions\/[0-9a-f-]{36}/);
 	const orderId = page.url().match(/transactions\/([0-9a-f-]{36})/)![1]!;
@@ -97,11 +104,13 @@ test.describe('OTA bookings · end to end', () => {
 		await staffLogin(page);
 	});
 
-	test('the form: OTA mode drops payment, works out commission and net live, and validates', async ({ page }) => {
+	test('the form: OTA mode follows the voucher, drops payment, and takes the net only', async ({ page }) => {
 		const sheet = await addRoom(page, B + 40, 2);
 		await sheet.getByRole('button', { name: 'OTA booking' }).click();
 
-		await expect(sheet.getByText('You receive (net)')).toBeVisible();
+		// The voucher's sections, in its order.
+		for (const label of ['Booking ID', 'First name', 'Last name', 'Country of residence', 'Other guests', 'Rate plan name (on the voucher)', 'Benefits included', 'Special requests', 'Cancellation policy'])
+			await expect(sheet.getByLabel(label, { exact: true })).toBeVisible();
 		await expect(sheet.getByText('Our rate for these rooms')).toBeVisible();
 		// No payment step in OTA mode, and email is optional.
 		await expect(sheet.getByText('Payment method')).toHaveCount(0);
@@ -113,31 +122,74 @@ test.describe('OTA bookings · end to end', () => {
 		const options = await sheet.locator('#otaName option:not([disabled])').allInnerTexts();
 		expect(options).toEqual(expect.arrayContaining(['Agoda', 'Booking.com']));
 		await expect(sheet.locator('#otaName')).toHaveJSProperty('tagName', 'SELECT');
-		await sheet.locator('#wiFullName').fill('DUMMY OTA Form Check');
+		await fillName(sheet, 'DUMMY OTA Form Check');
 		await sheet.locator('#otaName').selectOption({ label: 'Agoda' });
 		await sheet.locator('#otaRef').fill(ref('FORM'));
-		await sheet.locator('#otaGross').fill('10000');
-		await sheet.locator('#otaPct').fill('15');
-		await expect(sheet.locator('#otaCommission')).toHaveValue('1500.00');
-		await expect(sheet.getByText('You receive (net)').locator('..')).toContainText('₱8500.00'); // the front-desk page's own peso() has no thousands separator
+		// Agoda gives the hotel one amount: the net. No sell rate, commission or % to key in.
+		await expect(sheet.locator('#otaGross, #otaPct, #otaCommission')).toHaveCount(0);
+		await sheet.locator('#otaNet').fill('0');
+		await expect(create).toBeDisabled();
+		await sheet.locator('#otaNet').fill('8500');
 		await expect(create).toBeEnabled();
 
-		// Typing the peso commission fills the % back.
-		await sheet.locator('#otaCommission').fill('2000');
-		await expect(sheet.locator('#otaPct')).toHaveValue('20.00');
-
-		// A commission at or above the total is refused and blocks submit.
-		await sheet.locator('#otaCommission').fill('10000');
-		await expect(sheet.getByText('The commission must be less than the total.')).toBeVisible();
-		await expect(create).toBeDisabled();
-
-		// Switching back to Walk-in brings the payment step back.
+		// Switching back to Walk-in brings the payment step and the single full-name field back.
 		await sheet.getByRole('button', { name: 'Walk-in', exact: true }).click();
 		await expect(sheet.getByRole('button', { name: /Create booking/ })).toBeVisible();
+		await expect(sheet.locator('#wiFullName')).toBeVisible();
 	});
 
-	test('create Agoda A: no cash moves, the receivable carries the gross, the detail page says OTA', async ({ page }) => {
-		const orderId = await createOta(page, 'A', { startOffset: B, ota: 'Agoda', gross: '10000', pct: '15' });
+	test('the real Agoda voucher: keyed in at its net, and printed back', async ({ page }) => {
+		// Deluxe Studio, 3 adults (one over the base 2, so one extra bed), Room With Breakfast.
+		const sheet = await addRoom(page, B + 30, 1, 0, 3);
+		await sheet.getByRole('button', { name: 'OTA booking' }).click();
+		await fillName(sheet, 'DUMMY OTA Mave Rick Candia');
+		await sheet.locator('#otaName').selectOption({ label: 'Agoda' });
+		await sheet.locator('#otaRef').fill(ref('VOUCHER'));
+		await sheet.getByLabel('Country of residence').fill('Philippines');
+		await sheet.getByLabel('Other guests').fill('Guest of Mave Rick Candia, Guest of Mave Rick Candia');
+		await sheet.getByLabel('Rate plan name (on the voucher)').fill('Room With Breakfast');
+		await sheet.getByLabel('Benefits included').fill('Breakfast, Parking, Free WiFi, Drinking water');
+		await sheet.getByLabel('Special requests').fill('NonSmoke, TwinBeds');
+		await sheet.getByLabel('Cancellation policy').fill('Cancellation within 1 day of arrival or no-show: 100% of the booking value.');
+
+		await sheet.locator('#otaNet').fill('2695');
+		const create = sheet.getByRole('button', { name: 'Create OTA booking' });
+		await create.click();
+		await expect(page).toHaveURL(/\/management\/transactions\/[0-9a-f-]{36}/);
+		const orderId = page.url().match(/transactions\/([0-9a-f-]{36})/)![1]!;
+		made.VOUCHER = { orderId, ref: ref('VOUCHER') };
+
+		// Net only: the booking total and what Agoda owes are both the voucher's net (room + extra bed).
+		expect(await orderRow(orderId)).toMatchObject({ g: 269_500, c: 0, n: 269_500, total: 269_500, status: 'confirmed' });
+		expect(await receivableOf(orderId)).toMatchObject({ status: 'open', outstanding: 269_500 });
+		const guest = (await sql`select g.full_name from orders o join guests g on g.id = o.guest_id where o.id = ${orderId}`)[0]!;
+		expect(guest.full_name).toBe('DUMMY OTA Mave Rick Candia');
+
+		// The voucher prints back in the same layout.
+		const [voucher] = await Promise.all([page.waitForEvent('popup'), page.getByRole('link', { name: 'Agoda voucher' }).click()]);
+		await voucher.waitForLoadState();
+		const body = voucher.locator('body');
+		for (const t of ['Agoda booking voucher', ref('VOUCHER'), 'DUMMY OTA Mave Rick Candia', 'Philippines', 'Room With Breakfast', 'Breakfast, Parking, Free WiFi, Drinking water', 'NonSmoke, TwinBeds', '3 Adults', 'PHP 2,695.00', 'Booked and payable by'])
+			await expect(body).toContainText(t);
+	});
+
+	test('a late cancel the OTA still charges for keeps the receivable open', async ({ page }) => {
+		const orderId = await createOta(page, 'LATE', { startOffset: B + 34, ota: 'Agoda', net: '4000' });
+		const bookingId = (await sql`select id from bookings where order_id = ${orderId}`)[0]!.id as string;
+		await page.goto(`/${SLUG}/management/reservations/room/${bookingId}`);
+		await page.waitForLoadState('networkidle');
+		await page.locator('#otaReason').fill('Cancelled on Agoda within 1 day: charged 100%');
+		await page.getByLabel(/Agoda still pays us/).check();
+		await page.getByRole('button', { name: 'Cancelled at OTA' }).click();
+		await expect(page.getByText('Cancelled. The room is released. The OTA still owes the net.')).toBeVisible();
+		expect((await sql`select status from bookings where id = ${bookingId}`)[0]!.status).toBe('cancelled');
+		expect(await receivableOf(orderId)).toMatchObject({ status: 'open', outstanding: 400_000 });
+		await page.goto(`/${SLUG}/management/finance/ota?ota=Agoda`);
+		await expect(page.locator('body')).toContainText(`Ref ${ref('LATE')}`);
+	});
+
+	test('create Agoda A: no cash moves, the receivable carries the net, the detail page says OTA', async ({ page }) => {
+		const orderId = await createOta(page, 'A', { startOffset: B, ota: 'Agoda', net: '8500' });
 		await expect(page.getByText('Awaiting OTA payout').first()).toBeVisible();
 		// The OTA's bill is "owed by the OTA", not "moved to the city ledger", and cannot be moved there.
 		await expect(page.getByText(/Less: owed by Agoda \(paid at the OTA\)/).first()).toBeVisible();
@@ -151,28 +203,28 @@ test.describe('OTA bookings · end to end', () => {
 		expect(await orderRow(orderId)).toMatchObject({
 			ota_name: 'Agoda',
 			ota_reference: ref('A'),
-			g: 1_000_000,
-			c: 150_000,
+			g: 850_000,
+			c: 0,
 			n: 850_000,
-			total: 1_000_000,
+			total: 850_000,
 			status: 'confirmed'
 		});
 		const r = await receivableOf(orderId);
-		expect(r).toMatchObject({ status: 'open', orig: 1_000_000, outstanding: 1_000_000 });
+		expect(r).toMatchObject({ status: 'open', orig: 850_000, outstanding: 850_000 });
 		const cash =
 			await sql`select count(*)::int n from cash_movements where payment_id in (select id from payments where order_id = ${orderId})`;
 		expect(cash[0]!.n).toBe(0);
 	});
 
 	test('create Agoda B (second room type) and Booking.com C', async ({ page }) => {
-		await createOta(page, 'B', { startOffset: B, row: 1, ota: 'Agoda', gross: '6000', pct: '15' });
-		await createOta(page, 'C', { startOffset: B + 2, ota: 'Booking.com', gross: '8000', pct: '18' });
+		await createOta(page, 'B', { startOffset: B, row: 1, ota: 'Agoda', net: '5100' });
+		await createOta(page, 'C', { startOffset: B + 2, ota: 'Booking.com', net: '8000' });
 		expect((await orderRow(made.C!.orderId)).ota_name).toBe('Booking.com');
 	});
 
 	test('the same OTA reference twice is refused with a plain message', async ({ page }) => {
 		const sheet = await addRoom(page, B + 4, 2);
-		await fillOta(sheet, { guest: 'DUMMY OTA Duplicate', ota: 'Agoda', ref: ref('A'), gross: '5000', pct: '10' });
+		await fillOta(sheet, { guest: 'DUMMY OTA Duplicate', ota: 'Agoda', ref: ref('A'), net: '5000' });
 		await sheet.getByRole('button', { name: 'Create OTA booking' }).click();
 		await expect(page.getByText(/already booked here/)).toBeVisible(); // shown as a toast, outside the drawer
 		await expect(page).not.toHaveURL(/\/transactions\//);
@@ -224,7 +276,7 @@ test.describe('OTA bookings · end to end', () => {
 	});
 
 	test('cancel at the OTA: no refund screen, the room is released, the receivable closes', async ({ page }) => {
-		const orderId = await createOta(page, 'D', { startOffset: B + 6, ota: 'Agoda', gross: '4000', pct: '15' });
+		const orderId = await createOta(page, 'D', { startOffset: B + 6, ota: 'Agoda', net: '4000' });
 		const bookingId = (await sql`select id from bookings where order_id = ${orderId}`)[0]!.id as string;
 		await page.goto(`/${SLUG}/management/reservations/room/${bookingId}`);
 		await page.waitForLoadState('networkidle');
@@ -268,12 +320,12 @@ test.describe('OTA bookings · end to end', () => {
 		await expect(page.getByRole('button', { name: 'Record payout' })).toBeDisabled(); // no statement reference yet
 		await page.locator('#otaStatementRef').fill(`DUMMY-STMT-${RUN}`);
 		await expect(page.getByText('Received ₱13,500.00')).toBeVisible();
-		await expect(page.getByText('Commission ₱2,500.00')).toBeVisible();
+		await expect(page.getByText('Commission ₱100.00')).toBeVisible();
 
 		await page.getByRole('button', { name: 'Record payout' }).click();
 		await expect(page.getByText(/Bank receives ₱13,500\.00; 2 booking/)).toBeVisible();
 		await page.getByRole('button', { name: 'Confirm' }).click();
-		await expect(page.getByText(/Payout recorded: ₱13,500\.00 received, ₱2,500\.00 commission/)).toBeVisible();
+		await expect(page.getByText(/Payout recorded: ₱13,500\.00 received, ₱100\.00 commission/)).toBeVisible();
 
 		// Both rows are gone from Agoda's tab; C is still waiting on Booking.com's.
 		await expect(page.locator('body')).not.toContainText(`Ref ${ref('A')}`);
@@ -299,7 +351,7 @@ test.describe('OTA bookings · end to end', () => {
 		await expect(block).toContainText(`Ref ${ref('A')}`);
 		await expect(block).toContainText(`Ref ${ref('B')}`);
 		await expect(block).toContainText('received ₱13,500.00');
-		await expect(block).toContainText('commission ₱2,500.00');
+		await expect(block).toContainText('commission ₱100.00');
 		// Search by a booking finds its statement; Booking.com has not paid anything of ours here.
 		await page.locator('#otaSearch').fill(ref('B'));
 		await expect(block.locator('tbody tr')).toHaveCount(1);
@@ -317,7 +369,7 @@ test.describe('OTA bookings · end to end', () => {
 	});
 
 	test('check in and check out an OTA guest: the zero folio balance does not block check-out', async ({ page }) => {
-		const orderId = await createOta(page, 'E', { startOffset: 0, nights: 1, row: 0, ota: 'Agoda', gross: '3000', pct: '15' });
+		const orderId = await createOta(page, 'E', { startOffset: 0, nights: 1, row: 0, ota: 'Agoda', net: '3000' });
 		const bookingId = (await sql`select id from bookings where order_id = ${orderId}`)[0]!.id as string;
 		await page.goto(`/${SLUG}/management/reservations/room/${bookingId}`);
 		await page.waitForLoadState('networkidle');
@@ -398,7 +450,7 @@ test.describe('OTA bookings · end to end', () => {
 		await expect(page.locator('li', { hasText: /^Expedia\s/ })).toBeVisible();
 
 		// A booking under Expedia, then switch Expedia off: staff cannot pick it, but its payout tab stays while it is owed.
-		await createOta(page, 'X', { startOffset: B + 20, ota: 'Expedia', gross: '5000', pct: '12' });
+		await createOta(page, 'X', { startOffset: B + 20, ota: 'Expedia', net: '5000' });
 		expect((await orderRow(made.X!.orderId)).ota_name).toBe('Expedia');
 
 		await page.goto(settings);

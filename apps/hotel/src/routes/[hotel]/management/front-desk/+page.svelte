@@ -687,25 +687,12 @@
 	let walkInMode = $state<'walkin' | 'ota'>('walkin');
 	let otaName = $state('');
 	let otaRef = $state('');
-	let otaGross = $state(''); // pesos, as typed
-	let otaPct = $state('');
-	let otaCommission = $state(''); // pesos, as typed
-	const otaGrossC = $derived(Math.round(Number(otaGross) * 100) || 0);
-	const otaCommissionC = $derived(Math.round(Number(otaCommission) * 100) || 0);
-	const otaNetC = $derived(otaGrossC - otaCommissionC);
-	const otaInvalid = $derived(
-		!otaName.trim() || !otaRef.trim() || otaGrossC <= 0 || otaCommissionC < 0 || otaCommissionC >= otaGrossC
-	);
-	/** Typing either commission field fills the other from the guest total. */
-	function onOtaPct() {
-		otaCommission = otaGrossC > 0 && otaPct !== '' ? ((otaGrossC * Number(otaPct)) / 10000).toFixed(2) : '';
-	}
-	function onOtaCommission() {
-		otaPct = otaGrossC > 0 && otaCommission !== '' ? ((Number(otaCommission) * 100 * 100) / otaGrossC).toFixed(2) : '';
-	}
-	function onOtaGross() {
-		if (otaPct !== '') onOtaPct();
-	}
+	// The OTA's voucher gives the hotel one amount: the net it pays out (pesos, as typed).
+	let otaNet = $state('');
+	const otaNetC = $derived(Math.round(Number(otaNet) * 100) || 0);
+	const otaInvalid = $derived(!otaName.trim() || !otaRef.trim() || otaNetC <= 0);
+	const textareaClass =
+		'mt-1 w-full min-w-0 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50';
 	// Which entry point built the current cart — lets the sheet hide the date-search
 	// form/results-list entirely when the cart came from picking rooms on the grid
 	// (availability was already checked there, so re-showing an unrelated search
@@ -3481,35 +3468,13 @@
 								</button>
 							{/each}
 						</div>
-						<GuestContactFields
-							prefix="wi"
-							emailOptional={walkInMode === 'ota'}
-							bind:valid={walkInContactValid}
-						/>
-						{#if walkInMode === 'ota'}<p class="-mt-2 text-xs text-ink-muted">Agoda often hides the email.</p>{/if}
-						<div>
-							<Label for="wiSpecialRequests">Special requests</Label>
-							<textarea
-								id="wiSpecialRequests"
-								name="specialRequests"
-								maxlength={1000}
-								rows="2"
-								class="w-full min-w-0 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-							></textarea>
-						</div>
 						{#if walkInMode === 'ota'}
-							<div class="space-y-3 border-t border-border pt-3">
-								<h3 class="text-sm font-semibold text-ink">OTA</h3>
+							<!-- Laid out in the same order as the printed voucher, so staff copy it top to bottom. -->
+							<section class="space-y-3" aria-label="OTA voucher">
 								<div class="grid grid-cols-2 gap-3">
 									<div>
 										<Label for="otaName">OTA</Label>
-										<select
-											id="otaName"
-											name="otaName"
-											bind:value={otaName}
-											required
-											class="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
-										>
+										<select id="otaName" name="otaName" bind:value={otaName} required class="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm">
 											<option value="" disabled>Select the OTA…</option>
 											{#each data.otaNames as n (n)}<option value={n}>{n}</option>{/each}
 										</select>
@@ -3518,42 +3483,80 @@
 										{/if}
 									</div>
 									<div>
-										<Label for="otaRef">OTA reference</Label>
-										<Input id="otaRef" name="otaReference" bind:value={otaRef} required maxlength={80} autocomplete="off" />
+										<Label for="otaRef">Booking ID</Label>
+										<Input id="otaRef" name="otaReference" bind:value={otaRef} required maxlength={80} autocomplete="off" class="mt-1" />
+									</div>
+								</div>
+								<p class="text-xs text-ink-muted">Booked and payable by {otaName || 'the OTA'}: prepaid, no payment is taken here.</p>
+
+								<h3 class="border-b border-border pb-1 text-xs font-semibold text-ink-muted">Guest</h3>
+								<GuestContactFields prefix="wi" emailOptional splitName bind:valid={walkInContactValid} />
+								<div class="grid grid-cols-2 gap-3">
+									<div>
+										<Label for="otaCountry">Country of residence</Label>
+										<Input id="otaCountry" name="country" maxlength={80} class="mt-1" />
+									</div>
+									<div class="text-sm">
+										<span class="text-xs text-ink-muted">Check-in → Check-out</span>
+										{#each walkInCart as l (l.id)}<div class="mt-1 text-ink tabular-nums">{l.checkIn} → {l.checkOut}</div>{/each}
 									</div>
 								</div>
 								<div>
-									<Label for="otaGross">Gross / sell rate on the OTA voucher (₱)</Label>
-									<Input id="otaGross" type="number" min="0.01" step="0.01" inputmode="decimal" bind:value={otaGross} oninput={onOtaGross} required class="tabular-nums" />
-									<input type="hidden" name="grossCentavos" value={otaGrossC} />
+									<Label for="otaOtherGuests">Other guests</Label>
+									<textarea id="otaOtherGuests" name="otherGuests" maxlength={1000} rows="2" class={textareaClass}></textarea>
 								</div>
-								<div class="grid grid-cols-2 gap-3">
-									<div>
-										<Label for="otaPct">Commission (%)</Label>
-										<Input id="otaPct" type="number" min="0" step="0.01" inputmode="decimal" bind:value={otaPct} oninput={onOtaPct} class="tabular-nums" />
-									</div>
-									<div>
-										<Label for="otaCommission">Commission + programs (₱)</Label>
-										<Input id="otaCommission" type="number" min="0" step="0.01" inputmode="decimal" bind:value={otaCommission} oninput={onOtaCommission} class="tabular-nums" />
-										<input type="hidden" name="commissionCentavos" value={otaCommissionC} />
-									</div>
+
+								<h3 class="border-b border-border pb-1 text-xs font-semibold text-ink-muted">Room</h3>
+								<table class="w-full text-sm">
+									<thead class="text-left text-xs text-ink-muted">
+										<tr><th class="font-normal">Room type</th><th class="font-normal">Rooms</th><th class="font-normal">Occupancy</th><th class="font-normal">Extra bed</th></tr>
+									</thead>
+									<tbody>
+										{#each walkInCart as l (l.id)}
+											<tr class="text-ink">
+												<td>{l.roomTypeName}</td>
+												<td class="tabular-nums">{l.roomCount}</td>
+												<td class="tabular-nums">{l.occupancy} adult{l.occupancy === 1 ? '' : 's'}</td>
+												<td class="tabular-nums">{l.extraBedsNeeded}</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+								<div>
+									<Label for="otaRatePlan">Rate plan name (on the voucher)</Label>
+									<Input id="otaRatePlan" name="ratePlanName" maxlength={200} placeholder="Room With Breakfast" class="mt-1" />
 								</div>
-								{#if otaGrossC > 0 && otaCommissionC >= otaGrossC}
-									<p class="text-xs text-danger">The commission must be less than the total.</p>
-								{/if}
+								<div>
+									<Label for="otaBenefits">Benefits included</Label>
+									<Input id="otaBenefits" name="benefits" maxlength={500} placeholder="Breakfast, Parking, Free WiFi" class="mt-1" />
+								</div>
+								<div>
+									<Label for="wiSpecialRequests">Special requests</Label>
+									<textarea id="wiSpecialRequests" name="specialRequests" maxlength={1000} rows="2" class={textareaClass}></textarea>
+								</div>
+								<div>
+									<Label for="otaCancelPolicy">Cancellation policy</Label>
+									<textarea id="otaCancelPolicy" name="cancellationPolicy" maxlength={2000} rows="2" class={textareaClass}></textarea>
+								</div>
+
 								<div class="rounded-lg bg-surface-2 px-3 py-2 text-sm">
-									<div class="flex items-center justify-between">
-										<span class="font-medium text-ink">You receive (net)</span>
-										<span class="font-semibold text-ink tabular-nums">{peso(Math.max(otaNetC, 0))}</span>
-									</div>
-									<div class="mt-1 flex items-center justify-between text-xs text-ink-muted">
+									<Label for="otaNet">Net rate on the voucher (incl. taxes & fees, ₱)</Label>
+									<Input id="otaNet" type="number" min="0.01" step="0.01" inputmode="decimal" bind:value={otaNet} required class="mt-1 tabular-nums" />
+									<input type="hidden" name="netCentavos" value={otaNetC} />
+									<p class="mt-1 text-xs text-ink-muted">What {otaName || 'the OTA'} pays the hotel, room and any extra bed together. It is the booking total.</p>
+									<div class="mt-2 flex items-center justify-between text-xs text-ink-muted">
 										<span>Our rate for these rooms</span>
 										<span class="tabular-nums">{peso(walkInCartGrandTotal)}</span>
 									</div>
 								</div>
-								<p class="text-xs text-ink-muted">Prepaid at the OTA: no payment is taken here. The net shows under Finance → OTA payouts until the OTA pays it out.</p>
-							</div>
+								<p class="text-xs text-ink-muted">The net shows under Finance → OTA payouts until the OTA pays it out.</p>
+							</section>
 						{:else}
+							<GuestContactFields prefix="wi" bind:valid={walkInContactValid} />
+							<div>
+								<Label for="wiSpecialRequests">Special requests</Label>
+								<textarea id="wiSpecialRequests" name="specialRequests" maxlength={1000} rows="2" class={textareaClass}></textarea>
+							</div>
 						<WalkinPaymentFields
 						totalCentavos={walkInCartGrandTotal}
 						cashier={data.cashier}

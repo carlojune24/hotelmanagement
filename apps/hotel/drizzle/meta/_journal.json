@@ -764,6 +764,13 @@
       "when": 1793329077811,
       "tag": "0108_zippy_mordo",
       "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "7",
+      "when": 1793841714058,
+      "tag": "0109_stale_lucky_pierre",
+      "breakpoints": true
     }
   ]
 }

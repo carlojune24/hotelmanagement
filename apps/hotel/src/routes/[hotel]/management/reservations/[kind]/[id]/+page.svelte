@@ -1015,9 +1015,13 @@
 				<form method="POST" action="?/otaClose" use:enhance class="mb-3 flex flex-wrap items-end gap-2">
 					<div class="min-w-56 flex-1">
 						<Label for="otaReason" class="text-xs">
-							{data.ota.name} {data.ota.reference}: nothing is refunded here, the OTA owes you less
+							{data.ota.name} {data.ota.reference}: nothing is refunded here
 						</Label>
 						<Input id="otaReason" name="reason" required maxlength={300} placeholder="Reason, e.g. guest cancelled on the OTA" class="mt-1 h-9" />
+						<label class="mt-1.5 flex items-center gap-1.5 text-xs text-ink-muted">
+							<input type="checkbox" name="otaStillPays" />
+							{data.ota.name} still pays us (no-show or late cancel charged per its policy). Unticked: the OTA owes you less.
+						</label>
 					</div>
 					<Button type="submit" name="outcome" value="cancelled" variant="outline">Cancelled at OTA</Button>
 					{#if data.canMarkNoShow}

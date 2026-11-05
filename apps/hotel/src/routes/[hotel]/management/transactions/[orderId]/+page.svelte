@@ -175,6 +175,11 @@
 				href="{base}/print/invoice/for-order/{data.order.id}"
 				target="_blank">Print all invoices</Button
 			>
+			{#if data.ota}
+				<Button variant="outline" size="sm" href="{base}/print/ota-voucher/{data.order.id}" target="_blank"
+					>{data.ota.name} voucher</Button
+				>
+			{/if}
 			{#if page.url.searchParams.has('back')}
 				<Button
 					variant="outline"

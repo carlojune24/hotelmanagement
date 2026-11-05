@@ -348,6 +348,9 @@ function walkInPaymentFrom(d: z.infer<typeof paymentFieldsSchema>, allocationsJs
 	};
 }
 
+const optText = (max: number) =>
+	z.string().trim().max(max).optional().transform((v) => v || null);
+
 export const actions: Actions = {
 	roomDetail: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'booking:read');
@@ -1143,7 +1146,7 @@ export const actions: Actions = {
 		redirect(303, `/${event.locals.hotel!.slug}/management/transactions/${orderId}${backQuery}`);
 	},
 
-	/** A prepaid OTA booking: no desk payment, the OTA's gross is the booking total. */
+	/** A prepaid OTA booking: no desk payment, the voucher's net is the booking total. */
 	otaCreate: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'booking:write');
 		const hotel = event.locals.hotel!;
@@ -1157,8 +1160,14 @@ export const actions: Actions = {
 				itemsJson: z.string(),
 				otaName: z.string().trim().min(1).max(80, 'Pick the OTA.'),
 				otaReference: z.string().trim().min(1).max(80),
-				grossCentavos: z.coerce.number().int().positive(),
-				commissionCentavos: z.coerce.number().int().min(0)
+				// The voucher's details; blank = not on the voucher.
+				country: optText(80),
+				otherGuests: optText(1000),
+				ratePlanName: optText(200),
+				benefits: optText(500),
+				cancellationPolicy: optText(2000),
+				// The "Net rate" on the voucher: what the OTA pays the hotel. The only amount staff enter.
+				netCentavos: z.coerce.number().int().positive()
 			})
 			.safeParse(raw);
 		if (!parsed.success) {
@@ -1184,8 +1193,16 @@ export const actions: Actions = {
 				ota: {
 					name: d.otaName,
 					reference: d.otaReference,
-					grossCentavos: d.grossCentavos,
-					commissionCentavos: d.commissionCentavos
+					// Net only: the booking total is what the OTA pays us, so there is no commission to record.
+					grossCentavos: d.netCentavos,
+					commissionCentavos: 0,
+					voucher: {
+						country: d.country,
+						otherGuests: d.otherGuests,
+						ratePlanName: d.ratePlanName,
+						benefits: d.benefits,
+						cancellationPolicy: d.cancellationPolicy
+					}
 				},
 				actor: event.locals.user
 			});

@@ -895,16 +895,18 @@ export async function markNoShow(
  * Cancels (or marks no-show) one room of an OTA booking. The guest paid the OTA, so nothing is refunded
  * here: the room is released and its share comes off the order's OTA receivable (the account closes as
  * written off when nothing is left). Refused once the OTA has already paid that account out — reverse
- * that payout by hand first.
+ * that payout by hand first. With `otaStillPays` (a no-show or late cancel the OTA still charged the guest
+ * for, per its policy) the receivable is left as it is: the OTA still owes the net.
  */
 export async function cancelOtaBooking(input: {
 	hotelId: string;
 	bookingId: string;
 	reason: string;
 	outcome: 'cancelled' | 'no_show';
+	otaStillPays?: boolean;
 	actor: SessionUser | null;
 }): Promise<{ orderCancelled: boolean }> {
-	const { hotelId, bookingId, outcome, actor } = input;
+	const { hotelId, bookingId, outcome, actor, otaStillPays = false } = input;
 	const reason = input.reason.trim();
 	if (!reason) throw new CancellationError('Enter a reason.');
 
@@ -918,7 +920,7 @@ export async function cancelOtaBooking(input: {
 			throw new CancellationError(`A ${booking.status.replace(/_/g, ' ')} booking can't be cancelled here.`);
 
 		const [entry] = await tx.select().from(receivableEntries).where(eq(receivableEntries.bookingId, bookingId)).limit(1);
-		if (entry) {
+		if (entry && !otaStillPays) {
 			const [acct] = await tx.select().from(receivables).where(eq(receivables.id, entry.receivableId)).for('update');
 			if (!acct || (acct.status !== 'open' && acct.status !== 'partial') || acct.outstandingCentavos < entry.amountCentavos)
 				throw new CancellationError('The OTA has already paid this booking out. Reverse that payout before cancelling.');
@@ -950,7 +952,7 @@ export async function cancelOtaBooking(input: {
 			bookingId,
 			fromStatus: 'confirmed',
 			toStatus: outcome,
-			note: `${outcome === 'no_show' ? 'No-show' : 'Cancelled'} at OTA (${order.otaName} ${order.otaReference}) — ${reason}`
+			note: `${outcome === 'no_show' ? 'No-show' : 'Cancelled'} at OTA (${order.otaName} ${order.otaReference})${otaStillPays ? ', OTA still pays' : ''} — ${reason}`
 		});
 		await tx
 			.update(folios)
@@ -975,7 +977,7 @@ export async function cancelOtaBooking(input: {
 		action: outcome === 'no_show' ? 'booking.ota_no_show' : 'booking.ota_cancel',
 		entityType: 'booking',
 		entityId: bookingId,
-		after: { reason, orderCancelled: result.orderCancelled }
+		after: { reason, otaStillPays, orderCancelled: result.orderCancelled }
 	});
 	return result;
 }

@@ -365,18 +365,23 @@ export const actions: Actions = {
 		}
 	},
 
-	/** Cancelled or no-show at the OTA: releases the room and takes its share off the OTA receivable; no refund. */
+	/** Cancelled or no-show at the OTA: releases the room; no refund. Its share comes off the OTA receivable unless the OTA still pays. */
 	otaClose: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'booking:write');
 		const hotelId = event.locals.hotel!.id;
 		if (event.params.kind !== 'room') return fail(400, { error: 'Only room bookings can be closed here.' });
 		const parsed = z
-			.object({ outcome: z.enum(['cancelled', 'no_show']), reason: z.string().trim().min(1, 'Enter a reason.').max(300) })
+			.object({
+				outcome: z.enum(['cancelled', 'no_show']),
+				reason: z.string().trim().min(1, 'Enter a reason.').max(300),
+				otaStillPays: z.literal('on').optional().transform((v) => v === 'on')
+			})
 			.safeParse(Object.fromEntries(await event.request.formData()));
 		if (!parsed.success) return fail(400, { error: parsed.error.issues[0]?.message ?? 'Enter a reason.' });
 		try {
 			await cancelOtaBooking({ hotelId, bookingId: event.params.id, ...parsed.data, actor: event.locals.user });
-			return { ok: parsed.data.outcome === 'no_show' ? 'Marked as no-show. The room is released.' : 'Cancelled. The room is released.' };
+			const owed = parsed.data.otaStillPays ? ' The OTA still owes the net.' : '';
+			return { ok: (parsed.data.outcome === 'no_show' ? 'Marked as no-show. The room is released.' : 'Cancelled. The room is released.') + owed };
 		} catch (e) {
 			if (e instanceof CancellationError) return fail(400, { error: e.message });
 			throw e;

@@ -16,7 +16,8 @@ import {
 	ratePlans,
 	roomTypes,
 	rooms,
-	roomAssignments
+	roomAssignments,
+	type OtaVoucher
 } from './db/schema/index';
 import { ACTIVE_BOOKING_STATUSES, getAvailableRoomType, roomHeldUntil } from './availability';
 import { checkHallAvailability } from './hall-availability';
@@ -784,6 +785,8 @@ export interface WalkInOta {
 	reference: string;
 	grossCentavos: number;
 	commissionCentavos: number;
+	/** The voucher's guest/stay details as keyed in. */
+	voucher?: OtaVoucher;
 }
 
 export interface WalkInPaymentInput {
@@ -1074,7 +1077,8 @@ export async function createWalkInBooking(params: {
 					otaReference: ota.reference,
 					otaGrossCentavos: ota.grossCentavos,
 					otaCommissionCentavos: ota.commissionCentavos,
-					otaNetCentavos: ota.grossCentavos - ota.commissionCentavos
+					otaNetCentavos: ota.grossCentavos - ota.commissionCentavos,
+					otaVoucher: ota.voucher ?? null
 				})
 			})
 			.returning({ id: orders.id });
