@@ -488,6 +488,7 @@
 							bind:adults
 							bind:children
 							onSearch={() => searchForRoom(rt.id)}
+							searchedGuests={data.stay ? data.stay.adults + data.stay.children : 0}
 							{stayQuery}
 							onQuickView={openQuickView}
 							onReserve={reserve}

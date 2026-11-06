@@ -36,7 +36,8 @@
 		onSearch,
 		onQuickView,
 		onReserve,
-		stayQuery = ''
+		stayQuery = '',
+		searchedGuests = 0
 	}: {
 		room: BrowsableRoomType;
 		hotelSlug: string;
@@ -61,6 +62,8 @@
 		onReserve: (room: AvailableRoomType, plan: AvailableRatePlan) => void;
 		/** Query string carried onto the detail page so it stays dated. */
 		stayQuery?: string;
+		/** Party size of the search shown (not the unsaved stepper), to explain a "no" honestly. */
+		searchedGuests?: number;
 	} = $props();
 
 	const peso = (centavos: number) =>
@@ -77,7 +80,34 @@
 	const ready = $derived(Boolean(checkIn && checkOut));
 	const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 	const guests = $derived(adults + children);
-	const overCapacity = $derived(guests > room.maxOccupancy);
+	// Most guests one room of this type takes: its beds plus every extra bed it allows.
+	const extraBedGuests = $derived(room.extraBedAllowed ? room.maxExtraBeds * room.extraBedCapacity : 0);
+	const maxParty = $derived(room.maxOccupancy + extraBedGuests);
+	const overCapacity = $derived(guests > maxParty);
+	const tooMany = $derived(unavailable && searchedGuests > maxParty);
+	const sleepsText = $derived(
+		extraBedGuests > 0
+			? `${maxParty} (${room.maxOccupancy} + ${room.maxExtraBeds} extra bed${room.maxExtraBeds === 1 ? '' : 's'})`
+			: String(maxParty)
+	);
+
+	// Party changes re-check straight away once dates are set; debounced so quick clicks make one request.
+	let stepTimer: ReturnType<typeof setTimeout> | undefined;
+	function stepGuests(nextAdults: number, nextChildren: number) {
+		adults = clamp(nextAdults, 1, 10);
+		children = clamp(nextChildren, 0, 10);
+		if (!ready) return;
+		clearTimeout(stepTimer);
+		stepTimer = setTimeout(() => void onSearch(), 400);
+	}
+
+	/** Shrinks the party to what one room takes (adults first) and searches, so the guest can book it. */
+	function bookForMax() {
+		const a = Math.min(adults, maxParty);
+		adults = a;
+		children = Math.min(children, maxParty - a);
+		void onSearch();
+	}
 
 	async function submit(e: SubmitEvent) {
 		e.preventDefault();
@@ -93,7 +123,7 @@
 
 	const pill = $derived.by((): { text: string; tone: '' | 'is-low' | 'is-out' } | null => {
 		if (searched) {
-			if (!live) return { text: 'Not available for your dates', tone: 'is-out' };
+			if (!live) return { text: tooMany ? 'Too many guests for one room' : 'Not available for your dates', tone: 'is-out' };
 			if (live.availableRooms <= FEW_LEFT_ROOMS)
 				return { text: `Only ${live.availableRooms} left for your dates`, tone: 'is-low' };
 			return null;
@@ -120,23 +150,23 @@
 			<div class="storefront-stepper-row">
 				<span class="text-sm">Adults</span>
 				<div class="storefront-stepper">
-					<button type="button" aria-label="Fewer adults" disabled={adults <= 1} onclick={() => (adults = clamp(adults - 1, 1, 10))}><MinusIcon /></button>
+					<button type="button" aria-label="Fewer adults" disabled={adults <= 1} onclick={() => stepGuests(adults - 1, children)}><MinusIcon /></button>
 					<span class="ledger-data">{adults}</span>
-					<button type="button" aria-label="More adults" disabled={adults >= 10} onclick={() => (adults = clamp(adults + 1, 1, 10))}><PlusIcon /></button>
+					<button type="button" aria-label="More adults" disabled={adults >= 10} onclick={() => stepGuests(adults + 1, children)}><PlusIcon /></button>
 				</div>
 			</div>
 			<div class="storefront-stepper-row">
 				<span class="text-sm">Children</span>
 				<div class="storefront-stepper">
-					<button type="button" aria-label="Fewer children" disabled={children <= 0} onclick={() => (children = clamp(children - 1, 0, 10))}><MinusIcon /></button>
+					<button type="button" aria-label="Fewer children" disabled={children <= 0} onclick={() => stepGuests(adults, children - 1)}><MinusIcon /></button>
 					<span class="ledger-data">{children}</span>
-					<button type="button" aria-label="More children" disabled={children >= 10} onclick={() => (children = clamp(children + 1, 0, 10))}><PlusIcon /></button>
+					<button type="button" aria-label="More children" disabled={children >= 10} onclick={() => stepGuests(adults, children + 1)}><PlusIcon /></button>
 				</div>
 			</div>
 		</div>
 		<p class="sf-roompick-note" class:is-warn={overCapacity}>
 			{#if overCapacity}
-				This room sleeps up to {room.maxOccupancy}. We will show what fits your party of {guests}.
+				This room sleeps up to {sleepsText}. For a party of {guests}, book a second room for the rest.
 			{:else}
 				Crossed-out nights are sold out for this room.
 			{/if}
@@ -195,7 +225,15 @@
 			<RoomRates room={live} nights={search!.nights} {vatRateBps} {onReserve} />
 		{:else}
 			<div class="sf-stay-none">
-				<p>This room isn't available for your dates or party size. Try other dates, or have a look at the other rooms.</p>
+				{#if tooMany}
+					<p>
+						This room sleeps up to {sleepsText}. For your party of {searchedGuests}, book this room for {maxParty}
+						now, then come back and add a second room for the other {searchedGuests - maxParty}.
+					</p>
+					<button type="button" class="sf-btn sf-btn--sm" onclick={bookForMax}>Book for {maxParty} guests</button>
+				{:else}
+					<p>This room isn't available for your dates or party size. Try other dates, or have a look at the other rooms.</p>
+				{/if}
 				<button type="button" class="sf-btn sf-btn--outline sf-btn--sm" onclick={() => (picking = true)}>Change dates</button>
 			</div>
 		{/if}

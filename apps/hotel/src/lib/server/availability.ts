@@ -485,6 +485,10 @@ export interface BrowsableRoomType {
 	photos: RoomPhoto[];
 	baseOccupancy: number;
 	maxOccupancy: number;
+	/** Extra-bed policy, so a card can say how big a party one room takes (base + extra beds). */
+	extraBedAllowed: boolean;
+	maxExtraBeds: number;
+	extraBedCapacity: number;
 	sizeSqm: number | null;
 	bedConfiguration: BedConfigEntry[];
 	bedFlexible: boolean;
@@ -555,6 +559,9 @@ export async function listBrowsableRoomTypes(
 		photos: (t.photos as RoomPhoto[]) ?? [],
 		baseOccupancy: t.baseOccupancy,
 		maxOccupancy: t.maxOccupancy,
+		extraBedAllowed: t.extraBedAllowed,
+		maxExtraBeds: t.maxExtraBeds ?? 0,
+		extraBedCapacity: t.extraBedCapacity,
 		sizeSqm: t.sizeSqm,
 		bedConfiguration: (t.bedConfiguration as BedConfigEntry[]) ?? [],
 		bedFlexible: t.bedFlexible,
