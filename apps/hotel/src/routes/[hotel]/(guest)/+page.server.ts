@@ -1,5 +1,6 @@
 import { getStorefrontAvailability, listBrowsableRoomTypes, searchAvailability } from '$lib/server/availability';
 import { todayInTimezone } from '$lib/server/front-desk';
+import { MAX_ROOMS_PER_LINE } from '$lib/pricing-utils';
 import type { PageServerLoad } from './$types';
 
 /** How far ahead the date picker shows availability. */
@@ -37,8 +38,41 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			: Promise.resolve(null)
 	]);
 
+	// A party too big for one room of a type is also offered N rooms of it (4 guests → 2 × "Good for 2").
+	// One extra search per distinct N — normally just N = 2. Only whole-room rates that fit without an
+	// extra bed qualify: "Good for 1" × 2 is never offered for 2 guests.
+	const party = adults + children;
+	const roomsNeeded = new Set(
+		browsableRoomTypes
+			.map((t) => Math.ceil(party / Math.max(1, t.maxOccupancy)))
+			.filter((n) => n >= 2 && n <= MAX_ROOMS_PER_LINE)
+	);
+	const splitRooms = validStay
+		? (
+				await Promise.all(
+					[...roomsNeeded].map(async (roomCount) =>
+						(await searchAvailability({ hotelId, checkIn, checkOut, occupancy: party, roomCount, accessibleOnly: false }))
+							.filter((room) => Math.ceil(party / room.maxOccupancy) === roomCount)
+							.map((room) => ({
+								roomCount,
+								party,
+								room: {
+									...room,
+									ratePlans: room.ratePlans.filter(
+										(p) => p.fitsParty && p.extraBedsNeeded === 0 && (p.maxGuests == null || p.maxGuests >= room.maxOccupancy)
+									)
+								}
+							}))
+							.filter((s) => s.room.ratePlans.length > 0)
+					)
+				)
+			).flat()
+		: [];
+
 	return {
 		browsableRoomTypes,
+		/** Room types offered as several rooms for a party too big for one; see `splitRooms` above. */
+		splitRooms,
 		/** The hotel's own "today" — the calendar's first pickable day. */
 		today,
 		/** One entry per night for the next year: free / few left / full. */

@@ -11,7 +11,7 @@
 	import AccessibilityIcon from '@lucide/svelte/icons/accessibility';
 	import XIcon from '@lucide/svelte/icons/x';
 	import { humanize } from '$lib/room-line';
-	import RoomRates from '$lib/components/storefront/room-rates.svelte';
+	import RoomRates, { type SplitOffer } from '$lib/components/storefront/room-rates.svelte';
 	import { amenityIcon } from '$lib/amenity-icons';
 	import { AMENITY_CATEGORY_LABELS, AMENITY_CATEGORY_ORDER } from '$lib/amenity-categories';
 	import type { AvailableRatePlan, AvailableRoomType, BrowsableRoomType } from '$lib/server/availability';
@@ -27,6 +27,7 @@
 		open = $bindable(false),
 		room,
 		live = null,
+		split = null,
 		search = null,
 		hotelSlug,
 		vatRateBps,
@@ -38,12 +39,14 @@
 		open?: boolean;
 		room: BrowsableRoomType | null;
 		live?: AvailableRoomType | null;
+		/** The same room as N rooms, for a party too big for one. */
+		split?: SplitOffer | null;
 		search?: { checkIn: string; checkOut: string; nights: number } | null;
 		hotelSlug: string;
 		vatRateBps: number;
 		themeStyle: string;
 		stayQuery?: string;
-		onReserve: (room: AvailableRoomType, plan: AvailableRatePlan) => void;
+		onReserve: (room: AvailableRoomType, plan: AvailableRatePlan, roomCount?: number) => void;
 		onPickDates: () => void;
 	} = $props();
 
@@ -125,9 +128,9 @@
 						<p class="mt-4 leading-relaxed text-[var(--ledger-ink-muted)]">{room.description}</p>
 					{/if}
 
-					{#if live && search}
+					{#if (live || split) && search}
 						<h3>Your stay</h3>
-						<RoomRates room={live} nights={search.nights} {vatRateBps} {onReserve} />
+						<RoomRates room={live} {split} nights={search.nights} {vatRateBps} {onReserve} />
 					{:else if searched}
 						<p class="sf-room-unavailable">Not available for your dates. Try other dates.</p>
 					{/if}
@@ -147,7 +150,7 @@
 				</div>
 
 				<div class="sf-qv-foot">
-					{#if live}
+					{#if live || split}
 						<a href={detailHref} class="sf-link">Full details</a>
 					{:else if searched}
 						<button type="button" class="sf-btn sf-btn--outline sf-btn--sm" onclick={onPickDates}>Change dates</button>

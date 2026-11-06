@@ -7,7 +7,7 @@
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 	import MinusIcon from '@lucide/svelte/icons/minus';
 	import PlusIcon from '@lucide/svelte/icons/plus';
-	import RoomRates from '$lib/components/storefront/room-rates.svelte';
+	import RoomRates, { type SplitOffer } from '$lib/components/storefront/room-rates.svelte';
 	import AvailabilityRangePicker from '$lib/components/storefront/availability-range-picker.svelte';
 	import { FEW_LEFT_ROOMS, type DayAvailability } from '$lib/day-availability';
 	import type { AvailableRatePlan, AvailableRoomType, BrowsableRoomType } from '$lib/server/availability';
@@ -26,6 +26,7 @@
 		vatRateBps,
 		search = null,
 		live = null,
+		split = null,
 		stockTonight = null,
 		days,
 		today,
@@ -46,6 +47,8 @@
 		search?: { checkIn: string; checkOut: string; nights: number } | null;
 		/** This room type's live result for the search; null when it is not available (or not searched). */
 		live?: AvailableRoomType | null;
+		/** The same room as N rooms, for a party too big for one. */
+		split?: SplitOffer | null;
 		/** Tonight's free count (undated). */
 		stockTonight?: { freeTonight: number; totalRooms: number } | null;
 		/** Per-night availability of THIS room type, for the card's own calendar. */
@@ -59,7 +62,7 @@
 		/** Search this stay and bring the guest back to this room, now with its live rates. */
 		onSearch: () => void;
 		onQuickView: (room: BrowsableRoomType) => void;
-		onReserve: (room: AvailableRoomType, plan: AvailableRatePlan) => void;
+		onReserve: (room: AvailableRoomType, plan: AvailableRatePlan, roomCount?: number) => void;
 		/** Query string carried onto the detail page so it stays dated. */
 		stayQuery?: string;
 		/** Party size of the search shown (not the unsaved stepper), to explain a "no" honestly. */
@@ -72,7 +75,9 @@
 	const cover = $derived(room.photos.find((p) => p.tag === 'cover')?.url ?? room.photos[0]?.url ?? null);
 	const detailHref = $derived(`${base}/rooms/${room.id}${stayQuery}`);
 	const searched = $derived(search !== null);
-	const unavailable = $derived(searched && live === null);
+	// What the rate list shows: one room, or (for a party too big for one) the same room as N rooms.
+	const rates = $derived(live ?? split?.room ?? null);
+	const unavailable = $derived(searched && rates === null);
 
 	// The card's own date picker: opened by "Check dates & price" / "Change dates", right inside this room.
 	let picking = $state(false);
@@ -85,6 +90,7 @@
 	const maxParty = $derived(room.maxOccupancy + extraBedGuests);
 	const overCapacity = $derived(guests > maxParty);
 	const tooMany = $derived(unavailable && searchedGuests > maxParty);
+	const roomsFor = (party: number) => Math.ceil(party / Math.max(1, room.maxOccupancy));
 	const sleepsText = $derived(
 		extraBedGuests > 0
 			? `${maxParty} (${room.maxOccupancy} + ${room.maxExtraBeds} extra bed${room.maxExtraBeds === 1 ? '' : 's'})`
@@ -123,9 +129,9 @@
 
 	const pill = $derived.by((): { text: string; tone: '' | 'is-low' | 'is-out' } | null => {
 		if (searched) {
-			if (!live) return { text: tooMany ? 'Too many guests for one room' : 'Not available for your dates', tone: 'is-out' };
-			if (live.availableRooms <= FEW_LEFT_ROOMS)
-				return { text: `Only ${live.availableRooms} left for your dates`, tone: 'is-low' };
+			if (!rates) return { text: tooMany ? `Not enough rooms free for ${searchedGuests} guests` : 'Not available for your dates', tone: 'is-out' };
+			if (rates.availableRooms <= FEW_LEFT_ROOMS)
+				return { text: `Only ${rates.availableRooms} left for your dates`, tone: 'is-low' };
 			return null;
 		}
 		if (!stockTonight || stockTonight.totalRooms === 0) return null;
@@ -166,7 +172,7 @@
 		</div>
 		<p class="sf-roompick-note" class:is-warn={overCapacity}>
 			{#if overCapacity}
-				This room sleeps up to {sleepsText}. For a party of {guests}, book a second room for the rest.
+				<UsersIcon aria-hidden="true" /><span>This room sleeps up to {sleepsText}. For a party of {guests}, we'll offer it as {roomsFor(guests)} rooms.</span>
 			{:else}
 				Crossed-out nights are sold out for this room.
 			{/if}
@@ -202,7 +208,7 @@
 					<h3>{room.name}</h3>
 					{#if pill}
 						<span class="sf-badge {pill.tone}">{pill.text}</span>
-					{:else if live}
+					{:else if rates}
 						<span class="sf-badge is-ok">Available for your dates</span>
 					{/if}
 				</div>
@@ -221,14 +227,14 @@
 
 		{#if picking}{@render picker()}{/if}
 
-		{#if live}
-			<RoomRates room={live} nights={search!.nights} {vatRateBps} {onReserve} />
+		{#if rates}
+			<RoomRates room={live} {split} nights={search!.nights} {vatRateBps} {onReserve} />
 		{:else}
 			<div class="sf-stay-none">
 				{#if tooMany}
 					<p>
-						This room sleeps up to {sleepsText}. For your party of {searchedGuests}, book this room for {maxParty}
-						now, then come back and add a second room for the other {searchedGuests - maxParty}.
+						Your party of {searchedGuests} needs {roomsFor(searchedGuests)} of these rooms, and fewer are free for these
+						dates. Try other dates or another room, or book this room for {maxParty} now.
 					</p>
 					<button type="button" class="sf-btn sf-btn--sm" onclick={bookForMax}>Book for {maxParty} guests</button>
 				{:else}

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { guestBase } from '$lib/guest-base';
 	import { enhance } from '$app/forms';
-import { pushState } from '$app/navigation';
+import { pushState, replaceState } from '$app/navigation';
 import { tick, untrack } from 'svelte';
 	import { page } from '$app/state';
 	import StorefrontNav from '$lib/components/storefront/storefront-nav.svelte';
@@ -233,6 +233,19 @@ import { tick, untrack } from 'svelte';
 		} catch {
 			/* an unreadable saved cart is simply ignored */
 		}
+		// A dish tapped on the Dining page arrives as ?dish=…: add it (or open its options) once, then drop
+		// the param so a reload doesn't add it again.
+		const dishId = page.url.searchParams.get('dish');
+		if (dishId) {
+			const item = data.menu.items.find((i) => i.id === dishId);
+			if (item?.isAvailable && !cart.some((l) => l.item.id === item.id)) {
+				startItem(item);
+				if (editing) void tick().then(() => document.getElementById(`dish-${item.id}`)?.scrollIntoView({ block: 'center' }));
+			}
+			const url = new URL(page.url);
+			url.searchParams.delete('dish');
+			void tick().then(() => replaceState(url, page.state));
+		}
 	});
 	$effect(() => {
 		const snapshot = cart.map((l) => ({ itemId: l.item.id, addons: l.addons, quantity: l.quantity, remarks: l.remarks }));
@@ -354,7 +367,7 @@ Online ordering is closed for today.
 					<ul>
 						{#each section.items as item (item.id)}
 							{@const open = editing?.item.id === item.id}
-							<li class="order-dish" class:is-sold-out={!item.isAvailable}>
+							<li id="dish-{item.id}" class="order-dish" class:is-sold-out={!item.isAvailable}>
 								<button type="button" class="order-row" class:has-photo={item.imageUrl} disabled={!item.isAvailable} aria-expanded={open} onclick={() => startItem(item)}>
 									<span class="min-w-0 flex-1">
 										<span class="storefront-menu-name">{item.name}{#if !item.isAvailable}<span class="storefront-menu-flag">Sold out today</span>{/if}</span>
@@ -410,209 +423,408 @@ Online ordering is closed for today.
 						{/each}
 					</ul>
 				{/each}
-			{:else if step === 2}
-<section aria-labelledby="review-h">
-<h2 id="review-h" class="ledger-label border-b border-[var(--ledger-ink)] pb-2">Review your order</h2>
-{#if cart.length === 0}
-<p class="mt-4 text-sm text-[var(--ledger-ink-muted)]">Your order is empty.</p>
-{:else}
-<div class="order-ledger mt-2">
-{@render orderLines(true)}
-<div class="order-total">
-<span>Subtotal <span class="text-xs text-[var(--ledger-ink-muted)]">VAT included</span></span>
-<span class="ledger-data text-lg">{peso(dishesTotal)}</span>
-</div>
-</div>
-<p class="mt-3 text-xs text-[var(--ledger-ink-muted)]">{isPre ? "Your order is served at your table time." : canDeliver ? "Next you choose pickup or delivery and a time." : "Next you choose a pickup time."}</p>
-{/if}
-<div class="mt-6 flex flex-wrap items-center gap-3">
-<button type="button" class="ledger-btn-ghost min-h-12 px-5" onclick={back}>← Back to menu</button>
-<button type="button" class="ledger-btn-primary min-h-12 px-6" disabled={cart.length === 0 || closedToday} onclick={next}>Continue</button>
-</div>
-</section>
-{/if}
-
-{#if step >= 3}
-<div id="order-step">
-<form
-			method="POST"
-			action="?/place"
-			class="space-y-10"
-			use:enhance={() => {
-				submitting = true;
-				return async ({ result, update }) => {
-					if (result.type === 'redirect') {
-						try {
-							sessionStorage.removeItem(CART_KEY);
-						} catch {
-							/* nothing to clear */
-						}
-						window.location.href = result.location; // PayMongo or the order page: a full navigation
-						return;
-					}
-					submitting = false;
-					await update({ reset: false });
-				};
-			}}
-		>
-			<input type="hidden" name="payload" value={payload} />
-
-			{#if step === 3 && !isPre}
-				<fieldset>
-					<legend class="ledger-label w-full border-b border-[var(--ledger-rule)] pb-2">Pickup or delivery</legend>
-					<div class="mt-4 space-y-2" role="radiogroup" aria-label="Pickup or delivery">
-						<label class="order-pay-option">
-							<input type="radio" name="fulfilmentChoice" value="pickup" checked={fulfilment === 'pickup'} onchange={() => (fulfilment = 'pickup')} />
-							<span>
-								<span class="storefront-menu-name block">Pickup</span>
-								<span class="storefront-menu-desc block">Collect it at the restaurant. No delivery fee.</span>
-							</span>
-						</label>
+			{:else if step === 2}
+
+<section aria-labelledby="review-h">
+
+<h2 id="review-h" class="ledger-label border-b border-[var(--ledger-ink)] pb-2">Review your order</h2>
+
+{#if cart.length === 0}
+
+<p class="mt-4 text-sm text-[var(--ledger-ink-muted)]">Your order is empty.</p>
+
+{:else}
+
+<div class="order-ledger mt-2">
+
+{@render orderLines(true)}
+
+<div class="order-total">
+
+<span>Subtotal <span class="text-xs text-[var(--ledger-ink-muted)]">VAT included</span></span>
+
+<span class="ledger-data text-lg">{peso(dishesTotal)}</span>
+
+</div>
+
+</div>
+
+<p class="mt-3 text-xs text-[var(--ledger-ink-muted)]">{isPre ? "Your order is served at your table time." : canDeliver ? "Next you choose pickup or delivery and a time." : "Next you choose a pickup time."}</p>
+
+{/if}
+
+<div class="mt-6 flex flex-wrap items-center gap-3">
+
+<button type="button" class="ledger-btn-ghost min-h-12 px-5" onclick={back}>← Back to menu</button>
+
+<button type="button" class="ledger-btn-primary min-h-12 px-6" disabled={cart.length === 0 || closedToday} onclick={next}>Continue</button>
+
+</div>
+
+</section>
+
+{/if}
+
+
+
+{#if step >= 3}
+
+<div id="order-step">
+
+<form
+
+			method="POST"
+
+			action="?/place"
+
+			class="space-y-10"
+
+			use:enhance={() => {
+
+				submitting = true;
+
+				return async ({ result, update }) => {
+
+					if (result.type === 'redirect') {
+
+						try {
+
+							sessionStorage.removeItem(CART_KEY);
+
+						} catch {
+
+							/* nothing to clear */
+
+						}
+
+						window.location.href = result.location; // PayMongo or the order page: a full navigation
+
+						return;
+
+					}
+
+					submitting = false;
+
+					await update({ reset: false });
+
+				};
+
+			}}
+
+		>
+
+			<input type="hidden" name="payload" value={payload} />
+
+
+
+			{#if step === 3 && !isPre}
+
+				<fieldset>
+
+					<legend class="ledger-label w-full border-b border-[var(--ledger-rule)] pb-2">Pickup or delivery</legend>
+
+					<div class="mt-4 space-y-2" role="radiogroup" aria-label="Pickup or delivery">
+
+						<label class="order-pay-option">
+
+							<input type="radio" name="fulfilmentChoice" value="pickup" checked={fulfilment === 'pickup'} onchange={() => (fulfilment = 'pickup')} />
+
+							<span>
+
+								<span class="storefront-menu-name block">Pickup</span>
+
+								<span class="storefront-menu-desc block">Collect it at the restaurant. No delivery fee.</span>
+
+							</span>
+
+						</label>
+
 						{#if data.cfg.deliveryEnabled}
-<label class="order-pay-option">
-							<input type="radio" name="fulfilmentChoice" value="delivery" checked={fulfilment === 'delivery'} onchange={() => (fulfilment = 'delivery')} />
-							<span>
-								<span class="storefront-menu-name block">Delivered by our rider{data.cfg.deliveryFeeCentavos > 0 ? ` · ${peso(data.cfg.deliveryFeeCentavos)}` : ' · free'}</span>
-								<span class="storefront-menu-desc block">Our rider brings it to your address. The fee is added to your total, VAT included.</span>
-							</span>
+<label class="order-pay-option">
+
+							<input type="radio" name="fulfilmentChoice" value="delivery" checked={fulfilment === 'delivery'} onchange={() => (fulfilment = 'delivery')} />
+
+							<span>
+
+								<span class="storefront-menu-name block">Delivered by our rider{data.cfg.deliveryFeeCentavos > 0 ? ` · ${peso(data.cfg.deliveryFeeCentavos)}` : ' · free'}</span>
+
+								<span class="storefront-menu-desc block">Our rider brings it to your address. The fee is added to your total, VAT included.</span>
+
+							</span>
+
 						</label>
 {:else}
 <p class="text-sm text-[var(--ledger-ink-muted)]">This venue does not deliver online orders, so it is for pickup.</p>
-{/if}
-					</div>
-					{#if delivering}
-						<div class="mt-4">
-							<Label for="orAddress" class="ledger-label">Delivery address</Label>
-							<Textarea id="orAddress" bind:value={deliveryAddress} rows={2} maxlength={300} required placeholder="Street, barangay, city, and a landmark if you can" class="ledger-field mt-1" />
-						</div>
-					{/if}
-				</fieldset>
-			{/if}
-
-			{#if step === 3}
-<fieldset>
-<legend class="ledger-label w-full border-b border-[var(--ledger-rule)] pb-2">{isPre ? 'Served at your table' : delivering ? 'Delivery time' : 'Pickup time'}</legend>
-				{#if isPre}
-					<p class="mt-4 text-[0.9375rem]">
-						<span class="ledger-data">{dayLabel(data.reservation!.local.date)}, {clock(data.reservation!.local.time)}</span>
-						at {data.reservation!.venueTitle}, as booked.
-					</p>
-				{:else if days.length === 0}
-					<p class="mt-4 text-sm text-[var(--ledger-ink-muted)]">
-						{sameDayOnly ? 'Online ordering is closed for today.' : 'There are no pickup times left.'}
-						{#if callPhone}To order for another day, please call <a class="underline" href="tel:{callPhone}">{callPhone}</a>.{:else}Please try again tomorrow.{/if}
-					</p>
-				{:else}
-					{#if days.length > 1}
-						<div class="mt-4 flex flex-wrap gap-2" role="tablist" aria-label="Pickup day">
-							{#each days as d (d.date)}
-								<button type="button" role="tab" aria-selected={pickDate === d.date} class="order-chip" class:is-on={pickDate === d.date} onclick={() => { pickDate = d.date; pickTime = ''; }}>{dayLabel(d.date)}</button>
-							{/each}
-						</div>
-					{:else}
-						<p class="mt-4 text-sm">Today, <span class="ledger-data">{dayLabel(days[0]!.date)}</span></p>
-					{/if}
-					<div class="dining-slot-grid mt-4" role="radiogroup" aria-label="Pickup times">
-						{#each timesForDay as t (t)}
-							<label class="dining-slot">
-								<input type="radio" name="pickupTime" value={t} checked={pickTime === t} onchange={() => (pickTime = t)} />
-								<span class="ledger-data">{clock(t)}</span>
-							</label>
-						{/each}
-					</div>
-					{#if data.cfg.pickupNote && !delivering}<p class="mt-3 text-sm text-[var(--ledger-ink-muted)]">{data.cfg.pickupNote}</p>{/if}
-				{/if}
-			</fieldset>
-<div class="flex flex-wrap items-center gap-3">
-<button type="button" class="ledger-btn-ghost min-h-12 px-5" onclick={back}>← Back</button>
-<button type="button" class="ledger-btn-primary min-h-12 px-6" disabled={!whenOk || closedToday} onclick={next}>Continue</button>
-{#if form?.error}<p role="alert" class="w-full text-sm text-[var(--ledger-danger)]">{form.error}</p>{/if}{#if !whenOk}<p class="text-xs text-[var(--ledger-ink-muted)]">{delivering && deliveryAddress.trim().length < 8 ? "Enter the address to deliver to, then choose a time." : "Choose a time to continue."}</p>{/if}
-</div>
-{/if}
-
-			{#if step === 4}
-<section aria-label="Your order at a glance">
-<h2 class="ledger-label w-full border-b border-[var(--ledger-rule)] pb-2">Almost there</h2>
-<dl class="mt-3 divide-y divide-[var(--ledger-rule)] text-sm">
-<div class="flex items-baseline justify-between gap-4 py-2"><dt class="ledger-label">Order</dt><dd class="text-right">{itemCount} {itemCount === 1 ? "item" : "items"} · {peso(dishesTotal)} <button type="button" class="ml-2 underline underline-offset-2" onclick={() => go(2)}>Change</button></dd></div>
-{#if isPre}
-<div class="flex items-baseline justify-between gap-4 py-2"><dt class="ledger-label">At your table</dt><dd class="text-right">{dayLabel(data.reservation.local.date)}, {clock(data.reservation.local.time)}</dd></div>
-{:else}
-<div class="flex items-baseline justify-between gap-4 py-2"><dt class="ledger-label">{delivering ? "Delivery" : "Pickup"}</dt><dd class="text-right">{pickDate ? dayLabel(pickDate) : ""}{pickTime ? `, ${clock(pickTime)}` : ""} <button type="button" class="ml-2 underline underline-offset-2" onclick={() => go(3)}>Change</button></dd></div>
-{#if delivering}<div class="flex items-baseline justify-between gap-4 py-2"><dt class="ledger-label">Deliver to</dt><dd class="text-right">{deliveryAddress}</dd></div>{/if}
-{/if}
-</dl>
-</section>
-
-<fieldset class="space-y-5">
-				<legend class="ledger-label w-full border-b border-[var(--ledger-rule)] pb-2">Your details</legend>
-				<div class="absolute -left-[9999px]" aria-hidden="true">
-					<label>Website <input type="text" tabindex="-1" autocomplete="off" bind:value={honeypot} /></label>
-				</div>
-				<div>
-					<Label for="orName" class="ledger-label">Name</Label>
-					<Input id="orName" bind:value={guestName} required autocomplete="name" class="ledger-field mt-1" />
-				</div>
-				<div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
-					<div>
-						<Label for="orPhone" class="ledger-label">Mobile number</Label>
-						<Input id="orPhone" type="tel" bind:value={guestPhone} required autocomplete="tel" inputmode="tel" class="ledger-field mt-1" />
-						<p class="mt-1 text-xs text-[var(--ledger-ink-muted)]">So we can reach you about your order.</p>
-					</div>
-					<div>
-						<Label for="orEmail" class="ledger-label">Email (optional)</Label>
-						<Input id="orEmail" type="email" bind:value={guestEmail} autocomplete="email" inputmode="email" class="ledger-field mt-1" />
-						<p class="mt-1 text-xs text-[var(--ledger-ink-muted)]">We email your order code and tell you when it is ready.</p>
-					</div>
-				</div>
-				<div>
-					<Label for="orNote" class="ledger-label">Anything we should know (optional)</Label>
-					<Textarea id="orNote" bind:value={remarks} rows={2} maxlength={500} placeholder="Allergies, packaging, cutlery" class="ledger-field mt-1" />
-				</div>
-			</fieldset>
-
-			<fieldset>
-				<legend class="ledger-label w-full border-b border-[var(--ledger-rule)] pb-2">How you will pay</legend>
-				<div class="mt-4 space-y-2" role="radiogroup" aria-label="Payment">
-					{#if data.cfg.canPayOnline}
-						<label class="order-pay-option">
-							<input type="radio" name="payChoice" value="online" checked={payMode === 'online'} onchange={() => (payMode = 'online')} />
-							<span>
-								<span class="storefront-menu-name block">Pay now online</span>
-								<span class="storefront-menu-desc block">GCash, Maya, card or QR Ph. {isPre ? 'Your table is confirmed as soon as payment goes through, and your dishes will be ready when you sit down.' : 'Your order goes to the kitchen as soon as payment is confirmed.'}</span>
-							</span>
-						</label>
-					{/if}
-					{#if data.cfg.canPayAtVenue && !isPre}
-						<label class="order-pay-option">
-							<input type="radio" name="payChoice" value="venue" checked={payMode === 'venue'} onchange={() => (payMode = 'venue')} />
-							<span>
-								<span class="storefront-menu-name block">Pay at the restaurant</span>
-								<span class="storefront-menu-desc block">Your order goes straight to the kitchen. Pay when you {isPre ? 'dine' : delivering ? 'receive it' : 'collect it'}.</span>
-							</span>
-						</label>
-					{/if}
-				</div>
-			</fieldset>
-
-			{#if form?.error}
-				<p role="alert" class="border-t border-[var(--ledger-danger)] pt-3 text-sm text-[var(--ledger-danger)]">{form.error}</p>
-			{/if}
-
-			<div class="flex flex-wrap items-center gap-4">
-				<button type="submit" class="ledger-btn-primary min-h-12 w-full sm:w-auto" disabled={!ready || !detailsOk || submitting}>
-					{submitting ? 'One moment…' : payMode === 'online' ? `Pay ${peso(total)} now` : `Place order · ${peso(total)}`}
-				</button>
-				<p class="text-xs text-[var(--ledger-ink-muted)]">VAT included. {payMode === 'online' ? 'You will pay on PayMongo’s secure page.' : 'No payment is taken now.'}</p>
-			</div>
-		
-<div>
-<button type="button" class="ledger-btn-ghost min-h-12 px-5" onclick={back}>← Back</button>
-</div>
-{/if}
-</form>
-</div>
-{/if}
+{/if}
+
+					</div>
+
+					{#if delivering}
+
+						<div class="mt-4">
+
+							<Label for="orAddress" class="ledger-label">Delivery address</Label>
+
+							<Textarea id="orAddress" bind:value={deliveryAddress} rows={2} maxlength={300} required placeholder="Street, barangay, city, and a landmark if you can" class="ledger-field mt-1" />
+
+						</div>
+
+					{/if}
+
+				</fieldset>
+
+			{/if}
+
+
+
+			{#if step === 3}
+
+<fieldset>
+
+<legend class="ledger-label w-full border-b border-[var(--ledger-rule)] pb-2">{isPre ? 'Served at your table' : delivering ? 'Delivery time' : 'Pickup time'}</legend>
+
+				{#if isPre}
+
+					<p class="mt-4 text-[0.9375rem]">
+
+						<span class="ledger-data">{dayLabel(data.reservation!.local.date)}, {clock(data.reservation!.local.time)}</span>
+
+						at {data.reservation!.venueTitle}, as booked.
+
+					</p>
+
+				{:else if days.length === 0}
+
+					<p class="mt-4 text-sm text-[var(--ledger-ink-muted)]">
+
+						{sameDayOnly ? 'Online ordering is closed for today.' : 'There are no pickup times left.'}
+
+						{#if callPhone}To order for another day, please call <a class="underline" href="tel:{callPhone}">{callPhone}</a>.{:else}Please try again tomorrow.{/if}
+
+					</p>
+
+				{:else}
+
+					{#if days.length > 1}
+
+						<div class="mt-4 flex flex-wrap gap-2" role="tablist" aria-label="Pickup day">
+
+							{#each days as d (d.date)}
+
+								<button type="button" role="tab" aria-selected={pickDate === d.date} class="order-chip" class:is-on={pickDate === d.date} onclick={() => { pickDate = d.date; pickTime = ''; }}>{dayLabel(d.date)}</button>
+
+							{/each}
+
+						</div>
+
+					{:else}
+
+						<p class="mt-4 text-sm">Today, <span class="ledger-data">{dayLabel(days[0]!.date)}</span></p>
+
+					{/if}
+
+					<div class="dining-slot-grid mt-4" role="radiogroup" aria-label="Pickup times">
+
+						{#each timesForDay as t (t)}
+
+							<label class="dining-slot">
+
+								<input type="radio" name="pickupTime" value={t} checked={pickTime === t} onchange={() => (pickTime = t)} />
+
+								<span class="ledger-data">{clock(t)}</span>
+
+							</label>
+
+						{/each}
+
+					</div>
+
+					{#if data.cfg.pickupNote && !delivering}<p class="mt-3 text-sm text-[var(--ledger-ink-muted)]">{data.cfg.pickupNote}</p>{/if}
+
+				{/if}
+
+			</fieldset>
+
+<div class="flex flex-wrap items-center gap-3">
+
+<button type="button" class="ledger-btn-ghost min-h-12 px-5" onclick={back}>← Back</button>
+
+<button type="button" class="ledger-btn-primary min-h-12 px-6" disabled={!whenOk || closedToday} onclick={next}>Continue</button>
+
+{#if form?.error}<p role="alert" class="w-full text-sm text-[var(--ledger-danger)]">{form.error}</p>{/if}{#if !whenOk}<p class="text-xs text-[var(--ledger-ink-muted)]">{delivering && deliveryAddress.trim().length < 8 ? "Enter the address to deliver to, then choose a time." : "Choose a time to continue."}</p>{/if}
+
+</div>
+
+{/if}
+
+
+
+			{#if step === 4}
+
+<section aria-label="Your order at a glance">
+
+<h2 class="ledger-label w-full border-b border-[var(--ledger-rule)] pb-2">Almost there</h2>
+
+<dl class="mt-3 divide-y divide-[var(--ledger-rule)] text-sm">
+
+<div class="flex items-baseline justify-between gap-4 py-2"><dt class="ledger-label">Order</dt><dd class="text-right">{itemCount} {itemCount === 1 ? "item" : "items"} · {peso(dishesTotal)} <button type="button" class="ml-2 underline underline-offset-2" onclick={() => go(2)}>Change</button></dd></div>
+
+{#if data.reservation}
+
+<div class="flex items-baseline justify-between gap-4 py-2"><dt class="ledger-label">At your table</dt><dd class="text-right">{dayLabel(data.reservation.local.date)}, {clock(data.reservation.local.time)}</dd></div>
+
+{:else}
+
+<div class="flex items-baseline justify-between gap-4 py-2"><dt class="ledger-label">{delivering ? "Delivery" : "Pickup"}</dt><dd class="text-right">{pickDate ? dayLabel(pickDate) : ""}{pickTime ? `, ${clock(pickTime)}` : ""} <button type="button" class="ml-2 underline underline-offset-2" onclick={() => go(3)}>Change</button></dd></div>
+
+{#if delivering}<div class="flex items-baseline justify-between gap-4 py-2"><dt class="ledger-label">Deliver to</dt><dd class="text-right">{deliveryAddress}</dd></div>{/if}
+
+{/if}
+
+</dl>
+
+</section>
+
+
+
+<fieldset class="space-y-5">
+
+				<legend class="ledger-label w-full border-b border-[var(--ledger-rule)] pb-2">Your details</legend>
+
+				<div class="absolute -left-[9999px]" aria-hidden="true">
+
+					<label>Website <input type="text" tabindex="-1" autocomplete="off" bind:value={honeypot} /></label>
+
+				</div>
+
+				<div>
+
+					<Label for="orName" class="ledger-label">Name</Label>
+
+					<Input id="orName" bind:value={guestName} required autocomplete="name" class="ledger-field mt-1" />
+
+				</div>
+
+				<div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+
+					<div>
+
+						<Label for="orPhone" class="ledger-label">Mobile number</Label>
+
+						<Input id="orPhone" type="tel" bind:value={guestPhone} required autocomplete="tel" inputmode="tel" class="ledger-field mt-1" />
+
+						<p class="mt-1 text-xs text-[var(--ledger-ink-muted)]">So we can reach you about your order.</p>
+
+					</div>
+
+					<div>
+
+						<Label for="orEmail" class="ledger-label">Email (optional)</Label>
+
+						<Input id="orEmail" type="email" bind:value={guestEmail} autocomplete="email" inputmode="email" class="ledger-field mt-1" />
+
+						<p class="mt-1 text-xs text-[var(--ledger-ink-muted)]">We email your order code and tell you when it is ready.</p>
+
+					</div>
+
+				</div>
+
+				<div>
+
+					<Label for="orNote" class="ledger-label">Anything we should know (optional)</Label>
+
+					<Textarea id="orNote" bind:value={remarks} rows={2} maxlength={500} placeholder="Allergies, packaging, cutlery" class="ledger-field mt-1" />
+
+				</div>
+
+			</fieldset>
+
+
+
+			<fieldset>
+
+				<legend class="ledger-label w-full border-b border-[var(--ledger-rule)] pb-2">How you will pay</legend>
+
+				<div class="mt-4 space-y-2" role="radiogroup" aria-label="Payment">
+
+					{#if data.cfg.canPayOnline}
+
+						<label class="order-pay-option">
+
+							<input type="radio" name="payChoice" value="online" checked={payMode === 'online'} onchange={() => (payMode = 'online')} />
+
+							<span>
+
+								<span class="storefront-menu-name block">Pay now online</span>
+
+								<span class="storefront-menu-desc block">GCash, Maya, card or QR Ph. {isPre ? 'Your table is confirmed as soon as payment goes through, and your dishes will be ready when you sit down.' : 'Your order goes to the kitchen as soon as payment is confirmed.'}</span>
+
+							</span>
+
+						</label>
+
+					{/if}
+
+					{#if data.cfg.canPayAtVenue && !isPre}
+
+						<label class="order-pay-option">
+
+							<input type="radio" name="payChoice" value="venue" checked={payMode === 'venue'} onchange={() => (payMode = 'venue')} />
+
+							<span>
+
+								<span class="storefront-menu-name block">Pay at the restaurant</span>
+
+								<span class="storefront-menu-desc block">Your order goes straight to the kitchen. Pay when you {isPre ? 'dine' : delivering ? 'receive it' : 'collect it'}.</span>
+
+							</span>
+
+						</label>
+
+					{/if}
+
+				</div>
+
+			</fieldset>
+
+
+
+			{#if form?.error}
+
+				<p role="alert" class="border-t border-[var(--ledger-danger)] pt-3 text-sm text-[var(--ledger-danger)]">{form.error}</p>
+
+			{/if}
+
+
+
+			<div class="flex flex-wrap items-center gap-4">
+
+				<button type="submit" class="ledger-btn-primary min-h-12 w-full sm:w-auto" disabled={!ready || !detailsOk || submitting}>
+
+					{submitting ? 'One moment…' : payMode === 'online' ? `Pay ${peso(total)} now` : `Place order · ${peso(total)}`}
+
+				</button>
+
+				<p class="text-xs text-[var(--ledger-ink-muted)]">VAT included. {payMode === 'online' ? 'You will pay on PayMongo’s secure page.' : 'No payment is taken now.'}</p>
+
+			</div>
+
+		
+
+<div>
+
+<button type="button" class="ledger-btn-ghost min-h-12 px-5" onclick={back}>← Back</button>
+
+</div>
+
+{/if}
+
+</form>
+
+</div>
+
+{/if}
+
 </div>
 
 <!-- Your order -->

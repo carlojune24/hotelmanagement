@@ -255,6 +255,17 @@ Two distinct headers, never both on screen at once. On the five wizard steps (`d
 - **Gallery:** a uniform grid of 4:3 tiles (`object-fit: cover`), 2 columns on phones and 3 from 720px; counts of 1, 2 and 4 fill the width instead of stranding a tile.
 - **Dining menu:** the venue's showcase, not a price list. Header ("The {venue} menu", real dish and category counts, Order online / Reserve a table), category chips, then dish cards: 4:3 photo (opens the lightbox), category label, name in the display face, price in the accent, full description (4-line clamp), and "Make it yours" only when the dish really has add-ons. Sold-out dishes go grey with a "Sold out today" pill. Menus of 8 dishes or fewer flow as one grid (the category rides on each card); larger ones keep category sections. Only hotel-entered data is shown: no invented ratings, spice levels or "chef's picks".
 
+### Addendum (2026-11-06): a party bigger than one room
+- **Rate fit.** A rate's "Good for N" below the room type's max occupancy is a firm cap (no extra bed stretches it). Rates fitting with room to spare (a 2-guest rate for 1 guest) are muted (`.is-roomy`), still bookable; too-small ones are greyed and disabled (`.is-unfit`).
+- **Several rooms.** When the party is too big for one room, the homepage also offers the room as N rooms (whole-room rates only, no extra bed). A rate that fits both ways (3 guests: 1 room + extra bed, or 2 rooms) shows a pill choice (`.sf-rate-opts`, `role=radiogroup`) with the price of each option. The cheaper one is picked first, and the row keeps its place when the guest switches. Reserve reads "Reserve 2 rooms".
+- **Confirmation** (`split-room-confirm.svelte`): a small dialog, "Your party of 4 needs 2 rooms", a ruled register list of rooms with their guests (the same even split the server books), rate, stay, and an accent-ruled total. Buttons are `Book 2 rooms` and `Change guests`. A one-room Reserve never asks.
+- **Room picker note.** When the stepper party is over one room, the note becomes an accent callout (tinted background, accent left bar, users icon).
+
+### Addendum (2026-11-06): tap a dish to order it
+- **Dish rows on `/dining`** are tappable when the venue takes online orders or reservations and the dish isn't sold out. An invisible button covers the text side (`.sf-dish-hit`, a stretched button, so the heading markup stays valid), the photo still opens the lightbox, and a round accent `+` sits beside the price.
+- **Chooser** (`dish-order-choice.svelte`): a small dialog showing the dish photo, name (display face) and price (accent mono), then "How would you like it?" and two ruled option rows with icons: **Order online** (pickup or delivery, paid online) and **Reserve a table** (this dish is ready when you arrive). It only offers the ways the venue has turned on, and "Keep browsing" closes it.
+- **The dish travels as `?dish=`.** The order page adds it (or opens its size/add-on picker) once, then drops the param. The reserve page shows an accent note ("{dish} is waiting in your pre-order") and carries the dish through "Show times" and the booking into the pre-order step.
+
 <!-- ===================================================================== -->
 
 <!-- AS-BUILT: the print-document component and its route shell are implemented under

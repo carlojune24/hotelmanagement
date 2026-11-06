@@ -8,6 +8,9 @@
 	import ClockIcon from '@lucide/svelte/icons/clock';
 	import UtensilsCrossedIcon from '@lucide/svelte/icons/utensils-crossed';
 	import SlidersHorizontalIcon from '@lucide/svelte/icons/sliders-horizontal';
+	import PlusIcon from '@lucide/svelte/icons/plus';
+	import DishOrderChoice, { type DishChoice } from '$lib/components/storefront/dish-order-choice.svelte';
+	import { DEFAULT_DISPLAY_FONT, DISPLAY_FONTS } from '$lib/branding';
 	import type { DiningPhoto } from '$lib/server/db/schema/dining';
 	import type { PageData } from './$types';
 	const base = $derived(guestBase(page));
@@ -47,6 +50,15 @@
 		lightboxImages = images;
 		lightboxIndex = index;
 	}
+	// A tapped dish: "Order online" or "Reserve a table", with the dish already picked.
+	let dishChoice = $state<DishChoice | null>(null);
+	const themeStyle = $derived(
+		`--hotel-accent: ${data.theme.accent}; --hotel-accent-light: ${data.theme.accentLight}; ` +
+			`--hotel-accent-deep: ${data.theme.accentDeep}; --hotel-woven-pattern: url("${data.theme.patternUri}"); ` +
+			`--ledger-paper: ${data.theme.paper}; --ledger-paper-2: ${data.theme.paperDeep}; ` +
+			`--ledger-font-display: ${DISPLAY_FONTS[data.branding.fontDisplay ?? DEFAULT_DISPLAY_FONT].family};`
+	);
+
 	function hidePhoto(e: Event) {
 		(e.currentTarget as HTMLImageElement).style.display = 'none';
 	}
@@ -165,7 +177,7 @@
 								<div>
 									<h3>The {item.title} menu</h3>
 									<p class="sf-menu-sub">
-										{dishCount} dish{dishCount === 1 ? '' : 'es'}{sections.length > 1 ? ` across ${sections.length} categories` : ''}. Tap a photo to see it larger.
+										{dishCount} dish{dishCount === 1 ? '' : 'es'}{sections.length > 1 ? ` across ${sections.length} categories` : ''}.{canOrder || canReserve ? ' Tap a dish to order it, or a photo to see it larger.' : ' Tap a photo to see it larger.'}
 									</p>
 								</div>
 								{#if canOrder || canReserve}
@@ -192,6 +204,7 @@
 									<ul class="sf-dishes">
 										{#each section.items as dish (dish.id)}
 											{@const dp = dishPhotos(item.id)}
+											{@const orderable = dish.isAvailable && (canOrder || canReserve)}
 											<li class="sf-dish" class:is-sold-out={!dish.isAvailable}>
 												{#if dish.imageUrl}
 													<button type="button" class="sf-dish-photo" onclick={() => openLightbox(dp, dp.indexOf(dish.imageUrl!))} aria-label="View photo of {dish.name} larger">
@@ -201,10 +214,20 @@
 													<div class="sf-dish-photo is-empty" aria-hidden="true"><UtensilsCrossedIcon /></div>
 												{/if}
 												{#if !dish.isAvailable}<span class="sf-dish-flag">Sold out today</span>{/if}
-												<div class="sf-dish-body">
+												<div class="sf-dish-body" class:is-orderable={orderable}>
+													{#if orderable}
+														<!-- Covers the text side (not the photo, which opens the lightbox). -->
+														<button
+															type="button"
+															class="sf-dish-hit"
+															aria-label="Order {dish.name}, {peso(dish.priceCentavos)}"
+															onclick={() => (dishChoice = { venueId: item.id, dish, canOrder, canReserve })}
+														></button>
+													{/if}
 													<div class="sf-dish-top">
 														<h5 class="sf-dish-name">{dish.name}</h5>
 														<span class="sf-dish-price">{peso(dish.priceCentavos)}</span>
+														{#if orderable}<span class="sf-dish-add" aria-hidden="true"><PlusIcon /></span>{/if}
 													</div>
 													{#if dish.description}<p class="sf-dish-desc">{dish.description}</p>{/if}
 													{#if dish.hasAddons && dish.isAvailable}
@@ -240,6 +263,8 @@
 </main>
 
 <StorefrontLightbox images={lightboxImages} bind:index={lightboxIndex} />
+
+<DishOrderChoice bind:choice={dishChoice} {base} {themeStyle} />
 
 <StorefrontFooter
 	hotelSlug={data.hotel.slug}

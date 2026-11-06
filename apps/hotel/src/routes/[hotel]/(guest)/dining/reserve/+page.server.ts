@@ -1,8 +1,8 @@
 import { error, fail, redirect } from '@sveltejs/kit';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
-import { diningItems } from '$lib/server/db/schema/index';
+import { diningItems, diningMenuItems } from '$lib/server/db/schema/index';
 import {
 	ReservationError,
 	createReservation,
@@ -14,6 +14,7 @@ import { localParts, zonedToUtc } from '$lib/dining-slots';
 import type { Actions, PageServerLoad } from './$types';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const addDays = (date: string, n: number) => {
 	const d = new Date(`${date}T00:00:00Z`);
 	d.setUTCDate(d.getUTCDate() + n);
@@ -55,6 +56,23 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const orderAhead = ordering?.enabled && ordering.canPayOnline ? { prepMinutes: ordering.prepMinutes } : null;
 	const readyBy = Date.now() + (orderAhead?.prepMinutes ?? 0) * 60_000;
 
+	// A dish tapped on the Dining page rides along to the pre-order step (`?dish=` on the order page).
+	const rawDish = url.searchParams.get('dish') ?? '';
+	const [dish] = UUID_RE.test(rawDish)
+		? await db
+				.select({ id: diningMenuItems.id, name: diningMenuItems.name })
+				.from(diningMenuItems)
+				.where(
+					and(
+						eq(diningMenuItems.id, rawDish),
+						eq(diningMenuItems.hotelId, hotelId),
+						eq(diningMenuItems.diningItemId, venue.id),
+						eq(diningMenuItems.isActive, true),
+						isNull(diningMenuItems.deletedAt)
+					)
+				)
+		: [];
+
 	const slots = date
 		? await getSlotsForDate({ hotelId, venueId: venue.id, timezone, date, partySize: party })
 		: null;
@@ -69,6 +87,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		date,
 		party,
 		orderAhead,
+		dish: dish ?? null,
 		// A table too soon for the kitchen to have the pre-order ready is not offered.
 		slots:
 			slots?.map((s) => ({ time: s.time, available: s.available && zonedToUtc(date!, s.time, timezone).getTime() > readyBy })) ?? null
@@ -100,6 +119,7 @@ export const actions: Actions = {
 			guestEmail: String(raw.guestEmail ?? ''),
 			remarks: String(raw.remarks ?? '')
 		};
+		const dishParam = UUID_RE.test(String(raw.dish ?? '')) ? `&dish=${raw.dish}` : '';
 		// Honeypot: a real visitor never sees or fills this field.
 		if (raw.website) return fail(400, { error: 'Something went wrong. Please try again.', values: keep });
 
@@ -134,7 +154,7 @@ export const actions: Actions = {
 			});
 			// The table is held `pending`; choosing dishes and paying for them confirms it (and sends the
 			// confirmation email). Unpaid, it is released after the checkout window.
-			redirect(303, `${locals.isCustomDomain ? "" : `/${params.hotel}`}/dining/order?venue=${d.venue}&reservation=${r.code}&t=${r.accessToken}`);
+			redirect(303, `${locals.isCustomDomain ? "" : `/${params.hotel}`}/dining/order?venue=${d.venue}&reservation=${r.code}&t=${r.accessToken}${dishParam}`);
 		} catch (e) {
 			if (e instanceof ReservationError) return fail(409, { error: e.message, values: keep });
 			throw e;

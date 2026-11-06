@@ -59,6 +59,11 @@
 		<p class="storefront-section-lede text-[0.9375rem] leading-relaxed">
 			Choose a day and the size of your party, pick a time, then choose your dishes and pay online to confirm your table.
 		</p>
+		{#if data.dish}
+			<p class="reserve-dish-note mt-4">
+				<b>{data.dish.name}</b> is waiting in your pre-order. You can add more dishes after you pick a time.
+			</p>
+		{/if}
 
 		<!-- When: a plain GET, so the page works without scripts and times are shareable -->
 		<form
@@ -88,6 +93,7 @@
 				{:else}
 					<input type="hidden" name="venue" value={data.venue.id} />
 				{/if}
+				{#if data.dish}<input type="hidden" name="dish" value={data.dish.id} />{/if}
 
 				<div class="grid grid-cols-1 gap-5 sm:grid-cols-[1fr_9rem_auto] sm:items-end">
 					<div>
@@ -145,6 +151,7 @@
 				<input type="hidden" name="venue" value={data.venue.id} />
 				<input type="hidden" name="date" value={data.date} />
 				<input type="hidden" name="party" value={data.party} />
+				{#if data.dish}<input type="hidden" name="dish" value={data.dish.id} />{/if}
 				<!-- honeypot: real visitors never see this -->
 				<div class="absolute -left-[9999px]" aria-hidden="true">
 					<label>Website <input type="text" name="website" tabindex="-1" autocomplete="off" /></label>

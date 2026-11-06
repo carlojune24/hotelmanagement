@@ -227,8 +227,9 @@
 							class="mt-1"
 						/>
 						<p class="mt-1 text-xs text-ink-muted">
-							Most guests one room holds on this rate before extra beds. The room type's extra beds
-							add to it, charged at the Extra bed fee. Leave blank for no limit.
+							Most guests one room holds on this rate. When it is below the room type's max occupancy,
+							the cap is firm; otherwise the room type's extra beds add to it, charged at the Extra bed
+							fee. Leave blank for no limit.
 						</p>
 					</div>
 				</div>

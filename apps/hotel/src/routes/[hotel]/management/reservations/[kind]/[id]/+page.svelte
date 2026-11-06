@@ -22,6 +22,7 @@
 	import CancelBookingDialog from '$lib/components/staff/cancel-booking-dialog.svelte';
 	import IdCameraCapture from '$lib/components/staff/id-camera-capture.svelte';
 	import FolioPromoTrail from '$lib/components/staff/folio-promo-trail.svelte';
+	import ConfirmationCode from '$lib/components/staff/confirmation-code.svelte';
 	import { formatClockTime } from '$lib/stay-dates';
 	import type { ActionData, PageData } from './$types';
 
@@ -382,7 +383,8 @@
 				</Badge>
 				<span class="text-xs text-ink-muted">Order {statusLabel(data.detail.order.status)}</span>
 			</div>
-			<div class="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-sm text-ink-muted">
+			<div class="mt-2"><ConfirmationCode orderId={data.detail.order.id} /></div>
+			<div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-sm text-ink-muted">
 				<span class="truncate">{data.detail.guest.email}</span>
 				{#if data.detail.guest.phone}<span>{data.detail.guest.phone}</span>{/if}
 			</div>

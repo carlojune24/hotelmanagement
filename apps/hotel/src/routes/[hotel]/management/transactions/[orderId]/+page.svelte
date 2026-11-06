@@ -10,6 +10,7 @@
 	import PaymentFields from '$lib/components/staff/payment-fields.svelte';
 	import OrderPaymentForm from '$lib/components/staff/order-payment-form.svelte';
 	import FolioPromoTrail from '$lib/components/staff/folio-promo-trail.svelte';
+	import ConfirmationCode from '$lib/components/staff/confirmation-code.svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -137,10 +138,9 @@
 	<div class="flex flex-wrap items-start justify-between gap-4">
 		<div>
 			<h1 class="text-xl font-semibold tracking-tight text-ink">{data.guest.fullName}</h1>
-			<p class="mt-0.5 text-sm text-ink-muted">
-				Booking <span class="font-mono">{data.order.code}</span>
-				{#if data.guest.email}· {data.guest.email}{/if}
-				{#if data.guest.phone}· {data.guest.phone}{/if}
+			<div class="mt-2"><ConfirmationCode orderId={data.order.id} /></div>
+			<p class="mt-2 text-sm text-ink-muted">
+				{[data.guest.email, data.guest.phone].filter(Boolean).join(' · ')}
 			</p>
 			<div class="mt-2 flex flex-wrap items-center gap-2">
 				<Badge variant="outline" class={statusClass(data.order.status)}>

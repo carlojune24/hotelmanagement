@@ -20,6 +20,7 @@
 	import BookingBar from '$lib/components/storefront/booking-bar.svelte';
 	import RoomCard from '$lib/components/storefront/room-card.svelte';
 	import RoomQuickView from '$lib/components/storefront/room-quick-view.svelte';
+	import SplitRoomConfirm from '$lib/components/storefront/split-room-confirm.svelte';
 	import { brandBothWays, brandName, canonicalUrl, homeTitle, hotelJsonLd, spacedName } from '$lib/seo';
 	import { page } from '$app/state';
 	import type { PageData } from './$types';
@@ -98,8 +99,17 @@
 	);
 	const availableCount = $derived(data.liveRooms.length);
 
-	function reserve(room: AvailableRoomType, plan: AvailableRatePlan) {
+	const splitById = $derived(new Map(data.splitRooms.map((s) => [s.room.id, s])));
+	/** A several-room Reserve waiting on the guest's "Book 2 rooms" in the confirmation dialog. */
+	let pendingSplit = $state<{ room: AvailableRoomType; plan: AvailableRatePlan; roomCount: number } | null>(null);
+
+	function reserve(room: AvailableRoomType, plan: AvailableRatePlan, roomCount = 1, confirmed = false) {
 		if (!data.stay) return;
+		if (roomCount > 1 && !confirmed) {
+			pendingSplit = { room, plan, roomCount };
+			return;
+		}
+		pendingSplit = null;
 		cart.addRoom(
 			roomCartItem({
 				roomType: room,
@@ -107,7 +117,7 @@
 				checkIn: data.stay.checkIn,
 				checkOut: data.stay.checkOut,
 				occupancy: data.stay.adults + data.stay.children,
-				roomCount: 1,
+				roomCount,
 				vatRateBps: data.hotel.vatRateBps
 			})
 		);
@@ -480,6 +490,7 @@
 							vatRateBps={data.hotel.vatRateBps}
 							{search}
 							live={liveById.get(rt.id) ?? null}
+							split={splitById.get(rt.id) ?? null}
 							stockTonight={data.stockByRoomType[rt.id] ?? null}
 							days={data.dayAvailabilityByRoomType[rt.id] ?? data.dayAvailability}
 							today={data.today}
@@ -741,6 +752,7 @@
 	bind:open={qvOpen}
 	room={qvRoom}
 	live={qvRoom ? (liveById.get(qvRoom.id) ?? null) : null}
+	split={qvRoom ? (splitById.get(qvRoom.id) ?? null) : null}
 	{search}
 	hotelSlug={slug}
 	vatRateBps={data.hotel.vatRateBps}
@@ -749,3 +761,17 @@
 	onReserve={reserve}
 	onPickDates={pickDates}
 />
+
+{#if data.stay}
+	<SplitRoomConfirm
+		pending={pendingSplit}
+		party={data.stay.adults + data.stay.children}
+		checkIn={data.stay.checkIn}
+		checkOut={data.stay.checkOut}
+		nights={data.stay.nights}
+		vatRateBps={data.hotel.vatRateBps}
+		themeStyle={sheetTheme}
+		onConfirm={(p) => reserve(p.room, p.plan, p.roomCount, true)}
+		onCancel={() => (pendingSplit = null)}
+	/>
+{/if}

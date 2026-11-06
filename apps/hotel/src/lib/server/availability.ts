@@ -374,11 +374,12 @@ export async function searchAvailability(
 		for (const plan of plans) {
 			const price = await priceStay({ hotelId, ratePlanId: plan.id, checkIn, checkOut }, tx);
 			const cancellation = cancellationByPlan.get(plan.id);
-			// "Good for" caps the normal beds; the room type's extra beds still add on top.
+			// "Good for" caps the normal beds. Extra beds only add on top when the rate covers the whole room:
+			// a "Good for 1" rate in a 2-person room never stretches to 2 — that party books the "Good for 2" rate.
 			const fit = resolveOccupancyPlan(
 				{
 					maxOccupancy: Math.min(type.maxOccupancy, plan.maxGuests ?? type.maxOccupancy),
-					extraBedAllowed: type.extraBedAllowed,
+					extraBedAllowed: type.extraBedAllowed && (plan.maxGuests == null || plan.maxGuests >= type.maxOccupancy),
 					maxExtraBeds: type.maxExtraBeds ?? 0,
 					extraBedCapacity: type.extraBedCapacity
 				},

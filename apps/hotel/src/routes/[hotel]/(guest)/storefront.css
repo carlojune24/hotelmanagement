@@ -1023,30 +1023,51 @@ html:has(.woven-ledger) {
 	border-color: var(--ledger-rule);
 	border-radius: 10px;
 }
+/* Adults and Children sit side by side when there is room, stack when there isn't — never spill past the box. */
 .woven-ledger .sf-roompick-guests {
 	display: grid;
-	gap: 0 2rem;
+	grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+	gap: 0 1.25rem;
 	background: var(--ledger-paper);
 	border: 1px solid var(--ledger-rule);
 	border-radius: 10px;
-	padding: 0 1rem;
+	padding: 0.125rem 1rem;
 }
-.woven-ledger .sf-roompick-guests .storefront-stepper-row:last-of-type {
+.woven-ledger .sf-roompick-guests .storefront-stepper-row {
+	gap: 0.5rem;
+	min-width: 0;
 	border-bottom: none;
 }
-@media (min-width: 640px) {
-	.woven-ledger .sf-roompick-guests {
-		grid-template-columns: 1fr 1fr;
-	}
-	.woven-ledger .sf-roompick-guests .storefront-stepper-row {
-		border-bottom: none;
-	}
+.woven-ledger .sf-roompick-guests .storefront-stepper {
+	gap: 0.375rem;
+	flex-shrink: 0;
+}
+.woven-ledger .sf-roompick-guests .storefront-stepper button {
+	width: 36px;
+	height: 36px;
+	flex-shrink: 0;
 }
 .woven-ledger .sf-roompick-note {
 	font-size: 0.8125rem;
 	color: var(--ledger-ink-muted);
 }
 .woven-ledger .sf-roompick-note.is-warn {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.5rem;
+	padding: 0.625rem 0.875rem;
+	font-weight: 600;
+	color: var(--ledger-ink);
+	background: color-mix(in oklab, var(--hotel-accent) 14%, var(--ledger-paper));
+	border: 1px solid color-mix(in oklab, var(--hotel-accent) 45%, transparent);
+	border-left: 3px solid var(--hotel-accent);
+	border-radius: 8px;
+}
+.woven-ledger .sf-roompick-note.is-warn svg {
+	flex-shrink: 0;
+	width: 1rem;
+	height: 1rem;
+	margin-top: 0.125rem;
 	color: var(--hotel-accent-deep);
 }
 .woven-ledger .sf-roompick-actions {
@@ -1060,7 +1081,7 @@ html:has(.woven-ledger) {
 }
 @media (min-width: 720px) {
 	.woven-ledger .sf-roompick {
-		grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 		align-items: start;
 	}
 	.woven-ledger .sf-roompick-title,
@@ -1285,12 +1306,124 @@ html:has(.woven-ledger) {
 .woven-ledger .sf-rate.is-unfit .sf-rate-perks {
 	opacity: 0.45;
 }
+/* Roomier than the party needs: muted, still bookable. */
+.woven-ledger .sf-rate.is-roomy .sf-rate-name,
+.woven-ledger .sf-rate.is-roomy .sf-rate-perks,
+.woven-ledger .sf-rate.is-roomy .sf-rate-price {
+	opacity: 0.6;
+}
 .woven-ledger .sf-rate.is-unfit .sf-rate-go {
 	cursor: not-allowed;
 }
 .woven-ledger .sf-rate-unfit {
 	font-weight: 600;
 	color: var(--ledger-ink);
+}
+
+/* ---- a party too big for one room: "1 room + extra bed" vs "2 rooms" on a rate ---- */
+.woven-ledger .sf-rate-opts {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.375rem;
+	margin-top: 0.625rem;
+}
+.woven-ledger .sf-rate-opts button {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.375rem 0.75rem;
+	font-size: 0.8125rem;
+	font-weight: 600;
+	color: var(--ledger-ink-muted);
+	background: transparent;
+	border: 1px solid var(--ledger-rule);
+	border-radius: 999px;
+	cursor: pointer;
+}
+.woven-ledger .sf-rate-opts button:hover {
+	border-color: var(--hotel-accent);
+	color: var(--ledger-ink);
+}
+.woven-ledger .sf-rate-opts button[aria-checked='true'] {
+	color: var(--ledger-ink);
+	background: color-mix(in oklab, var(--hotel-accent) 16%, transparent);
+	border-color: var(--hotel-accent);
+}
+.woven-ledger .sf-rate-opts button:focus-visible {
+	outline: 2px solid var(--hotel-accent);
+	outline-offset: 2px;
+}
+.woven-ledger .sf-rate-split {
+	font-weight: 600;
+	color: var(--hotel-accent-deep);
+}
+
+/* ---- the "Your party of 4 needs 2 rooms" check ---- */
+.woven-ledger.sf-split {
+	/* The world's root class is a full page (min-height: 100vh); this is a small dialog. */
+	min-height: 0;
+	max-height: calc(100dvh - 2rem);
+	overflow-y: auto;
+	gap: 1.25rem;
+	border-radius: 14px;
+}
+.woven-ledger .sf-split-title {
+	font-family: var(--ledger-font-display);
+	font-size: 1.375rem;
+	font-weight: 500;
+	line-height: 1.2;
+	letter-spacing: -0.01em;
+}
+.woven-ledger .sf-split-sub {
+	margin-top: 0.375rem;
+	font-size: 0.875rem;
+	color: var(--ledger-ink-muted);
+}
+.woven-ledger .sf-split-rooms {
+	border-top: 1px solid var(--ledger-rule);
+}
+.woven-ledger .sf-split-rooms li {
+	display: flex;
+	justify-content: space-between;
+	padding: 0.625rem 0;
+	font-weight: 600;
+	border-bottom: 1px solid var(--ledger-rule);
+}
+.woven-ledger .sf-split-facts {
+	display: grid;
+	gap: 0.375rem;
+	font-size: 0.875rem;
+}
+.woven-ledger .sf-split-facts > div {
+	display: flex;
+	justify-content: space-between;
+	gap: 1rem;
+}
+.woven-ledger .sf-split-facts dt {
+	color: var(--ledger-ink-muted);
+}
+.woven-ledger .sf-split-facts dd {
+	text-align: right;
+}
+.woven-ledger .sf-split-facts .is-total {
+	margin-top: 0.375rem;
+	padding-top: 0.625rem;
+	font-size: 1rem;
+	font-weight: 700;
+	border-top: 2px solid var(--hotel-accent);
+}
+.woven-ledger .sf-split-facts .is-total dt {
+	color: var(--ledger-ink);
+}
+.woven-ledger .sf-split-fine {
+	font-size: 0.75rem;
+	color: var(--ledger-ink-muted);
+}
+.woven-ledger .sf-split-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.75rem 1.25rem;
 }
 /* Wide enough: [what it is and its terms] [price] [Reserve] on one row. */
 @container (min-width: 36rem) {
@@ -2090,6 +2223,153 @@ html:has(.woven-ledger) {
 .woven-ledger .sf-dish.is-sold-out :is(.sf-dish-name, .sf-dish-price) {
 	color: var(--ledger-ink-muted);
 }
+/* A dish the guest can order: the text side is a button that opens "Order online / Reserve a table". */
+.woven-ledger .sf-dish-body.is-orderable {
+	position: relative;
+	align-self: stretch;
+}
+.woven-ledger .sf-dish-hit {
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	padding: 0;
+	background: none;
+	border: 0;
+	cursor: pointer;
+}
+.woven-ledger .sf-dish-hit:focus-visible {
+	outline: 2px solid var(--hotel-accent);
+	outline-offset: -4px;
+	border-radius: 12px;
+}
+/* Name left; price and the + together on the right. */
+.woven-ledger .sf-dish-body.is-orderable .sf-dish-top {
+	align-items: center;
+	justify-content: flex-start;
+}
+.woven-ledger .sf-dish-body.is-orderable .sf-dish-price {
+	margin-left: auto;
+}
+.woven-ledger .sf-dish-add {
+	display: inline-grid;
+	flex-shrink: 0;
+	place-items: center;
+	width: 2rem;
+	height: 2rem;
+	color: var(--hotel-accent);
+	border: 1px solid color-mix(in oklab, var(--hotel-accent) 55%, transparent);
+	border-radius: 999px;
+	transition: background-color 0.2s var(--sf-ease), color 0.2s var(--sf-ease);
+}
+.woven-ledger .sf-dish-add svg {
+	width: 1rem;
+	height: 1rem;
+}
+.woven-ledger .sf-dish:hover .sf-dish-add,
+.woven-ledger .sf-dish-hit:focus-visible ~ .sf-dish-top .sf-dish-add {
+	color: var(--ledger-paper);
+	background: var(--hotel-accent);
+}
+
+/* ---- "How would you like it?" — the dish chooser dialog ---- */
+.woven-ledger.sf-dishpick {
+	/* The world's root class is a full page (min-height: 100vh); this is a small dialog. */
+	min-height: 0;
+	max-height: calc(100dvh - 2rem);
+	overflow-y: auto;
+	gap: 1rem;
+	border-radius: 14px;
+}
+.woven-ledger .sf-dishpick-head {
+	display: flex;
+	align-items: center;
+	gap: 1rem;
+}
+.woven-ledger .sf-dishpick-photo {
+	flex-shrink: 0;
+	width: 5rem;
+	height: 5rem;
+	object-fit: cover;
+	border-radius: 10px;
+	background: var(--ledger-paper-2);
+}
+.woven-ledger .sf-dishpick-photo.is-empty {
+	display: grid;
+	place-items: center;
+	color: var(--ledger-ink-muted);
+}
+.woven-ledger .sf-dishpick-name {
+	font-family: var(--ledger-font-display);
+	font-size: 1.375rem;
+	font-weight: 500;
+	line-height: 1.2;
+}
+.woven-ledger .sf-dishpick-price {
+	margin-top: 0.25rem;
+	font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+	font-weight: 600;
+	color: var(--hotel-accent);
+}
+.woven-ledger .sf-dishpick-ask {
+	font-size: 0.9375rem;
+	color: var(--ledger-ink-muted);
+}
+.woven-ledger .sf-dishpick-opts {
+	display: grid;
+	border-top: 1px solid var(--ledger-rule);
+}
+.woven-ledger .sf-dishpick-opt {
+	display: flex;
+	align-items: center;
+	gap: 0.875rem;
+	padding: 0.875rem 0.25rem;
+	color: var(--ledger-ink);
+	text-decoration: none;
+	border-bottom: 1px solid var(--ledger-rule);
+	transition: background-color 0.2s var(--sf-ease);
+}
+.woven-ledger .sf-dishpick-opt:hover {
+	background: color-mix(in oklab, var(--hotel-accent) 10%, transparent);
+}
+.woven-ledger .sf-dishpick-opt:focus-visible {
+	outline: 2px solid var(--hotel-accent);
+	outline-offset: -2px;
+}
+.woven-ledger .sf-dishpick-opt > svg {
+	flex-shrink: 0;
+	width: 1.25rem;
+	height: 1.25rem;
+	color: var(--hotel-accent);
+}
+.woven-ledger .sf-dishpick-opt > svg:last-child {
+	margin-left: auto;
+	color: var(--ledger-ink-muted);
+}
+.woven-ledger .sf-dishpick-opt > span {
+	display: grid;
+	gap: 0.125rem;
+}
+.woven-ledger .sf-dishpick-opt b {
+	font-weight: 600;
+}
+.woven-ledger .sf-dishpick-opt > span > span {
+	font-size: 0.8125rem;
+	color: var(--ledger-ink-muted);
+}
+.woven-ledger .sf-dishpick-close {
+	justify-self: start;
+}
+
+/* Reserve page: the dish picked on the Dining page, waiting for the pre-order step. */
+.woven-ledger .reserve-dish-note {
+	padding: 0.625rem 0.875rem;
+	font-size: 0.875rem;
+	color: var(--ledger-ink);
+	background: color-mix(in oklab, var(--hotel-accent) 12%, var(--ledger-paper));
+	border-left: 3px solid var(--hotel-accent);
+	border-radius: 8px;
+}
+
 .woven-ledger .sf-dish-flag {
 	position: absolute;
 	top: 0.5rem;
