@@ -1,0 +1,1 @@
+ALTER TABLE "dining_addon_groups" ADD COLUMN "sets_price" boolean DEFAULT false NOT NULL;

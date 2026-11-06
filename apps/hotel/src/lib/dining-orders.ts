@@ -33,6 +33,29 @@ export function priceLine(args: {
 	};
 }
 
+/** Splits a line's chosen add-ons into the unit price and the extras on top. A size (an add-on
+ *  from a `setsPrice` group) replaces the item's own price; every other add-on adds to it. */
+export function linePrices(
+	itemPriceCentavos: number,
+	addons: { priceCentavos: number; setsPrice?: boolean }[]
+): { unitPriceCentavos: number; addonPricesCentavos: number[] } {
+	const size = addons.find((a) => a.setsPrice);
+	return {
+		unitPriceCentavos: size ? size.priceCentavos : itemPriceCentavos,
+		addonPricesCentavos: addons.filter((a) => !a.setsPrice).map((a) => a.priceCentavos)
+	};
+}
+
+/** What a dish card shows: "from ₱X" (its cheapest available size) when it is sold in sizes, else its own price. */
+export function menuPriceLabel(
+	itemPriceCentavos: number,
+	groups: { setsPrice?: boolean; addons: { priceCentavos: number; isAvailable: boolean }[] }[],
+	peso: (centavos: number) => string
+): string {
+	const sizes = groups.filter((g) => g.setsPrice).flatMap((g) => g.addons.filter((a) => a.isAvailable).map((a) => a.priceCentavos));
+	return sizes.length ? `from ${peso(Math.min(...sizes))}` : peso(itemPriceCentavos);
+}
+
 export function sumLines(lines: PricedLine[]): { totalCentavos: number; vatCentavos: number } {
 	return {
 		totalCentavos: lines.reduce((s, l) => s + l.lineTotalCentavos, 0),

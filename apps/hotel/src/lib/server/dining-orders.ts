@@ -43,6 +43,7 @@ import {
 	canMoveOrder,
 	checkAddonSelection,
 	groupByStation,
+	linePrices,
 	orderStateFromStations,
 	priceLine,
 	sumLines,
@@ -192,14 +193,16 @@ export async function createDiningOrder(
 		const problem = checkAddonSelection(item.name, rules, chosenByGroup);
 		if (problem) throw new OrderError(problem);
 
+		const sizeGroupIds = new Set(groups.filter((g) => g.setsPrice).map((g) => g.id));
+		const chosenTagged = chosen.map((a) => ({ ...a, setsPrice: sizeGroupIds.has(a.groupId) }));
+		const prices = linePrices(item.priceCentavos, chosenTagged);
 		const priced = priceLine({
-			unitPriceCentavos: item.priceCentavos,
-			addonPricesCentavos: chosen.map((a) => a.priceCentavos),
+			...prices,
 			quantity: line.quantity,
 			taxable: item.taxable,
 			vatRateBps: hotel.vatRateBps
 		});
-		return { line, item, chosen, priced, sortOrder };
+		return { line, item, chosen: chosenTagged, unitPriceCentavos: prices.unitPriceCentavos, priced, sortOrder };
 	});
 	const lineTotals = sumLines(resolved.map((r) => r.priced));
 	if (lineTotals.totalCentavos <= 0) throw new OrderError('This order has nothing to charge.');
@@ -304,7 +307,7 @@ export async function createDiningOrder(
 					stationName: r.item.stationName,
 					taxable: r.item.taxable,
 					quantity: r.line.quantity,
-					unitPriceCentavos: r.item.priceCentavos,
+					unitPriceCentavos: r.unitPriceCentavos,
 					addonsCentavos: r.priced.addonsCentavos,
 					lineTotalCentavos: r.priced.lineTotalCentavos,
 					vatCentavos: r.priced.vatCentavos,
@@ -318,7 +321,7 @@ export async function createDiningOrder(
 						orderItemId: oi!.id,
 						addonId: a.id,
 						name: a.name,
-						priceCentavos: a.priceCentavos
+						priceCentavos: a.setsPrice ? 0 : a.priceCentavos // a size is already the unit price; never count it twice
 					}))
 				);
 			}

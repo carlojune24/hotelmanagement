@@ -211,6 +211,11 @@ export const diningAddonGroups = pgTable(
 		name: text('name').notNull(),
 		minChoices: integer('min_choices').notNull().default(0),
 		maxChoices: integer('max_choices'),
+		/** Sizes: the chosen option's price IS the item's price (not added on top). Always pick exactly 1. */
+		setsPrice: boolean('sets_price').notNull().default(false),
+		/** Set when this is one dish's own size list, typed on the dish form. Hidden from the Add-ons
+		 *  page and from other dishes; goes when the dish does. */
+		menuItemId: uuid('menu_item_id').references(() => diningMenuItems.id, { onDelete: 'cascade' }),
 		sortOrder: integer('sort_order').notNull().default(0),
 		createdAt: createdAt(),
 		updatedAt: updatedAt()

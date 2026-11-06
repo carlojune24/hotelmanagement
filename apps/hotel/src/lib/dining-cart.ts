@@ -1,4 +1,4 @@
-import { priceLine, sumLines } from './dining-orders';
+import { linePrices, priceLine, sumLines } from './dining-orders';
 
 /**
  * The guest's cart at a table: pure functions over plain arrays, so the rules (merging, limits, totals,
@@ -18,6 +18,8 @@ export interface CartAddon {
 	id: string;
 	name: string;
 	priceCentavos: number;
+	/** A size: its price replaces the dish's price instead of adding to it. */
+	setsPrice?: boolean;
 }
 export interface CartLine {
 	key: number;
@@ -71,7 +73,7 @@ export const quantityOf = (lines: CartLine[], itemId: string) => lines.filter((l
 
 export function cartTotals(lines: CartLine[]) {
 	const priced = lines.map((l) =>
-		priceLine({ unitPriceCentavos: l.item.priceCentavos, addonPricesCentavos: l.addons.map((a) => a.priceCentavos), quantity: l.quantity, taxable: true, vatRateBps: 0 })
+		priceLine({ ...linePrices(l.item.priceCentavos, l.addons), quantity: l.quantity, taxable: true, vatRateBps: 0 })
 	);
 	return {
 		priced,

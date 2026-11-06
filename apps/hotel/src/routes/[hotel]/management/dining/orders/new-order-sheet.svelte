@@ -17,7 +17,7 @@
 	import XIcon from '@lucide/svelte/icons/x';
 	import UtensilsIcon from '@lucide/svelte/icons/utensils';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
-	import { checkAddonSelection, priceLine, sumLines } from '$lib/dining-orders';
+	import { checkAddonSelection, linePrices, menuPriceLabel, priceLine, sumLines } from '$lib/dining-orders';
 	import type { PageData } from './$types';
 
 	let {
@@ -57,7 +57,7 @@
 	interface CartLine {
 		key: number;
 		item: Item;
-		addons: { id: string; name: string; priceCentavos: number }[];
+		addons: { id: string; name: string; priceCentavos: number; setsPrice?: boolean }[];
 		quantity: number;
 		remarks: string;
 	}
@@ -155,7 +155,7 @@
 			return;
 		}
 		const chosen = groups.flatMap((g) =>
-			g.addons.filter((a) => (editing!.picks[g.id] ?? []).includes(a.id)).map((a) => ({ id: a.id, name: a.name, priceCentavos: a.priceCentavos }))
+			g.addons.filter((a) => (editing!.picks[g.id] ?? []).includes(a.id)).map((a) => ({ id: a.id, name: a.name, priceCentavos: a.priceCentavos, setsPrice: g.setsPrice }))
 		);
 		addToCart(editing.item, chosen, editing.quantity, editing.remarks.trim());
 		editing = null;
@@ -164,8 +164,7 @@
 	const priced = $derived(
 		cart.map((l) =>
 			priceLine({
-				unitPriceCentavos: l.item.priceCentavos,
-				addonPricesCentavos: l.addons.map((a) => a.priceCentavos),
+				...linePrices(l.item.priceCentavos, l.addons),
 				quantity: l.quantity,
 				taxable: l.item.taxable,
 				vatRateBps: data.vatRateBps
@@ -277,7 +276,7 @@
 									{:else}
 										<PlusIcon class="size-4 text-ink-muted" aria-hidden="true" />
 									{/if}
-									<span class="min-w-16 shrink-0 text-right text-sm font-medium tabular-nums text-ink">{peso(item.priceCentavos)}</span>
+									<span class="min-w-16 shrink-0 text-right text-sm font-medium tabular-nums text-ink">{menuPriceLabel(item.priceCentavos, groupsFor(item), peso)}</span>
 								</button>
 
 								{#if isEditing && editing}
@@ -296,7 +295,7 @@
 														<Label class="flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-normal {a.isAvailable ? '' : 'opacity-50'}">
 															<Checkbox checked={on} disabled={!a.isAvailable} onCheckedChange={() => togglePick(g.id, a.id, g.maxChoices)} />
 															<span class="flex-1 text-ink">{a.name}</span>
-															<span class="text-xs tabular-nums text-ink-muted">{a.priceCentavos ? `+${peso(a.priceCentavos)}` : 'Free'}</span>
+															<span class="text-xs tabular-nums text-ink-muted">{g.setsPrice ? peso(a.priceCentavos) : a.priceCentavos ? `+${peso(a.priceCentavos)}` : 'Free'}</span>
 														</Label>
 													{/each}
 												</div>

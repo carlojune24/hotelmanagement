@@ -18,10 +18,11 @@
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
 	const base = $derived(`/${page.params.hotel}/management/dining`);
-	const peso = (centavos: number) =>
-		centavos === 0
+	// a size's price is the item's whole price, so it shows as ₱X, never "+₱X" or "Free"
+	const peso = (centavos: number, isSize = false) =>
+		centavos === 0 && !isSize
 			? 'Free'
-			: `+₱${(centavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+			: `${isSize ? '' : '+'}₱${(centavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 	let groupDialog = $state<{ open: boolean; group: AddonGroupWithAddons | null }>({
 		open: false,
@@ -32,7 +33,13 @@
 		addon: { id: string; name: string; priceCentavos: number; isAvailable: boolean } | null;
 	}>({ open: false, addon: null });
 
+	let sizesChecked = $state(false);
+	$effect(() => {
+		if (groupDialog.open) sizesChecked = untrack(() => groupDialog.group?.setsPrice ?? false);
+	});
+
 	const rule = (g: AddonGroupWithAddons) => {
+		if (g.setsPrice) return 'Sizes · pick 1, its price is the item price';
 		if (g.minChoices > 0 && g.maxChoices === g.minChoices) return `Pick exactly ${g.minChoices}`;
 		if (g.minChoices > 0) return g.maxChoices ? `Pick ${g.minChoices}–${g.maxChoices}` : `Pick at least ${g.minChoices}`;
 		return g.maxChoices ? `Optional, up to ${g.maxChoices}` : 'Optional';
@@ -122,7 +129,7 @@
 										{a.name}
 										{#if !a.isAvailable}<span class="ml-1 text-xs text-ink-muted no-underline">Sold out</span>{/if}
 									</span>
-									<span class="text-sm tabular-nums text-ink-muted">{peso(a.priceCentavos)}</span>
+									<span class="text-sm tabular-nums text-ink-muted">{peso(a.priceCentavos, g.setsPrice)}</span>
 									{#if data.canManageMenu}
 										<Button
 											variant="ghost"
@@ -201,7 +208,14 @@
 					<Label for="groupName">Name</Label>
 					<Input id="groupName" name="name" required maxlength={80} value={group?.name ?? ''} placeholder="Choose a side" class="mt-1" />
 				</div>
-				<div class="grid grid-cols-2 gap-3">
+				<Label class="flex items-start gap-2 text-sm font-normal text-ink">
+					<Checkbox name="setsPrice" bind:checked={sizesChecked} value="on" class="mt-0.5" />
+					<span>
+						Sizes: each option has its own full price
+						<span class="block text-xs text-ink-muted">e.g. 8oz / 12oz / 16oz. The guest picks exactly one, and its price replaces the item's price.</span>
+					</span>
+				</Label>
+				<div class="grid grid-cols-2 gap-3" class:hidden={sizesChecked}>
 					<div>
 						<Label for="groupMin">Fewest to pick</Label>
 						<Input id="groupMin" name="minChoices" type="number" min="0" max="99" value={group?.minChoices ?? 0} class="mt-1" />

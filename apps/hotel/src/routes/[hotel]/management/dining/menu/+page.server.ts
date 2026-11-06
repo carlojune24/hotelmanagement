@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import {
 	diningAddonGroups,
+	diningAddons,
 	diningItems,
 	diningMenuCategories,
 	diningMenuItemAddonGroups,
@@ -78,6 +79,26 @@ const itemSchema = z.object({
 		.uuid('Pick a station from your list.'),
 	sortOrder: z.coerce.number().int().min(0).max(100000)
 });
+
+const sizeSchema = z.object({
+	name: z.string().trim().min(1, 'Give every size a name, e.g. 12oz or Good for 2.').max(80),
+	pricePhp: moneyPhp()
+});
+
+/** The dish's own sizes from the form's repeated `sizeName` / `sizePricePhp` rows; fully blank rows are skipped. */
+function readSizes(form: FormData) {
+	const names = form.getAll('sizeName').map(String);
+	const prices = form.getAll('sizePricePhp').map(String);
+	return z
+		.array(sizeSchema)
+		.min(1, 'Add at least one size, or switch to one price.')
+		.max(30)
+		.safeParse(
+			names
+				.map((name, i) => ({ name, pricePhp: prices[i] ?? '' }))
+				.filter((r) => r.name.trim() !== '' || r.pricePhp.trim() !== '')
+		);
+}
 
 export const actions: Actions = {
 	createCategory: async (event) => {
@@ -207,8 +228,15 @@ export const actions: Actions = {
 		const hotelId = event.locals.hotel!.id;
 		const form = await event.request.formData();
 		const raw = Object.fromEntries(form);
+		const sized = raw.priceMode === 'sizes' ? readSizes(form) : null;
+		if (sized && !sized.success) {
+			return fail(400, { error: sized.error.issues[0]?.message ?? 'Check the sizes and try again.' });
+		}
+		const sizes = sized?.data ?? null;
 		const parsed = itemSchema.safeParse({
 			...raw,
+			// a dish sold in sizes keeps its cheapest size as its own price (what lists and reports show)
+			pricePhp: sizes ? Math.min(...sizes.map((z) => z.pricePhp)) : raw.pricePhp,
 			categoryId: raw.categoryId && raw.categoryId !== 'none' ? raw.categoryId : undefined,
 			description: raw.description || undefined,
 			stationId: raw.stationId && raw.stationId !== 'none' ? raw.stationId : '',
@@ -262,7 +290,8 @@ export const actions: Actions = {
 					and(
 						inArray(diningAddonGroups.id, groupIds),
 						eq(diningAddonGroups.hotelId, hotelId),
-						eq(diningAddonGroups.diningItemId, d.diningItemId)
+						eq(diningAddonGroups.diningItemId, d.diningItemId),
+						isNull(diningAddonGroups.menuItemId) // another dish's own sizes are not on offer
 					)
 				);
 			if (valid.length !== groupIds.length) {
@@ -337,6 +366,33 @@ export const actions: Actions = {
 					.insert(diningMenuItemAddonGroups)
 					.values(groupIds.map((addonGroupId) => ({ menuItemId, addonGroupId })));
 			}
+
+			// The dish's own sizes live in a "Size" group only it uses. Rewritten only when they change,
+			// so carts already holding a size stay valid; past orders keep their snapshotted size.
+			const own = await tx
+				.select({ groupId: diningAddonGroups.id, name: diningAddons.name, priceCentavos: diningAddons.priceCentavos })
+				.from(diningAddonGroups)
+				.leftJoin(diningAddons, eq(diningAddons.groupId, diningAddonGroups.id))
+				.where(eq(diningAddonGroups.menuItemId, menuItemId))
+				.orderBy(asc(diningAddons.sortOrder));
+			const sig = (rows: { name: string | null; priceCentavos: number | null }[]) => rows.map((r) => `${r.name}=${r.priceCentavos}`).join('|');
+			const unchanged =
+				!!sizes && own.length > 0 && sig(own) === sig(sizes.map((z) => ({ name: z.name, priceCentavos: toCentavos(z.pricePhp) })));
+			if (unchanged) {
+				await tx.insert(diningMenuItemAddonGroups).values({ menuItemId, addonGroupId: own[0]!.groupId });
+				return menuItemId;
+			}
+			await tx.delete(diningAddonGroups).where(eq(diningAddonGroups.menuItemId, menuItemId));
+			if (sizes) {
+				const [g] = await tx
+					.insert(diningAddonGroups)
+					.values({ hotelId, diningItemId: d.diningItemId, menuItemId, name: 'Size', minChoices: 1, maxChoices: 1, setsPrice: true })
+					.returning({ id: diningAddonGroups.id });
+				await tx.insert(diningAddons).values(
+					sizes.map((z, sortOrder) => ({ hotelId, groupId: g!.id, name: z.name, priceCentavos: toCentavos(z.pricePhp), sortOrder }))
+				);
+				await tx.insert(diningMenuItemAddonGroups).values({ menuItemId, addonGroupId: g!.id });
+			}
 			return menuItemId;
 		});
 		if (!savedId) {
@@ -351,7 +407,7 @@ export const actions: Actions = {
 			action: itemId ? 'dining_menu_item.update' : 'dining_menu_item.create',
 			entityType: 'dining_menu_item',
 			entityId: savedId,
-			after: { ...values, addonGroupIds: groupIds }
+			after: { ...values, addonGroupIds: groupIds, sizes }
 		});
 		return { ok: itemId ? `Updated "${d.name}".` : `Added "${d.name}".` };
 	},

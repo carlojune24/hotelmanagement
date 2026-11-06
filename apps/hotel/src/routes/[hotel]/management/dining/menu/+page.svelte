@@ -13,6 +13,7 @@
 	import UtensilsIcon from '@lucide/svelte/icons/utensils';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import PencilIcon from '@lucide/svelte/icons/pencil';
+	import XIcon from '@lucide/svelte/icons/x';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import BanIcon from '@lucide/svelte/icons/ban';
 	import type { MenuItemWithAddons } from '$lib/server/dining-menu';
@@ -45,7 +46,18 @@
 	);
 	const stationLabel = $derived(data.stations.find((st) => st.id === itemStation)?.name ?? 'Choose a station');
 
+	// A dish's own size list (typed on this form) vs the venue's shared add-on groups.
+	const ownSizes = (item: MenuItemWithAddons | null) => (item ? menu?.groups.find((g) => g.menuItemId === item.id) : undefined);
+	const sharedGroups = $derived((menu?.groups ?? []).filter((g) => !g.menuItemId));
+	let sizeRows = $state<{ name: string; price: string }[]>([]);
+	let soldInSizes = $state(false);
+
 	function openItem(item: MenuItemWithAddons | null) {
+		const own = ownSizes(item);
+		soldInSizes = !!own;
+		sizeRows = own?.addons.length
+			? own.addons.map((a) => ({ name: a.name, price: (a.priceCentavos / 100).toFixed(2) }))
+			: [{ name: '', price: '' }, { name: '', price: '' }];
 		itemCategory = item?.categoryId ?? 'none';
 		// A new dish starts on the hotel's only station, when it has just one.
 		itemStation = item?.stationId ?? (data.stations.length === 1 ? data.stations[0]!.id : '');
@@ -250,17 +262,19 @@
 										{#if !item.isActive}
 											<span class="text-xs text-ink-muted">Hidden</span>
 										{/if}
-										{#if item.addonGroupIds.length > 0}
-											<span class="text-xs text-ink-muted">
-												{item.addonGroupIds.length} add-on {item.addonGroupIds.length === 1 ? 'group' : 'groups'}
-											</span>
+										{#if ownSizes(item)}
+											<span class="text-xs text-ink-muted">{ownSizes(item)!.addons.map((a) => a.name).join(' · ')}</span>
+										{/if}
+										{#if item.addonGroupIds.some((id) => id !== ownSizes(item)?.id)}
+											{@const extras = item.addonGroupIds.filter((id) => id !== ownSizes(item)?.id).length}
+											<span class="text-xs text-ink-muted">{extras} add-on {extras === 1 ? 'group' : 'groups'}</span>
 										{/if}
 									</div>
 									{#if item.description}
 										<p class="mt-0.5 line-clamp-1 text-sm text-ink-muted">{item.description}</p>
 									{/if}
 								</div>
-								<span class="text-sm font-medium tabular-nums text-ink">{peso(item.priceCentavos)}</span>
+								<span class="text-sm font-medium tabular-nums text-ink">{ownSizes(item) ? 'from ' : ''}{peso(item.priceCentavos)}</span>
 								<form method="POST" action="?/toggleAvailable" use:enhance>
 									<input type="hidden" name="itemId" value={item.id} />
 									<input type="hidden" name="isAvailable" value={item.isAvailable ? 'false' : 'true'} />
@@ -338,9 +352,31 @@
 						</div>
 					</div>
 				</div>
-				<div class="grid grid-cols-2 gap-3">
-					<div>
-						<Label for="itemPrice">Price (₱)</Label>
+				<fieldset class="space-y-2">
+					<legend class="text-sm font-medium text-ink">Price</legend>
+					<input type="hidden" name="priceMode" value={soldInSizes ? 'sizes' : 'single'} />
+					<div class="inline-flex rounded-md border border-border p-0.5 text-sm" role="radiogroup" aria-label="How this dish is priced">
+						<button type="button" role="radio" aria-checked={!soldInSizes} class="rounded px-3 py-1 {soldInSizes ? 'text-ink-muted' : 'bg-surface-2 font-medium text-ink'}" onclick={() => (soldInSizes = false)}>One price</button>
+						<button type="button" role="radio" aria-checked={soldInSizes} class="rounded px-3 py-1 {soldInSizes ? 'bg-surface-2 font-medium text-ink' : 'text-ink-muted'}" onclick={() => (soldInSizes = true)}>Sold in sizes</button>
+					</div>
+					{#if soldInSizes}
+						<div class="space-y-1.5">
+							<div class="grid grid-cols-[1fr_8rem_2rem] gap-2 text-xs text-ink-muted"><span>Size</span><span>Price (₱)</span></div>
+							{#each sizeRows as row, i (i)}
+								<div class="grid grid-cols-[1fr_8rem_2rem] items-center gap-2">
+									<Input name="sizeName" bind:value={row.name} maxlength={80} required placeholder={i === 0 ? '8oz or Good for 2' : ''} aria-label="Size {i + 1} name" />
+									<Input name="sizePricePhp" bind:value={row.price} type="number" min="0" step="0.01" required class="tabular-nums" aria-label="Size {i + 1} price" />
+									<Button type="button" variant="ghost" size="icon" aria-label="Remove size {i + 1}" disabled={sizeRows.length === 1} onclick={() => sizeRows.splice(i, 1)}>
+										<XIcon class="size-4" />
+									</Button>
+								</div>
+							{/each}
+							<Button type="button" variant="ghost" size="sm" class="px-2" onclick={() => sizeRows.push({ name: '', price: '' })}>
+								<PlusIcon class="size-4" /> Add a size
+							</Button>
+							<p class="text-xs text-ink-muted">e.g. 8oz / 12oz / 16oz, or Good for 2 / Good for 4. The guest picks one; its price is what they pay.</p>
+						</div>
+					{:else}
 						<Input
 							id="itemPrice"
 							name="pricePhp"
@@ -348,10 +384,13 @@
 							min="0"
 							step="0.01"
 							required
+							aria-label="Price (₱)"
 							value={item ? (item.priceCentavos / 100).toFixed(2) : ''}
-							class="mt-1 tabular-nums"
+							class="w-40 tabular-nums"
 						/>
-					</div>
+					{/if}
+				</fieldset>
+				<div class="grid grid-cols-2 gap-3">
 					<div>
 						<Label for="itemCategory">Category</Label>
 						<Select.Root type="single" name="categoryId" bind:value={itemCategory}>
@@ -393,17 +432,17 @@
 
 				<fieldset class="space-y-1.5">
 					<legend class="text-sm font-medium text-ink">Add-on groups</legend>
-					{#if menu.groups.length === 0}
+					{#if sharedGroups.length === 0}
 						<p class="text-sm text-ink-muted">
 							None yet. <a class="underline" href="{base}/addons?venue={venue.id}">Create add-on groups</a> to offer extras like sauces or sides.
 						</p>
 					{:else}
-						{#each menu.groups as g (g.id)}
+						{#each sharedGroups as g (g.id)}
 							<Label class="flex items-center gap-2 text-sm font-normal text-ink">
 								<Checkbox name="addonGroupIds" value={g.id} checked={item?.addonGroupIds.includes(g.id) ?? false} />
 								{g.name}
 								<span class="text-xs text-ink-muted">
-									{g.minChoices > 0 ? 'required' : 'optional'}
+									{g.setsPrice ? 'sizes, sets the price' : g.minChoices > 0 ? 'required' : 'optional'}
 								</span>
 							</Label>
 						{/each}

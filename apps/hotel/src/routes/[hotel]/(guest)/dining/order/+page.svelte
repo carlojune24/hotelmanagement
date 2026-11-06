@@ -14,7 +14,7 @@ import { tick, untrack } from 'svelte';
 	import MinusIcon from '@lucide/svelte/icons/minus';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ShoppingBagIcon from '@lucide/svelte/icons/shopping-bag';
-	import { checkAddonSelection, priceLine, sumLines } from '$lib/dining-orders';
+	import { checkAddonSelection, linePrices, menuPriceLabel, priceLine, sumLines } from '$lib/dining-orders';
 	import { addDays } from '$lib/dining-sales-range';
 	import { listSlots, localParts } from '$lib/dining-slots';
 	import type { ActionData, PageData } from './$types';
@@ -52,7 +52,7 @@ import { tick, untrack } from 'svelte';
 	interface CartLine {
 		key: number;
 		item: Item;
-		addons: { id: string; name: string; priceCentavos: number }[];
+		addons: { id: string; name: string; priceCentavos: number; setsPrice?: boolean }[];
 		quantity: number;
 		remarks: string;
 	}
@@ -99,13 +99,13 @@ import { tick, untrack } from 'svelte';
 			return;
 		}
 		const chosen = groups.flatMap((g) =>
-			g.addons.filter((a) => (editing!.picks[g.id] ?? []).includes(a.id)).map((a) => ({ id: a.id, name: a.name, priceCentavos: a.priceCentavos }))
+			g.addons.filter((a) => (editing!.picks[g.id] ?? []).includes(a.id)).map((a) => ({ id: a.id, name: a.name, priceCentavos: a.priceCentavos, setsPrice: g.setsPrice }))
 		);
 		addToCart(editing.item, chosen, editing.quantity, editing.remarks.trim());
 		editing = null;
 	}
 
-	const priced = $derived(cart.map((l) => priceLine({ unitPriceCentavos: l.item.priceCentavos, addonPricesCentavos: l.addons.map((a) => a.priceCentavos), quantity: l.quantity, taxable: true, vatRateBps: 0 })));
+	const priced = $derived(cart.map((l) => priceLine({ ...linePrices(l.item.priceCentavos, l.addons), quantity: l.quantity, taxable: true, vatRateBps: 0 })));
 	const dishesTotal = $derived(sumLines(priced).totalCentavos);
 
 	// ---- pickup or delivery ---------------------------------------------------------
@@ -365,7 +365,7 @@ Online ordering is closed for today.
 											<img src={item.imageUrl} alt="" loading="lazy" onerror={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')} />
 										</span>
 									{/if}
-									<span class="ledger-data">{peso(item.priceCentavos)}</span>
+									<span class="ledger-data">{menuPriceLabel(item.priceCentavos, groupsFor(item), peso)}</span>
 									{#if item.isAvailable}
 										<span class="order-add" aria-hidden="true">{#if groupsFor(item).length > 0}{open ? '−' : '+'}{:else}+{/if}</span>
 										<span class="sr-only">{groupsFor(item).length > 0 ? 'Choose options' : 'Add to order'}</span>
@@ -385,7 +385,7 @@ Online ordering is closed for today.
 														<Label class="order-choice {a.isAvailable ? '' : 'is-off'}">
 															<Checkbox checked={(editing.picks[g.id] ?? []).includes(a.id)} disabled={!a.isAvailable} onCheckedChange={() => togglePick(g.id, a.id, g.maxChoices)} />
 															<span class="flex-1">{a.name}</span>
-															<span class="ledger-data text-xs">{a.priceCentavos ? `+${peso(a.priceCentavos)}` : 'free'}</span>
+															<span class="ledger-data text-xs">{g.setsPrice ? peso(a.priceCentavos) : a.priceCentavos ? `+${peso(a.priceCentavos)}` : 'free'}</span>
 														</Label>
 													{/each}
 												</div>

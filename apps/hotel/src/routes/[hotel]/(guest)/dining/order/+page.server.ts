@@ -81,6 +81,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 				name: g.name,
 				minChoices: g.minChoices,
 				maxChoices: g.maxChoices,
+				setsPrice: g.setsPrice,
 				addons: g.addons.map((a) => ({ id: a.id, name: a.name, priceCentavos: a.priceCentavos, isAvailable: a.isAvailable }))
 			}))
 		}

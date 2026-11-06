@@ -10,7 +10,7 @@
 	import CartSheet from '$lib/components/table-order/cart-sheet.svelte';
 	import { getTableCart } from '$lib/dining-cart.svelte';
 	import { findPlainLine, quantityOf } from '$lib/dining-cart';
-	import { checkAddonSelection } from '$lib/dining-orders';
+	import { checkAddonSelection, menuPriceLabel } from '$lib/dining-orders';
 	import { buildMenuSections, categoryChips, effectiveCategory, peso, visibleSections } from '$lib/dining-qr-ui';
 	import { themeStyle } from '$lib/table-theme';
 	import type { ActionData, PageData } from './$types';
@@ -98,7 +98,7 @@
 			return;
 		}
 		const chosen = groups.flatMap((g) =>
-			g.addons.filter((a) => (editing!.picks[g.id] ?? []).includes(a.id)).map((a) => ({ id: a.id, name: a.name, priceCentavos: a.priceCentavos }))
+			g.addons.filter((a) => (editing!.picks[g.id] ?? []).includes(a.id)).map((a) => ({ id: a.id, name: a.name, priceCentavos: a.priceCentavos, setsPrice: g.setsPrice }))
 		);
 		cart.add(editing.item, chosen, editing.quantity, editing.remarks.trim());
 		announce = `Added ${editing.quantity} ${editing.item.name}.`;
@@ -163,7 +163,7 @@
 										class="tq-dish-main"
 										disabled={!item.isAvailable}
 										aria-expanded={hasChoices ? open : undefined}
-										aria-label={item.isAvailable ? `${hasChoices ? 'Choose options for' : 'Add'} ${item.name}, ${peso(item.priceCentavos)}` : `${item.name}, sold out today`}
+										aria-label={item.isAvailable ? `${hasChoices ? 'Choose options for' : 'Add'} ${item.name}, ${menuPriceLabel(item.priceCentavos, groupsFor(item), peso)}` : `${item.name}, sold out today`}
 										onclick={() => startItem(item)}
 									>
 										<span class="tq-dish-name">{item.name}</span>
@@ -178,7 +178,7 @@
 								</div>
 
 								<div class="tq-dish-foot">
-									<span class="ledger-data tq-dish-price">{peso(item.priceCentavos)}</span>
+									<span class="ledger-data tq-dish-price">{menuPriceLabel(item.priceCentavos, groupsFor(item), peso)}</span>
 									{#if item.isAvailable}
 										{#if !hasChoices && plain}
 											<div class="tq-stepper" role="group" aria-label="Quantity of {item.name}">
@@ -208,7 +208,7 @@
 														<Label class="tq-choice {a.isAvailable ? '' : 'is-off'}">
 															<Checkbox checked={(editing.picks[g.id] ?? []).includes(a.id)} disabled={!a.isAvailable} onCheckedChange={() => togglePick(g.id, a.id, g.maxChoices)} />
 															<span class="tq-choice-name">{a.name}</span>
-															<span class="ledger-data tq-choice-price">{a.priceCentavos ? `+${peso(a.priceCentavos)}` : 'free'}</span>
+															<span class="ledger-data tq-choice-price">{g.setsPrice ? peso(a.priceCentavos) : a.priceCentavos ? `+${peso(a.priceCentavos)}` : 'free'}</span>
 														</Label>
 													{/each}
 												</div>

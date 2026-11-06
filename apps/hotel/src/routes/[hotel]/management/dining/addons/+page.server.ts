@@ -23,7 +23,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const requested = url.searchParams.get('venue');
 	const venue = venues.find((v) => v.id === requested) ?? venues[0] ?? null;
 	const menu = venue ? await loadVenueMenu(hotelId, venue.id) : null;
-	return { venues, venue, groups: menu?.groups ?? [] };
+	return { venues, venue, groups: (menu?.groups ?? []).filter((g) => !g.menuItemId) }; // a dish's own sizes are edited on the dish
 };
 
 function requireManage(event: RequestEvent) {
@@ -44,11 +44,14 @@ const groupSchema = z
 	.object({
 		name: z.string().trim().min(1, 'Give the group a name.').max(80),
 		minChoices: optCount,
-		maxChoices: optCount
+		maxChoices: optCount,
+		setsPrice: z.preprocess((v) => v === 'on' || v === 'true', z.boolean())
 	})
 	.refine((g) => g.maxChoices == null || g.maxChoices >= (g.minChoices ?? 0), {
 		message: 'The most a guest can pick must be at least the fewest.'
-	});
+	})
+	// a size group is always "pick exactly one": the chosen size is the item's price
+	.transform((g) => (g.setsPrice ? { ...g, minChoices: 1, maxChoices: 1 } : g));
 
 const firstMessage = (e: z.ZodError, fallback: string) => e.issues[0]?.message ?? fallback;
 
@@ -72,7 +75,8 @@ export const actions: Actions = {
 				diningItemId: venueId.data,
 				name: d.name,
 				minChoices: d.minChoices ?? 0,
-				maxChoices: d.maxChoices ?? null
+				maxChoices: d.maxChoices ?? null,
+				setsPrice: d.setsPrice
 			})
 			.returning({ id: diningAddonGroups.id });
 		await writeAudit({
@@ -101,6 +105,7 @@ export const actions: Actions = {
 				name: d.name,
 				minChoices: d.minChoices ?? 0,
 				maxChoices: d.maxChoices ?? null,
+				setsPrice: d.setsPrice,
 				updatedAt: new Date()
 			})
 			.where(and(eq(diningAddonGroups.id, groupId.data), eq(diningAddonGroups.hotelId, hotelId)))
