@@ -71,6 +71,11 @@
 			.filter((i) => (filter === '' ? true : filter === 'none' ? !i.categoryId : i.categoryId === filter))
 			.filter((i) => !noPhotoOnly || !i.imageUrl)
 	);
+	const hiddenCount = $derived((menu?.items ?? []).filter((i) => !i.isActive).length);
+	let showRemoved = $state(false);
+	const visibleRemoved = $derived(
+		data.removedItems.filter((i) => (filter === '' ? true : filter === 'none' ? !i.categoryId : i.categoryId === filter))
+	);
 	const uncategorisedCount = $derived((menu?.items ?? []).filter((i) => !i.categoryId).length);
 	const countFor = (id: string) => (menu?.items ?? []).filter((i) => i.categoryId === id).length;
 	const stationName = (id: string | null) => data.stations.find((s) => s.id === id)?.name ?? '';
@@ -225,6 +230,29 @@
 								Without a photo · {withoutPhoto}
 							</button>
 						{/if}
+						{#if data.removedItems.length > 0}
+							<button
+								type="button"
+								aria-pressed={showRemoved}
+								title="Also list dishes taken off with Remove from menu"
+								class="rounded-md border px-2.5 py-1 text-xs {showRemoved ? 'border-brand bg-brand/10 font-medium text-ink' : 'border-border text-ink-muted hover:text-ink'}"
+								onclick={() => (showRemoved = !showRemoved)}
+							>
+								Show all items · {data.removedItems.length} removed
+							</button>
+						{/if}
+						{#if data.canManageMenu && hiddenCount > 0}
+							<form method="POST" action="?/showAllHidden" use:enhance>
+								<input type="hidden" name="diningItemId" value={venue.id} />
+								<button
+									type="submit"
+									title="Tick “Show on the menu” for every hidden dish"
+									class="rounded-md border border-border px-2.5 py-1 text-xs text-ink-muted hover:text-ink"
+								>
+									Show all on the menu · {hiddenCount} hidden
+								</button>
+							</form>
+						{/if}
 						{#if data.canManageMenu}
 							<Button onclick={() => openItem(null)}>
 								<PlusIcon class="size-4" /> New item
@@ -301,6 +329,32 @@
 									>
 										<PencilIcon class="size-4" />
 									</Button>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+
+				{#if showRemoved && visibleRemoved.length > 0}
+					<h3 class="mt-6 mb-1.5 text-sm font-medium text-ink-muted">Removed from the menu · {visibleRemoved.length}</h3>
+					<ul class="divide-y divide-border overflow-hidden rounded-xl border border-dashed border-border" aria-label="Removed dishes">
+						{#each visibleRemoved as item (item.id)}
+							<li class="flex items-center gap-3 bg-surface-2/60 px-4 py-3">
+								{#if item.imageUrl}
+									<img src={item.imageUrl} alt="" loading="lazy" class="size-12 shrink-0 rounded-md border border-border object-cover opacity-60" />
+								{:else}
+									<span class="flex size-12 shrink-0 items-center justify-center rounded-md border border-dashed border-border text-[10px] leading-tight text-ink-muted">No photo</span>
+								{/if}
+								<div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-2">
+									<span class="font-medium text-ink-muted">{item.name}</span>
+									<span class="text-xs text-ink-muted">Removed · {categoryName(item.categoryId)}</span>
+								</div>
+								<span class="text-sm tabular-nums text-ink-muted">{peso(item.priceCentavos)}</span>
+								{#if data.canManageMenu}
+									<form method="POST" action="?/restoreItem" use:enhance>
+										<input type="hidden" name="itemId" value={item.id} />
+										<Button type="submit" variant="outline" size="sm">Restore</Button>
+									</form>
 								{/if}
 							</li>
 						{/each}

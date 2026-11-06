@@ -29,7 +29,7 @@
 
 	const TAB_LABEL = { today: 'Today', upcoming: 'Upcoming', past: 'Past', cancelled: 'Cancelled & no-show' } as const;
 	const STATUS: Record<string, { label: string; variant: 'default' | 'outline' | 'ghost' | 'destructive' | 'secondary' }> = {
-		pending: { label: 'Pending', variant: 'secondary' },
+		pending: { label: 'Awaiting payment', variant: 'secondary' },
 		confirmed: { label: 'Reserved', variant: 'outline' },
 		seated: { label: 'Seated', variant: 'default' },
 		completed: { label: 'Done', variant: 'ghost' },

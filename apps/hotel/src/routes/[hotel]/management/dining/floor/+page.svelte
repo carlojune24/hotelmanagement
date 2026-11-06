@@ -405,7 +405,7 @@
 										</span>
 									</span>
 									<Badge variant={r.status === 'seated' ? 'secondary' : r.status === 'completed' ? 'ghost' : 'outline'}>
-										{r.status === 'confirmed' ? 'Reserved' : r.status === 'pending' ? 'Pending' : r.status === 'seated' ? 'Seated' : 'Done'}
+										{r.status === 'confirmed' ? 'Reserved' : r.status === 'pending' ? 'Awaiting payment' : r.status === 'seated' ? 'Seated' : 'Done'}
 									</Badge>
 								</button>
 							</li>

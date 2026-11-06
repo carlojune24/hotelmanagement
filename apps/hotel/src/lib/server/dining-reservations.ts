@@ -266,9 +266,9 @@ export async function createReservation(
 					hotelId: input.hotelId,
 					diningItemId: input.venueId,
 					code,
-					// Online bookings take the table straight away; `pending` is reserved for
-					// reservations waiting on an online pre-order payment (Phase 4).
-					status: 'confirmed',
+					// An online booking holds the table as `pending` until its pre-order is paid online:
+					// `confirmDiningPayment` confirms it, `expirePendingDiningOrders` frees it if never paid.
+					status: input.source === 'online' ? 'pending' : 'confirmed',
 					guestName: input.guestName.trim(),
 					guestPhone: input.guestPhone?.trim() || null,
 					guestEmail: input.guestEmail?.trim() || null,

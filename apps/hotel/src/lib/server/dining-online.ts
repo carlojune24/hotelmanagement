@@ -23,6 +23,7 @@ import { createDiningOrder, OrderError, type OrderLineInput } from './dining-ord
 import { heldForReservation } from './dining-hold';
 import { attachPreOrdersToCheck } from './dining-reservations';
 import { sendDiningOrderEmail } from './email/send-dining-order';
+import { sendDiningReservationConfirmation } from './email/send-dining-reservation';
 import { listSlots, localParts } from '../dining-slots';
 
 type Actor = SessionUser | null;
@@ -160,6 +161,8 @@ export async function placeOnlineOrder(
 	const cfg = await loadOnlineOrderingConfig(input.hotelId, input.venueId);
 	if (!cfg || !cfg.enabled) throw new OrderError('Online ordering is not available for this venue right now.');
 	if (input.payMode === 'online' && !cfg.canPayOnline) throw new OrderError('Online payment is not available. Please choose to pay at the restaurant.');
+	// A table pre-order is paid in full online first: that payment is what confirms the reservation.
+	if (input.orderType === 'pre_order' && input.payMode !== 'online') throw new OrderError('A pre-order for your table is paid in full online.');
 	if (input.payMode === 'venue' && !cfg.canPayAtVenue) throw new OrderError('This venue takes online orders with online payment only.');
 
 	// Delivery is only for a takeaway order, only where the venue offers it, and needs an address.
@@ -409,6 +412,7 @@ export async function confirmDiningPayment(args: {
 	amountCentavos: number;
 	payload: unknown;
 }): Promise<{ handled: boolean; confirmed: boolean; needsRefund: boolean; hotelId: string | null; paymentRowId?: string | null }> {
+	let reservationConfirmedId: string | null = null;
 	const result = await db.transaction(async (tx) => {
 		// Idempotent per event, and per PayMongo payment: the same `pay_` ID arriving by the webhook and by the verifier
 		// is recorded once.
@@ -529,6 +533,14 @@ export async function confirmDiningPayment(args: {
 				.where(eq(diningReservations.id, order.reservationId))
 				.limit(1);
 			if (res?.status === 'seated') await attachPreOrdersToCheck(tx, order.hotelId, res, { onOccupied: 'skip' });
+			// An online reservation waits as `pending` until its pre-order is paid: this payment confirms it.
+			if (res?.status === 'pending') {
+				await tx
+					.update(diningReservations)
+					.set({ status: 'confirmed', updatedAt: new Date() })
+					.where(and(eq(diningReservations.id, res.id), eq(diningReservations.status, 'pending')));
+				reservationConfirmedId = res.id;
+			}
 		}
 		return { handled: true, confirmed: true, needsRefund: false, hotelId: order.hotelId, paymentRowId, code: order.code };
 	});
@@ -556,6 +568,10 @@ export async function confirmDiningPayment(args: {
 			}
 		}
 		await sendDiningOrderEmail(args.orderId, 'confirmation').catch((e) => console.error('dining confirmation email failed', args.orderId, e));
+		const confirmedId = reservationConfirmedId;
+		if (confirmedId) {
+			await sendDiningReservationConfirmation(confirmedId).catch((e) => console.error('dining reservation email failed', confirmedId, e));
+		}
 	}
 	return { handled: true, confirmed: result.confirmed, needsRefund: result.needsRefund, hotelId: result.hotelId, paymentRowId: result.paymentRowId };
 }
@@ -642,7 +658,37 @@ export async function expirePendingDiningOrders(opts: { hotelId?: string; olderT
 			for (const s of sessions) await client?.expireCheckoutSession(s).catch(() => {});
 		}
 	}
-	return released;
+
+	// An online reservation is held `pending` only while its pre-order can still be paid. Past the same
+	// window, with no paid order and none still at checkout, the table is freed.
+	const freed = await db
+		.update(diningReservations)
+		.set({ status: 'cancelled', cancelledAt: new Date(), updatedAt: new Date() })
+		.where(
+			and(
+				eq(diningReservations.status, 'pending'),
+				eq(diningReservations.source, 'online'),
+				lt(diningReservations.createdAt, cutoff),
+				opts.hotelId ? eq(diningReservations.hotelId, opts.hotelId) : undefined,
+				sql`not exists (select 1 from ${diningOrders} where ${diningOrders.reservationId} = ${diningReservations.id}
+					and (${diningOrders.status} = 'pending_payment' or ${diningOrders.paymentStatus} = 'paid'))`
+			)
+		)
+		.returning({ id: diningReservations.id, hotelId: diningReservations.hotelId, code: diningReservations.code });
+	for (const r of freed) {
+		await writeAudit({
+			hotelId: r.hotelId,
+			actor: null,
+			actorKind: 'system',
+			action: 'dining_reservation.expired',
+			entityType: 'dining_reservation',
+			entityId: r.id,
+			refCode: r.code,
+			before: { status: 'pending' },
+			after: { reservationId: r.id, status: 'cancelled', reason: 'The pre-order was not paid in time.' }
+		});
+	}
+	return released + freed.length;
 }
 
 // ---------------------------------------------------------------------------

@@ -149,7 +149,7 @@ import { tick, untrack } from 'svelte';
 	let honeypot = $state('');
 	let payMode = $state<'online' | 'venue'>('online');
 	$effect(() => {
-		payMode = data.cfg.canPayOnline ? 'online' : 'venue';
+		payMode = data.cfg.canPayOnline || isPre ? 'online' : 'venue'; // a table pre-order is always paid online
 	});
 
 	const ready = $derived(
@@ -579,11 +579,11 @@ Online ordering is closed for today.
 							<input type="radio" name="payChoice" value="online" checked={payMode === 'online'} onchange={() => (payMode = 'online')} />
 							<span>
 								<span class="storefront-menu-name block">Pay now online</span>
-								<span class="storefront-menu-desc block">GCash, Maya, card or QR Ph. Your order goes to the kitchen as soon as payment is confirmed.</span>
+								<span class="storefront-menu-desc block">GCash, Maya, card or QR Ph. {isPre ? 'Your table is confirmed as soon as payment goes through, and your dishes will be ready when you sit down.' : 'Your order goes to the kitchen as soon as payment is confirmed.'}</span>
 							</span>
 						</label>
 					{/if}
-					{#if data.cfg.canPayAtVenue}
+					{#if data.cfg.canPayAtVenue && !isPre}
 						<label class="order-pay-option">
 							<input type="radio" name="payChoice" value="venue" checked={payMode === 'venue'} onchange={() => (payMode = 'venue')} />
 							<span>

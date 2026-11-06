@@ -1,5 +1,5 @@
 import { fail } from '@sveltejs/kit';
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
 import {
@@ -41,6 +41,26 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const requested = url.searchParams.get('venue');
 	const venue = venues.find((v) => v.id === requested) ?? venues[0] ?? null;
 	const menu = venue ? await loadVenueMenu(hotelId, venue.id) : null;
+	// Dishes taken off with "Remove from menu" (soft delete), so staff can see and restore them.
+	const removedItems = venue
+		? await db
+				.select({
+					id: diningMenuItems.id,
+					name: diningMenuItems.name,
+					priceCentavos: diningMenuItems.priceCentavos,
+					categoryId: diningMenuItems.categoryId,
+					imageUrl: diningMenuItems.imageUrl
+				})
+				.from(diningMenuItems)
+				.where(
+					and(
+						eq(diningMenuItems.hotelId, hotelId),
+						eq(diningMenuItems.diningItemId, venue.id),
+						isNotNull(diningMenuItems.deletedAt)
+					)
+				)
+				.orderBy(asc(diningMenuItems.name))
+		: [];
 	// A dish must belong to a station, so a manager opening the menu of a hotel that has none yet
 	// gets a default one. Read-only roles never write.
 	const { user, role } = locals;
@@ -49,7 +69,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		(!!role && (roleCan(role.capabilities, 'hotel:admin') || roleCan(role.capabilities, 'dining:manage')));
 	const stations = canManage ? await ensureDefaultStation(hotelId) : await listStations(hotelId);
 
-	return { venues, venue, menu, stations };
+	return { venues, venue, menu, stations, removedItems };
 };
 
 /** Menu edits need `dining:manage` (hotel admins also qualify through `hotel:admin`). */
@@ -462,5 +482,68 @@ export const actions: Actions = {
 			entityId: parsed.data.itemId
 		});
 		return { ok: `Removed "${updated[0]!.name}" from the menu.` };
+	},
+
+	/** Ticks "Show on the menu" for every hidden (not removed) dish of one venue. */
+	showAllHidden: async (event) => {
+		requireManage(event);
+		const hotelId = event.locals.hotel!.id;
+		const parsed = z
+			.object({ diningItemId: recordId() })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: 'Venue not found.' });
+
+		const shown = await db
+			.update(diningMenuItems)
+			.set({ isActive: true, updatedAt: new Date() })
+			.where(
+				and(
+					eq(diningMenuItems.hotelId, hotelId),
+					eq(diningMenuItems.diningItemId, parsed.data.diningItemId),
+					eq(diningMenuItems.isActive, false),
+					isNull(diningMenuItems.deletedAt)
+				)
+			)
+			.returning({ id: diningMenuItems.id });
+		if (shown.length === 0) return { ok: 'Every dish is already on the menu.' };
+		await writeAudit({
+			hotelId,
+			actor: event.locals.user,
+			action: 'dining_menu_item.show_all',
+			entityType: 'dining_item',
+			entityId: parsed.data.diningItemId,
+			after: { itemIds: shown.map((s) => s.id) }
+		});
+		return { ok: `${shown.length} ${shown.length === 1 ? 'dish is' : 'dishes are'} back on the menu.` };
+	},
+
+	restoreItem: async (event) => {
+		requireManage(event);
+		const hotelId = event.locals.hotel!.id;
+		const parsed = z
+			.object({ itemId: recordId() })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: 'That item could not be found.' });
+
+		const restored = await db
+			.update(diningMenuItems)
+			.set({ deletedAt: null, updatedAt: new Date() })
+			.where(
+				and(
+					eq(diningMenuItems.id, parsed.data.itemId),
+					eq(diningMenuItems.hotelId, hotelId),
+					isNotNull(diningMenuItems.deletedAt)
+				)
+			)
+			.returning({ name: diningMenuItems.name });
+		if (restored.length === 0) return fail(404, { error: 'That item could not be found.' });
+		await writeAudit({
+			hotelId,
+			actor: event.locals.user,
+			action: 'dining_menu_item.restore',
+			entityType: 'dining_menu_item',
+			entityId: parsed.data.itemId
+		});
+		return { ok: `Put "${restored[0]!.name}" back on the menu.` };
 	}
 };

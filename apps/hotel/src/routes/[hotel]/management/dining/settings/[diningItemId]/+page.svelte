@@ -248,6 +248,15 @@
 			<a class="underline" href="{base}/dining/floor?venue={item.id}">Floor</a>
 			({data.tableCount} active {data.tableCount === 1 ? 'table' : 'tables'}).
 		</p>
+		<p class="mt-1 text-xs text-ink-muted">
+			Guests who book online pre-order their meal and pay it in full online; the payment confirms the table, and an
+			unpaid booking is released after 30 minutes. Phone bookings taken by staff need no payment.
+		</p>
+		{#if !item.onlineOrdersEnabled || !data.payMongoConnected}
+			<p class="mt-2 rounded-md border border-danger/40 px-3 py-2 text-xs text-danger">
+				Guests cannot book online until {!item.onlineOrdersEnabled ? 'Online ordering above is on' : 'online payment (PayMongo) is connected'}. Staff can still take phone bookings.
+			</p>
+		{/if}
 
 		<form method="POST" action="?/updateReservations" use:enhance class="mt-4 space-y-4">
 			<div class="flex items-center justify-between rounded-lg border border-border px-3 py-2.5">

@@ -26,7 +26,7 @@
 
 	const HEADLINE: Record<string, { title: string; note: string }> = {
 		confirmed: { title: 'Your table is reserved', note: 'No payment is needed. Please arrive on time, and call us if you are running late.' },
-		pending: { title: 'We have your request', note: 'The restaurant will confirm shortly. This page updates on its own.' },
+		pending: { title: 'Pay to confirm your table', note: 'Your table is held for 30 minutes. Choose your dishes and pay for them online to confirm it. This page updates on its own.' },
 		seated: { title: 'Welcome. Enjoy your meal', note: 'You are seated. We hope you have a wonderful time.' },
 		completed: { title: 'Thank you for dining with us', note: 'We hope to see you again soon.' },
 		no_show: { title: 'This reservation was closed', note: 'It was marked as not attended. Please call us if that is a mistake.' },
