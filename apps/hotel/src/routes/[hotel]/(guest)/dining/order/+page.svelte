@@ -14,6 +14,7 @@ import { tick, untrack } from 'svelte';
 	import MinusIcon from '@lucide/svelte/icons/minus';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ShoppingBagIcon from '@lucide/svelte/icons/shopping-bag';
+	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 	import { checkAddonSelection, linePrices, menuPriceLabel, priceLine, sumLines } from '$lib/dining-orders';
 	import { addDays } from '$lib/dining-sales-range';
 	import { listSlots, localParts } from '$lib/dining-slots';
@@ -856,10 +857,10 @@ Online ordering is closed for today.
 </section>
 
 {#if cart.length > 0 && step === 1}
-<button type="button" onclick={() => (closedToday ? undefined : go(2))} class="order-pill lg:hidden" aria-label="View your order, {itemCount} items, {peso(total)}">
+<button type="button" onclick={() => (closedToday ? undefined : go(2))} class="order-pill" aria-label="Review your order, {itemCount} items, {peso(total)}">
 		<ShoppingBagIcon class="size-4" aria-hidden="true" />
-		<span>{itemCount} {itemCount === 1 ? 'item' : 'items'}</span>
-		<span class="ledger-data">{peso(total)}</span>
+		<span>{itemCount} {itemCount === 1 ? 'item' : 'items'} · <span class="ledger-data">{peso(total)}</span></span>
+		<span class="order-pill-go">Review order <ArrowRightIcon class="size-4" aria-hidden="true" /></span>
 	</button>
 {/if}
 

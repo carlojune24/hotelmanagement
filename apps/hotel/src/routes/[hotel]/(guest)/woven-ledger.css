@@ -2565,22 +2565,49 @@ button.storefront-menu-photo:focus-visible {
 	outline: 2px solid var(--hotel-accent);
 	outline-offset: 2px;
 }
+/* Phones and tablets: the cart as a full-width bar at the bottom (the "Your order" box sits far below the
+   menu there). Desktop has that box as a sidebar, so no bar. Hidden by media query, not `lg:hidden`: this
+   unlayered rule would beat Tailwind's layered utility. The chat launcher lifts above it. */
 .order-pill {
 	position: fixed;
-	right: 1rem;
-	bottom: 1rem;
+	right: 0;
+	bottom: 0;
+	left: 0;
 	z-index: 40;
-	display: inline-flex;
+	display: flex;
 	align-items: center;
 	gap: 0.625rem;
-	min-height: 3rem;
-	padding: 0 1.125rem;
-	border: 1px solid var(--hotel-accent);
-	border-radius: 2px;
+	min-height: 3.5rem;
+	padding: 0 1.25rem env(safe-area-inset-bottom);
+	border: 0;
+	border-top: 1px solid var(--hotel-accent-deep);
 	background: var(--hotel-accent);
 	color: var(--ledger-paper);
-	font-size: 0.875rem;
-	text-decoration: none;
+	font-size: 0.9375rem;
+	font-weight: 600;
+	text-align: left;
+	box-shadow: 0 -10px 24px -18px rgb(0 0 0 / 0.6);
+}
+.order-pill-go {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.375rem;
+	margin-left: auto;
+}
+.order-pill:focus-visible {
+	outline: 2px solid var(--ledger-ink);
+	outline-offset: -4px;
+}
+@media (max-width: 1023px) {
+	/* Room under the last dish and the footer so the bar never covers them. */
+	body:has(.order-pill) .woven-ledger {
+		padding-bottom: calc(3.5rem + env(safe-area-inset-bottom));
+	}
+}
+@media (min-width: 1024px) {
+	.order-pill {
+		display: none;
+	}
 }
 
 /* Order tracking: a ruled progress strip (dots joined by a hairline) and a message thread. */

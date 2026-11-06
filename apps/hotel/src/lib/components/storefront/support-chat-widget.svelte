@@ -812,10 +812,10 @@
 	.support.lift {
 		bottom: calc(5rem + var(--sf-bottom-bar, 0px));
 	}
-	/* The dining order page's cart pill (lg:hidden) sits in the same corner; stack above it. */
+	/* The dining order page's cart bar (full width, below 1024px only) owns the bottom edge; sit just above it. */
 	@media (max-width: 1023px) {
 		:global(body:has(.order-pill)) .support {
-			bottom: calc(5rem + var(--sf-bottom-bar, 0px));
+			bottom: calc(4.5rem + env(safe-area-inset-bottom));
 		}
 	}
 	/* Open: above the sticky booking bar (z 46) and the floating invoice (z 50). */
