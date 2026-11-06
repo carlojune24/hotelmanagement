@@ -955,6 +955,11 @@ export async function createWalkInBooking(params: {
 			if (!available || !plan) {
 				throw new WalkInError('One of the selected rooms is no longer available for these dates.');
 			}
+			if (!plan.fitsParty) {
+				throw new WalkInError(
+					`${plan.name} is good for up to ${plan.maxGuests} guest${plan.maxGuests === 1 ? '' : 's'} per room. Pick another rate or add a room.`
+				);
+			}
 			// Extra beds needed is re-derived here from the room type's own capacity/policy
 			// (`getAvailableRoomType` already ran the occupancy solver) rather than trusting
 			// anything the client sent — same "never trust the preview" posture the rest of

@@ -628,6 +628,10 @@
 					<Label for="maxStayNights">Max stay (nights)</Label>
 					<Input id="maxStayNights" name="maxStayNights" type="number" min="1" class="mt-1" />
 				</div>
+				<div>
+					<Label for="maxGuests">Good for (guests per room)</Label>
+					<Input id="maxGuests" name="maxGuests" type="number" min="1" placeholder="No limit" class="mt-1" />
+				</div>
 			</div>
 		</form>
 		<Dialog.Footer>

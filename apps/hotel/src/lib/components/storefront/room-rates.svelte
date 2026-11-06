@@ -46,8 +46,10 @@
 					pct: partial && bps != null ? Math.round(bps / 100) : null
 				};
 			})
-			.sort((a, b) => a.total - b.total)
+			// Rates too small for the party sink to the bottom, greyed; cheapest first within each group.
+			.sort((a, b) => Number(b.plan.fitsParty) - Number(a.plan.fitsParty) || a.total - b.total)
 	);
+	const fitCount = $derived(rows.filter((r) => r.plan.fitsParty).length);
 </script>
 
 <div class="sf-rates">
@@ -57,11 +59,11 @@
 	</div>
 
 	{#each rows as r, i (r.plan.id)}
-		<div class="sf-rate">
+		<div class="sf-rate" class:is-unfit={!r.plan.fitsParty} aria-disabled={!r.plan.fitsParty}>
 			<div class="sf-rate-main">
 				<h4 class="sf-rate-name">
 					{r.plan.name}
-					{#if i === 0 && rows.length > 1}<span class="sf-rate-best">Lowest price</span>{/if}
+					{#if i === 0 && r.plan.fitsParty && fitCount > 1}<span class="sf-rate-best">Lowest price</span>{/if}
 				</h4>
 				<ul class="sf-rate-perks">
 					{#each r.plan.inclusions.slice(0, 3) as inc (inc)}
@@ -74,6 +76,9 @@
 						<li><WalletIcon aria-hidden="true" />{r.pct}% due now ({peso(r.dueNow)}), the balance at the hotel</li>
 					{/if}
 				</ul>
+				{#if !r.plan.fitsParty}
+					<p class="sf-rate-fine sf-rate-unfit">Good for up to {r.plan.maxGuests} guest{r.plan.maxGuests === 1 ? '' : 's'} per room, too small for your party.</p>
+				{/if}
 				{#if room.extraBedsNeeded > 0}
 					<p class="sf-rate-fine">Includes {room.extraBedsNeeded} extra bed{room.extraBedsNeeded === 1 ? '' : 's'} for your party.</p>
 				{/if}
@@ -89,7 +94,7 @@
 				<span class="sf-rate-avg">taxes &amp; fees included</span>
 			</div>
 
-			<button type="button" class="sf-btn sf-rate-go" onclick={() => onReserve(room, r.plan)}>Reserve</button>
+			<button type="button" class="sf-btn sf-rate-go" disabled={!r.plan.fitsParty} onclick={() => onReserve(room, r.plan)}>Reserve</button>
 		</div>
 	{/each}
 </div>

@@ -216,6 +216,21 @@
 							maximum.
 						</p>
 					</div>
+					<div>
+						<Label for="maxGuests">Good for (guests per room)</Label>
+						<Input
+							id="maxGuests"
+							name="maxGuests"
+							type="number"
+							min="1"
+							value={p.maxGuests ?? ''}
+							class="mt-1"
+						/>
+						<p class="mt-1 text-xs text-ink-muted">
+							Most guests one room can book on this rate. Bigger parties see it greyed out. Leave
+							blank for no limit.
+						</p>
+					</div>
 				</div>
 				<div>
 					<Label for="cancellationPolicyId">Cancellation policy</Label>

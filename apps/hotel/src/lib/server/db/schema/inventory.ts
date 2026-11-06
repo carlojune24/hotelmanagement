@@ -246,6 +246,8 @@ export const ratePlans = pgTable(
 		/** Stay-length limits for this plan to be bookable. Null = unbounded. */
 		minStayNights: integer('min_stay_nights'),
 		maxStayNights: integer('max_stay_nights'),
+		/** Most guests per room this rate is sold for ("Good for 1 guest"). Null = no cap. */
+		maxGuests: integer('max_guests'),
 		isActive: boolean('is_active').notNull().default(true),
 		sortOrder: integer('sort_order').notNull().default(0),
 		createdAt: createdAt(),

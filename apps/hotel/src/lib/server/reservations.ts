@@ -7,8 +7,7 @@ import {
 	type ReservationView
 } from '$lib/reservation-views';
 import { db } from './db/index';
-import { getFolioDetail } from './folio';
-import { lineBalances } from './order-balances';
+import { getFolioDetail, loadOrderLedgers, type OrderLedgerLine } from './folio';
 import {
 	bookings,
 	bookingRooms,
@@ -63,7 +62,7 @@ export interface ReservationLine {
 	orderStatus: string;
 	totalCentavos: number;
 	/** What THIS room still owes (its charges minus what it has been paid). Zero for a settled
-	 *  room or a line that isn't live. See `lineBalances`. */
+	 *  room or a line that isn't live. From `loadOrderLedgers`. */
 	balanceCentavos: number;
 	createdAt: Date;
 	/** An open (unresolved) guest cancellation request against this specific line. */
@@ -191,13 +190,17 @@ export async function listReservationPage(
 		RESERVATION_VIEWS.map((v) => [v.key, Number(c[v.key] ?? 0)])
 	) as Record<ReservationView, number>;
 
-	// Balance owed + open cancellation requests — only for the rows on this page.
+	// Charges, balance owed + open cancellation requests — only for the rows on this page. The
+	// ledger is the same one the detail page reads, so add-ons posted later show in the total too.
+	// Rows are already hotel-scoped by the query above.
 	const live = (r: Row) =>
 		r.status === 'confirmed' || (r.kind === 'room' && r.status === 'checked_in');
-	const balances = await lineBalances(
-		hotelId,
-		rows.filter(live).map((r) => r.order_id)
-	);
+	const ledgers = await loadOrderLedgers(rows.map((r) => r.order_id));
+	const ledgerLines = new Map<string, OrderLedgerLine>();
+	for (const l of ledgers.values()) for (const line of l.lines) ledgerLines.set(line.id, line);
+	// Same set `lineChargesCentavos` bills from; anything else (pending / cancelled / no-show) keeps
+	// its booked price, which the ledger would report as 0 when there is no folio.
+	const billed = (r: Row) => ['confirmed', 'checked_in', 'checked_out', 'completed'].includes(r.status);
 	const ids = rows.map((r) => r.id);
 	const openRequests = ids.length
 		? await db
@@ -230,8 +233,11 @@ export async function listReservationPage(
 		endDate: r.end_date,
 		status: r.status,
 		orderStatus: r.order_status,
-		totalCentavos: Number(r.total_centavos),
-		balanceCentavos: live(r) ? Math.max(0, balances.get(r.id) ?? 0) : 0,
+		totalCentavos:
+			!billed(r) || !ledgerLines.has(r.id)
+				? Number(r.total_centavos)
+				: ledgerLines.get(r.id)!.chargesCentavos,
+		balanceCentavos: live(r) ? Math.max(0, ledgerLines.get(r.id)?.balanceCentavos ?? 0) : 0,
 		createdAt: new Date(r.created_at),
 		hasOpenCancellationRequest: withRequest.has(r.id)
 	}));

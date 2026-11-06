@@ -3286,9 +3286,15 @@
 								{#each rt.ratePlans as plan (plan.id)}
 									<div
 										class="flex items-center justify-between gap-3 px-3 py-2.5 hover:bg-surface-2"
+										class:opacity-50={!plan.fitsParty}
 									>
 										<div>
 											<div class="text-sm font-medium text-ink">{rt.name}</div>
+											{#if !plan.fitsParty}
+												<div class="text-xs font-medium text-ink">
+													Good for up to {plan.maxGuests} guest{plan.maxGuests === 1 ? '' : 's'} per room
+												</div>
+											{/if}
 											<div class="text-xs text-ink-muted">
 												{plan.name} · {rt.availableRooms} free
 												{#if rt.extraBedsNeeded > 0}
@@ -3319,7 +3325,12 @@
 											<div class="text-sm font-medium text-ink">
 												{peso(walkInLineTotal(rt, plan))}
 											</div>
-											<Button type="button" size="sm" onclick={() => addToWalkInCart(rt, plan)}>
+											<Button
+												type="button"
+												size="sm"
+												disabled={!plan.fitsParty}
+												onclick={() => addToWalkInCart(rt, plan)}
+											>
 												Add
 											</Button>
 										</div>

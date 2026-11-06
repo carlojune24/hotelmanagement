@@ -141,6 +141,7 @@ const updateDepositPolicySchema = createDepositPolicySchema.extend({ id: z.strin
 const blankToUndef = (v: unknown) => (v === '' || v == null ? undefined : v);
 const optMoney = optMoneyPhp;
 const optNights = z.preprocess(blankToUndef, z.coerce.number().int().min(1).max(365).optional());
+const optGuests = z.preprocess(blankToUndef, z.coerce.number().int().min(1).max(20).optional());
 /** A `<input type="datetime-local">` value ("YYYY-MM-DDTHH:MM") → a UTC Date. Deliberately
  *  UTC rather than the hotel's own timezone (this app has no wall-time→zone conversion
  *  helper the other direction, only `businessDateFor`'s UTC→local one) — the field is
@@ -161,7 +162,8 @@ const createPlanSchema = z.object({
 	extraPersonFeePhp: optMoney,
 	extraBedFeePhp: optMoney,
 	minStayNights: optNights,
-	maxStayNights: optNights
+	maxStayNights: optNights,
+	maxGuests: optGuests
 });
 
 const promoCodeBaseSchema = z.object({
@@ -408,7 +410,8 @@ export const actions: Actions = {
 				extraPersonFeeCentavos: toCentavos(parsed.data.extraPersonFeePhp),
 				extraBedFeeCentavos: toCentavos(parsed.data.extraBedFeePhp),
 				minStayNights: parsed.data.minStayNights ?? null,
-				maxStayNights: parsed.data.maxStayNights ?? null
+				maxStayNights: parsed.data.maxStayNights ?? null,
+				maxGuests: parsed.data.maxGuests ?? null
 			})
 			.returning({ id: ratePlans.id });
 

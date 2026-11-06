@@ -60,6 +60,10 @@ export interface AvailableRatePlan {
 	inclusions: string[];
 	minStayNights: number | null;
 	maxStayNights: number | null;
+	/** Most guests per room this rate is sold for; null = no cap. */
+	maxGuests: number | null;
+	/** False when the party is bigger than `maxGuests` × rooms — shown greyed, never bookable. */
+	fitsParty: boolean;
 	cancellation: CancellationTerms | null;
 	/** Per room — not yet scaled by room count. */
 	price: PriceBreakdown;
@@ -373,6 +377,8 @@ export async function searchAvailability(
 				inclusions: plan.inclusions,
 				minStayNights: plan.minStayNights,
 				maxStayNights: plan.maxStayNights,
+				maxGuests: plan.maxGuests,
+				fitsParty: plan.maxGuests == null || plan.maxGuests * roomCount >= occupancy,
 				cancellation: cancellation
 					? {
 							freeCancelHours: cancellation.freeCancelHours,

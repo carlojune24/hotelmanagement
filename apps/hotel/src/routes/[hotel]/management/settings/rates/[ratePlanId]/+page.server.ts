@@ -31,6 +31,7 @@ const csvToArray = (csv: string | undefined) =>
 const blankToUndef = (v: unknown) => (v === '' || v == null ? undefined : v);
 const optMoney = optMoneyPhp;
 const optNights = z.preprocess(blankToUndef, z.coerce.number().int().min(1).max(365).optional());
+const optGuests = z.preprocess(blankToUndef, z.coerce.number().int().min(1).max(20).optional());
 
 export const load: PageServerLoad = async ({ locals, params }) => {
 	requireCap(locals.user, locals.role, 'hotel:admin');
@@ -95,6 +96,7 @@ const updateSchema = z.object({
 	extraBedFeePhp: optMoney,
 	minStayNights: optNights,
 	maxStayNights: optNights,
+	maxGuests: optGuests,
 	cancellationPolicyId: z.string().uuid().optional(),
 	securityDepositPolicyId: z.string().uuid().optional(),
 	isActive: z.coerce.boolean().optional()
@@ -189,6 +191,7 @@ export const actions: Actions = {
 				extraBedFeeCentavos: toCentavos(parsed.data.extraBedFeePhp),
 				minStayNights: parsed.data.minStayNights ?? null,
 				maxStayNights: parsed.data.maxStayNights ?? null,
+				maxGuests: parsed.data.maxGuests ?? null,
 				cancellationPolicyId: parsed.data.cancellationPolicyId || null,
 				securityDepositPolicyId: parsed.data.securityDepositPolicyId || null,
 				isActive: parsed.data.isActive ?? false,

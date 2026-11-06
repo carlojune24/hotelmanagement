@@ -191,6 +191,12 @@ export const actions: Actions = {
 							error: 'A room in your invoice is no longer available for those dates.'
 						};
 					}
+					if (!plan.fitsParty) {
+						return {
+							ok: false as const,
+							error: `${plan.name} is good for up to ${plan.maxGuests} guest${plan.maxGuests === 1 ? '' : 's'} per room, too small for your party. Pick another rate or add a room.`
+						};
+					}
 					const perRoomPrice = await priceStay({
 						hotelId,
 						ratePlanId: item.ratePlanId,

@@ -254,8 +254,11 @@
 							{@const count = roomCounts[plan.id] ?? 1}
 							{@const inCart = addedCount(plan.id)}
 							{@const note = nightlyNote(plan)}
+							{@const fits = plan.maxGuests == null || plan.maxGuests * count >= data.adults + data.children}
 							<div
 								class="grid gap-4 border-t border-[var(--ledger-rule)] px-4 py-4 sm:grid-cols-[1fr_auto] sm:px-5"
+								class:opacity-50={!fits}
+								aria-disabled={!fits}
 							>
 								<div class="min-w-0">
 									<div class="text-[0.9375rem] font-semibold text-[var(--ledger-ink)]">
@@ -286,6 +289,12 @@
 									{#if plan.securityDepositCentavos}
 										<p class="ledger-data mt-1 text-xs text-[var(--ledger-ink-muted)]">
 											Refundable security deposit {peso(plan.securityDepositCentavos)} per room · collected at check-in, not charged online
+										</p>
+									{/if}
+									{#if !fits}
+										<p class="mt-1 text-xs font-semibold text-[var(--ledger-ink)]">
+											Good for up to {plan.maxGuests} guest{plan.maxGuests === 1 ? '' : 's'} per room, too
+											small for your party of {data.adults + data.children}. Add a room or pick another rate.
 										</p>
 									{/if}
 									{#if roomType.extraBedsNeeded > 0}
@@ -332,6 +341,7 @@
 										</div>
 										<Button
 											type="button"
+											disabled={!fits}
 											onclick={() => addRoomToCart(roomType, plan)}
 											class="ledger-btn-primary min-h-11 text-sm !px-5"
 										>

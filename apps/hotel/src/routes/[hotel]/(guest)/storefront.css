@@ -1279,6 +1279,19 @@ html:has(.woven-ledger) {
 .woven-ledger .sf-rate-go {
 	min-width: 8rem;
 }
+/* A rate sold for fewer guests than the party: shown so the guest knows it exists, never bookable. */
+.woven-ledger .sf-rate.is-unfit > :not(.sf-rate-main),
+.woven-ledger .sf-rate.is-unfit .sf-rate-name,
+.woven-ledger .sf-rate.is-unfit .sf-rate-perks {
+	opacity: 0.45;
+}
+.woven-ledger .sf-rate.is-unfit .sf-rate-go {
+	cursor: not-allowed;
+}
+.woven-ledger .sf-rate-unfit {
+	font-weight: 600;
+	color: var(--ledger-ink);
+}
 /* Wide enough: [what it is and its terms] [price] [Reserve] on one row. */
 @container (min-width: 36rem) {
 	.woven-ledger .sf-rate {

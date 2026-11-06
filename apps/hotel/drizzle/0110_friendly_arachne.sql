@@ -1,0 +1,1 @@
+ALTER TABLE "rate_plans" ADD COLUMN "max_guests" integer;
