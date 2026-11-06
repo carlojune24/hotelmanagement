@@ -34,7 +34,7 @@
 	const rows = $derived(
 		room.ratePlans
 			.map((plan) => {
-				const total = roomLinePrice(room, plan, 1, vatRateBps).totalCentavos;
+				const total = roomLinePrice(plan, 1, vatRateBps).totalCentavos;
 				const bps = plan.cancellation?.downpaymentBps ?? null;
 				const partial = isPartialDownpayment(bps);
 				return {
@@ -77,10 +77,10 @@
 					{/if}
 				</ul>
 				{#if !r.plan.fitsParty}
-					<p class="sf-rate-fine sf-rate-unfit">Good for up to {r.plan.maxGuests} guest{r.plan.maxGuests === 1 ? '' : 's'} per room, too small for your party.</p>
+					<p class="sf-rate-fine sf-rate-unfit">Good for up to {r.plan.maxGuests} guest{r.plan.maxGuests === 1 ? '' : 's'} per room{#if room.extraBedAllowed && room.maxExtraBeds > 0} (+{room.maxExtraBeds} extra bed{room.maxExtraBeds === 1 ? '' : 's'}){/if}, too small for your party.</p>
 				{/if}
-				{#if room.extraBedsNeeded > 0}
-					<p class="sf-rate-fine">Includes {room.extraBedsNeeded} extra bed{room.extraBedsNeeded === 1 ? '' : 's'} for your party.</p>
+				{#if r.plan.extraBedsNeeded > 0}
+					<p class="sf-rate-fine">Includes {r.plan.extraBedsNeeded} extra bed{r.plan.extraBedsNeeded === 1 ? '' : 's'} for your party.</p>
 				{/if}
 				{#if r.plan.securityDepositCentavos}
 					<p class="sf-rate-fine">Refundable security deposit {peso(r.plan.securityDepositCentavos)} per room, collected at check-in. It is not part of the price.</p>

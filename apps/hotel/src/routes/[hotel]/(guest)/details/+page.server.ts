@@ -210,7 +210,7 @@ export const actions: Actions = {
 					// (`searchAvailability` already ran the occupancy solver) rather than trusted
 					// from the guest's cart — same "never trust the client" posture as the rest of
 					// this re-verification loop.
-					const extraBeds = roomType.extraBedsNeeded;
+					const extraBeds = plan.extraBedsNeeded;
 					if (extraBeds > 0 && plan.extraBedFeeCentavos) {
 						price = addFlatFeeCentavos(
 							price,

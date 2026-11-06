@@ -706,6 +706,8 @@ export interface WalkInAvailabilityCheckResult {
 		name: string;
 		price: PriceBreakdown;
 		extraBedFeeCentavos: number | null;
+		extraBedsNeeded: number;
+		fitsParty: boolean;
 	}>;
 }
 
@@ -753,12 +755,17 @@ export async function previewWalkInAvailability(
 			roomTypeName: available.name,
 			availableRooms: available.availableRooms,
 			extraBedsNeeded: available.extraBedsNeeded,
-			ratePlans: available.ratePlans.map((p) => ({
-				id: p.id,
-				name: p.name,
-				price: p.price,
-				extraBedFeeCentavos: p.extraBedFeeCentavos
-			}))
+			// Rates that fit the party first, so pick mode's default (`ratePlans[0]`) is bookable.
+			ratePlans: available.ratePlans
+				.map((p) => ({
+					id: p.id,
+					name: p.name,
+					price: p.price,
+					extraBedFeeCentavos: p.extraBedFeeCentavos,
+					extraBedsNeeded: p.extraBedsNeeded,
+					fitsParty: p.fitsParty
+				}))
+				.sort((a, b) => Number(b.fitsParty) - Number(a.fitsParty))
 		});
 	}
 	return results;
@@ -964,7 +971,7 @@ export async function createWalkInBooking(params: {
 			// (`getAvailableRoomType` already ran the occupancy solver) rather than trusting
 			// anything the client sent — same "never trust the preview" posture the rest of
 			// this file already takes with prices and room selections.
-			const extraBeds = available.extraBedsNeeded;
+			const extraBeds = plan.extraBedsNeeded;
 			let price = scaleRoomPrice(plan.price, item.roomCount);
 			if (extraBeds > 0 && plan.extraBedFeeCentavos) {
 				price = addFlatFeeCentavos(

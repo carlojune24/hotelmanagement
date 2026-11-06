@@ -12,17 +12,16 @@ import { addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
 
 /** The line price for `count` rooms of a plan, including the per-line extra-bed fee when the party needs beds. */
 export function roomLinePrice(
-	roomType: Pick<AvailableRoomType, 'extraBedsNeeded'>,
-	plan: Pick<AvailableRatePlan, 'price' | 'extraBedFeeCentavos'>,
+	plan: Pick<AvailableRatePlan, 'price' | 'extraBedFeeCentavos' | 'extraBedsNeeded'>,
 	count: number,
 	vatRateBps: number
 ): PriceBreakdown {
 	let price = scaleRoomPrice(plan.price, count);
-	if (roomType.extraBedsNeeded > 0 && plan.extraBedFeeCentavos) {
+	if (plan.extraBedsNeeded > 0 && plan.extraBedFeeCentavos) {
 		price = addFlatFeeCentavos(
 			price,
-			`Extra bed × ${roomType.extraBedsNeeded}`,
-			roomType.extraBedsNeeded * plan.extraBedFeeCentavos,
+			`Extra bed × ${plan.extraBedsNeeded}`,
+			plan.extraBedsNeeded * plan.extraBedFeeCentavos,
 			vatRateBps
 		);
 	}
@@ -48,7 +47,7 @@ export function roomCartItem(args: {
 		checkOut: args.checkOut,
 		occupancy: args.occupancy,
 		roomCount: args.roomCount,
-		price: roomLinePrice(roomType, plan, args.roomCount, args.vatRateBps),
+		price: roomLinePrice(plan, args.roomCount, args.vatRateBps),
 		downpaymentBps: plan.cancellation?.downpaymentBps ?? null,
 		securityDepositCentavos: plan.securityDepositCentavos
 	};

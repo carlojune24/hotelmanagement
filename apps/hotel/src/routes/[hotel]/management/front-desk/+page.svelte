@@ -671,6 +671,8 @@
 			name: string;
 			price: PriceBreakdown;
 			extraBedFeeCentavos: number | null;
+			extraBedsNeeded: number;
+			fitsParty: boolean;
 		}>;
 		/** Set only for a line built from the grid's pick mode — the exact physical
 		 *  room staff clicked, pre-assigned to the booking the moment it's created
@@ -758,7 +760,7 @@
 			roomCount: Math.min(MAX_ROOMS_PER_LINE, rt.availableRooms, formWalkInSearch.roomCount),
 			availableRooms: rt.availableRooms,
 			perRoomPrice: plan.price,
-			extraBedsNeeded: rt.extraBedsNeeded,
+			extraBedsNeeded: plan.extraBedsNeeded,
 			extraBedFeeCentavos: plan.extraBedFeeCentavos
 		});
 	}
@@ -782,8 +784,9 @@
 	function setWalkInCartLineRatePlan(id: string, ratePlanId: string) {
 		const line = walkInCart.find((l) => l.id === id);
 		const plan = line?.ratePlanOptions?.find((p) => p.id === ratePlanId);
-		if (!line || !plan) return;
+		if (!line || !plan || !plan.fitsParty) return;
 		line.ratePlanId = plan.id;
+		line.extraBedsNeeded = plan.extraBedsNeeded;
 		line.ratePlanName = plan.name;
 		line.perRoomPrice = plan.price;
 		line.extraBedFeeCentavos = plan.extraBedFeeCentavos;
@@ -1026,7 +1029,7 @@
 					roomCount: 1,
 					availableRooms: result.availableRooms ?? 1,
 					perRoomPrice: plan.price,
-					extraBedsNeeded: result.extraBedsNeeded ?? 0,
+					extraBedsNeeded: plan.extraBedsNeeded,
 					extraBedFeeCentavos: plan.extraBedFeeCentavos,
 					ratePlanOptions: result.ratePlans,
 					roomId: tile.roomId,
@@ -1071,11 +1074,11 @@
 	 *  price never understates what the guest is about to be charged. */
 	function walkInLineTotal(rt: AvailableRoomType, plan: AvailableRatePlan): number {
 		let price = scaleRoomPrice(plan.price, formWalkInSearch?.roomCount ?? 1);
-		if (rt.extraBedsNeeded > 0 && plan.extraBedFeeCentavos) {
+		if (plan.extraBedsNeeded > 0 && plan.extraBedFeeCentavos) {
 			price = addFlatFeeCentavos(
 				price,
-				`Extra bed × ${rt.extraBedsNeeded}`,
-				rt.extraBedsNeeded * plan.extraBedFeeCentavos,
+				`Extra bed × ${plan.extraBedsNeeded}`,
+				plan.extraBedsNeeded * plan.extraBedFeeCentavos,
 				data.vatRateBps
 			);
 		}
@@ -3297,13 +3300,13 @@
 											{/if}
 											<div class="text-xs text-ink-muted">
 												{plan.name} · {rt.availableRooms} free
-												{#if rt.extraBedsNeeded > 0}
+												{#if plan.extraBedsNeeded > 0}
 													<span
 														class="ml-1 rounded border border-border px-1 py-0.5 text-[10px] font-medium text-ink"
 													>
-														+{rt.extraBedsNeeded} extra bed{rt.extraBedsNeeded === 1 ? '' : 's'}
+														+{plan.extraBedsNeeded} extra bed{plan.extraBedsNeeded === 1 ? '' : 's'}
 														{#if plan.extraBedFeeCentavos}
-															({peso(rt.extraBedsNeeded * plan.extraBedFeeCentavos)})
+															({peso(plan.extraBedsNeeded * plan.extraBedFeeCentavos)})
 														{/if}
 													</span>
 												{/if}
@@ -3373,7 +3376,7 @@
 										onchange={(e) => setWalkInCartLineRatePlan(line.id, e.currentTarget.value)}
 									>
 										{#each line.ratePlanOptions as opt (opt.id)}
-											<option value={opt.id}>{opt.name}</option>
+											<option value={opt.id} disabled={!opt.fitsParty}>{opt.name}{opt.fitsParty ? '' : ' (too small for party)'}</option>
 										{/each}
 									</select>
 								{:else}

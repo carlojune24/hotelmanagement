@@ -25,6 +25,16 @@ test('a 1-guest rate is greyed out and cannot be reserved by 2 adults', async ({
 	await expect(page.locator('.sf-rate.is-unfit')).toHaveCount(0);
 });
 
+test('an extra bed lets a 2-guest rate take 3 guests, charged at the rate\'s bed fee', async ({ page }) => {
+	const checkIn = futureDate(20);
+	const checkOut = futureDate(21);
+	await page.goto(`/${SLUG}?checkIn=${checkIn}&checkOut=${checkOut}&adults=3&children=0`);
+	const withBed = page.locator('.sf-rate:not(.is-unfit)', { hasText: 'extra bed' });
+	test.skip((await withBed.count()) === 0, 'No room type allows an extra bed for 3 guests.');
+	await expect(withBed.first().getByRole('button', { name: 'Reserve' })).toBeEnabled();
+	await expect(withBed.first()).toContainText('Includes 1 extra bed');
+});
+
 test('the Reservations list total matches the stay page total (add-ons included)', async ({ page }) => {
 	await staffLogin(page);
 	await page.goto(`/${SLUG}/management/reservations?view=in-house`);

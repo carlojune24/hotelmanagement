@@ -55,7 +55,7 @@
 	/** Same scale-then-extra-bed math `addRoomToCart` uses — kept in sync so the displayed
 	 *  row total always matches what actually lands in the cart. */
 	function lineTotalCentavos(roomType: AvailableRoomType, plan: AvailableRatePlan, count: number): number {
-		return roomLinePrice(roomType, plan, count, data.hotel.vatRateBps).totalCentavos;
+		return roomLinePrice(plan, count, data.hotel.vatRateBps).totalCentavos;
 	}
 
 	/** "₱4,200.00 × 3 nights" when every night costs the same, otherwise the average — so the
@@ -254,7 +254,7 @@
 							{@const count = roomCounts[plan.id] ?? 1}
 							{@const inCart = addedCount(plan.id)}
 							{@const note = nightlyNote(plan)}
-							{@const fits = plan.maxGuests == null || plan.maxGuests * count >= data.adults + data.children}
+							{@const fits = plan.fitsParty || (plan.maxGuests ?? 0) * count >= data.adults + data.children}
 							<div
 								class="grid gap-4 border-t border-[var(--ledger-rule)] px-4 py-4 sm:grid-cols-[1fr_auto] sm:px-5"
 								class:opacity-50={!fits}
@@ -297,12 +297,12 @@
 											small for your party of {data.adults + data.children}. Add a room or pick another rate.
 										</p>
 									{/if}
-									{#if roomType.extraBedsNeeded > 0}
+									{#if plan.extraBedsNeeded > 0}
 										<p class="mt-1 text-xs text-[var(--ledger-ink-muted)]">
-											Includes {roomType.extraBedsNeeded} extra bed{roomType.extraBedsNeeded === 1
+											Includes {plan.extraBedsNeeded} extra bed{plan.extraBedsNeeded === 1
 												? ''
 												: 's'} for your party size{#if plan.extraBedFeeCentavos}
-												({peso(roomType.extraBedsNeeded * plan.extraBedFeeCentavos)}){/if}
+												({peso(plan.extraBedsNeeded * plan.extraBedFeeCentavos)}){/if}
 										</p>
 									{/if}
 								</div>

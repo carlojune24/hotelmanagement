@@ -62,13 +62,17 @@ export interface AvailableRatePlan {
 	maxStayNights: number | null;
 	/** Most guests per room this rate is sold for; null = no cap. */
 	maxGuests: number | null;
-	/** False when the party is bigger than `maxGuests` × rooms — shown greyed, never bookable. */
+	/** False when the party doesn't fit `maxGuests` × rooms plus the room type's extra beds —
+	 *  shown greyed, never bookable. */
 	fitsParty: boolean;
+	/** Extra beds this rate needs for the party (across all rooms). Per rate, not per room type: a
+	 *  1-guest rate needs a bed for 2 guests where the room type itself needs none. */
+	extraBedsNeeded: number;
 	cancellation: CancellationTerms | null;
 	/** Per room — not yet scaled by room count. */
 	price: PriceBreakdown;
 	/** Flat charge per extra bed on this plan, if any (`ratePlans.extraBedFeeCentavos`) —
-	 *  for showing "+ ₱X per extra bed" alongside `AvailableRoomType.extraBedsNeeded`. */
+	 *  charged × `extraBedsNeeded`. */
 	extraBedFeeCentavos: number | null;
 	/** Refundable security deposit per room, collected at check-in (never charged online and never
 	 *  part of `price`); null when the plan has none. For display only. */
@@ -370,6 +374,17 @@ export async function searchAvailability(
 		for (const plan of plans) {
 			const price = await priceStay({ hotelId, ratePlanId: plan.id, checkIn, checkOut }, tx);
 			const cancellation = cancellationByPlan.get(plan.id);
+			// "Good for" caps the normal beds; the room type's extra beds still add on top.
+			const fit = resolveOccupancyPlan(
+				{
+					maxOccupancy: Math.min(type.maxOccupancy, plan.maxGuests ?? type.maxOccupancy),
+					extraBedAllowed: type.extraBedAllowed,
+					maxExtraBeds: type.maxExtraBeds ?? 0,
+					extraBedCapacity: type.extraBedCapacity
+				},
+				occupancy,
+				roomCount
+			);
 			ratePlansOut.push({
 				id: plan.id,
 				name: plan.name,
@@ -378,7 +393,8 @@ export async function searchAvailability(
 				minStayNights: plan.minStayNights,
 				maxStayNights: plan.maxStayNights,
 				maxGuests: plan.maxGuests,
-				fitsParty: plan.maxGuests == null || plan.maxGuests * roomCount >= occupancy,
+				fitsParty: fit.fits,
+				extraBedsNeeded: fit.fits ? fit.extraBedsNeeded : 0,
 				cancellation: cancellation
 					? {
 							freeCancelHours: cancellation.freeCancelHours,
