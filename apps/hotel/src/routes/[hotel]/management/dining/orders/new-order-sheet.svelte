@@ -241,10 +241,11 @@
 						</div>
 						{#if menu && menu.categories.length > 0}
 							<Tabs.Root bind:value={category}>
-								<Tabs.List class="h-auto w-full flex-wrap justify-start">
-									<Tabs.Trigger value="all">All</Tabs.Trigger>
-									{#each menu.categories as c (c.id)}<Tabs.Trigger value={c.id}>{c.name}</Tabs.Trigger>{/each}
-									{#if menu.items.some((i) => !i.categoryId)}<Tabs.Trigger value="none">Other</Tabs.Trigger>{/if}
+								<!-- one row that scrolls sideways: many categories must not wrap over the dish list -->
+								<Tabs.List class="w-full justify-start overflow-x-auto overflow-y-hidden">
+									<Tabs.Trigger value="all" class="flex-none">All</Tabs.Trigger>
+									{#each menu.categories as c (c.id)}<Tabs.Trigger value={c.id} class="flex-none">{c.name}</Tabs.Trigger>{/each}
+									{#if menu.items.some((i) => !i.categoryId)}<Tabs.Trigger value="none" class="flex-none">Other</Tabs.Trigger>{/if}
 								</Tabs.List>
 							</Tabs.Root>
 						{/if}
