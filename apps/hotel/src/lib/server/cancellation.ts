@@ -959,11 +959,11 @@ export async function cancelOtaBooking(input: {
 			.set({ status: 'closed', closedAt: new Date(), updatedAt: new Date() })
 			.where(and(eq(folios.hotelId, hotelId), eq(folios.bookingId, bookingId)));
 
-		// Cancel the parent order once nothing live remains under it.
+		// Cancel the parent order once every room is cancelled. A no-show stays a booking (like `markNoShow`).
 		const [live] = await tx
 			.select({ id: bookings.id })
 			.from(bookings)
-			.where(and(eq(bookings.orderId, order.id), ne(bookings.status, 'cancelled'), ne(bookings.status, 'no_show')))
+			.where(and(eq(bookings.orderId, order.id), ne(bookings.status, 'cancelled')))
 			.limit(1);
 		if (live) return { orderCancelled: false };
 		await tx.update(orders).set({ status: 'cancelled', cancelledAt: new Date(), updatedAt: new Date() }).where(eq(orders.id, order.id));

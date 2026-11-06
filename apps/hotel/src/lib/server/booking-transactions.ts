@@ -38,8 +38,8 @@ export interface BookingTransactionRow {
 	checkIn: string;
 	checkOut: string;
 	lineCount: number;
-	status: 'confirmed' | 'in_house' | 'checked_out' | 'closed' | 'cancelled';
-	/** How many of the booking's rooms/events are cancelled (a partly cancelled booking keeps its live status). */
+	status: 'confirmed' | 'in_house' | 'checked_out' | 'closed' | 'cancelled' | 'no_show';
+	/** How many of the booking's rooms/events are cancelled, no-shows not counted (a partly cancelled booking keeps its live status). */
 	cancelledCount: number;
 	chargesCentavos: number;
 	paidCentavos: number;
@@ -55,7 +55,8 @@ export interface BookingTransactionRow {
 }
 
 function summariseStatus(statuses: string[]): BookingTransactionRow['status'] {
-	if (statuses.every((s) => s === 'cancelled' || s === 'no_show')) return 'cancelled';
+	if (statuses.every((s) => s === 'cancelled' || s === 'no_show'))
+		return statuses.includes('no_show') ? 'no_show' : 'cancelled';
 	const live = statuses.filter((s) => s !== 'cancelled' && s !== 'no_show');
 	if (live.some((s) => s === 'checked_in')) return 'in_house';
 	// Closed is the end of the line — folio shut, invoice issued. Only when every line is there;
@@ -250,7 +251,7 @@ export async function listBookingTransactions(
 			lineCount: rl.length + hl.length,
 			status: summariseStatus([...rl.map((l) => l.status), ...hl.map((l) => l.status)]),
 			cancelledCount: [...rl.map((l) => l.status), ...hl.map((l) => l.status)].filter(
-				(x) => x === 'cancelled' || x === 'no_show'
+				(x) => x === 'cancelled'
 			).length,
 			chargesCentavos: ledger?.chargesTotalCentavos ?? 0,
 			paidCentavos: ledger?.paidTotalCentavos ?? 0,

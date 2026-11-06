@@ -26,7 +26,8 @@
 		confirmed: 'Confirmed',
 		in_house: 'In house',
 		checked_out: 'Checked out',
-		cancelled: 'Cancelled'
+		cancelled: 'Cancelled',
+		no_show: 'No show'
 	};
 	const sum = (pick: (r: BookingTransactionExportRow) => number) => rows.reduce((s, r) => s + pick(r), 0);
 	// A plain-words line for any filter in force, so a filtered print is never mistaken for the whole list.
@@ -87,7 +88,7 @@
 					<td>{r.guestName}</td>
 					<td>{r.roomLabel}</td>
 					<td class="bt-mono">{r.checkIn}{r.checkOut && r.checkOut !== r.checkIn ? ` → ${r.checkOut}` : ''}</td>
-					<td class:bt-cancelled={r.status === 'cancelled'}>{STATUS[r.status]}</td>
+					<td class:bt-cancelled={r.status === 'cancelled' || r.status === 'no_show'}>{STATUS[r.status]}</td>
 					<td>{r.source}</td>
 					<td>
 						{r.methods.join(', ') || '—'}

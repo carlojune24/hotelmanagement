@@ -16,7 +16,8 @@ const STATUS: Record<BookingTransactionExportRow['status'], string> = {
 	in_house: 'In house',
 	checked_out: 'Checked out',
 	closed: 'Closed',
-	cancelled: 'Cancelled'
+	cancelled: 'Cancelled',
+	no_show: 'No show'
 };
 
 export const BOOKING_TRANSACTION_HEADERS = [

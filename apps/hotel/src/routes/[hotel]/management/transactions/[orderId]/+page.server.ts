@@ -451,7 +451,8 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 					discountCentavos: promoLines.reduce((sum, p) => sum + p.discountCentavos, 0)
 				}
 			: null;
-	const cancelledCount = lines.filter((l) => l.cancelled).length;
+	const cancelledCount = lines.filter((l) => l.cancelled && l.status !== 'no_show').length;
+	const noShowCount = lines.filter((l) => l.status === 'no_show').length;
 	const depositAppliedTotal = lines.reduce((sum, l) => sum + l.depositAppliedCentavos, 0);
 	const cityLedgerTotal = lines.reduce((sum, l) => sum + l.cityLedgerMovedCentavos, 0);
 	const carrier = lines.find((l) => l.kind === 'room' && LIVE.has(l.status)) ?? lines[0] ?? null;
@@ -531,6 +532,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		},
 		lines,
 		cancelledCount,
+		noShowCount,
 		ledger: {
 			chargesTotalCentavos: ledger.chargesTotalCentavos,
 			paidTotalCentavos: ledger.paidTotalCentavos,

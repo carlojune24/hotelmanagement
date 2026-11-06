@@ -160,6 +160,11 @@
 						{data.cancelledCount} of {data.lines.length} room{data.lines.length === 1 ? '' : 's'} cancelled
 					</Badge>
 				{/if}
+				{#if data.noShowCount > 0}
+					<Badge variant="outline" class="border-transparent bg-danger/15 text-danger">
+						{data.noShowCount} of {data.lines.length} room{data.lines.length === 1 ? '' : 's'} no show
+					</Badge>
+				{/if}
 			</div>
 		</div>
 		<div class="flex items-center gap-2">
@@ -242,7 +247,7 @@
 							{@const rb = refundBadge(l)}
 							<div class="space-y-1 border-b border-border bg-surface-2 px-3 py-2 text-sm">
 								<div class="flex flex-wrap items-center gap-2">
-									<span class="text-ink">Cancelled — fee kept {peso(l.feeKeptCentavos)}</span>
+									<span class="text-ink">{l.status === 'no_show' ? 'No show' : 'Cancelled'} — fee kept {peso(l.feeKeptCentavos)}</span>
 									{#if rb}<Badge variant="outline" class={rb.cls}>{rb.text}</Badge>{/if}
 								</div>
 								{#each l.refundLines as r, i (i)}
@@ -571,7 +576,7 @@
 						<div class="flex items-center justify-between gap-3 px-3 py-1.5">
 							<dt class="text-ink-muted">
 								{l.title}
-								<span class="text-danger">— cancelled</span>{#if rb}<span class="block text-xs">{rb.text}</span>{/if}
+								<span class="text-danger">— {l.status === 'no_show' ? 'no show' : 'cancelled'}</span>{#if rb}<span class="block text-xs">{rb.text}</span>{/if}
 							</dt>
 							<dd class="tabular-nums text-ink">
 								{peso(l.feeKeptCentavos)}

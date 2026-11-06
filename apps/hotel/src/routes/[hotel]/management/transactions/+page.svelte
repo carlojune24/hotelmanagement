@@ -64,10 +64,11 @@
 		in_house: 'In house',
 		checked_out: 'Checked out',
 		closed: 'Closed',
-		cancelled: 'Cancelled'
+		cancelled: 'Cancelled',
+		no_show: 'No show'
 	};
 	function statusClass(s: string): string {
-		if (s === 'cancelled') return 'border-transparent bg-danger/15 text-danger';
+		if (s === 'cancelled' || s === 'no_show') return 'border-transparent bg-danger/15 text-danger';
 		if (s === 'checked_out' || s === 'closed') return 'border-border bg-surface-2 text-ink-muted';
 		return 'border-transparent bg-ok/15 text-ok';
 	}
