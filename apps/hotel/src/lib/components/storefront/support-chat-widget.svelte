@@ -812,6 +812,12 @@
 	.support.lift {
 		bottom: calc(5rem + var(--sf-bottom-bar, 0px));
 	}
+	/* The dining order page's cart pill (lg:hidden) sits in the same corner; stack above it. */
+	@media (max-width: 1023px) {
+		:global(body:has(.order-pill)) .support {
+			bottom: calc(5rem + var(--sf-bottom-bar, 0px));
+		}
+	}
 	/* Open: above the sticky booking bar (z 46) and the floating invoice (z 50). */
 	.support.is-open {
 		z-index: 60;
