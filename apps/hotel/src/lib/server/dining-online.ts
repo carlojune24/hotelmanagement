@@ -1035,7 +1035,7 @@ export async function recordDiningRefund(args: {
 	} else if (order.cashAccountId && order.paymentMethod !== 'cash') {
 		cashAccountId = order.cashAccountId;
 	} else {
-		cashAccountId = (await resolvePaymentAccount(args.hotelId, 'card')).cashAccountId;
+		cashAccountId = (await resolvePaymentAccount(args.hotelId, 'card', null, 'dining')).cashAccountId;
 	}
 
 	const result = await db.transaction(async (tx) => {

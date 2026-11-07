@@ -111,7 +111,8 @@ export async function createStandaloneSale(
 	const { cashAccountId, shiftId } = await resolvePaymentAccount(
 		input.hotelId,
 		input.method,
-		input.drawerAccountId
+		input.drawerAccountId,
+		input.category === 'dining_revenue' ? 'dining' : undefined
 	);
 
 	const saleId = await db.transaction(async (tx) => {

@@ -164,6 +164,26 @@
 					{/each}
 				</div>
 			</div>
+			<div>
+				<p class="text-xs font-medium text-ink">Dining payment accounts</p>
+				<p class="text-xs text-muted-foreground">
+					Where the dining register's card and e-wallet payments go (orders, quick sales and their refunds), e.g. a dining-only
+					GCash. Leave on "same as hotel" to use the account above. Tag the account Dining in Cash accounts below.
+				</p>
+				<div class="mt-2 grid gap-3 sm:grid-cols-4">
+					{#each [{ m: 'card', label: 'Card' }, { m: 'gcash', label: 'GCash' }, { m: 'maya', label: 'Maya' }, { m: 'bank_transfer', label: 'Bank transfer' }] as { m, label } (m)}
+						<div>
+							<Label class="text-xs">Dining {label}</Label>
+							<select name="dining_account_{m}" class="mt-1 w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-sm">
+								<option value="">— same as hotel —</option>
+								{#each data.accounts.filter((a) => a.kind === 'bank' || a.kind === 'e_wallet') as a (a.id)}
+									<option value={a.id} selected={data.settings.diningMethodAccountIds[m] === a.id}>{a.name}{a.side === 'dining' ? ' (dining)' : ''}</option>
+								{/each}
+							</select>
+						</div>
+					{/each}
+				</div>
+			</div>
 			<label class="flex items-center gap-2 text-sm text-ink">
 				<input type="checkbox" name="autoPostOnlinePayments" class="size-4" checked={data.settings.autoPostOnlinePayments} />
 				Post online (PayMongo) payments into the undeposited account automatically

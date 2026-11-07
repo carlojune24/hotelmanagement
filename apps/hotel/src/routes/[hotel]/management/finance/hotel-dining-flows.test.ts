@@ -168,4 +168,37 @@ describe.skipIf(!hasDb)('hotel / dining split through the finance pages (live DB
 		expect(val(all, /^Dining profit$/)).toBe(val(diningR, /^(Profit|Loss)$/));
 		expect(val(all, /^Hotel profit$/)).toBe(val(hotelR, /^(Profit|Loss)$/));
 	});
+
+	it('Dining payment accounts: a dining GCash sale lands in dining’s own e-wallet; hotel payments do not', async () => {
+		const { payDiningOrder, createDiningOrder } = await import('$lib/server/dining-orders');
+		const { resolvePaymentAccount } = await import('$lib/server/finance/payments');
+		const { createCashAccount } = await import('$lib/server/finance/accounts');
+		const wallet = { id: await createCashAccount(hotel.id, { name: `${tag} Dining GCash`, kind: 'e_wallet', side: 'dining' }, null) };
+		const saved = await act(settingsPage.actions.updateSettings, {
+			defaultDrawerAccountId: acct['Front Desk Drawer']!,
+			diningDrawerAccountId: acct['Dining Desk Drawer']!,
+			defaultBankAccountId: acct['Bank — Main']!,
+			dining_account_gcash: wallet!.id
+		});
+		expect(status(saved)).toBeUndefined();
+
+		// The dining register: GCash goes to dining's wallet, card (not set) falls back to the hotel's bank.
+		const [venue] = await db.insert(s.diningItems).values({ hotelId: hotel.id, title: `${tag} Cafe` }).returning();
+		await db.insert(s.diningStations).values({ hotelId: hotel.id, name: 'Kitchen' }).onConflictDoNothing();
+		const [station] = await db.select().from(s.diningStations).where(and(eq(s.diningStations.hotelId, hotel.id), eq(s.diningStations.name, 'Kitchen')));
+		const [dish] = await db
+			.insert(s.diningMenuItems)
+			.values({ hotelId: hotel.id, stationId: station!.id, diningItemId: venue!.id, name: 'Adobo', priceCentavos: 25_000 })
+			.returning();
+		const sell = async (method: 'gcash' | 'card') => {
+			const o = await createDiningOrder({ hotelId: hotel.id, venueId: venue!.id, orderType: 'takeaway', lines: [{ menuItemId: dish!.id, quantity: 1 }] } as never);
+			await payDiningOrder({ hotelId: hotel.id, orderId: o.id, method, referenceNo: `${method}-1`, documents: 'none' });
+			const [row] = await db.select().from(s.diningOrders).where(eq(s.diningOrders.id, o.id));
+			return row!.cashAccountId;
+		};
+		expect(await sell('gcash')).toBe(wallet!.id);
+		expect(await sell('card')).toBe(acct['Bank — Main']);
+		// A hotel (non-dining) GCash payment is untouched.
+		expect((await resolvePaymentAccount(hotel.id, 'gcash')).cashAccountId).toBe(acct['Bank — Main']);
+	});
 });

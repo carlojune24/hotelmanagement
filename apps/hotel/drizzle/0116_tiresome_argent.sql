@@ -1,0 +1,1 @@
+ALTER TABLE "finance_settings" ADD COLUMN "dining_method_account_ids" jsonb DEFAULT '{}'::jsonb NOT NULL;

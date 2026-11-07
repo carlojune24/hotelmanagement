@@ -642,6 +642,12 @@ export const financeSettings = pgTable('finance_settings', {
 		.$type<Record<string, string>>()
 		.notNull()
 		.default({}),
+	/** Dining's own account per non-cash method (`{ gcash: <dining e-wallet id> }`), used by dining
+	 *  payments and refunds. A method with no entry falls back to `methodAccountIds` / the default. */
+	diningMethodAccountIds: jsonb('dining_method_account_ids')
+		.$type<Record<string, string>>()
+		.notNull()
+		.default({}),
 	autoPostOnlinePayments: boolean('auto_post_online_payments').notNull().default(true),
 	requireExpenseApproval: boolean('require_expense_approval').notNull().default(true),
 	lockOnDayClose: boolean('lock_on_day_close').notNull().default(true),

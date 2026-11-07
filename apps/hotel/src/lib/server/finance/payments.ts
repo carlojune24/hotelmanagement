@@ -130,7 +130,9 @@ const DRAWER_METHODS = new Set<PaymentMethod>(['cash']);
 export async function resolvePaymentAccount(
 	hotelId: string,
 	method: PaymentMethod,
-	drawerAccountId?: string | null
+	drawerAccountId?: string | null,
+	/** `dining` for the dining register: card / e-wallet money goes to dining's own account when one is set. */
+	side?: 'dining'
 ): Promise<{ cashAccountId: string; shiftId: string | null }> {
 	const settings = await getFinanceSettings(hotelId);
 	if (DRAWER_METHODS.has(method)) {
@@ -145,7 +147,7 @@ export async function resolvePaymentAccount(
 		if (!drawer) throw new FinanceError('No cash drawer is set up. Add one in Finance settings.');
 		return { cashAccountId: drawer, shiftId: null };
 	}
-	const accountId = accountForMethod(settings, method);
+	const accountId = accountForMethod(settings, method, side);
 	if (!accountId) {
 		throw new FinanceError(
 			'No bank / e-wallet account is set up for non-cash payments. Add one in Finance settings.'

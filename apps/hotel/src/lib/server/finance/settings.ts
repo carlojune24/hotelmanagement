@@ -10,6 +10,7 @@ export const DEFAULT_FINANCE_SETTINGS = {
 	defaultBankAccountId: null as string | null,
 	undepositedAccountId: null as string | null,
 	methodAccountIds: {} as Record<string, string>,
+	diningMethodAccountIds: {} as Record<string, string>,
 	autoPostOnlinePayments: true,
 	requireExpenseApproval: true,
 	lockOnDayClose: true,
@@ -34,6 +35,7 @@ export async function getFinanceSettings(hotelId: string): Promise<ResolvedFinan
 		defaultBankAccountId: row.defaultBankAccountId,
 		undepositedAccountId: row.undepositedAccountId,
 		methodAccountIds: row.methodAccountIds,
+		diningMethodAccountIds: row.diningMethodAccountIds,
 		autoPostOnlinePayments: row.autoPostOnlinePayments,
 		requireExpenseApproval: row.requireExpenseApproval,
 		lockOnDayClose: row.lockOnDayClose,
@@ -42,9 +44,10 @@ export async function getFinanceSettings(hotelId: string): Promise<ResolvedFinan
 	};
 }
 
-/** The account a non-cash method posts to: its own mapping, else the default bank / e-wallet. */
-export function accountForMethod(settings: ResolvedFinanceSettings, method: string): string | null {
-	return settings.methodAccountIds[method] ?? settings.defaultBankAccountId;
+/** The account a non-cash method posts to: dining's own mapping for a dining payment, else the
+ *  method's mapping, else the default bank / e-wallet. */
+export function accountForMethod(settings: ResolvedFinanceSettings, method: string, side?: 'dining'): string | null {
+	return (side === 'dining' ? settings.diningMethodAccountIds[method] : undefined) ?? settings.methodAccountIds[method] ?? settings.defaultBankAccountId;
 }
 
 /** Creates the settings row on first touch, pointing the default-account fields at

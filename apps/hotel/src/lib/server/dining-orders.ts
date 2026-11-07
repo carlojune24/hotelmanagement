@@ -816,7 +816,8 @@ export async function payDiningOrder(args: {
 	const { cashAccountId, shiftId } = await resolvePaymentAccount(
 		args.hotelId,
 		args.method,
-		await diningDrawerId(args.hotelId)
+		await diningDrawerId(args.hotelId),
+		'dining'
 	);
 
 	await db.transaction(async (tx) => {
