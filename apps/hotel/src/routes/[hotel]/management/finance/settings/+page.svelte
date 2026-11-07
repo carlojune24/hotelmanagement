@@ -211,6 +211,10 @@
 				<select name="kind" class="rounded-md border border-input bg-transparent px-2 py-1.5 text-sm">
 					{#each data.accountKinds as k (k)}<option value={k}>{kindLabel(k)}</option>{/each}
 				</select>
+				<select name="side" aria-label="Hotel or dining money" class="rounded-md border border-input bg-transparent px-2 py-1.5 text-sm">
+					<option value="">For: hotel (tills) / shared (bank, e-wallet)</option>
+					{#each [['hotel', 'Hotel'], ['dining', 'Dining'], ['shared', 'Shared (both)']] as const as [v, l] (v)}<option value={v}>For: {l}</option>{/each}
+				</select>
 				<Input name="openingBalance" type="number" step="0.01" placeholder="Opening balance ₱" />
 				<Input name="institution" placeholder="Institution (optional)" />
 				<Input name="accountRef" placeholder="Acct/wallet no. (optional)" />
@@ -228,7 +232,18 @@
 						{#if !a.isActive}<span class="ml-1.5 text-xs text-danger">inactive</span>{/if}
 						<span class="ml-2 text-ink-muted tabular-nums">{peso(a.currentBalanceCentavos)}</span>
 					</div>
-					<div class="flex gap-2">
+					<div class="flex items-center gap-2">
+						<form method="POST" action="?/updateAccount" use:enhance>
+							<input type="hidden" name="id" value={a.id} />
+							<select
+								name="side"
+								aria-label="{a.name}: hotel or dining money"
+								class="h-7 rounded-md border border-input bg-transparent px-1.5 text-xs"
+								onchange={(e) => e.currentTarget.form?.requestSubmit()}
+							>
+								{#each [['hotel', 'Hotel'], ['dining', 'Dining'], ['shared', 'Shared (both)']] as const as [v, l] (v)}<option value={v} selected={a.side === v}>{l}</option>{/each}
+							</select>
+						</form>
 						<form method="POST" action="?/updateAccount" use:enhance>
 							<input type="hidden" name="id" value={a.id} />
 							<input type="hidden" name="isActive" value={a.isActive ? 'false' : 'true'} />

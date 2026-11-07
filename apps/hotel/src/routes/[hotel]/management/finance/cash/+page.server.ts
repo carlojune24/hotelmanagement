@@ -5,6 +5,8 @@ import { businessDateFor, FinanceError } from '$lib/server/finance/shared';
 import {
 	getCashPosition,
 	listMovements,
+	movementTotals,
+	parseCashFilter,
 	recordManualMovement,
 	transferBetweenAccounts,
 	voidCashMovement
@@ -25,11 +27,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	requireCap(locals.user, locals.role, 'finance:read');
 	const hotel = locals.hotel!;
 	const today = businessDateFor(hotel.timezone);
-	const from = url.searchParams.get('from') || undefined;
-	const to = url.searchParams.get('to') || undefined;
-	const accountId = url.searchParams.get('account') || undefined;
-	const direction = (url.searchParams.get('direction') as 'in' | 'out' | null) || undefined;
-	const includeVoided = url.searchParams.get('includeVoided') === '1';
+	const f = parseCashFilter(url);
+	const { from, to, cashAccountId: accountId, direction, includeVoided, side } = f;
 
 	// Always compute an opening → in → out → closing position so the ledger
 	// reconciles to the balance cards even when no range is chosen (an account's
@@ -37,11 +36,17 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const posFrom = from ?? '1900-01-01';
 	const posTo = to ?? today;
 
-	const [accounts, movements, position] = await Promise.all([
+	const [allAccounts, movements, totals, allPosition] = await Promise.all([
 		listCashAccounts(hotel.id, { includeInactive: true }),
-		listMovements(hotel.id, { from, to, cashAccountId: accountId, direction, includeVoided, limit: 400 }),
+		listMovements(hotel.id, { ...f, limit: 400 }),
+		movementTotals(hotel.id, f),
 		getCashPosition(hotel.id, { from: posFrom, to: posTo })
 	]);
+	// With Hotel or Dining picked, balances show only that side's own accounts: a shared account
+	// (bank, e-wallet, undeposited) holds both, so its balance can't honestly be split.
+	const accounts = side ? allAccounts.filter((a) => a.side === side) : allAccounts;
+	const sideIds = new Set(accounts.map((a) => a.id));
+	const position = side ? allPosition.filter((p) => sideIds.has(p.accountId)) : allPosition;
 
 	// A synthetic "opening balance" row per account, shown only when the ledger
 	// isn't date-filtered (so the visible rows add up to each account's balance).
@@ -65,15 +70,24 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 						voidedAt: null as Date | null,
 						paymentPurpose: null as string | null,
 						paymentProvider: null as string | null,
-						orderId: null as string | null
+						orderId: null as string | null,
+						side: a.side
 					}))
 			: [];
 
 	return {
 		today,
 		accounts,
-		activeAccounts: accounts.filter((a) => a.isActive && !a.deletedAt),
+		activeAccounts: allAccounts.filter((a) => a.isActive && !a.deletedAt),
+		allAccounts,
+		sharedCount: side ? allAccounts.filter((a) => a.side === 'shared' && !a.deletedAt).length : 0,
 		movements: [...openingRows, ...movements],
+		// Whole-filter totals (the list shows the newest 400); opening floats are added like the rows they mirror.
+		totals: {
+			count: totals.count + openingRows.length,
+			in: totals.inCentavos + openingRows.reduce((t, r) => t + r.amountCentavos, 0),
+			out: totals.outCentavos
+		},
 		position,
 		rangeActive: !!(from || to),
 		manualCategories: MANUAL_CATEGORIES,
@@ -82,6 +96,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			to: to ?? '',
 			account: accountId ?? '',
 			direction: direction ?? '',
+			side: side ?? '',
 			includeVoided
 		}
 	};
@@ -130,10 +145,11 @@ export const actions: Actions = {
 				amount: z.coerce.number().positive(),
 				counterpartyName: z.string().max(200).optional(),
 				memo: z.string().max(300).optional(),
+				side: z.enum(['hotel', 'dining']),
 				businessDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 			})
 			.safeParse(Object.fromEntries(await event.request.formData()));
-		if (!parsed.success) return fail(400, { error: 'Check the movement details.' });
+		if (!parsed.success) return fail(400, { error: 'Check the movement details, including whether it is hotel or dining money.' });
 		try {
 			await recordManualMovement({
 				hotelId: hotel.id,
@@ -144,6 +160,7 @@ export const actions: Actions = {
 				amountCentavos: Math.round(parsed.data.amount * 100),
 				counterpartyName: parsed.data.counterpartyName || null,
 				memo: parsed.data.memo || null,
+				side: parsed.data.side,
 				actor: event.locals.user
 			});
 			return { ok: 'Movement recorded.' };
@@ -161,10 +178,11 @@ export const actions: Actions = {
 				cashAccountId: z.string().uuid(),
 				amount: z.coerce.number().positive(),
 				memo: z.string().max(300).optional(),
+				side: z.enum(['hotel', 'dining']),
 				businessDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 			})
 			.safeParse(Object.fromEntries(await event.request.formData()));
-		if (!parsed.success) return fail(400, { error: 'Enter an amount to withdraw.' });
+		if (!parsed.success) return fail(400, { error: 'Enter an amount, and whether it comes out of hotel or dining money.' });
 		try {
 			await recordManualMovement({
 				hotelId: hotel.id,
@@ -175,6 +193,7 @@ export const actions: Actions = {
 				amountCentavos: Math.round(parsed.data.amount * 100),
 				counterpartyName: null,
 				memo: parsed.data.memo?.trim() || 'Owner withdrawal',
+				side: parsed.data.side,
 				actor: event.locals.user
 			});
 			return { ok: 'Owner withdrawal recorded.' };

@@ -1,6 +1,7 @@
 import { and, eq, gte, lte, ne, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/index';
 import {
+	cashAccounts,
 	cashMovements,
 	diningOrders,
 	hotels,
@@ -53,18 +54,17 @@ function scopeRevenueCategories(scope: ReportScope): readonly string[] {
 }
 
 /**
- * The `cash_movements` rows a scope covers: its revenue categories, plus refunds paid out of it
- * (a dining refund carries `source_type = 'dining_refund'`; any other refund belongs to the hotel).
- * `undefined` for `all`, so the default query is untouched.
+ * The `cash_movements` rows a scope covers: revenue (and room deposits) taken in, plus refunds paid
+ * out. A row is dining's when it was tagged Dining by hand (a manual entry), or, untagged, when it is
+ * a dining sale or came from dining (`source_type` like `dining%`, e.g. a dining refund); every other
+ * row is the hotel's, so Hotel + Dining is always Overall. `undefined` for `all`, so the default query
+ * is untouched.
  */
 export function scopeMovementFilter(scope: ReportScope): SQL | undefined {
 	if (scope === 'all') return undefined;
-	const isDiningSource = sql`${cashMovements.sourceType} like 'dining%'`;
-	if (scope === 'dining') {
-		return sql`(${cashMovements.category} = 'dining_revenue' or (${cashMovements.category} = 'refund' and ${isDiningSource}))`;
-	}
-	const cats = sql.join(HOTEL_CATEGORIES.map((c) => sql`${c}`), sql`, `);
-	return sql`(${cashMovements.category} in (${cats}) or (${cashMovements.category} in ('refund', 'deposit_refund') and not ${isDiningSource}))`;
+	const cats = sql.join([...REVENUE_CATEGORIES, 'deposit', 'refund', 'deposit_refund'].map((c) => sql`${c}`), sql`, `);
+	const side = sql`coalesce(${cashMovements.side}::text, case when ${cashMovements.category} = 'dining_revenue' or ${cashMovements.sourceType} like 'dining%' then 'dining' else 'hotel' end)`;
+	return sql`(${cashMovements.category} in (${cats}) and ${side} = ${scope})`;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,7 +188,8 @@ export async function dailySalesReport(
 			)
 		);
 
-	const revenueBySource = scopeRevenueCategories(scope)
+	// The scope's usual lines, plus any other line a hand-tagged manual entry put on this side.
+	const revenueBySource = [...new Set([...scopeRevenueCategories(scope), ...movementRows.filter((m) => m.direction === 'in').map((m) => m.category as string)])]
 		.filter((c) => (REVENUE_CATEGORIES as readonly string[]).includes(c))
 		.map((source) => ({
 		source,
@@ -378,13 +379,8 @@ export async function revenueBySourceReport(
 				lte(cashMovements.businessDate, to),
 				sql`${cashMovements.voidedAt} is null`,
 				sql`${cashMovements.category} in ('room_revenue','hall_revenue','incidental_sale','dining_revenue','other_revenue','deposit')`,
-				// Revenue lines only: a scope's refunds are not a "source".
-				scope === 'all'
-					? undefined
-					: sql`${cashMovements.category} in (${sql.join(
-							scopeRevenueCategories(scope).map((c) => sql`${c}`),
-							sql`, `
-						)})`
+				// Revenue lines only (the category list above): a scope's refunds are not a "source".
+				scopeMovementFilter(scope)
 			)
 		)
 		.groupBy(cashMovements.category);
@@ -407,7 +403,16 @@ export async function revenueBySourceReport(
 
 // ---------------------------------------------------------------------------
 
-export async function expenseReport(hotelId: string, from: string, to: string) {
+/**
+ * Whose a cash-out "expense" movement with no `expenses` row behind it is (a shift payout, a manual
+ * cash-out): the side picked by hand, else dining when it left a Dining account (the dining drawer),
+ * else the hotel's. Needs `cash_accounts` joined on the movement's account.
+ */
+function payoutSideSql(): SQL {
+	return sql`coalesce(${cashMovements.side}::text, case when ${cashAccounts.side} = 'dining' then 'dining' else 'hotel' end)`;
+}
+
+export async function expenseReport(hotelId: string, from: string, to: string, scope: ReportScope = 'all') {
 	const grouped = await db
 		.select({
 			group: expenseCategories.group,
@@ -424,7 +429,8 @@ export async function expenseReport(hotelId: string, from: string, to: string) {
 				gte(expenses.expenseDate, from),
 				lte(expenses.expenseDate, to),
 				sql`${expenses.status} <> 'void'`,
-				sql`${expenses.deletedAt} is null`
+				sql`${expenses.deletedAt} is null`,
+				scope === 'all' ? undefined : eq(expenses.source, scope)
 			)
 		)
 		.groupBy(expenseCategories.group, expenseCategories.name);
@@ -455,6 +461,7 @@ export async function expenseReport(hotelId: string, from: string, to: string) {
 			grossCentavos: sql<number>`coalesce(sum(${cashMovements.amountCentavos}), 0)::bigint`
 		})
 		.from(cashMovements)
+		.innerJoin(cashAccounts, eq(cashAccounts.id, cashMovements.cashAccountId))
 		.where(
 			and(
 				eq(cashMovements.hotelId, hotelId),
@@ -463,7 +470,8 @@ export async function expenseReport(hotelId: string, from: string, to: string) {
 				sql`${cashMovements.sourceType} <> 'expense'`,
 				sql`${cashMovements.voidedAt} is null`,
 				gte(cashMovements.businessDate, from),
-				lte(cashMovements.businessDate, to)
+				lte(cashMovements.businessDate, to),
+				scope === 'all' ? undefined : sql`${payoutSideSql()} = ${scope}`
 			)
 		);
 	const payoutGross = Number(payout?.grossCentavos ?? 0);
@@ -484,6 +492,22 @@ export async function expenseReport(hotelId: string, from: string, to: string) {
 		totalGrossCentavos: rows.reduce((s, r) => s + r.grossCentavos, 0),
 		totalInputVatCentavos: rows.reduce((s, r) => s + r.inputVatCentavos, 0),
 		uncategorisedPayoutCentavos: payoutGross
+	};
+}
+
+/**
+ * Profit & loss for a scope: revenue kept (received less refunds, as Revenue by source reads it)
+ * less expenses (as the Expenses report reads them). Built from those two so the three always agree.
+ */
+export async function profitLossReport(hotelId: string, from: string, to: string, scope: ReportScope = 'all') {
+	const [revenue, spend] = await Promise.all([
+		revenueBySourceReport(hotelId, from, to, scope),
+		expenseReport(hotelId, from, to, scope)
+	]);
+	return {
+		revenue,
+		expenses: spend,
+		profitCentavos: revenue.netCentavos - spend.totalGrossCentavos
 	};
 }
 

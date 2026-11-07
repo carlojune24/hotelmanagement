@@ -69,6 +69,8 @@ export async function createCashAccount(
 	input: {
 		name: string;
 		kind: CashAccount['kind'];
+		/** Omitted: a till or petty cash is the hotel's, anything else is shared. */
+		side?: CashAccount['side'];
 		institution?: string | null;
 		accountRef?: string | null;
 		openingBalanceCentavos?: number;
@@ -102,6 +104,7 @@ export async function createCashAccount(
 			hotelId,
 			name,
 			kind: input.kind,
+			side: input.side ?? (input.kind === 'cash_drawer' || input.kind === 'petty_cash' ? 'hotel' : 'shared'),
 			coaAccountId,
 			institution: input.institution?.trim() || null,
 			accountRef: input.accountRef?.trim() || null,
@@ -127,6 +130,7 @@ export async function updateCashAccount(
 		name?: string;
 		institution?: string | null;
 		accountRef?: string | null;
+		side?: CashAccount['side'];
 		isActive?: boolean;
 		sortOrder?: number;
 	},
@@ -147,6 +151,7 @@ export async function updateCashAccount(
 			institution:
 				patch.institution === undefined ? a.institution : patch.institution?.trim() || null,
 			accountRef: patch.accountRef === undefined ? a.accountRef : patch.accountRef?.trim() || null,
+			side: patch.side ?? a.side,
 			isActive: patch.isActive ?? a.isActive,
 			sortOrder: patch.sortOrder ?? a.sortOrder,
 			updatedAt: new Date()

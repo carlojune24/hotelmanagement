@@ -44,6 +44,9 @@ export const cashAccountKind = pgEnum('cash_account_kind', [
 	'undeposited' // holding account for online (PayMongo) receipts until a payout lands
 ]);
 
+/** Whose money an account holds, for the Hotel / Dining toggle on Finance → Cash. `shared` = both (bank, e-wallet, undeposited). */
+export const cashAccountSide = pgEnum('cash_account_side', ['hotel', 'dining', 'shared']);
+
 export const cashAccounts = pgTable(
 	'cash_accounts',
 	{
@@ -57,6 +60,7 @@ export const cashAccounts = pgTable(
 		institution: text('institution'),
 		/** Masked account / wallet number for reference, optional. */
 		accountRef: text('account_ref'),
+		side: cashAccountSide('side').notNull().default('shared'),
 		openingBalanceCentavos: bigint('opening_balance_centavos', { mode: 'number' })
 			.notNull()
 			.default(0),
@@ -258,6 +262,9 @@ export const cashMovements = pgTable(
 		shiftId: uuid('shift_id').references(() => cashierShifts.id, { onDelete: 'set null' }),
 		/** Pairs the two rows of a transfer (or a shift cash-drop). */
 		transferGroupId: uuid('transfer_group_id'),
+		/** Hotel or dining, as picked by hand on a manual entry / owner draw. Null = worked out from the
+		 *  movement's origin (see `cashSideSql`). Never `shared`. */
+		side: cashAccountSide('side'),
 		memo: text('memo'),
 		recordedByUserId: uuid('recorded_by_user_id').references(() => users.id, {
 			onDelete: 'set null'

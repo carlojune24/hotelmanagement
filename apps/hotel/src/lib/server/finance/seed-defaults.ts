@@ -172,9 +172,9 @@ export async function seedFinanceDefaults(db: DbLike, hotelId: string): Promise<
 	const accounts = await db
 		.insert(cashAccounts)
 		.values([
-			{ hotelId, name: 'Front Desk Drawer', kind: 'cash_drawer', sortOrder: 0 },
-			{ hotelId, name: 'Dining Desk Drawer', kind: 'cash_drawer', sortOrder: 1 },
-			{ hotelId, name: 'Petty Cash', kind: 'petty_cash', sortOrder: 2 },
+			{ hotelId, name: 'Front Desk Drawer', kind: 'cash_drawer', side: 'hotel', sortOrder: 0 },
+			{ hotelId, name: 'Dining Desk Drawer', kind: 'cash_drawer', side: 'dining', sortOrder: 1 },
+			{ hotelId, name: 'Petty Cash', kind: 'petty_cash', side: 'hotel', sortOrder: 2 },
 			{ hotelId, name: 'Bank — Main', kind: 'bank', sortOrder: 3 },
 			{ hotelId, name: 'E-wallet', kind: 'e_wallet', sortOrder: 4 },
 			{ hotelId, name: 'Undeposited Funds', kind: 'undeposited', isSystem: true, sortOrder: 5 }

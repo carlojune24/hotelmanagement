@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lte, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/index';
 import {
 	cashAccounts,
@@ -37,6 +37,8 @@ export interface RecordMovementInput {
 	paymentId?: string | null;
 	shiftId?: string | null;
 	transferGroupId?: string | null;
+	/** Hotel or dining, picked by hand (manual entry, owner draw). Omit to work it out from the origin. */
+	side?: 'hotel' | 'dining' | null;
 	memo?: string | null;
 	actor?: SessionUser | null;
 	/** Overrides the category's default chart-of-accounts mapping for the non-cash
@@ -88,6 +90,7 @@ export async function recordCashMovement(input: RecordMovementInput, tx?: Tx): P
 				paymentId: input.paymentId ?? null,
 				shiftId: input.shiftId ?? null,
 				transferGroupId: input.transferGroupId ?? null,
+				side: input.side ?? null,
 				memo: input.memo ?? null,
 				recordedByUserId: input.actor?.id ?? null
 			})
@@ -445,19 +448,93 @@ export interface MovementFilters {
 	direction?: CashDirection;
 	category?: CashCategory;
 	includeVoided?: boolean;
+	/** Hotel or dining money (see `diningMovementSql`). */
+	side?: 'hotel' | 'dining';
 	limit?: number;
 }
 
-/** The Cash-page ledger list, newest first, with the account name joined in. */
-export async function listMovements(hotelId: string, filters: MovementFilters = {}) {
-	const conds = [eq(cashMovements.hotelId, hotelId)];
+export type CashSide = 'hotel' | 'dining' | 'shared';
+
+/**
+ * Whose money a cash movement is, for the Hotel / Dining toggle on Finance → Cash. Read-side only
+ * (nothing is stored except a hand-picked side on a manual entry). In order:
+ *  - the side picked by hand on a manual entry or owner draw;
+ *  - `dining`: a dining sale or dining payment / refund / payout, an expense tagged Dining, anything
+ *    on a Dining account (the dining drawer), or a transfer with a leg on one;
+ *  - `shared`: a transfer between two shared accounts (bank → GCash): neither side's money, so it
+ *    shows only under All;
+ *  - otherwise `hotel`.
+ * Needs `cash_accounts` joined on the movement's account.
+ */
+export function cashSideSql(): SQL<CashSide> {
+	return sql<CashSide>`(case
+		when ${cashMovements.side} is not null then ${cashMovements.side}::text
+		when ${cashMovements.category} = 'dining_revenue'
+			or ${cashMovements.sourceType} like 'dining%'
+			or ${cashAccounts.side} = 'dining'
+			or (${cashMovements.sourceType} = 'expense' and exists (
+				select 1 from expenses e where e.id = ${cashMovements.sourceId} and e.source = 'dining'))
+			or (${cashMovements.transferGroupId} is not null and exists (
+				select 1 from cash_movements t join cash_accounts ta on ta.id = t.cash_account_id
+				where t.transfer_group_id = ${cashMovements.transferGroupId} and ta.side = 'dining'))
+			then 'dining'
+		when ${cashMovements.transferGroupId} is not null and not exists (
+				select 1 from cash_movements t join cash_accounts ta on ta.id = t.cash_account_id
+				where t.transfer_group_id = ${cashMovements.transferGroupId} and ta.side <> 'shared')
+			then 'shared'
+		else 'hotel'
+	end)`;
+}
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Finance → Cash's filters from a URL (the page, its CSV and its print view read the same ones). */
+export function parseCashFilter(url: URL) {
+	const p = url.searchParams;
+	const from = p.get('from') ?? '';
+	const to = p.get('to') ?? '';
+	const account = p.get('account') ?? '';
+	const direction = p.get('direction');
+	const src = p.get('src');
+	return {
+		from: ISO_DAY.test(from) ? from : undefined,
+		to: ISO_DAY.test(to) ? to : undefined,
+		cashAccountId: UUID_RE.test(account) ? account : undefined,
+		direction: direction === 'in' || direction === 'out' ? (direction as CashDirection) : undefined,
+		includeVoided: p.get('includeVoided') === '1',
+		side: src === 'hotel' || src === 'dining' ? (src as 'hotel' | 'dining') : undefined
+	};
+}
+
+function movementWhere(hotelId: string, filters: MovementFilters): SQL | undefined {
+	const conds: (SQL | undefined)[] = [eq(cashMovements.hotelId, hotelId)];
 	if (filters.from) conds.push(gte(cashMovements.businessDate, filters.from));
 	if (filters.to) conds.push(lte(cashMovements.businessDate, filters.to));
 	if (filters.cashAccountId) conds.push(eq(cashMovements.cashAccountId, filters.cashAccountId));
 	if (filters.direction) conds.push(eq(cashMovements.direction, filters.direction));
 	if (filters.category) conds.push(eq(cashMovements.category, filters.category));
 	if (!filters.includeVoided) conds.push(sql`${cashMovements.voidedAt} is null`);
+	if (filters.side) conds.push(sql`${cashSideSql()} = ${filters.side}`);
+	return and(...conds);
+}
 
+/** In / out over EVERY movement the filters match (not just the rows listed); voided rows never count. */
+export async function movementTotals(hotelId: string, filters: MovementFilters = {}) {
+	const [t] = await db
+		.select({
+			count: sql<number>`count(*)::int`,
+			inCentavos: sql<number>`coalesce(sum(${cashMovements.amountCentavos}) filter (where ${cashMovements.direction} = 'in' and ${cashMovements.voidedAt} is null), 0)::bigint`,
+			outCentavos: sql<number>`coalesce(sum(${cashMovements.amountCentavos}) filter (where ${cashMovements.direction} = 'out' and ${cashMovements.voidedAt} is null), 0)::bigint`
+		})
+		.from(cashMovements)
+		.innerJoin(cashAccounts, eq(cashAccounts.id, cashMovements.cashAccountId))
+		.where(movementWhere(hotelId, filters));
+	return { count: Number(t?.count ?? 0), inCentavos: Number(t?.inCentavos ?? 0), outCentavos: Number(t?.outCentavos ?? 0) };
+}
+
+/** The Cash-page ledger list, newest first, with the account name joined in. */
+export async function listMovements(hotelId: string, filters: MovementFilters = {}) {
 	return db
 		.select({
 			id: cashMovements.id,
@@ -474,6 +551,7 @@ export async function listMovements(hotelId: string, filters: MovementFilters = 
 			memo: cashMovements.memo,
 			voidedAt: cashMovements.voidedAt,
 			voidReason: cashMovements.voidReason,
+			side: cashSideSql(),
 			// The payment behind it (when there is one): why the money moved, and which booking to open.
 			paymentPurpose: payments.purpose,
 			paymentProvider: payments.provider,
@@ -482,7 +560,7 @@ export async function listMovements(hotelId: string, filters: MovementFilters = 
 		.from(cashMovements)
 		.innerJoin(cashAccounts, eq(cashAccounts.id, cashMovements.cashAccountId))
 		.leftJoin(payments, eq(payments.id, cashMovements.paymentId))
-		.where(and(...conds))
+		.where(movementWhere(hotelId, filters))
 		.orderBy(desc(cashMovements.occurredAt))
 		.limit(filters.limit ?? 500);
 }
@@ -498,6 +576,7 @@ export async function recordManualMovement(input: {
 	amountCentavos: number;
 	counterpartyName?: string | null;
 	memo?: string | null;
+	side?: 'hotel' | 'dining' | null;
 	actor: SessionUser | null;
 }): Promise<string> {
 	const id = await recordCashMovement({ ...input, sourceType: 'manual' });

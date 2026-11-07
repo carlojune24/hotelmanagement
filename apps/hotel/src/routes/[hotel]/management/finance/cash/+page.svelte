@@ -10,6 +10,8 @@
 	import * as Table from '$lib/components/ui/table/index.js';
 	import { movementReason } from '$lib/movement-reason';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import DownloadIcon from '@lucide/svelte/icons/download';
+	import PrinterIcon from '@lucide/svelte/icons/printer';
 	import { RANGE_PRESETS, matchPreset, resolveRange } from '$lib/finance-range';
 	import type { ActionData, PageData } from './$types';
 
@@ -37,14 +39,9 @@
 
 	// Voided rows stay listed (greyed out, "Include voided") but never count toward the
 	// total — same posture the Reconciliation card's own totals already take.
-	const movementTotals = $derived({
-		in: data.movements
-			.filter((m) => !m.voidedAt && m.direction === 'in')
-			.reduce((s, m) => s + m.amountCentavos, 0),
-		out: data.movements
-			.filter((m) => !m.voidedAt && m.direction === 'out')
-			.reduce((s, m) => s + m.amountCentavos, 0)
-	});
+	// Server-side, over every movement the filters match, not just the rows listed.
+	const movementTotals = $derived(data.totals);
+	const filterQuery = $derived(page.url.search);
 
 	const kindLabel: Record<string, string> = {
 		cash_drawer: 'Drawer',
@@ -78,11 +75,21 @@
 		}
 		if (data.filters.account) q.set('account', data.filters.account);
 		if (data.filters.direction) q.set('direction', data.filters.direction);
+		if (data.filters.side) q.set('src', data.filters.side);
 		goto(`?${q}`, { keepFocus: true, noScroll: true });
+	}
+
+	// Hotel / Dining toggle: keeps every other filter.
+	function sideHref(v: string) {
+		const q = new URLSearchParams(page.url.searchParams);
+		if (v) q.set('src', v);
+		else q.delete('src');
+		const qs = q.toString();
+		return qs ? `?${qs}` : page.url.pathname;
 	}
 </script>
 
-<div class="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6">
+<div class="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
 	<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
 		<h1 class="text-xl font-semibold tracking-tight text-ink">Cash accounts &amp; movements</h1>
 		{#if data.finance.canWrite}
@@ -92,6 +99,30 @@
 				<Button size="sm" variant="outline" onclick={() => (panel = panel === 'ownerdraw' ? null : 'ownerdraw')}>Owner draw</Button>
 				<Button size="sm" variant="outline" onclick={() => (panel = panel === 'manual' ? null : 'manual')}>Manual entry</Button>
 			</div>
+		{/if}
+	</div>
+
+	<div class="mb-4 flex flex-wrap items-center gap-3">
+		<div class="inline-flex rounded-lg border border-border bg-surface-2 p-1" role="group" aria-label="Source">
+			{#each [['', 'All'], ['hotel', 'Hotel'], ['dining', 'Dining']] as const as [v, label] (v)}
+				<a
+					href={sideHref(v)}
+					data-sveltekit-noscroll
+					aria-current={data.filters.side === v ? 'true' : undefined}
+					class="min-w-20 rounded-md px-4 py-2 text-center text-sm font-semibold {data.filters.side === v ? 'bg-background text-ink shadow-sm' : 'text-ink-muted hover:text-ink'}"
+				>{label}</a>
+			{/each}
+		</div>
+		<Button variant="outline" href="{page.url.pathname}/export{filterQuery}" data-sveltekit-reload>
+			<DownloadIcon class="size-4" aria-hidden="true" /> Export CSV
+		</Button>
+		<Button variant="outline" href="/{page.params.hotel}/print/cash{filterQuery}" target="_blank" rel="noopener">
+			<PrinterIcon class="size-4" aria-hidden="true" /> Print
+		</Button>
+		{#if data.filters.side}
+			<p class="max-w-xl text-xs text-ink-muted">
+				Showing {data.filters.side} money only. Balances below are the {data.filters.side} accounts{data.sharedCount ? `; ${data.sharedCount} shared account${data.sharedCount === 1 ? '' : 's'} (bank, e-wallet, undeposited) hold both and only show under All` : ''}. The movements list covers every account; transfers between two shared accounts show only under All.
+			</p>
 		{/if}
 	</div>
 
@@ -167,6 +198,14 @@
 					{#each data.activeAccounts as a (a.id)}<option value={a.id}>{a.name}</option>{/each}
 				</select>
 			</div>
+<div>
+				<Label class="text-xs">For</Label>
+				<select name="side" required class="mt-1 w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-sm">
+					<option value="" disabled selected>Hotel or dining?</option>
+					<option value="hotel">Hotel</option>
+					<option value="dining">Dining</option>
+				</select>
+			</div>
 			<div><Label class="text-xs">Amount (₱)</Label><Input name="amount" type="number" min="0.01" step="0.01" required class="mt-1" /></div>
 			<div><Label class="text-xs">Counterparty</Label><Input name="counterpartyName" class="mt-1" /></div>
 			<div class="flex items-end gap-2">
@@ -202,6 +241,14 @@
 						{#each data.activeAccounts as a (a.id)}
 							<option value={a.id}>{a.name} — {peso(a.currentBalanceCentavos)}</option>
 						{/each}
+					</select>
+				</div>
+				<div>
+					<Label class="text-xs">Out of</Label>
+					<select name="side" required class="mt-1 h-9 rounded-md border border-input bg-transparent px-2 text-sm">
+						<option value="" disabled selected>Hotel or dining?</option>
+						<option value="hotel">Hotel money</option>
+						<option value="dining">Dining money</option>
 					</select>
 				</div>
 				<div>
@@ -319,7 +366,7 @@
 			<Label class="text-xs">Account</Label>
 			<select name="account" class="mt-1 h-8 rounded-md border border-input bg-transparent px-2 text-sm">
 				<option value="">All</option>
-				{#each data.accounts as a (a.id)}<option value={a.id} selected={data.filters.account === a.id}>{a.name}</option>{/each}
+				{#each data.allAccounts as a (a.id)}<option value={a.id} selected={data.filters.account === a.id}>{a.name}</option>{/each}
 			</select>
 		</div>
 		<div>
@@ -340,6 +387,7 @@
 			/>
 			Include voided
 		</label>
+		{#if data.filters.side}<input type="hidden" name="src" value={data.filters.side} />{/if}
 		<Button type="submit" size="sm" variant="outline">Filter</Button>
 		<a href={page.url.pathname} class="text-xs text-ink-muted underline underline-offset-2">Clear</a>
 	</form>
@@ -368,8 +416,11 @@
 								: ''}
 					>
 						<Table.Cell class="whitespace-nowrap text-ink-muted">{m.businessDate}</Table.Cell>
-						<Table.Cell class="text-ink">{m.accountName}</Table.Cell>
-						<Table.Cell class="text-ink-muted">{catLabel(m.category)}</Table.Cell>
+						<Table.Cell class="text-ink">
+							<span class="mr-1 rounded px-1.5 py-0.5 text-[11px] font-medium not-italic {m.side === 'dining' ? 'bg-warning/20 text-ink' : m.side === 'shared' ? 'bg-surface-2 text-ink-muted' : 'bg-brand/10 text-brand'}" title={m.side === 'shared' && m.sourceType !== 'opening' ? 'A transfer between two shared accounts: neither hotel nor dining money, so it shows only under All' : undefined}>{m.side === 'dining' ? 'Dining' : m.side === 'shared' ? 'Shared' : 'Hotel'}</span>
+							{m.accountName}
+						</Table.Cell>
+						<Table.Cell class="max-w-[10rem] text-ink-muted first-letter:uppercase">{catLabel(m.category)}</Table.Cell>
 						<Table.Cell class="whitespace-nowrap">
 							{#if movementReason(m)}
 								{@const r = movementReason(m)!}
@@ -381,8 +432,8 @@
 							{#if m.orderId}<a href="/{page.params.hotel}/management/transactions/{m.orderId}" class="ml-1 text-xs underline underline-offset-2 hover:text-ink">booking</a>{/if}
 							{#if m.voidedAt}<span class="text-danger"> (voided)</span>{/if}
 						</Table.Cell>
-						<Table.Cell class="text-right tabular-nums text-ok">{m.direction === 'in' ? peso(m.amountCentavos) : ''}</Table.Cell>
-						<Table.Cell class="text-right tabular-nums text-danger">{m.direction === 'out' ? peso(m.amountCentavos) : ''}</Table.Cell>
+						<Table.Cell class="text-right whitespace-nowrap tabular-nums text-ok">{m.direction === 'in' ? peso(m.amountCentavos) : ''}</Table.Cell>
+						<Table.Cell class="text-right whitespace-nowrap tabular-nums text-danger">{m.direction === 'out' ? peso(m.amountCentavos) : ''}</Table.Cell>
 						<Table.Cell class="text-right">
 							{#if !m.voidedAt && data.finance.canAdmin && m.sourceType === 'manual'}
 								<form method="POST" action="?/voidMovement" use:enhance>
@@ -400,9 +451,11 @@
 			{#if data.movements.length > 0}
 				<Table.Footer>
 					<Table.Row>
-						<Table.Cell colspan={5} class="text-ink">Total</Table.Cell>
-						<Table.Cell class="text-right tabular-nums text-ok">{peso(movementTotals.in)}</Table.Cell>
-						<Table.Cell class="text-right tabular-nums text-danger">{peso(movementTotals.out)}</Table.Cell>
+						<Table.Cell colspan={5} class="text-ink">
+						Total{data.totals.count > data.movements.length ? ` of all ${data.totals.count} movements (newest ${data.movements.length} listed; export for the rest)` : ''}
+					</Table.Cell>
+						<Table.Cell class="text-right whitespace-nowrap tabular-nums text-ok">{peso(movementTotals.in)}</Table.Cell>
+						<Table.Cell class="text-right whitespace-nowrap tabular-nums text-danger">{peso(movementTotals.out)}</Table.Cell>
 						<Table.Cell></Table.Cell>
 					</Table.Row>
 				</Table.Footer>

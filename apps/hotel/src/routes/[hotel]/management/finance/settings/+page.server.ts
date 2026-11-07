@@ -133,6 +133,7 @@ export const actions: Actions = {
 			.object({
 				name: z.string().min(1).max(120),
 				kind: z.enum(ACCOUNT_KINDS),
+				side: z.enum(['hotel', 'dining', 'shared']).optional(),
 				institution: z.string().max(120).optional(),
 				accountRef: z.string().max(120).optional(),
 				openingBalance: z.coerce.number().optional()
@@ -146,6 +147,7 @@ export const actions: Actions = {
 					{
 						name: p.data.name,
 						kind: p.data.kind,
+						side: p.data.side,
 						institution: p.data.institution || null,
 						accountRef: p.data.accountRef || null,
 						openingBalanceCentavos: Math.round((p.data.openingBalance ?? 0) * 100)
@@ -164,6 +166,7 @@ export const actions: Actions = {
 				name: z.string().min(1).max(120).optional(),
 				institution: z.string().max(120).optional(),
 				accountRef: z.string().max(120).optional(),
+				side: z.enum(['hotel', 'dining', 'shared']).optional(),
 				isActive: z.enum(['true', 'false']).optional()
 			})
 			.safeParse(Object.fromEntries(await event.request.formData()));
@@ -177,6 +180,7 @@ export const actions: Actions = {
 						name: p.data.name,
 						institution: p.data.institution,
 						accountRef: p.data.accountRef,
+						side: p.data.side,
 						isActive: p.data.isActive === undefined ? undefined : p.data.isActive === 'true'
 					},
 					event.locals.user

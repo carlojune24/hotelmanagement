@@ -94,6 +94,13 @@ export async function updateFinanceSettings(
 		.update(financeSettings)
 		.set({ ...patch, updatedAt: new Date() })
 		.where(eq(financeSettings.hotelId, hotelId));
+	// The dining drawer's money is dining's (Finance → Cash's Hotel / Dining toggle).
+	if (patch.diningDrawerAccountId) {
+		await db
+			.update(cashAccounts)
+			.set({ side: 'dining', updatedAt: new Date() })
+			.where(and(eq(cashAccounts.id, patch.diningDrawerAccountId), eq(cashAccounts.hotelId, hotelId)));
+	}
 	await writeAudit({
 		hotelId,
 		actor,

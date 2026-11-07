@@ -187,9 +187,9 @@ describe.skipIf(!hasDb)('finance report scope (live DB)', async () => {
 		expect(overall!.name).toBe('Revenue by source');
 		expect(overall!.summary.some(([k]) => k === 'Scope')).toBe(false);
 
-		const expenses = await runner.runReport(hotelA, 'expenses', { ...opts, scope: 'dining' });
-		expect(expenses!.scope).toBe('all');
-		expect(expenses!.name).toBe('Expenses');
+		const position = await runner.runReport(hotelA, 'cash-position', { ...opts, scope: 'dining' });
+		expect(position!.scope).toBe('all');
+		expect(position!.name).toBe('Cash position');
 
 		expect(r.parseReportScope('dining')).toBe('dining');
 		expect(r.parseReportScope('hotel')).toBe('hotel');

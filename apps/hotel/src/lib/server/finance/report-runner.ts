@@ -7,6 +7,7 @@ import {
 	dailySalesReport,
 	expenseReport,
 	paymentMethodBreakdown,
+	profitLossReport,
 	revenueBySourceReport,
 	scPwdInRange,
 	toCsv,
@@ -21,6 +22,7 @@ export const REPORTS = [
 	{ slug: 'cashflow', name: 'Cashflow', kind: 'range' },
 	{ slug: 'revenue-by-source', name: 'Revenue by source', kind: 'range' },
 	{ slug: 'expenses', name: 'Expenses', kind: 'range' },
+	{ slug: 'profit-loss', name: 'Profit & loss', kind: 'range' },
 	{ slug: 'payment-methods', name: 'Payment methods', kind: 'range' },
 	{ slug: 'ar-aging', name: 'City-ledger aging', kind: 'asOf' }
 ] as const;
@@ -28,7 +30,7 @@ export const REPORTS = [
 export type ReportSlug = (typeof REPORTS)[number]['slug'];
 
 /** The reports that can be narrowed to Hotel or Dining. The others are not split by business line. */
-export const SCOPED_REPORTS: readonly string[] = ['daily-sales', 'cashflow', 'revenue-by-source', 'payment-methods'];
+export const SCOPED_REPORTS: readonly string[] = ['daily-sales', 'cashflow', 'revenue-by-source', 'expenses', 'profit-loss', 'payment-methods'];
 
 const peso = (c: number) => (c / 100).toFixed(2);
 
@@ -185,9 +187,9 @@ export async function runReport(
 			};
 		}
 		case 'expenses': {
-			const r = await expenseReport(hotelId, from, to);
+			const r = await expenseReport(hotelId, from, to, scope);
 			return {
-				name: meta.name,
+				name: scopedName(meta.name),
 				scope,
 				kind: 'range',
 				columns: ['Group', 'Category', 'Count', 'Gross', 'Input VAT'],
@@ -201,8 +203,43 @@ export async function runReport(
 				summary: [
 					['From', from],
 					['To', to],
+					...scopeSummary(),
 					['Total gross', peso(r.totalGrossCentavos)],
 					['Total input VAT', peso(r.totalInputVatCentavos)]
+				]
+			};
+		}
+		case 'profit-loss': {
+			const r = await profitLossReport(hotelId, from, to, scope);
+			// Under Overall, each side's own profit too (Hotel + Dining = Overall: every peso has one side).
+			const sides =
+				scope === 'all'
+					? await Promise.all([profitLossReport(hotelId, from, to, 'hotel'), profitLossReport(hotelId, from, to, 'dining')])
+					: null;
+			return {
+				name: scopedName(meta.name),
+				scope,
+				kind: 'range',
+				columns: ['Section', 'Line', 'Amount'],
+				rows: [
+					...r.revenue.rows.map((x): (string | number)[] => ['Revenue', labelSource(x.source), peso(x.amountCentavos)]),
+					['Revenue', 'Less: refunds paid out', `-${peso(r.revenue.refundsCentavos)}`],
+					...r.expenses.rows.map((x): (string | number)[] => ['Expenses', `${x.group} — ${x.categoryName}`, `-${peso(x.grossCentavos)}`])
+				],
+				summary: [
+					['From', from],
+					['To', to],
+					...scopeSummary(),
+					['Revenue kept (after refunds)', peso(r.revenue.netCentavos)],
+					['Expenses', `-${peso(r.expenses.totalGrossCentavos)}`],
+					[r.profitCentavos < 0 ? 'Loss' : 'Profit', peso(r.profitCentavos)],
+					...(sides
+						? ([
+								['Hotel profit', peso(sides[0].profitCentavos)],
+								['Dining profit', peso(sides[1].profitCentavos)]
+							] as [string, string][])
+						: []),
+					['Basis', 'Revenue as received (cash basis); expenses by expense date, unless voided']
 				]
 			};
 		}

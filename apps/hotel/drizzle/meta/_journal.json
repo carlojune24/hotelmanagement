@@ -806,6 +806,13 @@
       "when": 1794023847978,
       "tag": "0114_ordinary_franklin_richards",
       "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1794025885054,
+      "tag": "0115_stale_slyde",
+      "breakpoints": true
     }
   ]
 }
