@@ -436,6 +436,12 @@ export async function addShiftEvent(input: {
 					: 0;
 				const payee = input.reason?.trim() || '';
 				const description = payee || 'Cash payout';
+				// A payout from the dining drawer is a dining expense; every other drawer is the hotel's.
+				const [fs] = await tx
+					.select({ dining: financeSettings.diningDrawerAccountId })
+					.from(financeSettings)
+					.where(eq(financeSettings.hotelId, input.hotelId))
+					.limit(1);
 
 				const [exp] = await tx
 					.insert(expenses)
@@ -444,6 +450,7 @@ export async function addShiftEvent(input: {
 						expenseDate: shift.businessDate,
 						categoryId: cat.id,
 						description,
+						source: fs?.dining && fs.dining === shift.cashAccountId ? 'dining' : 'hotel',
 						grossCentavos: input.amountCentavos,
 						inputVatCentavos: inputVat,
 						netOfVatCentavos: input.amountCentavos - inputVat,

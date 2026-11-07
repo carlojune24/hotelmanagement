@@ -12,6 +12,7 @@
 	import ArrowDownLeftIcon from '@lucide/svelte/icons/arrow-down-left';
 	import ArrowUpRightIcon from '@lucide/svelte/icons/arrow-up-right';
 	import DownloadIcon from '@lucide/svelte/icons/download';
+	import PrinterIcon from '@lucide/svelte/icons/printer';
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import type { ActionData, PageData } from './$types';
 
@@ -57,6 +58,7 @@
 		const merged: Record<string, string | undefined> = {
 			dir: f.direction === 'all' ? undefined : f.direction,
 			kind: f.kind === 'all' ? undefined : f.kind,
+			src: f.source === 'all' ? undefined : f.source,
 			status: f.status === 'all' ? undefined : f.status,
 			from: f.from,
 			to: f.to,
@@ -69,6 +71,9 @@
 		return qs ? `${base}?${qs}` : base;
 	}
 	const exportHref = $derived(href({}).replace(base, `${base}/export`));
+	const printHref = $derived(href({}).replace(base, `/${page.params.hotel}/print/paymongo`));
+	const sourceOf = (r: { orderId: string | null; diningOrderId: string | null }) =>
+		r.orderId ? 'Hotel' : r.diningOrderId ? 'Dining' : null;
 
 	// ---- sync: start, then poll until the server says it has finished
 	let waiting = $state(false);
@@ -152,9 +157,6 @@
 						<RefreshCwIcon class="size-4 {data.syncing || waiting ? 'animate-spin' : ''}" aria-hidden="true" /> Sync now
 					</Button>
 				</form>
-				<Button size="sm" variant="outline" href={exportHref} data-sveltekit-reload>
-					<DownloadIcon class="size-4" aria-hidden="true" /> CSV
-				</Button>
 			</div>
 		</div>
 
@@ -193,14 +195,14 @@
 				<p class="text-xs text-ink-muted">Paid, still inside PayMongo's hold. Not available yet.</p>
 			</div>
 			<div class="rounded-xl border border-border p-4">
-				<p class="text-xs font-semibold tracking-wide text-ink-muted uppercase">On the way to the bank</p>
+				<p class="text-xs font-semibold tracking-wide text-ink-muted uppercase">Payouts in transit</p>
 				<p class="mt-1 text-2xl font-semibold tabular-nums text-ink">{peso(data.balance.onTheWayCentavos)}</p>
 				<p class="text-xs text-ink-muted">Payouts created, not yet deposited.</p>
 			</div>
 			<div class="rounded-xl border border-border p-4">
 				<p class="text-xs font-semibold tracking-wide text-ink-muted uppercase">Paid out, last 30 days</p>
 				<p class="mt-1 text-2xl font-semibold tabular-nums text-ink">{peso(data.balance.paidOut30dCentavos)}</p>
-				<p class="text-xs text-ink-muted">Deposited to the bank.</p>
+				<p class="text-xs text-ink-muted">Deposited to the payout account (a bank or the PayMongo wallet). Withdrawals from the wallet are not shown here.</p>
 			</div>
 		</section>
 		{#if !data.balance.wallet}
@@ -238,6 +240,24 @@
 
 		<!-- Filters -->
 		<div class="mb-3 flex flex-wrap items-end gap-x-6 gap-y-3">
+			<div class="flex w-full flex-wrap items-center gap-3">
+				<div class="inline-flex rounded-lg border border-border bg-surface-2 p-1" role="group" aria-label="Source">
+					{#each [['all', 'All'], ['hotel', 'Hotel'], ['dining', 'Dining']] as [v, label] (v)}
+						<a
+							href={href({ src: v === 'all' ? undefined : v })}
+							aria-current={data.filter.source === v ? 'true' : undefined}
+							class="min-w-20 rounded-md px-4 py-2 text-center text-sm font-semibold {data.filter.source === v ? 'bg-background text-ink shadow-sm' : 'text-ink-muted hover:text-ink'}"
+						>{label}</a>
+					{/each}
+				</div>
+				<Button variant="outline" href={exportHref} data-sveltekit-reload>
+					<DownloadIcon class="size-4" aria-hidden="true" /> Export CSV
+				</Button>
+				<Button variant="outline" href={printHref} target="_blank" rel="noopener">
+					<PrinterIcon class="size-4" aria-hidden="true" /> Print
+				</Button>
+				<span class="text-xs text-ink-muted">{data.totals.count} record{data.totals.count === 1 ? '' : 's'} match the filters</span>
+			</div>
 			<div class="flex gap-1" role="group" aria-label="Direction">
 				{#each [['all', 'All'], ['in', 'Incoming'], ['out', 'Outgoing']] as [v, label] (v)}
 					<a
@@ -259,6 +279,7 @@
 			<form method="GET" action={base} class="flex flex-wrap items-end gap-2">
 				{#if data.filter.direction !== 'all'}<input type="hidden" name="dir" value={data.filter.direction} />{/if}
 				{#if data.filter.kind !== 'all'}<input type="hidden" name="kind" value={data.filter.kind} />{/if}
+				{#if data.filter.source !== 'all'}<input type="hidden" name="src" value={data.filter.source} />{/if}
 				{#if data.filter.recon}<input type="hidden" name="recon" value={data.filter.recon} />{/if}
 				<label class="text-xs text-ink-muted">Status
 					<select name="status" class="mt-0.5 block h-9 rounded-md border border-input bg-transparent px-2 text-sm text-ink">
@@ -281,6 +302,9 @@
 				{/if}
 			</form>
 		</div>
+		{#if data.filter.source !== 'all'}
+			<p class="mb-3 text-xs text-ink-muted">Payouts carry hotel and dining money together, so they only show under All.</p>
+		{/if}
 
 		<!-- Totals for what is filtered -->
 		<div class="mb-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-5">
@@ -288,7 +312,7 @@
 			<div class="rounded-lg border border-border px-3 py-2"><span class="text-xs text-ink-muted">PayMongo fees</span><p class="font-semibold tabular-nums text-danger">−{peso(data.totals.inFees)}</p></div>
 			<div class="rounded-lg border border-border px-3 py-2"><span class="text-xs text-ink-muted">Incoming (net)</span><p class="font-semibold tabular-nums text-ok">{peso(data.totals.inNet)}</p></div>
 			<div class="rounded-lg border border-border px-3 py-2"><span class="text-xs text-ink-muted">Refunds out</span><p class="font-semibold tabular-nums text-danger">−{peso(data.totals.refundsOut)}</p></div>
-			<div class="rounded-lg border border-border px-3 py-2"><span class="text-xs text-ink-muted">Paid out to bank</span><p class="font-semibold tabular-nums">{peso(data.totals.payoutsOut)}</p></div>
+			<div class="rounded-lg border border-border px-3 py-2"><span class="text-xs text-ink-muted">Paid out</span><p class="font-semibold tabular-nums">{peso(data.totals.payoutsOut)}</p></div>
 		</div>
 
 		<!-- The records -->
@@ -337,6 +361,7 @@
 									{#if r.kind === 'payout'}
 										<span class="text-xs">{r.bankName ?? 'Bank'}{r.accountLast4 ? ` ••••${r.accountLast4}` : ''}</span>
 									{:else}
+										{#if sourceOf(r)}<span class="mr-1 rounded px-1.5 py-0.5 text-[11px] font-medium {r.orderId ? 'bg-brand/10 text-brand' : 'bg-warning/20 text-ink'}">{sourceOf(r)}</span>{/if}
 										{#if r.sourceType}<span class="mr-1 rounded bg-surface-2 px-1.5 py-0.5 text-[11px] uppercase">{r.sourceType}</span>{/if}
 										{#if r.guestName}<span class="text-xs">{r.guestName}</span>{/if}
 										{#if r.orderId}<a href="/{page.params.hotel}/management/transactions/{r.orderId}" class="ml-1 text-xs text-brand underline underline-offset-2" onclick={(e) => e.stopPropagation()}>booking</a>{/if}
@@ -345,7 +370,7 @@
 									{/if}
 								</td>
 								<td class="px-3 py-2 text-right font-mono">{peso(r.grossCentavos)}</td>
-								<td class="px-3 py-2 text-right font-mono text-ink-muted">{r.feeCentavos ? `−${peso(r.feeCentavos)}` : '—'}</td>
+								<td class="px-3 py-2 text-right font-mono text-ink-muted" title={r.kind === 'payout' ? 'Fees, tax and adjustments' : undefined}>{#if r.kind === 'payout'}−{peso(r.grossCentavos - r.netCentavos)}{:else}{r.feeCentavos ? `−${peso(r.feeCentavos)}` : '—'}{/if}</td>
 								<td class="px-3 py-2 text-right font-mono font-medium {signed(r) >= 0 ? 'text-ok' : 'text-danger'}">{signed(r) < 0 ? '−' : '+'}{peso(signed(r))}</td>
 								<td class="px-3 py-2"><Badge variant="outline" class={statusClass(r.status)}>{statusLabel(r.status)}</Badge></td>
 							</tr>
@@ -380,6 +405,7 @@
 				{@render row('Payout', detail.payoutId)}
 				{@render row('Balance transaction', detail.balanceTransactionId)}
 				{@render row('Reference', detail.reference)}
+				{@render row('Source', sourceOf(detail), false)}
 				{@render row('Method', detail.sourceType, false)}
 				{@render row('Happened', when(detail.occurredAt), false)}
 				{#if detail.kind === 'payment'}
@@ -390,8 +416,9 @@
 					{@render row('Net to the hotel', peso(detail.netCentavos), false)}
 				{/if}
 				{#if detail.kind === 'payout'}
-					{@render row('Bank', `${detail.bankName ?? ''}${detail.accountLast4 ? ` ••••${detail.accountLast4}` : ''}`, false)}
+					{@render row('Paid to', `${detail.bankName ?? ''}${detail.accountLast4 ? ` ••••${detail.accountLast4}` : ''}`, false)}
 					{@render row('Fees', peso(detail.feeCentavos), false)}
+					{@render row('Tax and adjustments', peso(detail.grossCentavos - detail.feeCentavos - detail.netCentavos), false)}
 					{@render row('Net deposited', peso(detail.netCentavos), false)}
 				{/if}
 				{@render row('Note', detail.description, false)}

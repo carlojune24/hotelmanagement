@@ -432,6 +432,7 @@ export async function listRecurringExpenses(hotelId: string) {
 			description: recurringExpenses.description,
 			amountCentavos: recurringExpenses.amountCentavos,
 			isVatable: recurringExpenses.isVatable,
+			source: recurringExpenses.source,
 			cadence: recurringExpenses.cadence,
 			anchorDay: recurringExpenses.anchorDay,
 			nextDueOn: recurringExpenses.nextDueOn,
@@ -456,6 +457,7 @@ export async function createRecurringExpense(
 		description: string;
 		amountCentavos: number;
 		isVatable: boolean;
+		source?: 'hotel' | 'dining';
 		cadence: 'weekly' | 'monthly' | 'quarterly' | 'annually';
 		anchorDay: number;
 		nextDueOn: string;
@@ -474,6 +476,7 @@ export async function createRecurringExpense(
 			description: input.description.trim(),
 			amountCentavos: input.amountCentavos,
 			isVatable: input.isVatable,
+			source: input.source ?? 'hotel',
 			cadence: input.cadence,
 			anchorDay: input.anchorDay,
 			nextDueOn: input.nextDueOn,

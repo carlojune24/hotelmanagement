@@ -7,6 +7,8 @@
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Table from '$lib/components/ui/table/index.js';
+	import DownloadIcon from '@lucide/svelte/icons/download';
+	import PrinterIcon from '@lucide/svelte/icons/printer';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -33,6 +35,16 @@
 	};
 	const tabs = ['', 'draft', 'approved', 'paid'] as const;
 	const tabLabel = (s: string) => (s === '' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1));
+
+	// Every filter link and the export/print keep the other filters.
+	function href(path: string, next: Record<string, string> = {}) {
+		const f = { status: data.filters.status, src: data.filters.source, from: data.filters.from, to: data.filters.to, ...next };
+		const p = new URLSearchParams();
+		for (const [k, v] of Object.entries(f)) if (v) p.set(k, v);
+		const qs = p.toString();
+		return qs ? `${path}?${qs}` : path;
+	}
+	const listPath = $derived(`${base}/expenses`);
 </script>
 
 <div class="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6">
@@ -68,6 +80,14 @@
 					{#each data.vendors as v (v.id)}<option value={v.id}>{v.name}</option>{/each}
 				</select>
 			</div>
+			<div>
+				<Label class="text-xs">For</Label>
+				<select name="source" required class="mt-1 w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-sm">
+					<option value="" disabled selected>Hotel or dining?</option>
+					<option value="hotel">Hotel</option>
+					<option value="dining">Dining</option>
+				</select>
+			</div>
 			<div class="sm:col-span-2"><Label class="text-xs">Description</Label><Input name="description" required maxlength={300} class="mt-1" /></div>
 			<div><Label class="text-xs">Vendor invoice/OR no.</Label><Input name="vendorInvoiceNo" maxlength={120} class="mt-1" /></div>
 			<div><Label class="text-xs">Gross amount (₱)</Label><Input name="gross" type="number" min="0.01" step="0.01" required class="mt-1" /></div>
@@ -83,11 +103,32 @@
 		</form>
 	{/if}
 
-	<!-- Status tabs -->
-	<div class="mb-3 flex gap-1">
+	<!-- Source, export and print -->
+	<div class="mb-3 flex flex-wrap items-center gap-3">
+		<div class="inline-flex rounded-lg border border-border bg-surface-2 p-1" role="group" aria-label="Source">
+			{#each [['', 'All'], ['hotel', 'Hotel'], ['dining', 'Dining']] as const as [v, label] (v)}
+				<a
+					href={href(listPath, { src: v })}
+					aria-current={data.filters.source === v ? 'true' : undefined}
+					class="min-w-20 rounded-md px-4 py-2 text-center text-sm font-semibold {data.filters.source === v ? 'bg-background text-ink shadow-sm' : 'text-ink-muted hover:text-ink'}"
+				>{label}</a>
+			{/each}
+		</div>
+		<Button variant="outline" href={href(`${listPath}/export`)} data-sveltekit-reload>
+			<DownloadIcon class="size-4" aria-hidden="true" /> Export CSV
+		</Button>
+		<Button variant="outline" href={href(`/${page.params.hotel}/print/expenses`)} target="_blank" rel="noopener">
+			<PrinterIcon class="size-4" aria-hidden="true" /> Print
+		</Button>
+		<span class="text-xs text-ink-muted">{data.rows.length} expense{data.rows.length === 1 ? '' : 's'} · {peso(data.totals.gross)}</span>
+	</div>
+
+	<!-- Status tabs and dates -->
+	<div class="mb-3 flex flex-wrap items-end justify-between gap-3">
+	<div class="flex gap-1">
 		{#each tabs as t (t)}
 			<a
-				href="?status={t}"
+				href={href(listPath, { status: t })}
 				class="rounded-md px-3 py-1.5 text-sm font-medium {data.filters.status === t
 					? 'bg-surface-2 text-ink'
 					: 'text-ink-muted hover:text-ink'}"
@@ -95,6 +136,21 @@
 				{tabLabel(t)}
 			</a>
 		{/each}
+	</div>
+	<form method="GET" action={listPath} class="flex flex-wrap items-end gap-2">
+		{#if data.filters.status}<input type="hidden" name="status" value={data.filters.status} />{/if}
+		{#if data.filters.source}<input type="hidden" name="src" value={data.filters.source} />{/if}
+		<label class="text-xs text-ink-muted">From
+			<Input type="date" name="from" value={data.filters.from} class="mt-0.5 h-9 w-40" />
+		</label>
+		<label class="text-xs text-ink-muted">To
+			<Input type="date" name="to" value={data.filters.to} class="mt-0.5 h-9 w-40" />
+		</label>
+		<Button type="submit" size="sm">Apply</Button>
+		{#if data.filters.from || data.filters.to}
+			<a href={href(listPath, { from: '', to: '' })} class="pb-2 text-xs text-ink-muted underline underline-offset-2">Reset</a>
+		{/if}
+	</form>
 	</div>
 
 	<div class="overflow-x-auto rounded-xl border border-border">
@@ -115,6 +171,7 @@
 					<Table.Row>
 						<Table.Cell class="whitespace-nowrap text-ink-muted">{r.expenseDate}</Table.Cell>
 						<Table.Cell class="text-ink">
+							<span class="mr-1 rounded px-1.5 py-0.5 text-[11px] font-medium {r.source === 'dining' ? 'bg-warning/20 text-ink' : 'bg-brand/10 text-brand'}">{r.source === 'dining' ? 'Dining' : 'Hotel'}</span>
 							{r.categoryName}
 							{#if r.vendorName}<span class="block text-xs text-ink-muted">{r.vendorName}</span>{/if}
 						</Table.Cell>

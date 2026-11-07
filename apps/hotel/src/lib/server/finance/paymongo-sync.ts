@@ -97,11 +97,11 @@ function mapRefund(r: Refund, hotelId: string): LedgerInsert {
 	};
 }
 
-function mapPayout(po: PayMongoPayout, hotelId: string): LedgerInsert {
+export function mapPayout(po: PayMongoPayout, hotelId: string): LedgerInsert {
 	const digits = (po.bank_account_number ?? '').replace(/\D/g, '');
 	const last4 = digits ? digits.slice(-4) : null;
-	// Keep PayMongo's record, but never the full bank account number or the account holder's name.
-	const { bank_account_number: _n, bank_account_name: _h, ...safe } = po;
+	// Keep PayMongo's record, but never a full account number or holder's name, at any depth (they also nest in last_payout_transfer).
+	const safe = JSON.parse(JSON.stringify(po, (k, v) => (/account_(number|name)$/.test(k) ? undefined : v)));
 	return {
 		hotelId,
 		paymongoId: po.id,

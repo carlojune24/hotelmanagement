@@ -224,8 +224,11 @@ export class PayMongoClient {
 		return res.data ?? [];
 	}
 
+	/** v2 only: v1 returns no balance. `fields=balance` also leaves the account number and holder name out. */
 	async retrieveWallet(id: string): Promise<PayMongoWallet> {
-		const res = await this.request<{ data: PayMongoWallet }>(`/wallets/${id}`);
+		const res = await this.request<{ data: PayMongoWallet }>(`/wallets/${id}?fields=balance`, {
+			baseUrl: 'https://api.paymongo.com/v2'
+		});
 		return res.data;
 	}
 

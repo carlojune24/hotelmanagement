@@ -1,5 +1,5 @@
 {
-  "id": "dfdd8a0c-999f-4fdc-b6d2-1fca9fa8e91e",
+  "id": "bcdbec5c-6181-4623-a3b3-cf6687cffa4f",
   "prevId": "6553232c-6f85-4cc4-a259-748eba31ee3f",
   "version": "7",
   "dialect": "postgresql",
@@ -4548,12 +4548,6 @@
           "name": "payment_method",
           "type": "payment_method",
           "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "payment_reference_no": {
-          "name": "payment_reference_no",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -10064,6 +10058,14 @@
           "primaryKey": false,
           "notNull": true
         },
+        "source": {
+          "name": "source",
+          "type": "expense_source",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'hotel'"
+        },
         "vendor_invoice_no": {
           "name": "vendor_invoice_no",
           "type": "text",
@@ -10958,6 +10960,14 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "source": {
+          "name": "source",
+          "type": "expense_source",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'hotel'"
         },
         "cadence": {
           "name": "cadence",
@@ -17323,6 +17333,14 @@
         "rent",
         "admin",
         "other"
+      ]
+    },
+    "public.expense_source": {
+      "name": "expense_source",
+      "schema": "public",
+      "values": [
+        "hotel",
+        "dining"
       ]
     },
     "public.expense_status": {

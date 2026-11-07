@@ -342,7 +342,8 @@ export async function startDiningCheckout(args: {
 			show_line_items: true,
 			line_items: lineItems,
 			payment_method_types: ['gcash', 'card', 'paymaya', 'qrph'],
-			description: `${args.hotelName}: order ${order.code}`,
+			description: `Dining · ${args.hotelName}: order ${order.code}`,
+			reference_number: order.code,
 			success_url: args.successUrl,
 			cancel_url: args.cancelUrl,
 			metadata: { kind: 'dining', diningOrderId: order.id }

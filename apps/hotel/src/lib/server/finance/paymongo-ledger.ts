@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, ilike, isNotNull, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/index';
 import {
 	diningOrders,
@@ -105,6 +105,7 @@ export async function getPaymongoBalance(hotelId: string): Promise<PaymongoBalan
 
 export type LedgerDirection = 'all' | 'in' | 'out';
 export type LedgerKind = 'all' | 'payment' | 'refund' | 'payout';
+export type LedgerSource = 'all' | 'hotel' | 'dining';
 
 export interface LedgerFilter {
 	direction: LedgerDirection;
@@ -115,6 +116,8 @@ export interface LedgerFilter {
 	from?: string;
 	to?: string;
 	q?: string;
+	/** Hotel booking or dining money. Payouts carry both, so a source filter leaves them (and unlinked rows) out. */
+	source: LedgerSource;
 	/** `unlinked` = payments PayMongo has that no booking or dining order in our system claims. */
 	recon?: 'unlinked';
 }
@@ -154,12 +157,14 @@ export function parseLedgerFilter(url: URL): LedgerFilter {
 	const p = url.searchParams;
 	const dir = p.get('dir');
 	const kind = p.get('kind');
+	const src = p.get('src');
 	const status = p.get('status') ?? 'all';
 	const from = p.get('from') ?? '';
 	const to = p.get('to') ?? '';
 	return {
 		direction: dir === 'in' || dir === 'out' ? dir : 'all',
 		kind: kind === 'payment' || kind === 'refund' || kind === 'payout' ? kind : 'all',
+		source: src === 'hotel' || src === 'dining' ? src : 'all',
 		status: /^[a-z_]{1,30}$/.test(status) ? status : 'all',
 		from: ISO.test(from) ? from : undefined,
 		to: ISO.test(to) ? to : undefined,
@@ -173,6 +178,8 @@ function whereFor(hotelId: string, tz: string, f: LedgerFilter): SQL | undefined
 	if (f.direction !== 'all') conds.push(eq(l.direction, f.direction));
 	if (f.kind !== 'all') conds.push(eq(l.kind, f.kind));
 	if (f.status !== 'all') conds.push(eq(l.status, f.status));
+	if (f.source === 'hotel') conds.push(isNotNull(l.orderId));
+	if (f.source === 'dining') conds.push(isNotNull(l.diningOrderId));
 	if (f.from) conds.push(sql`(${l.occurredAt} at time zone ${tz})::date >= ${f.from}::date`);
 	if (f.to) conds.push(sql`(${l.occurredAt} at time zone ${tz})::date <= ${f.to}::date`);
 	if (f.recon === 'unlinked') {
