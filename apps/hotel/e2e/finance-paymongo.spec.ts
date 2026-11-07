@@ -17,7 +17,7 @@ test.describe('finance paymongo tab', () => {
     await expect(page.getByRole('heading', { name: 'PayMongo' })).toBeVisible();
     await expect(page.getByText('Available', { exact: true })).toBeVisible();
     await expect(page.getByText('Pending', { exact: true })).toBeVisible();
-    await expect(page.getByText('On the way to the bank')).toBeVisible();
+    await expect(page.getByText('Payouts in transit')).toBeVisible();
 
     const rows = page.locator('tbody tr');
     await expect(rows.first()).toBeVisible({ timeout: 60_000 });

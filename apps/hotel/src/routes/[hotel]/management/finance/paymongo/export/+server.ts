@@ -11,7 +11,8 @@ const pesos = (c: number) => (c / 100).toFixed(2);
 export const GET: RequestHandler = async ({ locals, url }) => {
 	requireCap(locals.user, locals.role, 'finance:read');
 	const hotel = locals.hotel!;
-	const { rows } = await listPaymongoLedger(hotel.id, hotel.timezone, parseLedgerFilter(url), 5000);
+	const filter = parseLedgerFilter(url);
+	const { rows } = await listPaymongoLedger(hotel.id, hotel.timezone, filter, 5000);
 	if (rows.length === 0 && url.searchParams.size === 0) error(404, 'Nothing to export yet');
 
 	const when = (d: Date) =>
@@ -23,9 +24,10 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 		}).format(d);
 
 	const csv = toCsv(
-		['Date', 'PayMongo ID', 'Type', 'Direction', 'Status', 'Method', 'Gross', 'Fee', 'Net', 'Reference', 'Payment ID', 'Payout ID', 'Guest', 'Booking / dining', 'Bank'],
+		['Date', 'Source', 'PayMongo ID', 'Type', 'Direction', 'Status', 'Method', 'Gross', 'Fee', 'Net', 'Reference', 'Payment ID', 'Payout ID', 'Guest', 'Booking / dining', 'Bank'],
 		rows.map((r) => [
 			when(r.occurredAt),
+			r.orderId ? 'Hotel' : r.diningOrderId ? 'Dining' : '',
 			r.paymongoId,
 			KIND_LABEL[r.kind] ?? r.kind,
 			r.direction === 'in' ? 'Incoming' : 'Outgoing',
@@ -38,14 +40,14 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 			r.paymentId ?? '',
 			r.payoutId ?? '',
 			r.guestName ?? '',
-			r.diningCode ?? r.orderId ?? '',
+			r.diningCode ?? r.orderId?.slice(0, 8).toUpperCase() ?? '',
 			r.bankName ? `${r.bankName}${r.accountLast4 ? ` ••••${r.accountLast4}` : ''}` : ''
 		])
 	);
 	return new Response(csv, {
 		headers: {
 			'content-type': 'text/csv; charset=utf-8',
-			'content-disposition': `attachment; filename="paymongo-${new Date().toISOString().slice(0, 10)}.csv"`
+			'content-disposition': `attachment; filename="paymongo-${filter.source === 'all' ? '' : `${filter.source}-`}${new Date().toISOString().slice(0, 10)}.csv"`
 		}
 	});
 };

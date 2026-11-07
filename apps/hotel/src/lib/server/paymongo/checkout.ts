@@ -80,10 +80,12 @@ export async function createCheckoutSession(params: {
 		show_line_items: true,
 		line_items: lineItems,
 		payment_method_types: ['gcash', 'card', 'paymaya', 'qrph'],
-		description: `${hotelName} — ${items.map((i) => i.name).join(', ')}`,
+		// "Hotel booking" / "Dining" up front so the two can be told apart in PayMongo's own dashboard.
+		description: `Hotel booking · ${hotelName} — ${items.map((i) => i.name).join(', ')}`,
+		reference_number: order.id.slice(0, 8).toUpperCase(),
 		success_url: successUrl,
 		cancel_url: cancelUrl,
-		metadata: { orderId: order.id }
+		metadata: { kind: 'booking', orderId: order.id }
 	});
 
 	return { checkoutSessionId: session.id, checkoutUrl: session.attributes.checkout_url };
