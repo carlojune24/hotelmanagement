@@ -23,23 +23,24 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	// Only venues that are really open for ordering (hours set, a way to pay).
 	const venues: { id: string; title: string }[] = [];
 	for (const v of candidates) if ((await loadOnlineOrderingConfig(hotelId, v.id))?.enabled) venues.push(v);
-	if (venues.length === 0) error(404, 'Online ordering is not available.');
 
-	// A pre-order arrives from the guest's own reservation ticket and is tied to that venue.
+	// A pre-order arrives from the guest's own reservation ticket and is tied to that venue. It only
+	// needs online payment, so it works even where takeaway ordering is switched off.
 	const resCode = url.searchParams.get('reservation');
 	const resToken = url.searchParams.get('t');
 	let reservation: { code: string; token: string; venueTitle: string; local: { date: string; time: string }; startsAt: string } | null = null;
-	let venue = venues.find((v) => v.id === url.searchParams.get('venue')) ?? venues[0]!;
+	let venue: { id: string; title: string } | undefined = venues.find((v) => v.id === url.searchParams.get('venue')) ?? venues[0];
 	if (resCode && resToken) {
 		const r = await getReservationForGuest(hotelId, timezone, resCode, resToken);
 		if (r && (r.status === 'confirmed' || r.status === 'pending')) {
-			const match = venues.find((v) => v.id === r.venueId);
-			if (match) {
-				venue = match;
+			const resCfg = await loadOnlineOrderingConfig(hotelId, r.venueId);
+			if (resCfg?.preOrderEnabled) {
+				venue = { id: r.venueId, title: resCfg.title };
 				reservation = { code: r.code, token: resToken, venueTitle: r.venueTitle, local: r.local, startsAt: r.startsAt.toISOString() };
 			}
 		}
 	}
+	if (!venue) error(404, 'Online ordering is not available.');
 
 	const cfg = (await loadOnlineOrderingConfig(hotelId, venue.id))!;
 	const menu = await loadVenueMenu(hotelId, venue.id);
@@ -49,8 +50,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		venue,
 		reservation,
 		cfg: {
-			orderOpen: cfg.orderOpen!,
-			orderClose: cfg.orderClose!,
+			// Null when only table pre-orders are on; the page uses these for takeaway pickup only.
+			orderOpen: cfg.orderOpen ?? '',
+			orderClose: cfg.orderClose ?? '',
 			prepMinutes: cfg.prepMinutes,
 			orderAheadDays: cfg.orderAheadDays,
 			pickupNote: cfg.pickupNote,

@@ -169,6 +169,7 @@
 					<Input id="prepMinutes" name="prepMinutes" type="number" min="10" max="240" step="5" bind:value={prepMinutes} class="mt-1" />
 				</div>
 			</div>
+			<p class="-mt-2 text-xs text-ink-muted">Prep time also applies to table pre-orders, even with online orders switched off.</p>
 
 			<div>
 				<Label class="text-sm">How guests pay</Label>
@@ -252,9 +253,9 @@
 			Guests who book online pre-order their meal and pay it in full online; the payment confirms the table, and an
 			unpaid booking is released after 30 minutes. Phone bookings taken by staff need no payment.
 		</p>
-		{#if !item.onlineOrdersEnabled || !data.payMongoConnected}
+		{#if !data.payMongoConnected}
 			<p class="mt-2 rounded-md border border-danger/40 px-3 py-2 text-xs text-danger">
-				Guests cannot book online until {!item.onlineOrdersEnabled ? 'Online ordering above is on' : 'online payment (PayMongo) is connected'}. Staff can still take phone bookings.
+				Guests cannot book online until online payment (PayMongo) is connected. Staff can still take phone bookings.
 			</p>
 		{/if}
 

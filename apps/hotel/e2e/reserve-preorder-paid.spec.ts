@@ -17,7 +17,7 @@ test('reserving online goes straight to the menu, pending until paid, online pay
 	await page.goto(`/${SLUG}/dining/reserve?date=${futureDate(4)}&party=2`);
 	test.skip(await page.getByText('Online reservations are not open right now').isVisible(), 'Online ordering or PayMongo is off for this venue.');
 
-	await page.locator('label.dining-slot').first().click();
+	await page.locator('label.dining-slot:has(input:not([disabled]))').first().click();
 	await expect(page.locator('input[name="preorder"]')).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Reserve and choose dishes' })).toBeVisible();
 

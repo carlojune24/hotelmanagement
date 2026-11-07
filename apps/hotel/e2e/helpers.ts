@@ -28,13 +28,14 @@ export async function staffLogin(page: Page) {
 
 /**
  * Reserves a table as a guest and returns where the site sent them. The venue must take online
- * reservations, and online orders too if you expect the straight-to-menu redirect.
+ * reservations, and PayMongo must be connected for the straight-to-menu redirect.
  * `withOrder` (default true) ticks "Reserve and pre-order"; pass false for the table-only choice.
  */
 export async function reserveAsGuest(page: Page, opts: { daysAhead?: number; party?: number; withOrder?: boolean } = {}) {
 	const guest = uniqueGuest();
-	await page.goto(`/${SLUG}/dining/reserve?date=${futureDate(opts.daysAhead ?? 4)}&party=${opts.party ?? 2}`);
-	await page.locator('label.dining-slot').first().click();
+	// Wait for hydration: it re-renders the slot radios and would clear a click made before it.
+	await page.goto(`/${SLUG}/dining/reserve?date=${futureDate(opts.daysAhead ?? 4)}&party=${opts.party ?? 2}`, { waitUntil: 'networkidle' });
+	await page.locator('label.dining-slot:has(input:not([disabled]))').first().click();
 	await page.locator('#rvName').fill(guest.name);
 	await page.locator('#rvPhone').fill(guest.phone);
 	await page.locator('#rvEmail').fill(guest.email);

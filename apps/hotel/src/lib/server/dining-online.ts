@@ -54,6 +54,9 @@ export interface OnlineOrderingConfig {
 	title: string;
 	/** Guests can order from this venue right now (switched on, hours set, a way to pay). */
 	enabled: boolean;
+	/** Guests can pre-order for their own table reservation: needs only an active venue and online
+	 *  payment (a pre-order is always paid in full online), not takeaway being switched on. */
+	preOrderEnabled: boolean;
 	orderOpen: string | null;
 	orderClose: string | null;
 	prepMinutes: number;
@@ -80,6 +83,7 @@ export async function loadOnlineOrderingConfig(hotelId: string, venueId: string)
 		venueId: v.id,
 		title: v.title,
 		enabled: v.onlineOrdersEnabled && v.isActive && !!v.orderOpen && !!v.orderClose && (canPayOnline || canPayAtVenue),
+		preOrderEnabled: v.isActive && canPayOnline,
 		orderOpen: v.orderOpen,
 		orderClose: v.orderClose,
 		prepMinutes: v.prepMinutes,
@@ -159,7 +163,7 @@ export async function placeOnlineOrder(
 	totalCentavos: number;
 }> {
 	const cfg = await loadOnlineOrderingConfig(input.hotelId, input.venueId);
-	if (!cfg || !cfg.enabled) throw new OrderError('Online ordering is not available for this venue right now.');
+	if (!cfg || !(input.orderType === 'pre_order' ? cfg.preOrderEnabled : cfg.enabled)) throw new OrderError('Online ordering is not available for this venue right now.');
 	if (input.payMode === 'online' && !cfg.canPayOnline) throw new OrderError('Online payment is not available. Please choose to pay at the restaurant.');
 	// A table pre-order is paid in full online first: that payment is what confirms the reservation.
 	if (input.orderType === 'pre_order' && input.payMode !== 'online') throw new OrderError('A pre-order for your table is paid in full online.');

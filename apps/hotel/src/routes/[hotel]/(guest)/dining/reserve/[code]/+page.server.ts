@@ -18,7 +18,7 @@ export const load: PageServerLoad = async ({ locals, params, url, depends }) => 
 	// A pre-order is offered while the table is still in the future by more than the kitchen's prep time.
 	const ordering = await loadOnlineOrderingConfig(locals.hotel!.id, reservation.venueId);
 	const canPreOrder =
-		!!ordering?.enabled &&
+		!!ordering?.preOrderEnabled &&
 		(reservation.status === 'confirmed' || reservation.status === 'pending') &&
 		reservation.startsAt.getTime() > Date.now() + ordering.prepMinutes * 60_000;
 

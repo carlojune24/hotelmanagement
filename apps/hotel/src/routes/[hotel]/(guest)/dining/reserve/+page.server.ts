@@ -51,9 +51,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		Math.max(1, Math.floor(Number(url.searchParams.get('party'))) || Math.min(2, bookable.partyCap))
 	);
 
-	// Booking online means pre-ordering and paying in full online, so it needs both switched on.
+	// Booking online means pre-ordering and paying in full online; takeaway ordering need not be on.
 	const ordering = await loadOnlineOrderingConfig(hotelId, venue.id);
-	const orderAhead = ordering?.enabled && ordering.canPayOnline ? { prepMinutes: ordering.prepMinutes } : null;
+	const orderAhead = ordering?.preOrderEnabled ?{ prepMinutes: ordering.prepMinutes } : null;
 	const readyBy = Date.now() + (orderAhead?.prepMinutes ?? 0) * 60_000;
 
 	// A dish tapped on the Dining page rides along to the pre-order step (`?dish=` on the order page).
@@ -131,7 +131,7 @@ export const actions: Actions = {
 
 		// Every online table comes with a pre-order paid in full online; the payment confirms the table.
 		const ordering = await loadOnlineOrderingConfig(hotelId, d.venue);
-		if (!ordering?.enabled || !ordering.canPayOnline) {
+		if (!ordering?.preOrderEnabled) {
 			return fail(409, { error: 'Online reservations are not available right now. Please call us to book.', values: keep });
 		}
 		if (zonedToUtc(d.date, d.time, locals.hotel!.timezone).getTime() <= Date.now() + ordering.prepMinutes * 60_000) {
