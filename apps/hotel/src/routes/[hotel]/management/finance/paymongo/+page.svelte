@@ -157,12 +157,6 @@
 						<RefreshCwIcon class="size-4 {data.syncing || waiting ? 'animate-spin' : ''}" aria-hidden="true" /> Sync now
 					</Button>
 				</form>
-				<Button size="sm" variant="outline" href={exportHref} data-sveltekit-reload>
-					<DownloadIcon class="size-4" aria-hidden="true" /> CSV
-				</Button>
-				<Button size="sm" variant="outline" href={printHref} target="_blank" rel="noopener">
-					<PrinterIcon class="size-4" aria-hidden="true" /> Print
-				</Button>
 			</div>
 		</div>
 
@@ -246,14 +240,23 @@
 
 		<!-- Filters -->
 		<div class="mb-3 flex flex-wrap items-end gap-x-6 gap-y-3">
-			<div class="flex gap-1" role="group" aria-label="Source">
-				{#each [['all', 'All'], ['hotel', 'Hotel'], ['dining', 'Dining']] as [v, label] (v)}
-					<a
-						href={href({ src: v === 'all' ? undefined : v })}
-						aria-current={data.filter.source === v ? 'true' : undefined}
-						class="rounded-md px-2.5 py-1 text-xs font-medium {data.filter.source === v ? 'bg-surface-2 text-ink' : 'text-ink-muted hover:text-ink'}"
-					>{label}</a>
-				{/each}
+			<div class="flex w-full flex-wrap items-center gap-3">
+				<div class="inline-flex rounded-lg border border-border bg-surface-2 p-1" role="group" aria-label="Source">
+					{#each [['all', 'All'], ['hotel', 'Hotel'], ['dining', 'Dining']] as [v, label] (v)}
+						<a
+							href={href({ src: v === 'all' ? undefined : v })}
+							aria-current={data.filter.source === v ? 'true' : undefined}
+							class="min-w-20 rounded-md px-4 py-2 text-center text-sm font-semibold {data.filter.source === v ? 'bg-background text-ink shadow-sm' : 'text-ink-muted hover:text-ink'}"
+						>{label}</a>
+					{/each}
+				</div>
+				<Button variant="outline" href={exportHref} data-sveltekit-reload>
+					<DownloadIcon class="size-4" aria-hidden="true" /> Export CSV
+				</Button>
+				<Button variant="outline" href={printHref} target="_blank" rel="noopener">
+					<PrinterIcon class="size-4" aria-hidden="true" /> Print
+				</Button>
+				<span class="text-xs text-ink-muted">{data.totals.count} record{data.totals.count === 1 ? '' : 's'} match the filters</span>
 			</div>
 			<div class="flex gap-1" role="group" aria-label="Direction">
 				{#each [['all', 'All'], ['in', 'Incoming'], ['out', 'Outgoing']] as [v, label] (v)}
