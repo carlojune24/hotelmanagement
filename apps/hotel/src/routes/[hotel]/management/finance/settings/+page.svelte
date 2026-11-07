@@ -148,12 +148,15 @@
 				</div>
 			</div>
 			<div>
-				<p class="text-xs font-medium text-ink">Account per payment method</p>
-				<p class="text-xs text-muted-foreground">Leave on "default" to use the default bank / e-wallet above.</p>
+				<p class="text-xs font-medium text-ink">Hotel payment accounts</p>
+				<p class="text-xs text-muted-foreground">
+					Where front desk card and e-wallet payments go (rooms, halls, quick sales). Dining uses these too unless set below. Leave on
+					"default" to use the default bank / e-wallet above.
+				</p>
 				<div class="mt-2 grid gap-3 sm:grid-cols-3">
 					{#each [{ m: 'card', label: 'Card' }, { m: 'gcash', label: 'GCash' }, { m: 'maya', label: 'Maya' }, { m: 'bank_transfer', label: 'Bank transfer' }, { m: 'cheque', label: 'Cheque' }] as { m, label } (m)}
 						<div>
-							<Label class="text-xs">{label}</Label>
+							<Label class="text-xs">Hotel {label}</Label>
 							<select name="account_{m}" class="mt-1 w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-sm">
 								<option value="">— default —</option>
 								{#each data.accounts.filter((a) => a.kind === 'bank' || a.kind === 'e_wallet') as a (a.id)}
@@ -168,9 +171,9 @@
 				<p class="text-xs font-medium text-ink">Dining payment accounts</p>
 				<p class="text-xs text-muted-foreground">
 					Where the dining register's card and e-wallet payments go (orders, quick sales and their refunds), e.g. a dining-only
-					GCash. Leave on "same as hotel" to use the account above. Tag the account Dining in Cash accounts below.
+					GCash. Leave on "same as hotel" to use the hotel's account above. Tag the account Dining in Cash accounts below.
 				</p>
-				<div class="mt-2 grid gap-3 sm:grid-cols-4">
+				<div class="mt-2 grid gap-3 sm:grid-cols-3">
 					{#each [{ m: 'card', label: 'Card' }, { m: 'gcash', label: 'GCash' }, { m: 'maya', label: 'Maya' }, { m: 'bank_transfer', label: 'Bank transfer' }] as { m, label } (m)}
 						<div>
 							<Label class="text-xs">Dining {label}</Label>
