@@ -23,13 +23,16 @@
 		check,
 		shiftOpen,
 		slug,
-		inHouse
+		inHouse,
+		payAccounts
 	}: {
 		open: boolean;
 		check: Check | null;
 		shiftOpen: boolean;
 		slug: string;
 		inHouse: PageData['inHouse'];
+		/** Account each card / e-wallet payment posts to (Finance settings → Dining payment accounts). */
+		payAccounts: Record<'card' | 'gcash' | 'maya', string | null>;
 	} = $props();
 
 	const peso = (c: number) =>
@@ -247,7 +250,10 @@
 							{/if}
 						</div>
 					{:else}
-						<p class="text-sm text-ink-muted">Record this after the guest has paid on the terminal or wallet.</p>
+						<p class="text-sm text-ink-muted">
+							Record this after the guest has paid on the terminal or wallet. The full amount is posted to
+							<strong class="text-ink" data-pay-account>{payAccounts[method as 'card'] ?? 'the default bank / e-wallet'}</strong>.
+						</p>
 						<div>
 							<Label for="settleReferenceNo" class="text-xs">{method === 'card' ? 'Approval no.' : 'Reference no.'}</Label>
 							<Input id="settleReferenceNo" name="referenceNo" maxlength={80} required autocomplete="off" bind:value={referenceNo} class="mt-1" />

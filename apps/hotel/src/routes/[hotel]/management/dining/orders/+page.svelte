@@ -516,10 +516,10 @@
 />
 
 <NewOrderSheet bind:open={newOpen} {data} defaultVenueId={data.venueId} defaultTableId={newTable} onplaced={placed} />
-<PayDialog bind:open={payOpen} order={payOrder} shiftOpen={data.shiftOpen} {slug} inHouse={data.inHouse} />
+<PayDialog bind:open={payOpen} order={payOrder} shiftOpen={data.shiftOpen} {slug} inHouse={data.inHouse} payAccounts={data.payAccounts} />
 <ThreadSheet bind:open={threadOpen} order={threadOrder ?? data.refundDue.find((o) => o.id === threadOrderId) ?? null} canWrite={data.canWrite} timezone={data.timezone} />
 <RefundDialog bind:open={refundOpen} order={refundOrder} />
-<SettleDialog bind:open={settleOpen} check={settleFor} shiftOpen={data.shiftOpen} {slug} inHouse={data.inHouse} />
+<SettleDialog bind:open={settleOpen} check={settleFor} shiftOpen={data.shiftOpen} {slug} inHouse={data.inHouse} payAccounts={data.payAccounts} />
 
 <!-- Send a delivery order out with a rider -->
 <Dialog.Root open={dispatchFor !== null} onOpenChange={(o) => { if (!o) dispatchFor = null; }}>

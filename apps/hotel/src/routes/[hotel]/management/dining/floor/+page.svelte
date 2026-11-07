@@ -558,7 +558,7 @@
 	</Dialog.Content>
 </Dialog.Root>
 
-<SettleDialog bind:open={settleOpen} check={settleFor} shiftOpen={data.shiftOpen} slug={page.params.hotel ?? ''} inHouse={data.inHouse} />
+<SettleDialog bind:open={settleOpen} check={settleFor} shiftOpen={data.shiftOpen} slug={page.params.hotel ?? ''} inHouse={data.inHouse} payAccounts={data.payAccounts} />
 
 <!-- Join one table's tab into another's -->
 <Dialog.Root open={joinFor !== null} onOpenChange={(o) => { if (!o) joinFor = null; }}>

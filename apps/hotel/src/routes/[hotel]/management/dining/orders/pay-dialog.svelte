@@ -20,13 +20,16 @@
 		order,
 		shiftOpen,
 		slug,
-		inHouse
+		inHouse,
+		payAccounts
 	}: {
 		open: boolean;
 		order: PageData['orders'][number] | null;
 		shiftOpen: boolean;
 		slug: string;
 		inHouse: PageData['inHouse'];
+		/** Account each card / e-wallet payment posts to (Finance settings → Dining payment accounts). */
+		payAccounts: Record<'card' | 'gcash' | 'maya', string | null>;
 	} = $props();
 
 	const peso = (c: number) =>
@@ -243,7 +246,8 @@
 						</div>
 					{:else if method !== 'room'}
 						<p class="text-sm text-ink-muted">
-							Record this after the guest has paid on the terminal or wallet. The full amount is posted to the bank account.
+							Record this after the guest has paid on the terminal or wallet. The full amount is posted to
+							<strong class="text-ink" data-pay-account>{payAccounts[method as 'card'] ?? 'the default bank / e-wallet'}</strong>.
 						</p>
 						<div>
 							<Label for="payReferenceNo" class="text-xs">{method === 'card' ? 'Approval no.' : 'Reference no.'}</Label>

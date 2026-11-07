@@ -36,7 +36,7 @@ import { listOpenChecks } from '$lib/server/dining-checks';
 import { chargeDiningOrderToRoom, listInHouseGuests, undoDiningRoomCharge } from '$lib/server/dining-room-charge';
 import { DocumentError, issueDiningDocument, listDiningDocumentsForOrders } from '$lib/server/finance/documents';
 import { FinanceError } from '$lib/server/finance/shared';
-import { diningDrawerId } from '$lib/server/finance/payments';
+import { diningDrawerId, diningPayAccountNames } from '$lib/server/finance/payments';
 import { listCashAccounts } from '$lib/server/finance/accounts';
 import {
 	getDefaultOpenShift,
@@ -120,6 +120,7 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 	});
 
 	return {
+		payAccounts: await diningPayAccountNames(hotelId),
 		venues,
 		venueId,
 		orders: orders.map((o) => ({ ...serialize(o), documents: documents[o.id] ?? [] })),

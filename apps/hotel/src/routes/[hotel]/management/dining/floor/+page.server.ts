@@ -33,6 +33,7 @@ import { closeTableAction, settleTableAction } from '$lib/server/dining-check-ac
 import { listInHouseGuests } from '$lib/server/dining-room-charge';
 import { FinanceError } from '$lib/server/finance/shared';
 import { getDefaultOpenShift } from '$lib/server/finance/shifts';
+import { diningPayAccountNames } from '$lib/server/finance/payments';
 import { HOLDING_STATUSES, localParts, zonedToUtc } from '$lib/dining-slots';
 import type { RequestEvent } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -73,7 +74,8 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 		date,
 		nowLocal,
 		canWrite: can('dining:write'),
-		canClear: can('dining:manage') || can('hotel:admin')
+		canClear: can('dining:manage') || can('hotel:admin'),
+		payAccounts: await diningPayAccountNames(hotelId)
 	};
 	if (!venue) {
 		return { venues, venue: null, areas: [], tables: [], reservations: [], checks: [], awaiting: {} as Record<string, number>, inHouse: [], shiftOpen: false, ...common };

@@ -162,6 +162,18 @@ export async function diningDrawerId(hotelId: string): Promise<string | null> {
 	return (await getFinanceSettings(hotelId)).diningDrawerAccountId;
 }
 
+/** Name of the account each dining card / e-wallet payment lands in (Finance settings → Dining
+ *  payment accounts, else the hotel's), for the pay dialogs. Null when none is set up. */
+export async function diningPayAccountNames(hotelId: string): Promise<Record<'card' | 'gcash' | 'maya', string | null>> {
+	const settings = await getFinanceSettings(hotelId);
+	const rows = await db
+		.select({ id: cashAccounts.id, name: cashAccounts.name })
+		.from(cashAccounts)
+		.where(eq(cashAccounts.hotelId, hotelId));
+	const name = (m: string) => rows.find((r) => r.id === accountForMethod(settings, m, 'dining'))?.name ?? null;
+	return { card: name('card'), gcash: name('gcash'), maya: name('maya') };
+}
+
 export interface RecordPaymentInput {
 	hotelId: string;
 	target: FolioTarget;
