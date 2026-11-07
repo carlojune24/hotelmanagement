@@ -158,6 +158,7 @@
 			<Table.Header>
 				<Table.Row>
 					<Table.Head>Date</Table.Head>
+					<Table.Head>For</Table.Head>
 					<Table.Head>Category / vendor</Table.Head>
 					<Table.Head>Description</Table.Head>
 					<Table.Head class="text-right">Gross</Table.Head>
@@ -170,8 +171,10 @@
 				{#each data.rows as r (r.id)}
 					<Table.Row>
 						<Table.Cell class="whitespace-nowrap text-ink-muted">{r.expenseDate}</Table.Cell>
+						<Table.Cell>
+							<span class="rounded px-1.5 py-0.5 text-[11px] font-medium {r.source === 'dining' ? 'bg-warning/20 text-ink' : 'bg-brand/10 text-brand'}">{r.source === 'dining' ? 'Dining' : 'Hotel'}</span>
+						</Table.Cell>
 						<Table.Cell class="text-ink">
-							<span class="mr-1 rounded px-1.5 py-0.5 text-[11px] font-medium {r.source === 'dining' ? 'bg-warning/20 text-ink' : 'bg-brand/10 text-brand'}">{r.source === 'dining' ? 'Dining' : 'Hotel'}</span>
 							{r.categoryName}
 							{#if r.vendorName}<span class="block text-xs text-ink-muted">{r.vendorName}</span>{/if}
 						</Table.Cell>
@@ -210,7 +213,7 @@
 					</Table.Row>
 					{#if payingId === r.id}
 						<Table.Row>
-							<Table.Cell colspan={7} class="bg-surface-2">
+							<Table.Cell colspan={8} class="bg-surface-2">
 								<form method="POST" action="?/pay" use:enhance class="flex flex-wrap items-end gap-2">
 									<input type="hidden" name="id" value={r.id} />
 									<div>
@@ -233,7 +236,7 @@
 						</Table.Row>
 					{/if}
 				{:else}
-					<Table.Row><Table.Cell colspan={7} class="py-6 text-center text-ink-muted">No expenses.</Table.Cell></Table.Row>
+					<Table.Row><Table.Cell colspan={8} class="py-6 text-center text-ink-muted">No expenses.</Table.Cell></Table.Row>
 				{/each}
 			</Table.Body>
 		</Table.Root>
