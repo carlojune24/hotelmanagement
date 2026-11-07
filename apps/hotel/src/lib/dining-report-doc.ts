@@ -53,6 +53,7 @@ export const METHOD_LABEL: Record<string, string> = {
 	paymongo: 'Online (PayMongo)',
 	room_charge: 'Charged to room',
 	room_folio: 'Room bill settled',
+	manual: 'Manual entry',
 	bank_transfer: 'Bank transfer',
 	cheque: 'Cheque',
 	house_use: 'House use',
@@ -192,6 +193,14 @@ export function buildCashflowDoc(r: DiningCashflowReport, ctx: { from: string; t
 			emptyText: 'No movements in this period.'
 		},
 		{
+			title: 'Paid out (dining spending)',
+			columns: [T('Date'), T('Account'), T('Kind'), T('Details'), M('Amount')],
+			rows: r.paidOut.rows.map((p) => [p.businessDate, p.account, p.category.replace(/_/g, ' '), p.memo ?? '', p.amountCentavos]),
+			total: ['Total', '', '', '', r.paidOut.totalCentavos],
+			note: 'Expenses tagged Dining once paid, payouts from the dining drawer, and payroll or remittances booked to dining.',
+			emptyText: 'Nothing paid out for dining in this period.'
+		},
+		{
 			title: 'PayMongo payouts recorded',
 			columns: [T('Date'), T('Paid into'), T('Reference'), M('Amount')],
 			rows: r.payouts.map((p) => [p.businessDate, p.toAccount ?? '', p.memo ?? '', p.amountCentavos]),
@@ -220,6 +229,8 @@ export function buildCashflowDoc(r: DiningCashflowReport, ctx: { from: string; t
 			{ label: 'Money in', value: r.totals.inCentavos, kind: 'money' },
 			{ label: 'Refunds out', value: r.totals.refundCentavos, kind: 'money' },
 			{ label: 'Net cashflow', value: r.totals.netCentavos, kind: 'money' },
+			{ label: 'Paid out (dining spending)', value: r.paidOut.totalCentavos, kind: 'money' },
+			{ label: 'Net after spending', value: r.paidOut.afterSpendingCentavos, kind: 'money' },
 			{ label: 'Online money awaiting payout (all time)', value: Math.max(0, r.awaitingPayout.centavos), kind: 'money' }
 		],
 		sections,

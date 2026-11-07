@@ -169,6 +169,30 @@ describe.skipIf(!hasDb)('hotel / dining split through the finance pages (live DB
 		expect(val(all, /^Hotel profit$/)).toBe(val(hotelR, /^(Profit|Loss)$/));
 	});
 
+	it('Cashflow: Dining shows what dining spent; the Hotel / Dining report cashflow adds up to Overall', async () => {
+		const { diningCashflowReport } = await import('$lib/server/dining-cashflow');
+		const { cashflowReport } = await import('$lib/server/finance/reports');
+		const r = await diningCashflowReport(hotel.id, today, today);
+		const memos = r.paidOut.rows.map((x) => x.memo ?? '');
+		// The ice payout left the dining drawer; the soap payout left the front desk; unpaid drafts are not cash yet.
+		expect(memos.some((m) => m.includes(`${tag} ice`))).toBe(true);
+		expect(memos.some((m) => m.includes(`${tag} soap`))).toBe(false);
+		expect(memos.some((m) => m.includes(`${tag} gas`))).toBe(false);
+		expect(r.paidOut.totalCentavos).toBe(2_000);
+		expect(r.paidOut.afterSpendingCentavos).toBe(r.totals.netCentavos - 2_000);
+
+		const [all, hotelR, diningR] = await Promise.all([
+			cashflowReport(hotel.id, today, today),
+			cashflowReport(hotel.id, today, today, 'hotel'),
+			cashflowReport(hotel.id, today, today, 'dining')
+		]);
+		expect(diningR.rows.find((x) => x.category === 'expense')?.amountCentavos).toBe(2_000);
+		expect(hotelR.rows.find((x) => x.category === 'expense')?.amountCentavos).toBe(2_000);
+		// No shared-to-shared transfers in this hotel, so the two sides are the whole.
+		expect(hotelR.totalOutCentavos + diningR.totalOutCentavos).toBe(all.totalOutCentavos);
+		expect(hotelR.totalInCentavos + diningR.totalInCentavos).toBe(all.totalInCentavos);
+	});
+
 	it('Dining payment accounts: a dining GCash sale lands in dining’s own e-wallet; hotel payments do not', async () => {
 		const { payDiningOrder, createDiningOrder } = await import('$lib/server/dining-orders');
 		const { resolvePaymentAccount } = await import('$lib/server/finance/payments');

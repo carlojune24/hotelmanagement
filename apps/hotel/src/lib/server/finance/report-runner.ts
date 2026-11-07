@@ -117,7 +117,7 @@ export async function runReport(
 					['Less: refunds paid out', `-${peso(r.grossRevenueCentavos - r.netRevenueCentavos)}`],
 					['Net income (kept)', peso(r.netRevenueCentavos)],
 					...scPwdSummary(r.scPwd),
-					// A scope's net is its takings less its refunds; expenses are not split by business line.
+					// Daily sales is takings only: a scope's net is what it took in less its refunds (expenses: Cashflow, Profit & loss).
 					[scope === 'all' ? 'Net cash' : 'Net of refunds', peso(r.netCashCentavos)]
 				]
 			};

@@ -52,6 +52,7 @@
 		maya: 'Maya',
 		paymongo: 'Online (PayMongo)',
 		room_folio: 'Room bill settled',
+		manual: 'Manual entry',
 		bank_transfer: 'Bank transfer',
 		cheque: 'Cheque',
 		unknown: 'Unknown'
@@ -107,7 +108,7 @@
 		</div>
 	</div>
 
-	<dl class="grid grid-cols-2 divide-border overflow-hidden rounded-xl border border-border bg-surface sm:grid-cols-4 sm:divide-x">
+	<dl class="grid grid-cols-2 divide-border overflow-hidden rounded-xl border border-border bg-surface sm:grid-cols-3 lg:grid-cols-6 lg:divide-x">
 		<div class="px-4 py-3">
 			<dt class="text-xs text-ink-muted">Money in</dt>
 			<dd class="text-xl font-semibold tabular-nums text-ink">{peso(r.totals.inCentavos)}</dd>
@@ -119,6 +120,14 @@
 		<div class="px-4 py-3">
 			<dt class="text-xs text-ink-muted">Net</dt>
 			<dd class="text-xl font-semibold tabular-nums text-ink">{peso(r.totals.netCentavos)}</dd>
+		</div>
+		<div class="px-4 py-3">
+			<dt class="text-xs text-ink-muted">Paid out (spending)</dt>
+			<dd class="text-xl font-semibold tabular-nums text-ink">{peso(r.paidOut.totalCentavos)}</dd>
+		</div>
+		<div class="px-4 py-3">
+			<dt class="text-xs text-ink-muted">Net after spending</dt>
+			<dd class="text-xl font-semibold tabular-nums {r.paidOut.afterSpendingCentavos < 0 ? 'text-danger' : 'text-ink'}">{r.paidOut.afterSpendingCentavos < 0 ? '−' : ''}{peso(Math.abs(r.paidOut.afterSpendingCentavos))}</dd>
 		</div>
 		<div class="px-4 py-3">
 			<dt class="text-xs text-ink-muted">Online money awaiting payout</dt>
@@ -325,6 +334,45 @@
 					</Table.Root>
 				</div>
 				{#if r.movements.length === 100}<p class="mt-1 text-xs text-ink-muted">Showing the latest 100. Download the CSV or narrow the dates for the rest.</p>{/if}
+			</section>
+
+			<section aria-labelledby="cfPaidOut">
+				<h2 id="cfPaidOut" class="mb-2 text-sm font-semibold text-ink">Paid out (dining spending)</h2>
+				<div class="overflow-x-auto rounded-xl border border-border">
+					<Table.Root>
+						<Table.Header>
+							<Table.Row>
+								<Table.Head>Date</Table.Head>
+								<Table.Head>Account</Table.Head>
+								<Table.Head>Kind</Table.Head>
+								<Table.Head>Details</Table.Head>
+								<Table.Head class="w-36 text-right">Amount</Table.Head>
+							</Table.Row>
+						</Table.Header>
+						<Table.Body>
+							{#each r.paidOut.rows as p (p.id)}
+								<Table.Row>
+									<Table.Cell class="whitespace-nowrap text-ink-muted">{fmtDay(p.businessDate)}</Table.Cell>
+									<Table.Cell class="text-ink">{p.account}</Table.Cell>
+									<Table.Cell class="text-ink-muted first-letter:uppercase">{p.category.replace(/_/g, ' ')}</Table.Cell>
+									<Table.Cell class="max-w-[18rem] truncate text-ink-muted" title={p.memo ?? ''}>{p.memo ?? ''}</Table.Cell>
+									<Table.Cell class="text-right tabular-nums text-danger">{peso(p.amountCentavos)}</Table.Cell>
+								</Table.Row>
+							{:else}
+								<Table.Row><Table.Cell colspan={5} class="py-6 text-center text-ink-muted">Nothing paid out for dining in this period.</Table.Cell></Table.Row>
+							{/each}
+						</Table.Body>
+						{#if r.paidOut.rows.length > 0}
+							<Table.Footer>
+								<Table.Row>
+									<Table.Cell colspan={4} class="text-ink">Total</Table.Cell>
+									<Table.Cell class="text-right tabular-nums text-danger">{peso(r.paidOut.totalCentavos)}</Table.Cell>
+								</Table.Row>
+							</Table.Footer>
+						{/if}
+					</Table.Root>
+				</div>
+				<p class="mt-1 text-xs text-ink-muted">Expenses tagged Dining once they are paid, payouts from the dining drawer, and payroll or remittances booked to dining. Unpaid expenses are not cash yet.</p>
 			</section>
 
 			<section aria-labelledby="cfPayouts">

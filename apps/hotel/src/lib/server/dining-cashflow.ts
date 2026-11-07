@@ -2,6 +2,7 @@ import { and, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { db } from './db/index';
 import { cashAccounts, cashMovements, diningOrders, diningPayments, financeSettings } from './db/schema/index';
 import { scopeMovementFilter } from './finance/reports';
+import { cashSideSql } from './finance/cash';
 
 /** The source label a dining movement is shown under: the way the money arrived. */
 export type DiningMoneyMethod = 'cash' | 'card' | 'gcash' | 'maya' | 'paymongo' | 'room_folio' | 'unknown' | string;
@@ -27,6 +28,13 @@ export interface DiningCashflowReport {
 		orderCode: string | null;
 	}[];
 	payouts: { id: string; businessDate: string; amountCentavos: number; toAccount: string | null; memo: string | null }[];
+	/** Dining's spending paid in the range: expenses tagged Dining once paid, payouts from the dining drawer, payroll
+	 *  and remittances booked to dining. Sided as on Finance → Cash. `afterSpendingCentavos` = net takings − this. */
+	paidOut: {
+		totalCentavos: number;
+		afterSpendingCentavos: number;
+		rows: { id: string; businessDate: string; category: string; account: string; memo: string | null; amountCentavos: number }[];
+	};
 }
 
 const n = (v: unknown) => Number(v ?? 0);
@@ -36,6 +44,7 @@ const isRefund = sql`${cashMovements.direction} = 'out'`;
 const methodExpr = sql<string>`case
 	when ${cashMovements.sourceType} = 'dining_order' then coalesce(${diningOrders.paymentMethod}::text, 'unknown')
 	when ${cashMovements.sourceType} = 'dining_payment' then 'paymongo'
+	when ${cashMovements.sourceType} = 'manual' then 'manual'
 	when ${cashMovements.sourceType} = 'dining_refund' then coalesce(${diningPayments.method}::text, 'unknown')
 	else 'room_folio' end`;
 
@@ -216,8 +225,38 @@ export async function diningCashflowReport(
 		.orderBy(desc(diningOrders.paidAt))
 		.limit(50);
 
+	const spentRows = await db
+		.select({
+			id: cashMovements.id,
+			businessDate: cashMovements.businessDate,
+			category: cashMovements.category,
+			account: cashAccounts.name,
+			memo: cashMovements.memo,
+			amountCentavos: cashMovements.amountCentavos
+		})
+		.from(cashMovements)
+		.innerJoin(cashAccounts, eq(cashAccounts.id, cashMovements.cashAccountId))
+		.where(
+			and(
+				eq(cashMovements.hotelId, hotelId),
+				sql`${cashMovements.voidedAt} is null`,
+				eq(cashMovements.direction, 'out'),
+				inArray(cashMovements.category, ['expense', 'payroll', 'statutory_remittance']),
+				gte(cashMovements.businessDate, from),
+				lte(cashMovements.businessDate, to),
+				sql`${cashSideSql()} = 'dining'`
+			)
+		)
+		.orderBy(desc(cashMovements.businessDate), desc(cashMovements.occurredAt));
+	const spent = spentRows.reduce((s, r) => s + n(r.amountCentavos), 0);
+
 	return {
 		totals: { inCentavos: totalIn, refundCentavos: totalRefund, netCentavos: totalIn - totalRefund },
+		paidOut: {
+			totalCentavos: spent,
+			afterSpendingCentavos: totalIn - totalRefund - spent,
+			rows: spentRows.map((r) => ({ ...r, amountCentavos: n(r.amountCentavos) }))
+		},
 		byDay,
 		byAccount: byAccountRows
 			.map((r) => ({ accountId: r.accountId, name: r.name, kind: r.kind, inCentavos: n(r.inC), refundCentavos: n(r.outC) }))

@@ -147,7 +147,7 @@ describe.skipIf(!hasDb)('finance report scope (live DB)', async () => {
 		expect(hotel.grossRevenueCentavos).toBe(850_000);
 	});
 
-	it('cashflow narrows to the scope and leaves expenses out of Hotel and Dining', async () => {
+	it('cashflow narrows to the scope, each side carrying its own paid expenses', async () => {
 		const all = await r.cashflowReport(hotelA, FROM, TO);
 		expect(all.totalOutCentavos).toBe(75_000);
 
@@ -155,10 +155,12 @@ describe.skipIf(!hasDb)('finance report scope (live DB)', async () => {
 		expect(dining.totalInCentavos).toBe(100_000);
 		expect(dining.totalOutCentavos).toBe(5_000);
 
+		// The front-desk expense is the hotel's (it left a Hotel till), so Hotel + Dining is Overall, in and out.
 		const hotel = await r.cashflowReport(hotelA, FROM, TO, 'hotel');
-		expect(hotel.rows.some((x) => x.category === 'expense')).toBe(false);
-		expect(hotel.totalOutCentavos).toBe(30_000);
+		expect(hotel.rows.find((x) => x.category === 'expense')?.amountCentavos).toBe(40_000);
+		expect(hotel.totalOutCentavos).toBe(30_000 + 40_000);
 		expect(hotel.totalInCentavos + dining.totalInCentavos).toBe(all.totalInCentavos);
+		expect(hotel.totalOutCentavos + dining.totalOutCentavos).toBe(all.totalOutCentavos);
 	});
 
 	it('payment methods for Dining come from restaurant orders, not folio payments', async () => {

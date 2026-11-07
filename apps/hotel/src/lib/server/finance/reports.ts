@@ -11,7 +11,7 @@ import {
 	payments,
 	orders
 } from '../db/schema/index';
-import { getCashPosition } from './cash';
+import { cashSideSql, getCashPosition } from './cash';
 import { arAging } from './receivables';
 import { daySnapshot } from './dayclose';
 
@@ -285,13 +285,16 @@ export async function cashflowReport(
 			amountCentavos: sql<number>`coalesce(sum(${cashMovements.amountCentavos}), 0)::bigint`
 		})
 		.from(cashMovements)
+		.innerJoin(cashAccounts, eq(cashAccounts.id, cashMovements.cashAccountId))
 		.where(
 			and(
 				eq(cashMovements.hotelId, hotelId),
 				gte(cashMovements.businessDate, from),
 				lte(cashMovements.businessDate, to),
 				sql`${cashMovements.voidedAt} is null`,
-				scopeMovementFilter(scope)
+				// Every movement, sided as on Finance → Cash: takings, refunds, paid expenses, payouts, owner draws and
+				// transfers. A transfer between two shared accounts is neither side's, so only Overall shows it.
+				scope === 'all' ? undefined : sql`${cashSideSql()} = ${scope}`
 			)
 		)
 		.groupBy(cashMovements.direction, cashMovements.category);
