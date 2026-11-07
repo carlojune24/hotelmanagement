@@ -9,6 +9,7 @@
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
 	import BanIcon from '@lucide/svelte/icons/ban';
+	import CalendarClockIcon from '@lucide/svelte/icons/calendar-clock';
 	import MaximizeIcon from '@lucide/svelte/icons/maximize-2';
 	import MinimizeIcon from '@lucide/svelte/icons/minimize-2';
 	import Volume2Icon from '@lucide/svelte/icons/volume-2';
@@ -88,13 +89,16 @@
 		const mine = (o: Order) => !station || o.items.some((i) => (i.stationName ?? '') === laneKey);
 		const ids = new Set(data.orders.filter((o) => (o.status === 'new' || o.status === 'accepted') && mine(o)).map((o) => o.id));
 		const stopped = new Set(data.cancelled.map((c) => c.code));
-		const newTicket = seen !== null && [...ids].some((id) => !seen!.has(id));
+		const fresh = seen !== null ? [...ids].filter((id) => !seen!.has(id)) : [];
+		const newTicket = fresh.length > 0;
+		// A table pre-order coming off "coming up" onto the board has its own sound.
+		const preorderDue = fresh.some((id) => data.orders.find((o) => o.id === id)?.orderType === 'pre_order');
 		const newStop = seenCancelled !== null && [...stopped].some((c) => !seenCancelled!.has(c));
 		seen = ids;
 		seenCancelled = stopped;
 		if (!sound || (!newTicket && !newStop)) return;
 		// Stopping a dish matters more than a new one, so it wins when both arrive together.
-		blocked = !playTone(newStop ? 'stop' : 'ticket');
+		blocked = !playTone(newStop ? 'stop' : preorderDue ? 'preorder' : 'ticket');
 	});
 	function toggleSound() {
 		sound = !sound;
@@ -147,7 +151,15 @@
 		a && b ? Math.max(0, Math.floor((new Date(b).getTime() - new Date(a).getTime()) / 60_000)) : 0;
 	const clock12 = (d: Date | string) => new Date(d).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' });
 	const minutesSince = (d: Date | string | null) => (d ? Math.max(0, Math.floor((nowServer - new Date(d).getTime()) / 60_000)) : 0);
-	const waited = (o: Order) => minutesSince(o.createdAt);
+	// A table pre-order was placed (often days) before it was the kitchen's: it waits from its start
+	// time (table time − the venue's prep time), not from when the guest ordered.
+	const prepOf = $derived(new Map(data.venues.map((v) => [v.id, v.prepMinutes])));
+	const fireAt = (o: Order) =>
+		o.orderType === 'pre_order' && o.pickupAt ? new Date(new Date(o.pickupAt).getTime() - (prepOf.get(o.venueId) ?? 0) * 60_000) : null;
+	const waited = (o: Order) => minutesSince(fireAt(o) ?? o.createdAt);
+	const minutesUntil = (d: Date | string) => Math.ceil((new Date(d).getTime() - nowServer) / 60_000);
+	// Tables are often named "Table 4" already; don't print "Table Table 4".
+	const tableName = (t: string) => (/^table\b/i.test(t) ? t : `Table ${t}`);
 	const where = (o: Order) =>
 		o.orderType === 'takeaway' ? (o.fulfilment === 'delivery' ? 'Delivery' : 'Takeaway') : o.tableLabel ? `Table ${o.tableLabel}` : 'Dine-in';
 
@@ -238,12 +250,12 @@
 
 <!-- The time record on a ticket: when the order was taken, how long it waited before the station started it,
      and how long it has been (or was) in the kitchen. Plain rows on a narrow lane, three across on a wide one. -->
-{#snippet record(orderedAt: Date | string, startedAt: Date | string | null | undefined, readyAt?: Date | string | null)}
+{#snippet record(orderedAt: Date | string, startedAt: Date | string | null | undefined, readyAt?: Date | string | null, firstLabel: string = 'Ordered')}
 	{@const queue = startedAt ? between(orderedAt, startedAt) : minutesSince(orderedAt)}
 	{@const inKitchen = startedAt ? (readyAt ? between(startedAt, readyAt) : minutesSince(startedAt)) : null}
 	<dl class="mt-2 grid grid-cols-1 gap-y-0.5 rounded-lg border border-border bg-surface-2/40 px-2 py-1.5 @[19rem]:grid-cols-3 @[19rem]:gap-x-2">
 		<div class="flex items-baseline justify-between gap-2 @[19rem]:block">
-			<dt class="text-[11px] uppercase tracking-wide text-ink-muted">Ordered</dt>
+			<dt class="text-[11px] uppercase tracking-wide text-ink-muted">{firstLabel}</dt>
 			<dd class="font-mono text-sm font-bold tabular-nums">{clock12(orderedAt)}</dd>
 		</div>
 		<div class="flex items-baseline justify-between gap-2 @[19rem]:block">
@@ -255,6 +267,23 @@
 			<dd class="font-mono text-sm font-bold tabular-nums">{inKitchen === null ? '—' : formatWait(inKitchen)}</dd>
 		</div>
 	</dl>
+{/snippet}
+
+<!-- A table pre-order: a band across the top of its ticket with the table, party and a countdown to
+     when the guests sit down, so it never reads as just another walk-in. -->
+{#snippet preBand(o: Order)}
+	{#if o.orderType === 'pre_order' && o.pickupAt}
+		{@const seatsIn = minutesUntil(o.pickupAt)}
+		{@const res = o.reservationId ? data.reservations[o.reservationId] : null}
+		{@const party = res?.partySize}
+		{@const table = o.tableLabel ?? res?.tables}
+		<div class="-mx-2 -mt-2 mb-2 flex flex-wrap items-baseline justify-between gap-x-2 rounded-t-[10px] bg-brand px-2 py-1 text-brand-ink @[14rem]:-mx-3 @[14rem]:-mt-3 @[14rem]:px-3" data-preorder-band>
+			<span class="text-xs font-bold tracking-wide uppercase @[14rem]:text-sm">Pre-order{table ? ` · ${tableName(table)}` : ''}{party ? ` · ${party} ${party === 1 ? 'guest' : 'guests'}` : ''}</span>
+			<span class="text-xs font-semibold tabular-nums @[14rem]:text-sm">
+				Seats {clock12(o.pickupAt)} · {seatsIn > 0 ? `in ${formatWait(seatsIn)}` : seatsIn === 0 ? 'now' : `${formatWait(-seatsIn)} ago`}
+			</span>
+		</div>
+	{/if}
 {/snippet}
 
 <!-- Where a ticket came from, so a cook can tell an online order from a table or a walk-in at a glance:
@@ -387,6 +416,32 @@
 			<p class="rounded-lg border border-danger/50 bg-danger/10 px-4 py-3 text-base" role="alert">{error}</p>
 		{/if}
 
+		<!-- Today's table pre-orders that are not due yet: shown so the kitchen can plan, but with no
+		     Start button. Each moves onto the board (with its own sound) at its start time. -->
+		{#if data.comingUp.length > 0}
+			<section aria-labelledby="coming-up" class="rounded-xl border border-brand/40 bg-brand/5 px-3 py-3">
+				<h2 id="coming-up" class="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide">
+					<CalendarClockIcon class="size-4 text-brand" aria-hidden="true" />
+					Pre-orders coming up <span class="tabular-nums text-ink-muted">{data.comingUp.length}</span>
+				</h2>
+				<ul class="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+					{#each data.comingUp as c (c.id)}
+						{@const inMin = minutesUntil(c.fireAt)}
+						<li class="rounded-lg border border-border bg-surface px-3 py-2">
+							<p class="flex flex-wrap items-baseline justify-between gap-x-2">
+								<span class="font-mono text-base font-bold">{c.code}</span>
+								<span class="text-sm font-semibold text-brand">Start at {clock12(c.fireAt)}{inMin > 0 ? ` · in ${formatWait(inMin)}` : ''}</span>
+							</p>
+							<p class="text-sm text-ink-muted">
+								{c.tableLabel ? tableName(c.tableLabel) : 'Table to be set'}{c.partySize ? ` · ${c.partySize} ${c.partySize === 1 ? 'guest' : 'guests'}` : ''} · seats {clock12(c.seatsAt)}
+							</p>
+							<p class="mt-1 text-sm">{c.items.map((i) => `${i.quantity}× ${i.name}`).join(' · ')}</p>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
+
 		{#if view === 'lanes'}
 			<!-- One lane per station: a cook watches their own lane and nobody else's dishes. Up to five lanes
 			     sit side by side on anything from a small tablet up (a sixth wraps onto a second row); a phone
@@ -406,6 +461,7 @@
 							{@const m = waited(card.order)}
 							{@const level = waitLevel(m)}
 							<article class="rounded-xl border-2 bg-surface p-2 @[14rem]:p-3 {LEVEL_BORDER[level]}">
+								{@render preBand(card.order)}
 								<div class="flex flex-col gap-1 @[14rem]:flex-row @[14rem]:items-start @[14rem]:justify-between @[14rem]:gap-3">
 									<div class="min-w-0">
 										<p class="font-mono text-base font-bold @[14rem]:text-xl @[19rem]:text-2xl">{card.order.code}</p>
@@ -434,7 +490,7 @@
 									</div>
 								</div>
 
-								{@render record(card.order.createdAt, card.group.startedAt)}
+								{@render record(fireAt(card.order) ?? card.order.createdAt, card.group.startedAt, undefined, fireAt(card.order) ? 'Due' : 'Ordered')}
 
 								<p class="mt-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide @[14rem]:text-sm {card.state === 'cooking' ? LEVEL_TEXT[level] || 'text-ink' : 'text-ink-muted'}">
 									{#if card.state === 'cooking'}
@@ -508,7 +564,8 @@
 							{@const m = waited(t.order)}
 							{@const level = ticketLevel(t)}
 							{@const multi = t.shown.length > 1}
-							<article class="rounded-xl border-2 bg-surface p-3 sm:p-4 {LEVEL_BORDER[level]}">
+							<article class="@container rounded-xl border-2 bg-surface p-3 sm:p-4 {LEVEL_BORDER[level]}">
+								{@render preBand(t.order)}
 								<div class="flex items-start justify-between gap-3">
 									<div class="min-w-0">
 										<p class="font-mono text-2xl font-bold">{t.order.code}</p>
@@ -573,7 +630,7 @@
 												</li>
 											{/each}
 										</ul>
-										{@render record(t.order.createdAt, g.startedAt, g.readyAt)}
+										{@render record(fireAt(t.order) ?? t.order.createdAt, g.startedAt, g.readyAt, fireAt(t.order) ? 'Due' : 'Ordered')}
 										{#if data.canMove && g.state !== 'ready'}
 											<Button
 												class="mt-3 h-14 w-full text-lg"

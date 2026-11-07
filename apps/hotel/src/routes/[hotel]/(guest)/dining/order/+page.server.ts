@@ -28,7 +28,16 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	// needs online payment, so it works even where takeaway ordering is switched off.
 	const resCode = url.searchParams.get('reservation');
 	const resToken = url.searchParams.get('t');
-	let reservation: { code: string; token: string; venueTitle: string; local: { date: string; time: string }; startsAt: string } | null = null;
+	let reservation: {
+		code: string;
+		token: string;
+		venueTitle: string;
+		local: { date: string; time: string };
+		startsAt: string;
+		guestName: string;
+		guestPhone: string | null;
+		guestEmail: string | null;
+	} | null = null;
 	let venue: { id: string; title: string } | undefined = venues.find((v) => v.id === url.searchParams.get('venue')) ?? venues[0];
 	if (resCode && resToken) {
 		const r = await getReservationForGuest(hotelId, timezone, resCode, resToken);
@@ -36,7 +45,17 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			const resCfg = await loadOnlineOrderingConfig(hotelId, r.venueId);
 			if (resCfg?.preOrderEnabled) {
 				venue = { id: r.venueId, title: resCfg.title };
-				reservation = { code: r.code, token: resToken, venueTitle: r.venueTitle, local: r.local, startsAt: r.startsAt.toISOString() };
+				reservation = {
+					code: r.code,
+					token: resToken,
+					venueTitle: r.venueTitle,
+					local: r.local,
+					startsAt: r.startsAt.toISOString(),
+					// Proven by the ticket token; the guest typed these themselves when booking.
+					guestName: r.guestName,
+					guestPhone: r.guestPhone,
+					guestEmail: r.guestEmail
+				};
 			}
 		}
 	}

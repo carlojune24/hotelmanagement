@@ -17,6 +17,11 @@ import {
 import { requireCap } from '$lib/server/auth/rbac';
 import type { PageServerLoad } from './$types';
 
+const minIso = (ds: (Date | null)[]) => {
+	const t = ds.filter((d): d is Date => !!d).map((d) => d.getTime());
+	return t.length ? new Date(Math.min(...t)).toISOString() : null;
+};
+
 /** One table reservation in full: the booking, what was pre-ordered, and every peso paid or refunded. */
 export const load: PageServerLoad = async ({ locals, params }) => {
 	requireCap(locals.user, locals.role, 'dining:read');
@@ -114,6 +119,9 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			cancelReason: o.cancelReason,
 			remarks: o.remarks,
 			createdAt: o.createdAt.toISOString(),
+			// What the kitchen has done with it: first dish started, and when the last one was ready.
+			kitchenStartedAt: minIso(items.filter((i) => i.orderId === o.id).map((i) => i.startedAt)),
+			kitchenReadyAt: o.readyAt?.toISOString() ?? null,
 			lines: items
 				.filter((i) => i.orderId === o.id)
 				.map((i) => ({

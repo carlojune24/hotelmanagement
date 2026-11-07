@@ -185,7 +185,15 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 				return {
 					count: mine.length,
 					totalCentavos: mine.reduce((s, o) => s + o.total, 0),
-					paid: mine.every((o) => o.paymentStatus === 'paid' || o.paymentStatus === 'room_charged')
+					paid: mine.every((o) => o.paymentStatus === 'paid' || o.paymentStatus === 'room_charged'),
+					// Where the kitchen is with it: cooking if any order is, ready/served once all are.
+					kitchen: mine.some((o) => o.status === 'preparing')
+						? 'cooking'
+						: mine.every((o) => o.status === 'served')
+							? 'served'
+							: mine.every((o) => o.status === 'ready' || o.status === 'served')
+								? 'ready'
+								: null
 				};
 			})()
 		}))

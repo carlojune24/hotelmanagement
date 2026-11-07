@@ -163,6 +163,22 @@
 						<dl class="space-y-1 border-t border-border px-3 py-2.5 text-sm">
 							<div class="flex justify-between text-ink-muted"><dt>VAT included</dt><dd class="tabular-nums">{peso(o.vatCentavos)}</dd></div>
 							<div class="flex justify-between font-semibold text-ink"><dt>Total</dt><dd class="tabular-nums">{peso(o.totalCentavos)}</dd></div>
+							{#if o.status !== 'cancelled' && o.status !== 'pending_payment'}
+								<div class="flex justify-between text-xs" data-kitchen-state>
+									<dt class="text-ink-muted">Kitchen</dt>
+									<dd class={o.status === 'preparing' ? 'font-semibold text-warning' : o.status === 'ready' || o.status === 'served' ? 'font-semibold text-ok' : 'text-ink-muted'}>
+										{#if o.status === 'served'}
+											Served
+										{:else if o.status === 'ready'}
+											Ready{o.kitchenReadyAt ? ` at ${fmtTime(o.kitchenReadyAt)}` : ''}
+										{:else if o.status === 'preparing'}
+											Cooking{o.kitchenStartedAt ? ` since ${fmtTime(o.kitchenStartedAt)}` : ''}
+										{:else}
+											Not started yet
+										{/if}
+									</dd>
+								</div>
+							{/if}
 							{#if o.paidAt}
 								<div class="flex justify-between text-xs text-ink-muted">
 									<dt>Paid</dt>

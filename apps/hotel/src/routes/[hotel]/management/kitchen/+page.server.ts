@@ -1,8 +1,9 @@
 import { fail } from '@sveltejs/kit';
-import { and, asc, desc, eq, gte } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '$lib/server/db/index';
-import { diningItems, diningOrders } from '$lib/server/db/schema/index';
+import { diningItems, diningOrders, diningReservations, diningReservationTables, diningTables } from '$lib/server/db/schema/index';
+import { localParts } from '$lib/dining-slots';
 import { roleCan } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
 import { recordId } from '$lib/rate-validation';
@@ -27,20 +28,56 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 	const hotelId = locals.hotel!.id;
 
 	const venues = await db
-		.select({ id: diningItems.id, title: diningItems.title })
+		.select({ id: diningItems.id, title: diningItems.title, prepMinutes: diningItems.prepMinutes })
 		.from(diningItems)
 		.where(eq(diningItems.hotelId, hotelId))
 		.orderBy(asc(diningItems.sortOrder), asc(diningItems.title));
 	const venueId = venues.find((v) => v.id === url.searchParams.get('venue'))?.id ?? null;
 
 	await expirePendingDiningOrders({ hotelId }).catch((e) => console.error('kitchen: expirePendingDiningOrders failed', e));
-	// A pre-order for a table that is not due yet stays off the cooks' board until its release time.
-	const live = await listBoardOrders(hotelId, {
-		venueId,
-		servedSince: new Date(Date.now() + 86_400_000),
-		releasedOnly: true
-	});
-	const orders = live.filter((o) => o.status !== 'served');
+	// A pre-order for a table that is not due yet stays off the cooks' board until its release time
+	// (`dining-hold`); today's ones are listed apart as "coming up" so the kitchen can plan for them.
+	const all = await listBoardOrders(hotelId, { venueId, servedSince: new Date(Date.now() + 86_400_000) });
+	const orders = all.filter((o) => !o.held && o.status !== 'served');
+	const today = localParts(new Date(), locals.hotel!.timezone).date;
+	const heldToday = all.filter((o) => o.held && o.pickupAt && localParts(o.pickupAt, locals.hotel!.timezone).date === today);
+
+	// Party size for every pre-order ticket, released or coming up.
+	const resIds = [...new Set([...orders, ...heldToday].map((o) => o.reservationId).filter((id): id is string => !!id))];
+	const parties = resIds.length
+		? await db
+				.select({ id: diningReservations.id, partySize: diningReservations.partySize, code: diningReservations.code })
+				.from(diningReservations)
+				.where(and(eq(diningReservations.hotelId, hotelId), inArray(diningReservations.id, resIds)))
+		: [];
+	// A pre-order's table is the one held by its reservation (the order itself has none yet).
+	const resTables = resIds.length
+		? await db
+				.select({ reservationId: diningReservationTables.reservationId, name: diningTables.name })
+				.from(diningReservationTables)
+				.innerJoin(diningTables, eq(diningTables.id, diningReservationTables.tableId))
+				.where(inArray(diningReservationTables.reservationId, resIds))
+		: [];
+	const reservations = Object.fromEntries(
+		parties.map((p) => [
+			p.id,
+			{ partySize: p.partySize, code: p.code, tables: resTables.filter((t) => t.reservationId === p.id).map((t) => t.name).join(', ') || null }
+		])
+	);
+	const prepOf = new Map(venues.map((v) => [v.id, v.prepMinutes]));
+	const comingUp = heldToday
+		.map((o) => ({
+			id: o.id,
+			code: o.code,
+			tableLabel: o.tableLabel ?? (o.reservationId ? (reservations[o.reservationId]?.tables ?? null) : null),
+			guestName: o.guestName,
+			seatsAt: o.pickupAt!.toISOString(),
+			// When it lands on the board: the same rule as `heldForReservation`.
+			fireAt: new Date(o.pickupAt!.getTime() - (prepOf.get(o.venueId) ?? 0) * 60_000).toISOString(),
+			partySize: o.reservationId ? (reservations[o.reservationId]?.partySize ?? null) : null,
+			items: o.items.map((i) => ({ name: i.name, quantity: i.quantity }))
+		}))
+		.sort((a, b) => a.fireAt.localeCompare(b.fireAt));
 
 	// Orders cancelled in the last 15 minutes, so a cook who already started one is told to stop.
 	const cancelled = await db
@@ -62,6 +99,8 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 		venues,
 		venueId,
 		orders,
+		comingUp,
+		reservations,
 		cancelled: cancelled.map((c) => ({ code: c.code, tableLabel: c.tableLabel })),
 		stations,
 		canMove: !!locals.user?.isPlatformAdmin || (!!locals.role && roleCan(locals.role.capabilities, 'kitchen:write')),

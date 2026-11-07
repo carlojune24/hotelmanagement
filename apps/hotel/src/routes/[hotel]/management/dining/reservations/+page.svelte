@@ -219,6 +219,7 @@
 									<div class="mt-0.5 flex items-center gap-1 text-xs text-ink-muted">
 										<span class="rounded border border-border px-1 font-semibold text-ink">Pre-order</span>
 										{r.preOrder.count} {r.preOrder.count === 1 ? 'order' : 'orders'} · ₱{(r.preOrder.totalCentavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · {r.preOrder.paid ? 'paid' : 'unpaid'}
+										{#if r.preOrder.kitchen}· <span class="font-semibold {r.preOrder.kitchen === 'cooking' ? 'text-warning' : 'text-ok'}">{r.preOrder.kitchen}</span>{/if}
 									</div>
 								{/if}
 								{#if r.remarks}<div class="mt-0.5 line-clamp-1 text-xs text-ink-muted">“{r.remarks}”</div>{/if}

@@ -2,7 +2,7 @@
  *  contexts per page and keep them silent until the person has touched the page once, so one
  *  shared context is created lazily and woken by the first tap or key press. */
 
-export type Tone = 'ticket' | 'ready' | 'stop';
+export type Tone = 'ticket' | 'ready' | 'stop' | 'preorder';
 
 let ctx: AudioContext | null = null;
 
@@ -71,7 +71,10 @@ const PATTERNS: Record<Tone, (seconds: number) => Beep[]> = {
 	// food is ready to carry out: three rising notes, then a pause, over and over
 	ready: (sec) => repeat([{ freq: 660, len: 0.2 }, { freq: 880, len: 0.2 }, { freq: 1320, len: 0.34 }], 0.24, 1.0, sec),
 	// stop cooking: an urgent falling two-tone, faster, so it sounds different from a new ticket
-	stop: (sec) => repeat([{ freq: 880, len: 0.17 }, { freq: 440, len: 0.17 }], 0.2, 0.4, sec)
+	stop: (sec) => repeat([{ freq: 880, len: 0.17 }, { freq: 440, len: 0.17 }], 0.2, 0.4, sec),
+	// a table pre-order is due to start: a double "ding-ding" on one high note, then a low one,
+	// so a cook can tell it from an ordinary new ticket without looking
+	preorder: (sec) => repeat([{ freq: 1320, len: 0.14 }, { freq: 1320, len: 0.14 }, { freq: 660, len: 0.3 }], 0.18, 1.0, sec)
 };
 
 /** Peak loudness of one note, 0 to 1. Square waves are the loudest, most piercing waveform the

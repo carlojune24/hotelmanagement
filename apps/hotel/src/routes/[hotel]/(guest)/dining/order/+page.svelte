@@ -143,9 +143,11 @@ import { tick, untrack } from 'svelte';
 	const sameDayOnly = $derived(data.cfg.orderAheadDays === 0);
 
 	// ---- details and payment --------------------------------------------------------
-	let guestName = $state('');
-	let guestPhone = $state('');
-	let guestEmail = $state('');
+	// A pre-order comes from the guest's own booking: their details are already known, so start with them.
+	// Seeded once (the guest may edit them), hence `untrack`.
+	let guestName = $state(untrack(() => data.reservation?.guestName ?? ''));
+	let guestPhone = $state(untrack(() => data.reservation?.guestPhone ?? ''));
+	let guestEmail = $state(untrack(() => data.reservation?.guestEmail ?? ''));
 	let remarks = $state('');
 	let honeypot = $state('');
 	let payMode = $state<'online' | 'venue'>('online');
@@ -807,6 +809,9 @@ Online ordering is closed for today.
 				</button>
 
 				<p class="text-xs text-[var(--ledger-ink-muted)]">VAT included. {payMode === 'online' ? 'You will pay on PayMongo’s secure page.' : 'No payment is taken now.'}</p>
+				{#if !detailsOk}
+					<p class="w-full text-xs text-[var(--ledger-danger)]" role="status">Enter your name and mobile number above to continue.</p>
+				{/if}
 
 			</div>
 

@@ -1017,6 +1017,8 @@ export interface OrderView {
 	pickupAt: Date | null;
 	/** A pre-order for a table that is not due yet: kept off the kitchen board until it is released. */
 	held: boolean;
+	/** The table reservation a pre-order belongs to. */
+	reservationId: string | null;
 	/** An online takeaway order that is sent out rather than collected; the fee is inside the total. */
 	fulfilment: 'pickup' | 'delivery';
 	deliveryAddress: string | null;
@@ -1102,6 +1104,7 @@ async function hydrate(rows: { o: DiningOrder; venueTitle: string; bookingOrderI
 		roomLabel: o.roomLabel,
 		pickupAt: o.pickupAt,
 		held: heldSet.has(o.id),
+		reservationId: o.reservationId,
 		fulfilment: o.fulfilment === 'delivery' ? 'delivery' : 'pickup',
 		deliveryAddress: o.deliveryAddress,
 		deliveryFeeCentavos: o.deliveryFeeCentavos,

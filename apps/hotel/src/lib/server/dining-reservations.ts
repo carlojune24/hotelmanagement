@@ -627,6 +627,9 @@ export interface GuestReservationView {
 	venueId: string;
 	venueTitle: string;
 	guestName: string;
+	/** The guest's own details from booking, so the pre-order step can fill them in again. */
+	guestPhone: string | null;
+	guestEmail: string | null;
 	partySize: number;
 	startsAt: Date;
 	endsAt: Date;
@@ -668,6 +671,8 @@ export async function getReservationForGuest(
 		venueId: row.r.diningItemId,
 		venueTitle: row.venueTitle,
 		guestName: row.r.guestName,
+		guestPhone: row.r.guestPhone,
+		guestEmail: row.r.guestEmail,
 		partySize: row.r.partySize,
 		startsAt: row.r.startsAt,
 		endsAt: row.r.endsAt,
