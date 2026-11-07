@@ -37,6 +37,7 @@ export const actions: Actions = {
 				description: z.string().min(1).max(300),
 				amount: z.coerce.number().positive(),
 				isVatable: z.enum(['on']).optional(),
+				source: z.enum(['hotel', 'dining']),
 				cadence: z.enum(CADENCES),
 				anchorDay: z.coerce.number().int().min(0).max(31),
 				nextDueOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -52,6 +53,7 @@ export const actions: Actions = {
 					description: parsed.data.description,
 					amountCentavos: Math.round(parsed.data.amount * 100),
 					isVatable: parsed.data.isVatable === 'on',
+					source: parsed.data.source,
 					cadence: parsed.data.cadence,
 					anchorDay: parsed.data.anchorDay,
 					nextDueOn: parsed.data.nextDueOn

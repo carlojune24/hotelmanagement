@@ -37,6 +37,8 @@ export interface CreateExpenseInput {
 	categoryId: string;
 	vendorId?: string | null;
 	description: string;
+	/** Hotel or dining; defaults to hotel. */
+	source?: Expense['source'];
 	vendorInvoiceNo?: string | null;
 	grossCentavos: number;
 	isVatable: boolean;
@@ -81,6 +83,7 @@ export async function createExpense(
 		categoryId: input.categoryId,
 		vendorId: input.vendorId ?? null,
 		description: input.description.trim(),
+		source: input.source ?? 'hotel',
 		vendorInvoiceNo: input.vendorInvoiceNo?.trim() || null,
 		grossCentavos: input.grossCentavos,
 		inputVatCentavos: inputVat,
@@ -371,7 +374,26 @@ export interface ExpenseFilters {
 	status?: Expense['status'];
 	categoryId?: string;
 	vendorId?: string;
+	source?: Expense['source'];
 	limit?: number;
+}
+
+const EXPENSE_STATUSES = ['draft', 'approved', 'paid', 'void'] as const;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The Expenses list's filters from a URL (the page, its CSV and its print view all read the same ones). */
+export function parseExpenseFilter(url: URL) {
+	const p = url.searchParams;
+	const status = p.get('status');
+	const src = p.get('src');
+	const from = p.get('from') ?? '';
+	const to = p.get('to') ?? '';
+	return {
+		status: EXPENSE_STATUSES.includes(status as never) ? (status as Expense['status']) : undefined,
+		source: src === 'hotel' || src === 'dining' ? (src as Expense['source']) : undefined,
+		from: ISO_DATE.test(from) ? from : undefined,
+		to: ISO_DATE.test(to) ? to : undefined
+	};
 }
 
 export async function listExpenses(hotelId: string, filters: ExpenseFilters = {}) {
@@ -381,12 +403,14 @@ export async function listExpenses(hotelId: string, filters: ExpenseFilters = {}
 	if (filters.status) conds.push(eq(expenses.status, filters.status));
 	if (filters.categoryId) conds.push(eq(expenses.categoryId, filters.categoryId));
 	if (filters.vendorId) conds.push(eq(expenses.vendorId, filters.vendorId));
+	if (filters.source) conds.push(eq(expenses.source, filters.source));
 
 	return db
 		.select({
 			id: expenses.id,
 			expenseDate: expenses.expenseDate,
 			description: expenses.description,
+			source: expenses.source,
 			categoryName: expenseCategories.name,
 			categoryGroup: expenseCategories.group,
 			vendorName: vendors.name,
@@ -439,6 +463,7 @@ export async function generateDueRecurringExpenses(
 				categoryId: t.categoryId,
 				vendorId: t.vendorId,
 				description: t.description,
+				source: t.source,
 				grossCentavos: t.amountCentavos,
 				inputVatCentavos: inputVat,
 				netOfVatCentavos: t.amountCentavos - inputVat,

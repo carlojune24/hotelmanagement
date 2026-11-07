@@ -341,6 +341,9 @@ export const vendors = pgTable(
 	(t) => [index('vendors_hotel_idx').on(t.hotelId)]
 );
 
+/** Which side of the business an expense belongs to (Finance → Expenses filter, print and CSV). */
+export const expenseSource = pgEnum('expense_source', ['hotel', 'dining']);
+
 export const expenseStatus = pgEnum('expense_status', ['draft', 'approved', 'paid', 'void']);
 
 export const recurringCadence = pgEnum('recurring_cadence', [
@@ -364,6 +367,7 @@ export const recurringExpenses = pgTable(
 		description: text('description').notNull(),
 		amountCentavos: bigint('amount_centavos', { mode: 'number' }).notNull(),
 		isVatable: boolean('is_vatable').notNull().default(false),
+		source: expenseSource('source').notNull().default('hotel'),
 		cadence: recurringCadence('cadence').notNull(),
 		/** Day-of-month (monthly/quarterly/annually) or day-of-week 0–6 (weekly) anchor. */
 		anchorDay: integer('anchor_day').notNull().default(1),
@@ -392,6 +396,7 @@ export const expenses = pgTable(
 			.references(() => expenseCategories.id, { onDelete: 'restrict' }),
 		vendorId: uuid('vendor_id').references(() => vendors.id, { onDelete: 'set null' }),
 		description: text('description').notNull(),
+		source: expenseSource('source').notNull().default('hotel'),
 		/** The vendor's own invoice / OR number. */
 		vendorInvoiceNo: text('vendor_invoice_no'),
 		grossCentavos: bigint('gross_centavos', { mode: 'number' }).notNull(),

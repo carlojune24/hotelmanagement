@@ -6,6 +6,7 @@ import {
 	approveExpense,
 	createExpense,
 	listExpenses,
+	parseExpenseFilter,
 	markExpensePaid,
 	voidExpense
 } from '$lib/server/finance/expenses';
@@ -14,20 +15,15 @@ import { saveUpload, UploadValidationError } from '$lib/server/uploads';
 import type { Actions, PageServerLoad } from './$types';
 
 const PAY_METHODS = ['cash', 'card', 'gcash', 'maya', 'bank_transfer', 'cheque'] as const;
-const STATUSES = ['draft', 'approved', 'paid', 'void'] as const;
 
 export const load: PageServerLoad = async ({ locals, url }) => {
 	requireCap(locals.user, locals.role, 'finance:read');
 	const hotel = locals.hotel!;
 	const today = businessDateFor(hotel.timezone);
-	const status = STATUSES.includes(url.searchParams.get('status') as never)
-		? (url.searchParams.get('status') as (typeof STATUSES)[number])
-		: undefined;
-	const from = url.searchParams.get('from') || undefined;
-	const to = url.searchParams.get('to') || undefined;
+	const f = parseExpenseFilter(url);
 
 	const [rows, categories, vendors, accounts] = await Promise.all([
-		listExpenses(hotel.id, { status, from, to, limit: 400 }),
+		listExpenses(hotel.id, { ...f, limit: 400 }),
 		listExpenseCategories(hotel.id),
 		listVendors(hotel.id),
 		listCashAccounts(hotel.id)
@@ -40,7 +36,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		vendors,
 		accounts,
 		payMethods: PAY_METHODS,
-		filters: { status: status ?? '', from: from ?? '', to: to ?? '' },
+		filters: { status: f.status ?? '', source: f.source ?? '', from: f.from ?? '', to: f.to ?? '' },
 		totals: {
 			gross: rows.reduce((s, r) => s + r.grossCentavos, 0),
 			vat: rows.reduce((s, r) => s + r.inputVatCentavos, 0)
@@ -59,6 +55,7 @@ export const actions: Actions = {
 				categoryId: z.string().uuid(),
 				vendorId: z.string().uuid().optional().or(z.literal('')),
 				description: z.string().min(1).max(300),
+				source: z.enum(['hotel', 'dining']),
 				vendorInvoiceNo: z.string().max(120).optional(),
 				gross: z.coerce.number().positive(),
 				isVatable: z.enum(['on']).optional(),
@@ -66,7 +63,9 @@ export const actions: Actions = {
 				notes: z.string().max(1000).optional()
 			})
 			.safeParse(Object.fromEntries(fd));
-		if (!parsed.success) return fail(400, { error: 'Check the expense details.' });
+		if (!parsed.success) {
+			return fail(400, { error: parsed.error.issues.some((i) => i.path[0] === 'source') ? 'Choose whether this expense is for the hotel or dining.' : 'Check the expense details.' });
+		}
 
 		let attachmentUrl: string | null = null;
 		const file = fd.get('attachment');
@@ -86,6 +85,7 @@ export const actions: Actions = {
 				categoryId: parsed.data.categoryId,
 				vendorId: parsed.data.vendorId || null,
 				description: parsed.data.description,
+				source: parsed.data.source,
 				vendorInvoiceNo: parsed.data.vendorInvoiceNo || null,
 				grossCentavos: Math.round(parsed.data.gross * 100),
 				isVatable: parsed.data.isVatable === 'on',

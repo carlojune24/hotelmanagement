@@ -55,6 +55,14 @@
 					{#each data.vendors as v (v.id)}<option value={v.id}>{v.name}</option>{/each}
 				</select>
 			</div>
+			<div>
+				<Label class="text-xs">For</Label>
+				<select name="source" required class="mt-1 w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-sm">
+					<option value="" disabled selected>Hotel or dining?</option>
+					<option value="hotel">Hotel</option>
+					<option value="dining">Dining</option>
+				</select>
+			</div>
 			<div><Label class="text-xs">Amount (₱)</Label><Input name="amount" type="number" min="0.01" step="0.01" required class="mt-1" /></div>
 			<div class="sm:col-span-2"><Label class="text-xs">Description</Label><Input name="description" required maxlength={300} class="mt-1" /></div>
 			<div>
@@ -85,7 +93,7 @@
 			<Table.Body>
 				{#each data.rows as r (r.id)}
 					<Table.Row class={r.isActive ? '' : 'opacity-50'}>
-						<Table.Cell class="text-ink">{r.description}{#if r.vendorName}<span class="block text-xs text-ink-muted">{r.vendorName}</span>{/if}</Table.Cell>
+						<Table.Cell class="text-ink">{r.description}<span class="ml-1.5 rounded px-1.5 py-0.5 text-[11px] font-medium {r.source === 'dining' ? 'bg-warning/20 text-ink' : 'bg-brand/10 text-brand'}">{r.source === 'dining' ? 'Dining' : 'Hotel'}</span>{#if r.vendorName}<span class="block text-xs text-ink-muted">{r.vendorName}</span>{/if}</Table.Cell>
 						<Table.Cell class="text-ink-muted">{r.categoryName}</Table.Cell>
 						<Table.Cell class="text-right tabular-nums text-ink">{peso(r.amountCentavos)}</Table.Cell>
 						<Table.Cell class="text-ink-muted">{r.cadence}</Table.Cell>
