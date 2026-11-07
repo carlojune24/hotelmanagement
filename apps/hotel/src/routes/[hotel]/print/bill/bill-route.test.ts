@@ -78,7 +78,7 @@ describe.skipIf(!hasDb)('dining guest bill (live DB)', async () => {
 	});
 
 	it('shows an order that is already paid as paid, and the rest as due', async () => {
-		await o.payDiningOrder({ hotelId: hotelA.id, orderId: paidOrderId, method: 'card' });
+		await o.payDiningOrder({ hotelId: hotelA.id, orderId: paidOrderId, method: 'card', referenceNo: 'REF-1' });
 		const { bill } = await loadCheck(as(hotelA, ['dining:read']), checkId);
 		expect(bill.totalCentavos).toBe(31_000);
 		expect(bill.paidCentavos).toBe(16_000);

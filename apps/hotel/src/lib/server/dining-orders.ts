@@ -630,6 +630,51 @@ export async function cancelDiningOrder(args: {
 }
 
 /**
+ * Voids an order from the kitchen board (admin / manager only; the caller checks the role).
+ * - unpaid: cancelled
+ * - paid at the register: the payment is voided (receipt cancelled), then the order cancelled
+ * - paid online: cancelled but left `paid`, so it shows under Refunds due (like `declineOrder`)
+ * - charged to a room: refused; take it off the room bill first
+ */
+export async function voidDiningOrder(args: { hotelId: string; orderId: string; reason: string; actor?: Actor }): Promise<void> {
+	const reason = args.reason.trim();
+	if (!reason) throw new OrderError('Give a reason for voiding the order.');
+	const [order] = await db
+		.select()
+		.from(diningOrders)
+		.where(and(eq(diningOrders.id, args.orderId), eq(diningOrders.hotelId, args.hotelId)))
+		.limit(1);
+	if (!order) throw new OrderError('That order could not be found.');
+	if (!canMoveOrder(order.status, 'cancelled')) throw new OrderError(`A ${order.status} order can't be voided.`);
+
+	if (order.paymentStatus === 'paid' && order.paymentMethod === 'paymongo') {
+		await db.transaction(async (tx) => {
+			const locked = await loadOrderForUpdate(tx, args.hotelId, args.orderId);
+			if (!canMoveOrder(locked.status, 'cancelled')) throw new OrderError(`A ${locked.status} order can't be voided.`);
+			await tx
+				.update(diningOrders)
+				.set({ status: 'cancelled', cancelledAt: new Date(), cancelReason: reason, updatedAt: new Date() })
+				.where(eq(diningOrders.id, locked.id));
+			await writeAudit({
+				tx,
+				hotelId: args.hotelId,
+				actor: args.actor ?? null,
+				action: 'dining_order.void',
+				entityType: 'dining_order',
+				entityId: locked.id,
+				refCode: locked.code,
+				before: { status: locked.status, paymentStatus: locked.paymentStatus },
+				after: { orderId: locked.id, status: 'cancelled', reason, refundDue: true }
+			});
+		});
+		return;
+	}
+	// Paid at the register: reverse the money first, so nothing is cancelled with cash still booked against it.
+	if (order.paymentStatus === 'paid') await voidDiningOrderPayment({ hotelId: args.hotelId, orderId: order.id, reason, actor: args.actor ?? null });
+	await cancelDiningOrder({ hotelId: args.hotelId, orderId: order.id, reason, actor: args.actor ?? null });
+}
+
+/**
  * Staff accept an order that is waiting for them: it becomes a normal new ticket for the kitchen.
  * A table-QR order also joins the table's check (opening it, which is what makes the table
  * "occupied"); an online takeaway/delivery order has no table, so it just goes to the kitchen.
@@ -721,6 +766,8 @@ export async function payDiningOrder(args: {
 	orderId: string;
 	method: PaymentMethod;
 	tenderedCentavos?: number | null;
+	/** Card approval no. / GCash or Maya reference no. Required for those methods. */
+	referenceNo?: string | null;
 	/**
 	 * What to issue with the payment. Omitted (`default`) follows the hotel's auto-receipt setting;
 	 * `or` issues the Official Receipt, `invoice` the Invoice instead, `none` nothing.
@@ -759,6 +806,12 @@ export async function payDiningOrder(args: {
 		tendered = args.tenderedCentavos!;
 		change = changeFor(tendered, order.totalCentavos);
 	}
+	// Card and e-wallet payments carry the slip's approval no. / the wallet's reference no., like room payments.
+	const needsRef = args.method === 'card' || args.method === 'gcash' || args.method === 'maya';
+	const referenceNo = needsRef ? (args.referenceNo?.trim().slice(0, 80) ?? '') : '';
+	if (needsRef && !referenceNo) {
+		throw new FinanceError(args.method === 'card' ? 'Enter the approval no. from the card slip.' : 'Enter the reference no. of the payment.');
+	}
 
 	const { cashAccountId, shiftId } = await resolvePaymentAccount(
 		args.hotelId,
@@ -784,7 +837,7 @@ export async function payDiningOrder(args: {
 				sourceType: 'dining_order',
 				sourceId: locked.id,
 				shiftId,
-				memo: `Dining ${locked.code}${locked.tableLabel ? ` table ${locked.tableLabel}` : ''}`,
+				memo: `Dining ${locked.code}${locked.tableLabel ? ` table ${locked.tableLabel}` : ''}${referenceNo ? ` · ref ${referenceNo}` : ''}`,
 				actor: args.actor ?? null
 			},
 			tx
@@ -796,6 +849,7 @@ export async function payDiningOrder(args: {
 				paymentStatus: 'paid',
 				businessDate,
 				paymentMethod: args.method,
+				paymentReferenceNo: referenceNo || null,
 				tenderedCentavos: tendered,
 				changeCentavos: change,
 				cashAccountId,
@@ -820,6 +874,7 @@ export async function payDiningOrder(args: {
 				orderId: locked.id,
 				totalCentavos: locked.totalCentavos,
 				method: args.method,
+				referenceNo: referenceNo || null,
 				tenderedCentavos: tendered,
 				changeCentavos: change,
 				shiftId,

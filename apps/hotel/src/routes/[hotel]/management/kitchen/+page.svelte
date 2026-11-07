@@ -5,6 +5,10 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as ToggleGroup from '$lib/components/ui/toggle-group/index.js';
+	import * as Dialog from '$lib/components/ui/dialog/index.js';
+	import { Label } from '$lib/components/ui/label/index.js';
+	import { Textarea } from '$lib/components/ui/textarea/index.js';
+	import BanIcon from '@lucide/svelte/icons/ban';
 	import MaximizeIcon from '@lucide/svelte/icons/maximize-2';
 	import MinimizeIcon from '@lucide/svelte/icons/minimize-2';
 	import Volume2Icon from '@lucide/svelte/icons/volume-2';
@@ -181,6 +185,41 @@
 		} finally {
 			busy = null;
 			await invalidate('app:kitchen');
+		}
+	}
+
+	// ---- void an order (admin / manager only: `data.canVoid`) ----------------------------------
+	let voiding = $state<Order | null>(null);
+	let voidOpen = $state(false);
+	let voidReason = $state('');
+	let voidError = $state('');
+	let voidBusy = $state(false);
+	function askVoid(order: Order) {
+		voiding = order;
+		voidReason = '';
+		voidError = '';
+		voidOpen = true;
+	}
+	async function confirmVoid() {
+		if (!voiding || voidBusy || !voidReason.trim()) return;
+		voidBusy = true;
+		voidError = '';
+		const body = new FormData();
+		body.set('orderId', voiding.id);
+		body.set('reason', voidReason.trim());
+		try {
+			const res = await fetch('?/void', { method: 'POST', body, headers: { 'x-sveltekit-action': 'true' } });
+			const result = deserialize(await res.text());
+			if (result.type === 'failure') voidError = String(result.data?.error ?? 'That could not be done.');
+			else if (result.type === 'error') voidError = 'Something went wrong. Try again.';
+			else {
+				voidOpen = false;
+				await invalidate('app:kitchen');
+			}
+		} catch {
+			voidError = 'No connection. Try again.';
+		} finally {
+			voidBusy = false;
 		}
 	}
 
@@ -441,6 +480,11 @@
 										{/if}
 									</Button>
 								{/if}
+								{#if data.canVoid}
+									<button type="button" class="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md py-1.5 text-xs text-danger hover:bg-danger/10 @[14rem]:text-sm" onclick={() => askVoid(card.order)}>
+										<BanIcon class="size-3.5" aria-hidden="true" />Void order
+									</button>
+								{/if}
 							</article>
 						{:else}
 							<p class="rounded-xl border border-dashed border-border px-2 py-4 text-center text-xs text-ink-muted @[14rem]:text-sm sm:py-8">
@@ -558,6 +602,11 @@
 									</p>
 								{/if}
 								{#if t.order.remarks}<p class="mt-2 text-lg font-semibold">Note: “{t.order.remarks}”</p>{/if}
+								{#if data.canVoid}
+									<button type="button" class="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md py-2 text-sm text-danger hover:bg-danger/10" onclick={() => askVoid(t.order)}>
+										<BanIcon class="size-4" aria-hidden="true" />Void order
+									</button>
+								{/if}
 							</article>
 						{:else}
 							<p class="rounded-xl border border-dashed border-border px-4 py-4 text-center text-sm text-ink-muted sm:py-8 sm:text-base">
@@ -594,3 +643,34 @@
 		</section>
 	</div>
 </div>
+
+<Dialog.Root bind:open={voidOpen}>
+	<Dialog.Content class="sm:max-w-md">
+		{#if voiding}
+			<Dialog.Header>
+				<Dialog.Title>Void order {voiding.code}?</Dialog.Title>
+				<Dialog.Description>
+					It comes off the board and the cooks are told to stop.
+					{#if voiding.paymentStatus === 'paid' && voiding.paymentMethod === 'paymongo'}
+						It was paid online, so it moves to Refunds due for the money to be sent back.
+					{:else if voiding.paymentStatus === 'paid'}
+						Its payment is reversed and the receipt cancelled.
+					{:else if voiding.paymentStatus === 'room_charged'}
+						It is charged to a room bill: take it off the bill first.
+					{/if}
+				</Dialog.Description>
+			</Dialog.Header>
+			<div>
+				<Label for="voidReason" class="text-xs">Why is it being voided?</Label>
+				<Textarea id="voidReason" bind:value={voidReason} rows={3} maxlength={300} placeholder="Wrong order keyed in, guest changed their mind…" class="mt-1" />
+			</div>
+			{#if voidError}<p class="text-sm text-danger" role="alert">{voidError}</p>{/if}
+			<Dialog.Footer>
+				<Button type="button" variant="outline" onclick={() => (voidOpen = false)}>Keep it</Button>
+				<Button type="button" variant="destructive" disabled={voidBusy || !voidReason.trim()} onclick={confirmVoid}>
+					{voidBusy ? 'Voiding…' : 'Void order'}
+				</Button>
+			</Dialog.Footer>
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>

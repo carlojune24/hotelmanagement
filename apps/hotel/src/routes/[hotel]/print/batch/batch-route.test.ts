@@ -49,7 +49,7 @@ describe.skipIf(!hasDb)('batch print (live DB)', async () => {
 		const [dish] = await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, stationId: await stationIdFor(hotelA.id), diningItemId: v!.id, name: 'Soda', priceCentavos: 8_000 }).returning();
 		for (let i = 0; i < 2; i++) {
 			const placed = await o.createDiningOrder({ hotelId: hotelA.id, venueId: v!.id, orderType: 'takeaway', source: 'staff', lines: [{ menuItemId: dish!.id, quantity: 1 }] });
-			const paid = await o.payDiningOrder({ hotelId: hotelA.id, orderId: placed.id, method: 'card', documents: 'or' });
+			const paid = await o.payDiningOrder({ hotelId: hotelA.id, orderId: placed.id, method: 'card', referenceNo: 'REF-1', documents: 'or' });
 			ids.push(paid.documents[0]!.id);
 		}
 	});

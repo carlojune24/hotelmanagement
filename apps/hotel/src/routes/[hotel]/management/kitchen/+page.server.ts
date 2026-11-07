@@ -7,11 +7,18 @@ import { roleCan } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
 import { recordId } from '$lib/rate-validation';
 import { listStations } from '$lib/server/dining-menu';
-import { OrderError, listBoardOrders, setStationStatus } from '$lib/server/dining-orders';
+import { OrderError, listBoardOrders, setStationStatus, voidDiningOrder } from '$lib/server/dining-orders';
+import { FinanceError } from '$lib/server/finance/shared';
+import type { SessionUser } from '$lib/server/auth/session';
 import { expirePendingDiningOrders } from '$lib/server/dining-online';
 import type { Actions, PageServerLoad } from './$types';
 
-const isBusinessError = (e: unknown) => e instanceof OrderError;
+const isBusinessError = (e: unknown) => e instanceof OrderError || e instanceof FinanceError;
+
+/** Voiding an order is for the hotel admin and managers only: Hotel Admin has every permission, and a
+ *  manager role is given `dining:void` in the role editor. The Dining and Kitchen roles don't have it. */
+const canVoid = (user: SessionUser | null | undefined, role: App.Locals['role']) =>
+	!!user?.isPlatformAdmin || (!!role && roleCan(role.capabilities, 'dining:void'));
 
 /** The kitchen sees an order only while it can still be cooked, so served orders are left out. */
 export const load: PageServerLoad = async ({ locals, url, depends }) => {
@@ -58,6 +65,7 @@ export const load: PageServerLoad = async ({ locals, url, depends }) => {
 		cancelled: cancelled.map((c) => ({ code: c.code, tableLabel: c.tableLabel })),
 		stations,
 		canMove: !!locals.user?.isPlatformAdmin || (!!locals.role && roleCan(locals.role.capabilities, 'kitchen:write')),
+		canVoid: canVoid(locals.user, locals.role),
 		serverNow: Date.now()
 	};
 };
@@ -83,6 +91,22 @@ export const actions: Actions = {
 				actor: event.locals.user
 			});
 			return { moved: true };
+		} catch (e) {
+			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
+			throw e;
+		}
+	},
+
+	/** Void (cancel) a food order with a reason. A paid one has its payment reversed or is left for a refund. */
+	void: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'dining:void');
+		const parsed = z
+			.object({ orderId: recordId(), reason: z.string().trim().min(1, 'Give a reason for voiding the order.').max(300) })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: parsed.error.issues[0]?.message ?? 'Give a reason for voiding the order.' });
+		try {
+			await voidDiningOrder({ hotelId: event.locals.hotel!.id, orderId: parsed.data.orderId, reason: parsed.data.reason, actor: event.locals.user });
+			return { voided: true };
 		} catch (e) {
 			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
 			throw e;

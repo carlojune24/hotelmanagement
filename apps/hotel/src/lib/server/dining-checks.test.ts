@@ -117,7 +117,7 @@ describe.skipIf(!hasDb)('dining table checks (live DB)', async () => {
 		await expect(c.closeCheck({ hotelId, checkId: check.id })).rejects.toThrow(/not been served/);
 
 		// pay now, but they're still being made: the table stays open
-		const first = await c.settleCheck({ hotelId, checkId: check.id, method: 'gcash' });
+		const first = await c.settleCheck({ hotelId, checkId: check.id, method: 'gcash', referenceNo: 'REF-1' });
 		expect(first.paidCount).toBe(2);
 		expect(first.totalCentavos).toBe(33_000);
 		expect(first.closed).toBe(false);
@@ -161,7 +161,7 @@ describe.skipIf(!hasDb)('dining table checks (live DB)', async () => {
 			await place(t.id);
 			await place(t.id, soda);
 			const check = (await openCheckOf(t.id))!;
-			return c.settleCheck({ hotelId, checkId: check.id, method: 'card', documents });
+			return c.settleCheck({ hotelId, checkId: check.id, method: 'card', referenceNo: 'REF-1', documents });
 		};
 
 		const or = await settleWith('D1', 'or');
@@ -193,7 +193,7 @@ describe.skipIf(!hasDb)('dining table checks (live DB)', async () => {
 
 		await serve(qr.id);
 		expect((await c.listOpenChecks(hotelId, venueId)).find((x) => x.tableId === t.id)!.stage).toBe('needs_payment');
-		await c.settleCheck({ hotelId, checkId: mine.id, method: 'card' });
+		await c.settleCheck({ hotelId, checkId: mine.id, method: 'card', referenceNo: 'REF-1' });
 		expect(await openCheckOf(t.id)).toBeNull();
 	});
 
@@ -240,7 +240,7 @@ describe.skipIf(!hasDb)('dining table checks (live DB)', async () => {
 		const check = (await openCheckOf(t.id))!;
 		expect(check.reservationId).toBe(res!.id);
 		await serve(a.id);
-		await c.settleCheck({ hotelId, checkId: check.id, method: 'gcash' });
+		await c.settleCheck({ hotelId, checkId: check.id, method: 'gcash', referenceNo: 'REF-1' });
 		const [after] = await db.select().from(s.diningReservations).where(eq(s.diningReservations.id, res!.id));
 		expect(after!.status).toBe('completed');
 	});
@@ -291,11 +291,11 @@ describe.skipIf(!hasDb)('dining table checks (live DB)', async () => {
 			// an earlier, finished sitting at the old table must stay where it was
 			const earlier = await place(from.id);
 			await serve(earlier.id);
-			await c.settleCheck({ hotelId, checkId: (await openCheckOf(from.id))!.id, method: 'card' });
+			await c.settleCheck({ hotelId, checkId: (await openCheckOf(from.id))!.id, method: 'card', referenceNo: 'REF-1' });
 			expect(await openCheckOf(from.id)).toBeNull();
 
 			const paid = await place(from.id);
-			await c.settleCheck({ hotelId, checkId: (await openCheckOf(from.id))!.id, method: 'gcash' }); // pays, stays open
+			await c.settleCheck({ hotelId, checkId: (await openCheckOf(from.id))!.id, method: 'gcash', referenceNo: 'REF-1' }); // pays, stays open
 			const unpaid = await place(from.id, soda);
 			const check = (await openCheckOf(from.id))!;
 			await c.requestBill({ hotelId, checkId: check.id });
@@ -379,7 +379,7 @@ describe.skipIf(!hasDb)('dining table checks (live DB)', async () => {
 
 			// a closed tab cannot be moved
 			await serve(a.id);
-			await c.settleCheck({ hotelId, checkId: check.id, method: 'card' });
+			await c.settleCheck({ hotelId, checkId: check.id, method: 'card', referenceNo: 'REF-1' });
 			await expect(move((await mkTable('R8')).id)).rejects.toThrow(/already closed/);
 		});
 
@@ -408,7 +408,7 @@ describe.skipIf(!hasDb)('dining table checks (live DB)', async () => {
 			expect(tables.map((t) => t.tableId)).toEqual([to.id]);
 
 			await serve(a.id);
-			await c.settleCheck({ hotelId, checkId: check.id, method: 'gcash' });
+			await c.settleCheck({ hotelId, checkId: check.id, method: 'gcash', referenceNo: 'REF-1' });
 			const [after] = await db.select().from(s.diningReservations).where(eq(s.diningReservations.id, res.id));
 			expect(after!.status).toBe('completed');
 		});
@@ -465,7 +465,7 @@ describe.skipIf(!hasDb)('dining table checks (live DB)', async () => {
 
 			const paid = await place(t1.id);
 			const from = (await openCheckOf(t1.id))!;
-			await c.settleCheck({ hotelId, checkId: from.id, method: 'gcash' }); // paid, still open
+			await c.settleCheck({ hotelId, checkId: from.id, method: 'gcash', referenceNo: 'REF-1' }); // paid, still open
 			const unpaid = await place(t1.id, soda);
 			const friends = await place(t4.id);
 			const into = (await openCheckOf(t4.id))!;

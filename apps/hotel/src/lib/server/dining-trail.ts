@@ -504,7 +504,7 @@ export async function buildDiningTrail(
 				o.paidAt,
 				staff(o.paidByUserId) ?? (o.paymentMethod === 'paymongo' ? { kind: 'system', label: 'System' } : null),
 				'Payment received',
-				[method(o.paymentMethod) ? `by ${method(o.paymentMethod)}` : null, o.tenderedCentavos != null ? `tendered ${peso(o.tenderedCentavos)}` : null, o.changeCentavos > 0 ? `change ${peso(o.changeCentavos)}` : null]
+				[method(o.paymentMethod) ? `by ${method(o.paymentMethod)}` : null, o.paymentReferenceNo ? `ref ${o.paymentReferenceNo}` : null, o.tenderedCentavos != null ? `tendered ${peso(o.tenderedCentavos)}` : null, o.changeCentavos > 0 ? `change ${peso(o.changeCentavos)}` : null]
 					.filter(Boolean)
 					.join(' · '),
 				{ orderId: o.id, amount: o.totalCentavos, rank: 8 }

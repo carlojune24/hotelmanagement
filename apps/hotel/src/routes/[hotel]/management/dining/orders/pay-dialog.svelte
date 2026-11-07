@@ -34,6 +34,7 @@
 
 	let method = $state('cash');
 	let tendered = $state('');
+	let referenceNo = $state('');
 	let submitting = $state(false);
 	let paid = $state<{ changeCentavos: number; documents: IssuedDocument[]; documentError: string | null } | null>(null);
 	// Which document to issue with the payment (an official receipt unless the cashier says otherwise).
@@ -50,6 +51,7 @@
 			method = 'cash';
 			docChoice = 'or';
 			tendered = '';
+			referenceNo = '';
 			paid = null;
 			charged = null;
 			guestSearch = '';
@@ -82,6 +84,9 @@
 	});
 	const cashBlocked = $derived(method === 'cash' && (!shiftOpen || tenderedCentavos < total));
 	const roomBlocked = $derived(method === 'room' && !chosen);
+	// Card and e-wallets need the slip's approval no. / the wallet's reference no., like room payments.
+	const needsReference = $derived(method === 'card' || method === 'gcash' || method === 'maya');
+	const refBlocked = $derived(needsReference && !referenceNo.trim());
 </script>
 
 <Dialog.Root bind:open>
@@ -240,6 +245,10 @@
 						<p class="text-sm text-ink-muted">
 							Record this after the guest has paid on the terminal or wallet. The full amount is posted to the bank account.
 						</p>
+						<div>
+							<Label for="payReferenceNo" class="text-xs">{method === 'card' ? 'Approval no.' : 'Reference no.'}</Label>
+							<Input id="payReferenceNo" name="referenceNo" maxlength={80} required autocomplete="off" bind:value={referenceNo} class="mt-1" />
+						</div>
 					{/if}
 
 					{#if method !== 'room'}
@@ -248,7 +257,7 @@
 
 					<Dialog.Footer>
 						<Button type="button" variant="outline" onclick={() => (open = false)}>Cancel</Button>
-						<Button type="submit" disabled={submitting || cashBlocked || roomBlocked}>
+						<Button type="submit" disabled={submitting || cashBlocked || roomBlocked || refBlocked}>
 							{submitting ? 'Recording…' : method === 'room' ? (chosen ? `Charge to room ${chosen.roomNumber}` : 'Choose a guest') : `Record ${peso(total)}`}
 						</Button>
 					</Dialog.Footer>

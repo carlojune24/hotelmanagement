@@ -336,6 +336,7 @@ export const actions: Actions = {
 				orderId: recordId(),
 				method: z.enum(PAYMENT_METHODS),
 				tenderedPhp: z.coerce.number().min(0).max(10_000_000).optional(),
+				referenceNo: z.string().trim().max(80).optional(),
 				// What to issue with the payment: an Official Receipt unless the cashier says otherwise.
 				documents: z.enum(['or', 'invoice', 'bill', 'none']).default('or'),
 				billToName: z.string().trim().max(160).optional(),
@@ -351,6 +352,7 @@ export const actions: Actions = {
 				orderId: d.orderId,
 				method: d.method,
 				tenderedCentavos: d.tenderedPhp != null ? toCentavos(d.tenderedPhp) : null,
+				referenceNo: d.referenceNo ?? null,
 				documents: toPayDocuments(d.documents),
 				billTo: { name: d.billToName, address: d.billToAddress, tin: d.billToTin },
 				actor: event.locals.user

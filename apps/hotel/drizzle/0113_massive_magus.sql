@@ -1,0 +1,1 @@
+ALTER TABLE "dining_orders" ADD COLUMN "payment_reference_no" text;

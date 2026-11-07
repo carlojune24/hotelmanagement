@@ -53,7 +53,7 @@ describe.skipIf(!hasDb)('dining receipt print access (live DB)', async () => {
 		const [dish] = await db.insert(s.diningMenuItems).values({ hotelId: hotelA.id, stationId: await stationIdFor(hotelA.id), diningItemId: v!.id, name: 'Soda', priceCentavos: 8_000 }).returning();
 		const placed = await o.createDiningOrder({ hotelId: hotelA.id, venueId: v!.id, orderType: 'takeaway', source: 'online', guestName: 'Gina', lines: [{ menuItemId: dish!.id, quantity: 1 }] });
 		token = placed.accessToken;
-		await o.payDiningOrder({ hotelId: hotelA.id, orderId: placed.id, method: 'card' });
+		await o.payDiningOrder({ hotelId: hotelA.id, orderId: placed.id, method: 'card', referenceNo: 'REF-1' });
 		documentId = (await o.getOrderDocuments(hotelA.id, placed.id))[0]!.id;
 		invoiceId = (await issueDiningDocument(hotelA.id, placed.id, 'invoice', null)).id;
 	});

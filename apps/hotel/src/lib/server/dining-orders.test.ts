@@ -260,7 +260,7 @@ describe.skipIf(!hasDb)('dining orders and finance (live DB)', async () => {
 
 	it('takes a card payment into the bank account with no shift, and needs no tender', async () => {
 		const c = await order([{ menuItemId: soda, quantity: 2 }]);
-		await o.payDiningOrder({ hotelId: hotelA, orderId: c.id, method: 'card' });
+		await o.payDiningOrder({ hotelId: hotelA, orderId: c.id, method: 'card', referenceNo: 'REF-1' });
 		const [mv] = await db.select().from(s.cashMovements).where(and(eq(s.cashMovements.hotelId, hotelA), eq(s.cashMovements.sourceId, c.id)));
 		expect(mv!.shiftId).toBeNull();
 		expect(mv!.cashAccountId).not.toBe(drawerId);
@@ -269,13 +269,13 @@ describe.skipIf(!hasDb)('dining orders and finance (live DB)', async () => {
 
 	it("won't pay or cancel a paid order the wrong way, or another hotel's order", async () => {
 		const c = await order([{ menuItemId: soda, quantity: 1 }]);
-		await o.payDiningOrder({ hotelId: hotelA, orderId: c.id, method: 'card' });
+		await o.payDiningOrder({ hotelId: hotelA, orderId: c.id, method: 'card', referenceNo: 'REF-1' });
 		await expect(o.cancelDiningOrder({ hotelId: hotelA, orderId: c.id, reason: 'oops' })).rejects.toThrow(/Void its payment first/);
-		await expect(o.payDiningOrder({ hotelId: hotelA, orderId: c.id, method: 'card' })).rejects.toThrow(/already paid/);
-		await expect(o.payDiningOrder({ hotelId: hotelB, orderId: c.id, method: 'card' })).rejects.toThrow(/could not be found/);
+		await expect(o.payDiningOrder({ hotelId: hotelA, orderId: c.id, method: 'card', referenceNo: 'REF-1' })).rejects.toThrow(/already paid/);
+		await expect(o.payDiningOrder({ hotelId: hotelB, orderId: c.id, method: 'card', referenceNo: 'REF-1' })).rejects.toThrow(/could not be found/);
 		const cancelled = await order([{ menuItemId: soda, quantity: 1 }]);
 		await o.cancelDiningOrder({ hotelId: hotelA, orderId: cancelled.id, reason: 'no' });
-		await expect(o.payDiningOrder({ hotelId: hotelA, orderId: cancelled.id, method: 'card' })).rejects.toThrow(/cancelled/);
+		await expect(o.payDiningOrder({ hotelId: hotelA, orderId: cancelled.id, method: 'card', referenceNo: 'REF-1' })).rejects.toThrow(/cancelled/);
 	});
 
 	it('voids a payment: reverses the ledger entry and the drawer, and the order can be paid again', async () => {
@@ -348,7 +348,7 @@ describe.skipIf(!hasDb)('dining orders and finance (live DB)', async () => {
 
 	it('lets the cashier choose the document at payment: receipt, none or invoice', async () => {
 		const none = await order([{ menuItemId: soda, quantity: 1 }]);
-		const paidNone = await o.payDiningOrder({ hotelId: hotelA, orderId: none.id, method: 'card', documents: 'none' });
+		const paidNone = await o.payDiningOrder({ hotelId: hotelA, orderId: none.id, method: 'card', referenceNo: 'REF-1', documents: 'none' });
 		expect(paidNone).toMatchObject({ documents: [], receiptId: null, documentError: null });
 		expect(await o.getOrderDocuments(hotelA, none.id)).toHaveLength(0);
 
@@ -357,6 +357,7 @@ describe.skipIf(!hasDb)('dining orders and finance (live DB)', async () => {
 			hotelId: hotelA,
 			orderId: inv.id,
 			method: 'card',
+			referenceNo: 'REF-1',
 			documents: 'invoice',
 			billTo: { name: 'Acme Corp', tin: '123-456-789' }
 		});
@@ -368,7 +369,7 @@ describe.skipIf(!hasDb)('dining orders and finance (live DB)', async () => {
 		expect((await bir.getDocumentForRender(hotelA, invDocs[0]!.id))!.snapshot.billTo).toMatchObject({ name: 'Acme Corp', tin: '123-456-789' });
 
 		const or = await order([{ menuItemId: soda, quantity: 1 }]);
-		const paidOr = await o.payDiningOrder({ hotelId: hotelA, orderId: or.id, method: 'card', documents: 'or' });
+		const paidOr = await o.payDiningOrder({ hotelId: hotelA, orderId: or.id, method: 'card', referenceNo: 'REF-1', documents: 'or' });
 		expect(paidOr.documents.map((d) => d.type)).toEqual(['official_receipt']);
 		expect(paidOr.receiptId).toBe(paidOr.documents[0]!.id);
 	});
@@ -380,7 +381,7 @@ describe.skipIf(!hasDb)('dining orders and finance (live DB)', async () => {
 		const [vc] = await db.insert(s.diningItems).values({ hotelId: hotelC, title: 'Third cafe' }).returning();
 		const [dish] = await db.insert(s.diningMenuItems).values({ hotelId: hotelC, stationId: await stationIdFor(hotelC), diningItemId: vc!.id, name: 'Tea', priceCentavos: 5_000 }).returning();
 		const noSeries = await o.createDiningOrder({ hotelId: hotelC, venueId: vc!.id, orderType: 'takeaway', lines: [{ menuItemId: dish!.id, quantity: 1 }] });
-		const r = await o.payDiningOrder({ hotelId: hotelC, orderId: noSeries.id, method: 'card', documents: 'or' });
+		const r = await o.payDiningOrder({ hotelId: hotelC, orderId: noSeries.id, method: 'card', referenceNo: 'REF-1', documents: 'or' });
 		expect(r.documents).toHaveLength(0);
 		expect(r.documentError).toMatch(/series/i);
 		expect((await o.getDiningOrder(hotelC, noSeries.id))!.paymentStatus).toBe('paid');
@@ -398,7 +399,7 @@ describe.skipIf(!hasDb)('dining orders and finance (live DB)', async () => {
 		expect(invSnap.totals).toMatchObject({ grossCentavos: 8_000, lessPaymentsCentavos: 0, balanceDueCentavos: 8_000 });
 
 		// paying afterwards: the receipt points back at the invoice
-		await o.payDiningOrder({ hotelId: hotelA, orderId: c.id, method: 'card' });
+		await o.payDiningOrder({ hotelId: hotelA, orderId: c.id, method: 'card', referenceNo: 'REF-1' });
 		const docs = await o.getOrderDocuments(hotelA, c.id);
 		expect(docs.map((d) => d.type).sort()).toEqual(['invoice', 'official_receipt']);
 		const or = docs.find((d) => d.type === 'official_receipt')!;
@@ -417,7 +418,7 @@ describe.skipIf(!hasDb)('dining orders and finance (live DB)', async () => {
 
 	it('cancels the receipt when its payment is voided, keeps the serial, and never reuses it', async () => {
 		const c = await order([{ menuItemId: soda, quantity: 1 }]);
-		await o.payDiningOrder({ hotelId: hotelA, orderId: c.id, method: 'card' });
+		await o.payDiningOrder({ hotelId: hotelA, orderId: c.id, method: 'card', referenceNo: 'REF-1' });
 		const [first] = await o.getOrderDocuments(hotelA, c.id);
 
 		await o.voidDiningOrderPayment({ hotelId: hotelA, orderId: c.id, reason: 'Charged twice' });
@@ -426,7 +427,7 @@ describe.skipIf(!hasDb)('dining orders and finance (live DB)', async () => {
 		expect(row).toMatchObject({ status: 'cancelled', formattedNo: first!.formattedNo });
 		expect(row!.cancelReason).toMatch(/Charged twice/);
 
-		await o.payDiningOrder({ hotelId: hotelA, orderId: c.id, method: 'card' }); // paid again
+		await o.payDiningOrder({ hotelId: hotelA, orderId: c.id, method: 'card', referenceNo: 'REF-1' }); // paid again
 		const [second] = await o.getOrderDocuments(hotelA, c.id);
 		expect(second!.formattedNo).not.toBe(first!.formattedNo);
 		expect(second!.id).not.toBe(first!.id);

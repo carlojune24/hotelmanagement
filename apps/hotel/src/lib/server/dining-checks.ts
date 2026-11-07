@@ -135,6 +135,8 @@ export async function settleCheck(args: {
 	checkId: string;
 	method: SettleMethod;
 	tenderedCentavos?: number | null;
+	/** Card approval no. / GCash or Maya reference no.; one slip covers the whole table. */
+	referenceNo?: string | null;
 	bookingId?: string | null;
 	/** What to issue for each order paid; see `payDiningOrder`. A room charge issues nothing. */
 	documents?: PayDocuments;
@@ -177,6 +179,7 @@ export async function settleCheck(args: {
 				method: args.method,
 				// The change is worked out for the table as a whole; each order is tendered exactly.
 				tenderedCentavos: args.method === 'cash' ? o.totalCentavos : null,
+				referenceNo: args.referenceNo,
 				documents: args.documents,
 				billTo: args.billTo,
 				actor: args.actor ?? null

@@ -1085,7 +1085,7 @@ export async function buildDiningSnapshot(
 			balanceDueCentavos: isInvoice ? (paid ? 0 : gross) : null,
 			amountPaidCentavos: isInvoice ? null : gross,
 			paymentMethod: isInvoice ? null : (METHOD_LABEL[order.paymentMethod ?? ''] ?? order.paymentMethod ?? null),
-			paymentReferenceNo: null,
+			paymentReferenceNo: isInvoice ? null : (order.paymentReferenceNo ?? null),
 			tenderedCentavos: isInvoice ? null : order.tenderedCentavos,
 			changeCentavos: isInvoice ? null : order.changeCentavos,
 			balanceCarriedCentavos: null

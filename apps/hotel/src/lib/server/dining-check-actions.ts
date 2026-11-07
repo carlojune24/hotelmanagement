@@ -23,6 +23,7 @@ export async function settleTableAction(event: RequestEvent) {
 			checkId: recordId(),
 			method: z.enum(['cash', 'card', 'gcash', 'maya', 'room']),
 			tendered: z.coerce.number().min(0).max(10_000_000).optional(),
+			referenceNo: z.string().trim().max(80).optional(),
 			bookingId: z.string().uuid().optional().or(z.literal('').transform(() => undefined)),
 			// What to issue for each order: an Official Receipt unless the cashier says otherwise.
 			documents: z.enum(['or', 'invoice', 'bill', 'none']).default('or'),
@@ -38,6 +39,7 @@ export async function settleTableAction(event: RequestEvent) {
 			checkId: parsed.data.checkId,
 			method: parsed.data.method,
 			tenderedCentavos: parsed.data.tendered != null ? toCentavos(parsed.data.tendered) : null,
+			referenceNo: parsed.data.referenceNo ?? null,
 			bookingId: parsed.data.bookingId ?? null,
 			documents: toPayDocuments(parsed.data.documents),
 			billTo: { name: parsed.data.billToName, address: parsed.data.billToAddress, tin: parsed.data.billToTin },

@@ -59,7 +59,7 @@ describe.skipIf(!hasDb)('dining sales page and CSV (live DB)', async () => {
 			.returning();
 		for (let i = 0; i < 2; i++) {
 			const c = await o.createDiningOrder({ hotelId: hotelA.id, venueId: venueA, orderType: 'dine_in', lines: [{ menuItemId: dish!.id, quantity: 1 }] });
-			await o.payDiningOrder({ hotelId: hotelA.id, orderId: c.id, method: 'card' });
+			await o.payDiningOrder({ hotelId: hotelA.id, orderId: c.id, method: 'card', referenceNo: 'REF-1' });
 		}
 		// an unpaid order must not count
 		await o.createDiningOrder({ hotelId: hotelA.id, venueId: venueA, orderType: 'dine_in', lines: [{ menuItemId: dish!.id, quantity: 3 }] });

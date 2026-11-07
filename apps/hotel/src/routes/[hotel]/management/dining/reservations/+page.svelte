@@ -206,7 +206,7 @@
 								<span class="font-medium text-ink">{fmtTime(r.startsAt)}</span>
 							</Table.Cell>
 							<Table.Cell>
-								<div class="font-medium text-ink">{r.guestName}</div>
+								<a href="{base}/reservations/{r.code}" class="font-medium text-ink underline-offset-2 hover:underline">{r.guestName}</a>
 								<div class="text-xs text-ink-muted">
 									<span class="font-mono">{r.code}</span> <a href="/{page.params.hotel}/management/trail/{r.code}" class="underline-offset-2 hover:text-ink hover:underline">Trail</a>{r.guestPhone ? ` · ${r.guestPhone}` : ''}{data.venues.length > 1 ? ` · ${r.venueTitle}` : ''}
 								</div>
@@ -239,6 +239,12 @@
 										{/snippet}
 									</DropdownMenu.Trigger>
 									<DropdownMenu.Content align="end">
+										<DropdownMenu.Item>
+											{#snippet child({ props })}
+												<a {...props} href="{base}/reservations/{r.code}">View details</a>
+											{/snippet}
+										</DropdownMenu.Item>
+										<DropdownMenu.Separator />
 										{#each moves as to (to)}
 											<DropdownMenu.Item
 												variant={to === 'cancelled' || to === 'no_show' ? 'destructive' : 'default'}

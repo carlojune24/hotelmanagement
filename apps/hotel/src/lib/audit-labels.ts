@@ -86,6 +86,7 @@ export const ACTION_LABELS: Record<string, string> = {
 	'dining_order.station': 'Kitchen station updated the order',
 	'dining_order.dispatch': 'Delivery sent out with a rider',
 	'dining_order.cancel': 'Order cancelled',
+	'dining_order.void': 'Order voided',
 	'dining_order.accept': 'Order accepted',
 	'dining_order.decline': 'Order declined',
 	'dining_order.paid': 'Payment taken at the cashier',
@@ -271,6 +272,7 @@ export function detailOf(action: string, before: Json, after: Json): { detail: s
 			if (reason) bits.push(reason);
 			break;
 		case 'dining_order.cancel':
+		case 'dining_order.void':
 		case 'dining_order.decline':
 		case 'dining_order.expired':
 		case 'dining_order.guest_cancel':

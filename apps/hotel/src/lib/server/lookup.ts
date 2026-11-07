@@ -170,7 +170,22 @@ export async function resolveNumber(
 			.from(diningPayments)
 			.innerJoin(diningOrders, eq(diningOrders.id, diningPayments.orderId))
 			.where(and(eq(diningOrders.hotelId, hotelId), ilike(diningPayments.referenceNo, esc)))
-			.limit(10),
+			.limit(10)
+			// Plus card approval / e-wallet reference nos. the cashier typed when taking payment.
+			.then(async (online) => [
+				...online,
+				...(await db
+					.select({
+						orderId: diningOrders.id,
+						ref: diningOrders.paymentReferenceNo,
+						code: diningOrders.code,
+						total: diningOrders.totalCentavos,
+						status: diningOrders.status
+					})
+					.from(diningOrders)
+					.where(and(eq(diningOrders.hotelId, hotelId), ilike(diningOrders.paymentReferenceNo, esc)))
+					.limit(10))
+			]),
 		reservationCodes.length
 			? db
 					.select({

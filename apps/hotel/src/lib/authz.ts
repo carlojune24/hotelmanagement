@@ -260,6 +260,7 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 	{ cap: 'dining:manage', label: 'Edit the dining menu, add-ons, and the floor', section: 'Dining' },
 	{ cap: 'dining:shift', label: 'Open and close the dining drawer', section: 'Dining' },
 	{ cap: 'dining:sell', label: 'Use the dining Quick sale till', section: 'Dining' },
+	{ cap: 'dining:void', label: 'Void a food order from the Kitchen board, with a reason (reverses its payment)', section: 'Dining' },
 
 	{ cap: 'kitchen:*', label: 'Everything in the Kitchen', section: 'Kitchen' },
 	{ cap: 'kitchen:read', label: 'See the Kitchen section (board, prep, sold-out, history)', section: 'Kitchen' },

@@ -516,6 +516,8 @@ export const diningOrders = pgTable(
 		// --- payment (set when paid at the cashier) ---
 		businessDate: date('business_date', { mode: 'string' }),
 		paymentMethod: paymentMethod('payment_method'),
+		/** Card approval no. or GCash/Maya reference no., typed by the cashier from the slip/wallet. */
+		paymentReferenceNo: text('payment_reference_no'),
 		tenderedCentavos: bigint('tendered_centavos', { mode: 'number' }),
 		changeCentavos: bigint('change_centavos', { mode: 'number' }).notNull().default(0),
 		cashAccountId: uuid('cash_account_id').references(() => cashAccounts.id, { onDelete: 'restrict' }),

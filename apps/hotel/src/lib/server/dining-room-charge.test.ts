@@ -203,7 +203,7 @@ describe.skipIf(!hasDb)('charge dining to a room (live DB)', async () => {
 		const stay = await mkStay(hotelA, { roomNumber: 'R-4' });
 		await payBase(hotelA, stay);
 		const paid = await diningOrder(hotelA, 5_000);
-		await o.payDiningOrder({ hotelId: hotelA.id, orderId: paid.id, method: 'card' });
+		await o.payDiningOrder({ hotelId: hotelA.id, orderId: paid.id, method: 'card', referenceNo: 'REF-1' });
 		await expect(charge(hotelA, paid.id, stay.bookingId)).rejects.toThrow(/already been paid/);
 
 		const cancelled = await diningOrder(hotelA, 5_000);
@@ -247,7 +247,7 @@ describe.skipIf(!hasDb)('charge dining to a room (live DB)', async () => {
 		await payBase(hotelA, stay);
 		const order = await diningOrder(hotelA, 9_000);
 		await charge(hotelA, order.id, stay.bookingId);
-		await expect(o.payDiningOrder({ hotelId: hotelA.id, orderId: order.id, method: 'card' })).rejects.toThrow(/charged to a room bill/);
+		await expect(o.payDiningOrder({ hotelId: hotelA.id, orderId: order.id, method: 'card', referenceNo: 'REF-1' })).rejects.toThrow(/charged to a room bill/);
 		await expect(o.cancelDiningOrder({ hotelId: hotelA.id, orderId: order.id, reason: 'x' })).rejects.toThrow(/Take it off the room bill/);
 		await expect(o.voidDiningOrderPayment({ hotelId: hotelA.id, orderId: order.id, reason: 'x' })).rejects.toThrow(/no payment to void/);
 	});

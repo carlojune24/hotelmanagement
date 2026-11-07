@@ -37,6 +37,7 @@
 
 	let method = $state('cash');
 	let tendered = $state('');
+	let referenceNo = $state('');
 	let submitting = $state(false);
 	let guestSearch = $state('');
 	let bookingId = $state('');
@@ -54,6 +55,7 @@
 			method = 'cash';
 			docChoice = 'or';
 			tendered = '';
+			referenceNo = '';
 			guestSearch = '';
 			bookingId = '';
 			submitting = false;
@@ -84,7 +86,11 @@
 	});
 	const chosen = $derived(inHouse.find((g) => g.bookingId === bookingId) ?? null);
 	const blocked = $derived(
-		(method === 'cash' && (!shiftOpen || tenderedCentavos < total)) || (method === 'room' && !chosen) || unpaid.length === 0
+		(method === 'cash' && (!shiftOpen || tenderedCentavos < total)) ||
+			(method === 'room' && !chosen) ||
+			// Card and e-wallets need the slip's approval no. / the wallet's reference no., like room payments.
+			((method === 'card' || method === 'gcash' || method === 'maya') && !referenceNo.trim()) ||
+			unpaid.length === 0
 	);
 	// Settling frees the table only if everything has also been served.
 	const willClose = $derived(!!check && check.inProgress === 0 && check.awaitingAcceptance === 0);
@@ -242,6 +248,10 @@
 						</div>
 					{:else}
 						<p class="text-sm text-ink-muted">Record this after the guest has paid on the terminal or wallet.</p>
+						<div>
+							<Label for="settleReferenceNo" class="text-xs">{method === 'card' ? 'Approval no.' : 'Reference no.'}</Label>
+							<Input id="settleReferenceNo" name="referenceNo" maxlength={80} required autocomplete="off" bind:value={referenceNo} class="mt-1" />
+						</div>
 					{/if}
 
 					{#if method !== 'room'}
