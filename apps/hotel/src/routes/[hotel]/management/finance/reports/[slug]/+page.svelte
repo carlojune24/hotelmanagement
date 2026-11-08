@@ -40,13 +40,7 @@
 			{ label: 'This month', from: data.monthStart }
 		];
 	});
-	const GROUPS = [
-		{ key: 'day', label: 'Day' },
-		{ key: 'week', label: 'Week' },
-		{ key: 'month', label: 'Month' }
-	] as const;
-	const group = $derived(page.url.searchParams.get('group') ?? 'day');
-	const link = (href: string) => `/${page.params.hotel}/management/${href}`;
+
 </script>
 
 <div class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
@@ -72,12 +66,6 @@
 			{:else if r.scope === 'hotel'}
 				<span class="ml-2 text-xs text-ink-muted">Rooms, halls, incidentals and room deposits. Restaurant takings are left out.</span>
 			{/if}
-			{#if data.groupable}
-				<span class="ml-auto text-xs text-ink-muted">Group by</span>
-				{#each GROUPS as g (g.key)}
-					<Button size="sm" variant={group === g.key ? 'default' : 'outline'} href={withParams({ group: g.key === 'day' ? null : g.key })}>{g.label}</Button>
-				{/each}
-			{/if}
 		</nav>
 	{/if}
 	<p class="mb-3 hidden text-sm text-black print:block">{page.data.hotel?.name ?? ''}</p>
@@ -94,7 +82,6 @@
 				{/each}
 			</div>
 			{#if page.url.searchParams.get('scope')}<input type="hidden" name="scope" value={page.url.searchParams.get('scope')} />{/if}
-			{#if page.url.searchParams.get('group')}<input type="hidden" name="group" value={page.url.searchParams.get('group')} />{/if}
 			<div><Label class="text-xs">From</Label><Input name="from" type="date" value={data.params.from} class="mt-1 h-8" /></div>
 			<div><Label class="text-xs">To</Label><Input name="to" type="date" value={data.params.to} class="mt-1 h-8" /></div>
 		{/if}
@@ -130,33 +117,6 @@
 		</Table.Root>
 	</div>
 
-	{#each r.sections ?? [] as s (s.title)}
-		<h2 class="mt-6 mb-2 text-sm font-semibold text-ink print:text-black">{s.title}</h2>
-		<div class="overflow-x-auto rounded-xl border border-border print:overflow-visible print:rounded-none print:border-0">
-			<Table.Root>
-				<Table.Header>
-					<Table.Row>
-						{#each s.columns as c (c)}<Table.Head class="whitespace-nowrap print:text-black">{c}</Table.Head>{/each}
-					</Table.Row>
-				</Table.Header>
-				<Table.Body>
-					{#each s.rows as row, ri (ri)}
-						<Table.Row class="print:break-inside-avoid">
-							{#each row as cell, ci (ci)}
-								<Table.Cell class="tabular-nums text-ink print:text-black">
-									{#if ci === s.linkColumn && s.hrefs?.[ri]}
-										<a href={link(s.hrefs[ri]!)} class="font-mono underline underline-offset-2">{cell}</a>
-									{:else}{cell}{/if}
-								</Table.Cell>
-							{/each}
-						</Table.Row>
-					{:else}
-						<Table.Row><Table.Cell colspan={s.columns.length} class="py-6 text-center text-ink-muted">No data.</Table.Cell></Table.Row>
-					{/each}
-				</Table.Body>
-			</Table.Root>
-		</div>
-	{/each}
 </div>
 
 <style>

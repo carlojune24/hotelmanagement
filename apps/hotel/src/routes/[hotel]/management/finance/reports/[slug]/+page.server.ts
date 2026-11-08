@@ -25,7 +25,6 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		result,
 		/** Whether this report can be narrowed to Hotel or Dining (shows the switch). */
 		scopable: SCOPED_REPORTS.includes(params.slug),
-		groupable: params.slug === 'sc-pwd-discounts',
 		today,
 		monthStart: `${today.slice(0, 7)}-01`,
 		params: {
