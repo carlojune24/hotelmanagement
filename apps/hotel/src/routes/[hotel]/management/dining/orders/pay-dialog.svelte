@@ -12,7 +12,7 @@
 	import BedDoubleIcon from '@lucide/svelte/icons/bed-double';
 	import DocumentChoice from './document-choice.svelte';
 	import DoneDocuments from './done-documents.svelte';
-	import DiscountFields from './discount-fields.svelte';
+	import DiscountFields, { type DiscountPreview } from './discount-fields.svelte'
 	import type { DocumentChoice as DocChoice, IssuedDocument } from '$lib/print-batch';
 	import type { PageData } from './$types';
 
@@ -74,7 +74,7 @@
 	});
 	const chosen = $derived(inHouse.find((g) => g.bookingId === bookingId) ?? null);
 
-	let discount = $state<{ net: number; less: number; label: string } | null>(null);
+	let discount = $state<DiscountPreview | null>(null);
 	let discountReady = $state(true);
 	const total = $derived(discount?.net ?? order?.totalCentavos ?? 0);
 	const tenderedCentavos = $derived(Math.round((Number(tendered) || 0) * 100));

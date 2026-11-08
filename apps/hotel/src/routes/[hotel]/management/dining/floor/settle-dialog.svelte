@@ -13,7 +13,7 @@
 	import BedDoubleIcon from '@lucide/svelte/icons/bed-double';
 	import DocumentChoice from '../orders/document-choice.svelte';
 	import DoneDocuments from '../orders/done-documents.svelte';
-	import DiscountFields from '../orders/discount-fields.svelte';
+	import DiscountFields, { type DiscountPreview } from '../orders/discount-fields.svelte'
 	import type { DocumentChoice as DocChoice, IssuedDocument } from '$lib/print-batch';
 	import type { PageData } from './$types';
 
@@ -50,7 +50,7 @@
 	let docChoice = $state<DocChoice>('or');
 	let printAfter = $state(true);
 	let printNow = $state(false);
-	let discount = $state<{ net: number; less: number; label: string } | null>(null);
+	let discount = $state<DiscountPreview | null>(null);
 	let discountReady = $state(true);
 
 	// Only `open` is tracked: the floor plan refreshes `check` every few seconds, and that must

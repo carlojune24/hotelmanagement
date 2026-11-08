@@ -8,7 +8,7 @@
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as Select from '$lib/components/ui/select/index.js';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
-	import DiscountFields from './discount-fields.svelte';
+	import DiscountFields, { type DiscountPreview } from './discount-fields.svelte'
 
 	/**
 	 * Senior / PWD on an order already paid in full (a pre-order paid ahead, or a guest who shows their ID
@@ -17,9 +17,12 @@
 	 */
 	let {
 		open = $bindable(false),
-		order
+		order,
+		defaultDiners = null
 	}: {
 		open: boolean;
+		/** Starting diner count, e.g. the seated reservation's party size. */
+		defaultDiners?: number | null;
 		order: { id: string; code: string; guestName: string | null; totalCentavos: number; vatCentavos: number } | null;
 	} = $props();
 
@@ -35,7 +38,7 @@
 		{ value: 'other', label: 'Other' }
 	] as const;
 
-	let discount = $state<{ net: number; less: number; label: string } | null>(null);
+	let discount = $state<DiscountPreview | null>(null);
 	let ready = $state(true);
 	let method = $state('cash');
 	let referenceNo = $state('');
@@ -106,16 +109,29 @@
 				>
 					<input type="hidden" name="orderId" value={order.id} />
 					{#key session}
-						<DiscountFields orders={[order]} only="sc_pwd" bind:discount bind:ready />
+						<DiscountFields orders={[order]} only="sc_pwd" {defaultDiners} bind:discount bind:ready />
 					{/key}
 
-					<dl class="grid grid-cols-[1fr_auto] gap-y-1 rounded-lg bg-surface-2 px-4 py-3 text-sm" aria-live="polite">
-						<dt class="text-ink-muted">Paid</dt>
+					<!-- The working, line by line: only the qualifying guests' share is discounted. -->
+					<dl class="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5 rounded-lg bg-surface-2 px-4 py-3 text-sm" aria-live="polite">
+						<dt class="text-ink-muted">Paid for the order</dt>
 						<dd class="text-right tabular-nums text-ink">{peso(order.totalCentavos)}</dd>
-						<dt class="text-ink-muted">New total</dt>
-						<dd class="text-right tabular-nums text-ink">{discount ? peso(discount.net) : '—'}</dd>
-						<dt class="font-medium text-ink">Refund to the guest</dt>
-						<dd class="text-right text-lg font-semibold tabular-nums text-ink">{discount ? peso(refund) : '—'}</dd>
+						{#if discount}
+							<dt class="text-ink">Their share, {discount.guests} of {discount.diners} {discount.diners === 1 ? 'diner' : 'diners'}</dt>
+							<dd class="text-right tabular-nums text-ink">{peso(discount.share)}</dd>
+							{#if discount.vatRemoved > 0}
+								<dt class="pl-3 text-ink-muted">Less: VAT on the share (exempt)</dt>
+								<dd class="text-right tabular-nums text-ink-muted">−{peso(discount.vatRemoved)}</dd>
+							{/if}
+							<dt class="pl-3 text-ink-muted">Less: {discount.bps / 100}% of {peso(discount.share - discount.vatRemoved)}</dt>
+							<dd class="text-right tabular-nums text-ink-muted">−{peso(discount.discountOnly)}</dd>
+							<dt class="border-t border-border pt-1.5 text-ink-muted">New total</dt>
+							<dd class="border-t border-border pt-1.5 text-right tabular-nums text-ink">{peso(discount.net)}</dd>
+							<dt class="font-medium text-ink">Refund to the guest</dt>
+							<dd class="text-right text-lg font-semibold tabular-nums text-ink">{peso(refund)}</dd>
+						{:else}
+							<dd class="col-span-2 text-xs text-ink-muted">Enter how many dined to see the share and the refund.</dd>
+						{/if}
 					</dl>
 
 					<div class="grid grid-cols-2 gap-3">

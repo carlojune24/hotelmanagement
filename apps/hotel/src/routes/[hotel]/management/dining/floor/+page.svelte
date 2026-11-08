@@ -190,6 +190,14 @@
 	}
 	let scPwdOpen = $state(false);
 	let scPwdFor = $state<Check['orders'][number] | null>(null);
+	let scPwdDiners = $state<number | null>(null);
+	/** Like Settle: leave the table panel first, or its overlay covers the dialog. */
+	function openScPwd(o: Check['orders'][number]) {
+		scPwdDiners = (selectedId ? views[selectedId]?.reservation?.partySize : null) ?? null;
+		panelOpen = false;
+		scPwdFor = o;
+		scPwdOpen = true;
+	}
 
 	function openSettle(check: Check) {
 		panelOpen = false;
@@ -441,7 +449,7 @@
 	onsettle={openSettle}
 	onclear={openClear}
 	onjoin={openJoin}
-	onscpwd={(o) => { scPwdFor = o; scPwdOpen = true; }}
+	onscpwd={openScPwd}
 />
 
 <!-- Add / edit table -->
@@ -563,7 +571,7 @@
 	</Dialog.Content>
 </Dialog.Root>
 
-<DiscountAfterPaymentDialog bind:open={scPwdOpen} order={scPwdFor} />
+<DiscountAfterPaymentDialog bind:open={scPwdOpen} order={scPwdFor} defaultDiners={scPwdDiners} />
 <SettleDialog bind:open={settleOpen} check={settleFor} shiftOpen={data.shiftOpen} slug={page.params.hotel ?? ''} inHouse={data.inHouse} payAccounts={data.payAccounts} />
 
 <!-- Join one table's tab into another's -->

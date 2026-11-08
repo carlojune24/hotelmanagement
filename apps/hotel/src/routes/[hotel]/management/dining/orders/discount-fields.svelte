@@ -1,3 +1,8 @@
+<script lang="ts" module>
+	/** What the picker reports: the discounted amount and its parts, for a worked breakdown. */
+	export type DiscountPreview = { net: number; less: number; label: string; share: number; vatRemoved: number; discountOnly: number; guests: number; diners: number; bps: number };
+</script>
+
 <script lang="ts">
 	import { page } from '$app/state';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -18,6 +23,7 @@
 		orders,
 		off = false,
 		only = null,
+		defaultDiners = null,
 		discount = $bindable(null),
 		ready = $bindable(true)
 	}: {
@@ -27,8 +33,11 @@
 		off?: boolean;
 		/** Offer only this discount, already picked (Senior / PWD after payment). */
 		only?: DiningDiscountKind | null;
-		/** Out: the discounted amount and what came off, or null when no discount applies. */
-		discount?: { net: number; less: number; label: string } | null;
+		/** Starting "Diners at the table", e.g. the seated reservation's party size. */
+		defaultDiners?: number | null;
+		/** Out: the discounted amount and what came off (with its parts, for a worked breakdown), or null
+		 *  when no discount applies. */
+		discount?: DiscountPreview | null;
 		/** Out: false while an SC/PWD discount is missing a name, an ID or the diner count. */
 		ready?: boolean;
 	} = $props();
@@ -41,7 +50,8 @@
 	type Claimant = { type: 'senior_citizen' | 'pwd'; name: string; idNumber: string };
 	const blank = (): Claimant => ({ type: 'senior_citizen', name: '', idNumber: '' });
 	let claimants = $state<Claimant[]>([blank()]);
-	let diners = $state('');
+	// svelte-ignore state_referenced_locally
+	let diners = $state(defaultDiners ? String(defaultDiners) : '');
 
 	// The toggle can be cleared to '', which means none.
 	const kind = $derived(off || !picked ? 'none' : picked);
@@ -55,14 +65,23 @@
 			return;
 		}
 		const bps = kind === 'staff' ? rates.staffBps : rates.scPwdBps;
-		let less = 0;
-		let net = 0;
+		const m = Math.max(dinersN, 1);
+		const sum = { net: 0, less: 0, share: 0, vatRemoved: 0, discountOnly: 0 };
 		for (const o of orders) {
-			const r = computeDiningDiscount(o, kind, bps, claimants.length, Math.max(dinersN, 1));
-			less += r.discountCentavos + r.vatRemovedCentavos;
-			net += r.netCentavos;
+			const r = computeDiningDiscount(o, kind, bps, claimants.length, m);
+			sum.less += r.discountCentavos + r.vatRemovedCentavos;
+			sum.net += r.netCentavos;
+			sum.share += r.shareCentavos;
+			sum.vatRemoved += r.vatRemovedCentavos;
+			sum.discountOnly += r.discountCentavos;
 		}
-		discount = { net, less, label: kind === 'sc_pwd' ? 'senior / PWD discount and VAT' : 'staff discount' };
+		discount = {
+			...sum,
+			label: kind === 'sc_pwd' ? 'senior / PWD discount and VAT' : 'staff discount',
+			guests: claimants.length,
+			diners: m,
+			bps
+		};
 	});
 </script>
 

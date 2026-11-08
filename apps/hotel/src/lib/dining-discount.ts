@@ -28,6 +28,9 @@ export interface DiningDiscountResult {
 	netVatCentavos: number;
 	/** SC/PWD only: the qualifying share's VAT-exclusive amount after the discount, a VAT-exempt sale. */
 	vatExemptCentavos: number;
+	/** SC/PWD only: the qualifying guests' share of the order before the discount, VAT included
+	 *  (total × guests ÷ diners). Only this part is discounted. */
+	shareCentavos: number;
 }
 
 export function computeDiningDiscount(
@@ -43,7 +46,7 @@ export function computeDiningDiscount(
 		const discountCentavos = Math.round((total * bps) / 10000);
 		const netCentavos = total - discountCentavos;
 		const netVatCentavos = total > 0 ? Math.round((vat * netCentavos) / total) : 0;
-		return { discountCentavos, vatRemovedCentavos: 0, netCentavos, netVatCentavos, vatExemptCentavos: 0 };
+		return { discountCentavos, vatRemovedCentavos: 0, netCentavos, netVatCentavos, vatExemptCentavos: 0, shareCentavos: 0 };
 	}
 	const n = Math.min(Math.max(claimants, 0), diners);
 	const shareGross = Math.round((total * n) / diners);
@@ -54,6 +57,7 @@ export function computeDiningDiscount(
 		vatRemovedCentavos: r.vatRemovedCentavos,
 		netCentavos: total - r.totalReductionCentavos,
 		netVatCentavos: vat - shareVat,
-		vatExemptCentavos: r.baseAmountCentavos - r.discountCentavos
+		vatExemptCentavos: r.baseAmountCentavos - r.discountCentavos,
+		shareCentavos: shareGross
 	};
 }
