@@ -32,7 +32,9 @@
 	const pct = (bps: number) => `${bps / 100}%`;
 
 	let picked = $state<'none' | DiningDiscountKind>('none');
-	let claimants = $state<{ name: string; idNumber: string }[]>([{ name: '', idNumber: '' }]);
+	type Claimant = { type: 'senior_citizen' | 'pwd'; name: string; idNumber: string };
+	const blank = (): Claimant => ({ type: 'senior_citizen', name: '', idNumber: '' });
+	let claimants = $state<Claimant[]>([blank()]);
 	let diners = $state('');
 
 	// The toggle can be cleared to '', which means none.
@@ -79,13 +81,17 @@
 		<legend class="px-1 text-xs text-ink-muted">Senior / PWD guests</legend>
 		<input type="hidden" name="claimants" value={JSON.stringify(claimants)} />
 		{#each claimants as c, i (i)}
+			<ToggleGroup.Root type="single" value={c.type} onValueChange={(v) => v && (c.type = v as Claimant['type'])} variant="outline" size="sm" class="w-full" aria-label="Guest {i + 1} is a">
+				<ToggleGroup.Item value="senior_citizen" class="flex-1">Senior</ToggleGroup.Item>
+				<ToggleGroup.Item value="pwd" class="flex-1">PWD</ToggleGroup.Item>
+			</ToggleGroup.Root>
 			<div class="flex items-end gap-2">
 				<div class="min-w-0 flex-1">
 					<Label for="claimantName{i}" class="text-xs">Name</Label>
 					<Input id="claimantName{i}" bind:value={c.name} maxlength={160} autocomplete="off" class="mt-1" />
 				</div>
 				<div class="min-w-0 flex-1">
-					<Label for="claimantId{i}" class="text-xs">OSCA / PWD ID no.</Label>
+					<Label for="claimantId{i}" class="text-xs">{c.type === 'pwd' ? 'PWD ID no.' : 'OSCA ID no.'}</Label>
 					<Input id="claimantId{i}" bind:value={c.idNumber} maxlength={60} autocomplete="off" class="mt-1" />
 				</div>
 				{#if claimants.length > 1}
@@ -93,7 +99,7 @@
 				{/if}
 			</div>
 		{/each}
-		<Button type="button" variant="outline" size="sm" onclick={() => (claimants = [...claimants, { name: '', idNumber: '' }])}>Add another guest</Button>
+		<Button type="button" variant="outline" size="sm" onclick={() => (claimants = [...claimants, blank()])}>Add another guest</Button>
 		<div>
 			<Label for="discountDiners" class="text-xs">Diners in all</Label>
 			<Input id="discountDiners" name="diners" type="number" inputmode="numeric" min={claimants.length} step="1" bind:value={diners} class="mt-1 w-28 tabular-nums" />

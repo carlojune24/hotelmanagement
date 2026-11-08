@@ -539,7 +539,7 @@ export const diningOrders = pgTable(
 		/** SC/PWD only: the VAT on the qualifying share, removed because that share is VAT-exempt. */
 		discountVatRemovedCentavos: bigint('discount_vat_removed_centavos', { mode: 'number' }).notNull().default(0),
 		/** SC/PWD only: each qualifying guest's name and OSCA/PWD ID, and how many dined in all. */
-		discountClaimants: jsonb('discount_claimants').$type<{ name: string; idNumber: string }[]>(),
+		discountClaimants: jsonb('discount_claimants').$type<{ type?: 'senior_citizen' | 'pwd'; name: string; idNumber: string }[]>(),
 		discountDiners: integer('discount_diners'),
 		/** `vatCentavos` before the discount, so voiding the payment restores it exactly. */
 		discountVatBeforeCentavos: bigint('discount_vat_before_centavos', { mode: 'number' }),

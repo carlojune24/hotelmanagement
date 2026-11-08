@@ -1056,7 +1056,7 @@ export async function buildDiningSnapshot(
 		const before = gross + order.discountCentavos + order.discountVatRemovedCentavos;
 		const p = `${(order.discountBps ?? 0) / 100}%`;
 		if (order.discountKind === 'sc_pwd') {
-			const who = (order.discountClaimants ?? []).map((c) => `${c.name} (ID ${c.idNumber})`).join(', ');
+			const who = (order.discountClaimants ?? []).map((c) => `${c.name} (${c.type === 'pwd' ? 'PWD' : c.type === 'senior_citizen' ? 'Senior' : 'ID'} ${c.idNumber})`).join(', ');
 			const n = order.discountClaimants?.length ?? 1;
 			const m = order.discountDiners ?? n;
 			lines.push(

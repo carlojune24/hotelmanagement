@@ -14,6 +14,7 @@ import {
 	type ReportScope
 } from './reports';
 import { quickSalesReport } from './standalone-sales';
+import { scPwdDiscountReport, type ScPwdGroup } from './sc-pwd-report';
 
 export const REPORTS = [
 	{ slug: 'daily-sales', name: 'Daily sales', kind: 'day' },
@@ -24,13 +25,14 @@ export const REPORTS = [
 	{ slug: 'expenses', name: 'Expenses', kind: 'range' },
 	{ slug: 'profit-loss', name: 'Profit & loss', kind: 'range' },
 	{ slug: 'payment-methods', name: 'Payment methods', kind: 'range' },
+	{ slug: 'sc-pwd-discounts', name: 'Senior / PWD discounts', kind: 'range' },
 	{ slug: 'ar-aging', name: 'City-ledger aging', kind: 'asOf' }
 ] as const;
 
 export type ReportSlug = (typeof REPORTS)[number]['slug'];
 
 /** The reports that can be narrowed to Hotel or Dining. The others are not split by business line. */
-export const SCOPED_REPORTS: readonly string[] = ['daily-sales', 'cashflow', 'revenue-by-source', 'expenses', 'profit-loss', 'payment-methods'];
+export const SCOPED_REPORTS: readonly string[] = ['daily-sales', 'cashflow', 'revenue-by-source', 'expenses', 'profit-loss', 'payment-methods', 'sc-pwd-discounts'];
 
 const peso = (c: number) => (c / 100).toFixed(2);
 
@@ -53,12 +55,15 @@ export interface RunReportResult {
 	rows: (string | number)[][];
 	/** Summary key/value pairs rendered above the table. */
 	summary: [string, string][];
+	/** More tables under the main one (title, columns, rows). `hrefs[i]` makes row i's `linkColumn` cell a
+	 *  link, relative to `/{slug}/management`. */
+	sections?: { title: string; columns: string[]; rows: (string | number)[][]; hrefs?: (string | null)[]; linkColumn?: number }[];
 }
 
 export async function runReport(
 	hotelId: string,
 	slug: string,
-	opts: { timezone: string; date?: string; from?: string; to?: string; scope?: ReportScope }
+	opts: { timezone: string; date?: string; from?: string; to?: string; scope?: ReportScope; group?: ScPwdGroup }
 ): Promise<RunReportResult | null> {
 	const meta = REPORTS.find((r) => r.slug === slug);
 	if (!meta) return null;
@@ -259,6 +264,63 @@ export async function runReport(
 				]
 			};
 		}
+		case 'sc-pwd-discounts': {
+			const group = opts.group ?? 'day';
+			const r = await scPwdDiscountReport(hotelId, from, to, scope, group);
+			const t = r.totals;
+			const TYPE = { senior_citizen: 'Senior', pwd: 'PWD' } as const;
+			const groupName = { day: 'Day', week: 'Week of', month: 'Month' }[group];
+			return {
+				name: scopedName(meta.name),
+				scope,
+				kind: 'range',
+				columns: [groupName, 'Hotel', 'Dining', 'Senior', 'PWD', 'Discount', 'VAT removed', 'Total off'],
+				rows: r.periods.map((p) => [
+					p.period,
+					p.hotel,
+					p.dining,
+					p.senior,
+					p.pwd,
+					peso(p.discountCentavos),
+					peso(p.vatRemovedCentavos),
+					peso(p.discountCentavos + p.vatRemovedCentavos)
+				]),
+				summary: [
+					['From', from],
+					['To', to],
+					...scopeSummary(),
+					['Guests discounted', String(t.hotel + t.dining)],
+					['Senior', String(t.senior)],
+					['PWD', String(t.pwd)],
+					...(scope === 'all' ? ([['Hotel', String(t.hotel)], ['Dining', String(t.dining)]] as [string, string][]) : []),
+					['Discount given', peso(t.discountCentavos)],
+					['VAT removed', peso(t.vatRemovedCentavos)],
+					['Total off the bills', peso(t.discountCentavos + t.vatRemovedCentavos)]
+				],
+				sections: [
+					{
+						title: 'Every discount (the trail)',
+						columns: ['Date', 'Side', 'Ref', 'Guest (ID)', 'Type', 'Base (ex-VAT)', 'VAT removed', 'Discount', 'Total off', 'Receipt', 'Given by', 'Status'],
+						linkColumn: 2,
+						hrefs: r.trail.map((x) => x.href),
+						rows: r.trail.map((x) => [
+							x.date,
+							x.side === 'hotel' ? 'Hotel' : 'Dining',
+							x.ref,
+							x.guests.map((g) => `${g.name} (${g.idNumber})`).join('; '),
+							x.guests.map((g) => (g.type ? TYPE[g.type] : 'Senior / PWD')).join('; '),
+							peso(x.baseCentavos),
+							peso(x.vatRemovedCentavos),
+							peso(x.discountCentavos),
+							peso(x.discountCentavos + x.vatRemovedCentavos),
+							x.receipts.join(', ') || '—',
+							x.givenBy ?? '—',
+							x.reversedOn ? `Reversed ${x.reversedOn} (not counted)` : 'Given'
+						])
+					}
+				]
+			};
+		}
 		case 'ar-aging': {
 			const r = await arAgingReport(hotelId, to);
 			return {
@@ -280,7 +342,8 @@ export async function runReport(
 
 export function reportCsv(result: RunReportResult): string {
 	const summaryRows = result.summary.map(([k, v]) => [k, v] as (string | number)[]);
-	return toCsv([result.name, ''], [...summaryRows, ['', ''], result.columns, ...result.rows]);
+	const sections = (result.sections ?? []).flatMap((s) => [['', ''], [s.title], s.columns, ...s.rows]);
+	return toCsv([result.name, ''], [...summaryRows, ['', ''], result.columns, ...result.rows, ...sections]);
 }
 
 function labelSource(s: string): string {

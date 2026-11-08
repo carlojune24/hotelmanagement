@@ -27,7 +27,7 @@ export const discountFields = {
 		.transform((s, ctx) => {
 			try {
 				return z
-					.array(z.object({ name: z.string().max(160), idNumber: z.string().max(60) }))
+					.array(z.object({ type: z.enum(['senior_citizen', 'pwd']), name: z.string().max(160), idNumber: z.string().max(60) }))
 					.max(50)
 					.parse(s ? JSON.parse(s) : []);
 			} catch {
@@ -39,7 +39,7 @@ export const discountFields = {
 
 export function toDiscountChoice(d: {
 	discountKind: 'none' | 'sc_pwd' | 'staff';
-	claimants?: { name: string; idNumber: string }[];
+	claimants?: { type: 'senior_citizen' | 'pwd'; name: string; idNumber: string }[];
 	diners?: number;
 }): DiningDiscountChoice | null {
 	return d.discountKind === 'none' ? null : { kind: d.discountKind, claimants: d.claimants, diners: d.diners };

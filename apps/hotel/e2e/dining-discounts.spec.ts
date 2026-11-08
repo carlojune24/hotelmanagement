@@ -86,7 +86,7 @@ test('managers set the dining discount rates, and Senior / PWD comes off only th
 	const record = dlg.getByRole('button', { name: /^Record ₱/ });
 	await expect(record, 'name, ID and diners are required for SC/PWD').toBeDisabled();
 	await dlg.getByLabel('Name', { exact: true }).fill('Lola Test');
-	await dlg.getByLabel('OSCA / PWD ID no.').fill('OSCA-0001');
+	await dlg.getByLabel('OSCA ID no.').fill('OSCA-0001');
 	await dlg.getByLabel('Diners in all').fill('4');
 	await dlg.getByLabel('Reference no.').fill(ref);
 	await expect(record).toBeEnabled();
@@ -104,7 +104,7 @@ test('managers set the dining discount rates, and Senior / PWD comes off only th
 		discount_kind: 'sc_pwd',
 		discount_bps: 2000,
 		discount_diners: 4,
-		discount_claimants: [{ name: 'Lola Test', idNumber: 'OSCA-0001' }]
+		discount_claimants: [{ type: 'senior_citizen', name: 'Lola Test', idNumber: 'OSCA-0001' }]
 	});
 	expect(Number(row!.total_centavos)).toBe(want.netCentavos);
 	expect(Number(row!.vat_centavos)).toBe(want.netVatCentavos);

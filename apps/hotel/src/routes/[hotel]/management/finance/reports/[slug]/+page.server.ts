@@ -3,6 +3,7 @@ import { requireCap } from '$lib/server/auth/rbac';
 import { businessDateFor } from '$lib/server/finance/shared';
 import { SCOPED_REPORTS, runReport } from '$lib/server/finance/report-runner';
 import { parseReportScope } from '$lib/server/finance/reports';
+import { parseScPwdGroup } from '$lib/server/finance/sc-pwd-report';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, params, url }) => {
@@ -13,7 +14,8 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		date: url.searchParams.get('date') || undefined,
 		from: url.searchParams.get('from') || undefined,
 		to: url.searchParams.get('to') || undefined,
-		scope: parseReportScope(url.searchParams.get('scope'))
+		scope: parseReportScope(url.searchParams.get('scope')),
+		group: parseScPwdGroup(url.searchParams.get('group'))
 	});
 	if (!result) error(404, 'Unknown report');
 
@@ -23,6 +25,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		result,
 		/** Whether this report can be narrowed to Hotel or Dining (shows the switch). */
 		scopable: SCOPED_REPORTS.includes(params.slug),
+		groupable: params.slug === 'sc-pwd-discounts',
 		today,
 		monthStart: `${today.slice(0, 7)}-01`,
 		params: {

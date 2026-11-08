@@ -12,6 +12,8 @@ import { computeScPwdDiscount } from './sc-pwd-discount';
 export type DiningDiscountKind = 'sc_pwd' | 'staff';
 
 export interface DiningClaimant {
+	/** Same values as the hotel's `sc_pwd_claimant_type`. Older rows have none (reported as "Senior / PWD"). */
+	type?: 'senior_citizen' | 'pwd';
 	name: string;
 	/** OSCA ID (senior) or PWD ID number. */
 	idNumber: string;

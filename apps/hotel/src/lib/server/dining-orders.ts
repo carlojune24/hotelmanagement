@@ -776,8 +776,8 @@ export function resolveDiningDiscount(hotelConfig: unknown, d: DiningDiscountCho
 	const bps = d.kind === 'staff' ? rates.staffBps : rates.scPwdBps;
 	if (bps <= 0) throw new OrderError('That discount is turned off in Dining settings.');
 	if (d.kind === 'staff') return { bps, claimants: [], diners: 1 };
-	const claimants = (d.claimants ?? []).map((c) => ({ name: c.name.trim(), idNumber: c.idNumber.trim() }));
-	if (claimants.length === 0 || claimants.some((c) => !c.name || !c.idNumber)) {
+	const claimants = (d.claimants ?? []).map((c) => ({ type: c.type, name: c.name.trim(), idNumber: c.idNumber.trim() }));
+	if (claimants.length === 0 || claimants.some((c) => !c.name || !c.idNumber || !c.type)) {
 		throw new OrderError('Enter the name and OSCA / PWD ID of each senior or PWD guest.');
 	}
 	const diners = d.diners ?? claimants.length;
