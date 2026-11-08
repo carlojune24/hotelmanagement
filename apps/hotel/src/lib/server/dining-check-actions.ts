@@ -4,7 +4,9 @@ import { z } from 'zod';
 import { requireCap } from './auth/rbac';
 import { recordId } from '../rate-validation';
 import { FinanceError } from './finance/shared';
-import { OrderError, type DiningDiscountChoice } from './dining-orders';
+import { DocumentError } from './finance/documents';
+import { chargeDiningOrderToRoom } from './dining-room-charge';
+import { OrderError, payDiningOrder, type DiningDiscountChoice } from './dining-orders';
 import { closeCheck, settleCheck } from './dining-checks';
 import { toPayDocuments } from '../print-batch';
 
@@ -13,7 +15,8 @@ import { toPayDocuments } from '../print-batch';
  * (both show the same Settle dialog). Each page exposes them as `settle` and `closeTable`.
  */
 
-const businessError = (e: unknown) => e instanceof OrderError || e instanceof FinanceError;
+const businessError = (e: unknown) => e instanceof OrderError || e instanceof FinanceError || e instanceof DocumentError;
+const PAYMENT_METHODS = ['cash', 'card', 'gcash', 'maya'] as const;
 const toCentavos = (php: number) => Math.round(php * 100);
 
 /** The discount fields `discount-fields.svelte` posts; spread into an action's form schema. */
@@ -97,6 +100,74 @@ export async function closeTableAction(event: RequestEvent) {
 	try {
 		await closeCheck({ hotelId: event.locals.hotel!.id, checkId: parsed.data.checkId, actor: event.locals.user });
 		return { ok: 'The table is free again.' };
+	} catch (e) {
+		if (businessError(e)) return fail(400, { error: (e as Error).message });
+		throw e;
+	}
+}
+
+/** Takes payment for one order: the Take payment dialog on the Orders board and Reservations. */
+export async function payOrderAction(event: RequestEvent) {
+	requireCap(event.locals.user, event.locals.role, 'dining:write');
+	const raw = Object.fromEntries(await event.request.formData());
+	const parsed = z
+		.object({
+			orderId: recordId(),
+			method: z.enum(PAYMENT_METHODS),
+			tenderedPhp: z.coerce.number().min(0).max(10_000_000).optional(),
+			referenceNo: z.string().trim().max(80).optional(),
+			// What to issue with the payment: an Official Receipt unless the cashier says otherwise.
+			documents: z.enum(['or', 'invoice', 'bill', 'none']).default('or'),
+			billToName: z.string().trim().max(160).optional(),
+			billToAddress: z.string().trim().max(300).optional(),
+			billToTin: z.string().trim().max(40).optional(),
+			...discountFields
+		})
+		.safeParse({ ...raw, tenderedPhp: raw.tenderedPhp === '' ? undefined : raw.tenderedPhp });
+	if (!parsed.success) return fail(400, { error: 'Choose how the guest is paying.' });
+	const d = parsed.data;
+	try {
+		const r = await payDiningOrder({
+			hotelId: event.locals.hotel!.id,
+			orderId: d.orderId,
+			method: d.method,
+			tenderedCentavos: d.tenderedPhp != null ? toCentavos(d.tenderedPhp) : null,
+			referenceNo: d.referenceNo ?? null,
+			discount: toDiscountChoice(d),
+			documents: toPayDocuments(d.documents),
+			billTo: { name: d.billToName, address: d.billToAddress, tin: d.billToTin },
+			actor: event.locals.user
+		});
+		return {
+			paid: {
+				orderId: d.orderId,
+				changeCentavos: r.changeCentavos,
+				receiptId: r.receiptId,
+				documents: r.documents,
+				documentError: r.documentError
+			}
+		};
+	} catch (e) {
+		if (businessError(e)) return fail(400, { error: (e as Error).message });
+		throw e;
+	}
+}
+
+/** Charges one order to an in-house guest's room bill (one line on their folio). */
+export async function chargeRoomAction(event: RequestEvent) {
+	requireCap(event.locals.user, event.locals.role, 'dining:write');
+	const parsed = z
+		.object({ orderId: recordId(), bookingId: recordId() })
+		.safeParse(Object.fromEntries(await event.request.formData()));
+	if (!parsed.success) return fail(400, { error: 'Choose the guest to charge.' });
+	try {
+		const r = await chargeDiningOrderToRoom({
+			hotelId: event.locals.hotel!.id,
+			orderId: parsed.data.orderId,
+			bookingId: parsed.data.bookingId,
+			actor: event.locals.user
+		});
+		return { charged: { orderId: parsed.data.orderId, roomLabel: r.roomLabel, guestName: r.guestName } };
 	} catch (e) {
 		if (businessError(e)) return fail(400, { error: (e as Error).message });
 		throw e;

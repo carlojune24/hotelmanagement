@@ -15,7 +15,8 @@ import {
 	type DiningTable
 } from './db/schema/index';
 import { writeAudit } from './audit';
-import { ensureOpenCheck } from './dining-orders';
+import { OrderError, createDiningOrder, ensureOpenCheck, type OrderLineInput } from './dining-orders';
+import type { SessionUser } from './auth/session';
 import {
 	HOLDING_STATUSES,
 	availableSlots,
@@ -680,4 +681,46 @@ export async function getReservationForGuest(
 		tableNames: tables.map((t) => t.name),
 		local: localParts(row.r.startsAt, timezone)
 	};
+}
+
+/**
+ * A pre-order staff take for a phone or walk-in reservation. Same order as a guest's online
+ * pre-order: `pre_order`, tied to the reservation, timed for its seating (so the kitchen only sees
+ * it from the venue's prep time, `dining-hold.ts`), and joined to the table's check when the party
+ * is seated. It is created unpaid; the cashier takes full payment right after, in Take payment.
+ */
+export async function addStaffPreOrder(args: {
+	hotelId: string;
+	reservationId: string;
+	lines: OrderLineInput[];
+	remarks?: string | null;
+	actor?: SessionUser | null;
+}): Promise<{ id: string; code: string; totalCentavos: number; vatCentavos: number; guestName: string }> {
+	const [r] = await db
+		.select()
+		.from(diningReservations)
+		.where(and(eq(diningReservations.id, args.reservationId), eq(diningReservations.hotelId, args.hotelId)))
+		.limit(1);
+	if (!r) throw new OrderError('That reservation could not be found.');
+	if (r.status !== 'pending' && r.status !== 'confirmed') {
+		throw new OrderError('Only an upcoming reservation can take a pre-order. For a seated table, place an order on its tab.');
+	}
+	const created = await createDiningOrder({
+		hotelId: args.hotelId,
+		venueId: r.diningItemId,
+		orderType: 'pre_order',
+		lines: args.lines,
+		reservationId: r.id,
+		bookingId: r.bookingId,
+		guestName: r.guestName,
+		guestPhone: r.guestPhone,
+		guestEmail: r.guestEmail,
+		remarks: args.remarks ?? null,
+		source: 'staff',
+		pickupAt: r.startsAt,
+		initialStatus: 'new',
+		actor: args.actor ?? null
+	});
+	const [o] = await db.select({ vat: diningOrders.vatCentavos }).from(diningOrders).where(eq(diningOrders.id, created.id)).limit(1);
+	return { id: created.id, code: created.code, totalCentavos: created.totalCentavos, vatCentavos: o?.vat ?? 0, guestName: r.guestName };
 }

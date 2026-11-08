@@ -17,7 +17,6 @@ import {
 	dispatchDeliveryOrder,
 	listBoardOrders,
 	listRefundDueOrders,
-	payDiningOrder,
 	setDiningOrderStatus,
 	voidDiningOrderPayment
 } from '$lib/server/dining-orders';
@@ -31,9 +30,9 @@ import {
 	respondToDiningCancellation
 } from '$lib/server/dining-online';
 import { UploadValidationError, deleteUploadIfOwned, saveUpload } from '$lib/server/uploads';
-import { closeTableAction, discountFields, settleTableAction, toDiscountChoice } from '$lib/server/dining-check-actions';
+import { chargeRoomAction, closeTableAction, payOrderAction, settleTableAction } from '$lib/server/dining-check-actions';
 import { listOpenChecks } from '$lib/server/dining-checks';
-import { chargeDiningOrderToRoom, listInHouseGuests, undoDiningRoomCharge } from '$lib/server/dining-room-charge';
+import { listInHouseGuests, undoDiningRoomCharge } from '$lib/server/dining-room-charge';
 import { DocumentError, issueDiningDocument, listDiningDocumentsForOrders } from '$lib/server/finance/documents';
 import { FinanceError } from '$lib/server/finance/shared';
 import { diningDrawerId, diningPayAccountNames } from '$lib/server/finance/payments';
@@ -45,10 +44,8 @@ import {
 	openShift as openShiftFn
 } from '$lib/server/finance/shifts';
 import { zonedToUtc, localParts } from '$lib/dining-slots';
-import { toPayDocuments } from '$lib/print-batch';
 import type { Actions, PageServerLoad } from './$types';
 
-const PAYMENT_METHODS = ['cash', 'card', 'gcash', 'maya'] as const;
 /** Dining's own till, or the hotel-wide drawer capability finance and the front desk hold. */
 const DRAWER_CAPS = ['dining:shift', 'shift:write'];
 
@@ -173,7 +170,6 @@ const createSchema = z.object({
 	lines: z.array(lineSchema).min(1, 'Add at least one item.').max(40)
 });
 
-const toCentavos = (php: number) => Math.round(php * 100);
 
 export const actions: Actions = {
 	/** Places an order. `payNow` only tells the page to open the payment dialog next. */
@@ -329,51 +325,7 @@ export const actions: Actions = {
 	},
 
 
-	pay: async (event) => {
-		requireCap(event.locals.user, event.locals.role, 'dining:write');
-		const raw = Object.fromEntries(await event.request.formData());
-		const parsed = z
-			.object({
-				orderId: recordId(),
-				method: z.enum(PAYMENT_METHODS),
-				tenderedPhp: z.coerce.number().min(0).max(10_000_000).optional(),
-				referenceNo: z.string().trim().max(80).optional(),
-				// What to issue with the payment: an Official Receipt unless the cashier says otherwise.
-				documents: z.enum(['or', 'invoice', 'bill', 'none']).default('or'),
-				billToName: z.string().trim().max(160).optional(),
-				billToAddress: z.string().trim().max(300).optional(),
-				billToTin: z.string().trim().max(40).optional(),
-				...discountFields
-			})
-			.safeParse({ ...raw, tenderedPhp: raw.tenderedPhp === '' ? undefined : raw.tenderedPhp });
-		if (!parsed.success) return fail(400, { error: 'Choose how the guest is paying.' });
-		const d = parsed.data;
-		try {
-			const r = await payDiningOrder({
-				hotelId: event.locals.hotel!.id,
-				orderId: d.orderId,
-				method: d.method,
-				tenderedCentavos: d.tenderedPhp != null ? toCentavos(d.tenderedPhp) : null,
-				referenceNo: d.referenceNo ?? null,
-				discount: toDiscountChoice(d),
-				documents: toPayDocuments(d.documents),
-				billTo: { name: d.billToName, address: d.billToAddress, tin: d.billToTin },
-				actor: event.locals.user
-			});
-			return {
-				paid: {
-					orderId: d.orderId,
-					changeCentavos: r.changeCentavos,
-					receiptId: r.receiptId,
-					documents: r.documents,
-					documentError: r.documentError
-				}
-			};
-		} catch (e) {
-			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
-			throw e;
-		}
-	},
+	pay: payOrderAction,
 
 	voidPayment: async (event) => {
 		const { user, role } = event.locals;
@@ -394,25 +346,7 @@ export const actions: Actions = {
 	},
 
 	/** Charges an order to an in-house guest's room bill (one line on their folio). */
-	chargeRoom: async (event) => {
-		requireCap(event.locals.user, event.locals.role, 'dining:write');
-		const parsed = z
-			.object({ orderId: recordId(), bookingId: recordId() })
-			.safeParse(Object.fromEntries(await event.request.formData()));
-		if (!parsed.success) return fail(400, { error: 'Choose the guest to charge.' });
-		try {
-			const r = await chargeDiningOrderToRoom({
-				hotelId: event.locals.hotel!.id,
-				orderId: parsed.data.orderId,
-				bookingId: parsed.data.bookingId,
-				actor: event.locals.user
-			});
-			return { charged: { orderId: parsed.data.orderId, roomLabel: r.roomLabel, guestName: r.guestName } };
-		} catch (e) {
-			if (isBusinessError(e)) return fail(400, { error: (e as Error).message });
-			throw e;
-		}
-	},
+	chargeRoom: chargeRoomAction,
 
 	/** Takes an order off a guest's room bill (managers). */
 	undoRoomCharge: async (event) => {

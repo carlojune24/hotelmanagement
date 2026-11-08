@@ -19,7 +19,10 @@
 	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
 	import CalendarCheckIcon from '@lucide/svelte/icons/calendar-check';
 	import BedDoubleIcon from '@lucide/svelte/icons/bed-double';
+	import UtensilsIcon from '@lucide/svelte/icons/utensils';
 	import { RESERVATION_TRANSITIONS } from '$lib/dining-slots';
+	import NewOrderSheet, { type PickedDishes } from '../orders/new-order-sheet.svelte';
+	import PayDialog from '../orders/pay-dialog.svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -74,8 +77,48 @@
 		if (result.type === 'success') await invalidateAll();
 	}
 
+	const peso = (c: number) =>
+		`₱${(c / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+	// ---- pre-orders: pick dishes from the menu, then take full payment ------------
+	let pickOpen = $state(false);
+	let pickVenue = $state<string | null>(null);
+	let pick = $state<{ title: string; keep: boolean; done: (p: PickedDishes) => void } | null>(null);
+	let payOpen = $state(false);
+	let payFor = $state<{ id: string; code: string; tableLabel: string | null; guestName: string | null; totalCentavos: number; vatCentavos: number } | null>(null);
+
+	function takePayment(o: NonNullable<typeof payFor>) {
+		payFor = o;
+		payOpen = true;
+	}
+
+	/** An existing reservation: pick the dishes, save them as its pre-order, then take payment. */
+	function addPreOrderTo(r: (typeof data.rows)[number]) {
+		pickVenue = r.venueId;
+		pick = {
+			title: `Pre-order for ${r.guestName}`,
+			keep: false,
+			done: async (p) => {
+				const body = new FormData();
+				body.set('reservationId', r.id);
+				body.set('preOrder', JSON.stringify({ lines: p.lines, remarks: p.remarks }));
+				const res = await fetch('?/addPreOrder', { method: 'POST', body, headers: { 'x-sveltekit-action': 'true' } });
+				const result = deserialize(await res.text());
+				await applyAction(result);
+				if (result.type === 'success') await invalidateAll();
+			}
+		};
+		pickOpen = true;
+	}
+
 	// ---- new reservation sheet ---------------------------------------------------
 	let sheetOpen = $state(false);
+	let picked = $state<PickedDishes | null>(null);
+	function pickForNew() {
+		pickVenue = nVenue;
+		pick = { title: 'Pre-order', keep: !!picked, done: (p) => (picked = p) };
+		pickOpen = true;
+	}
 	const bookable = $derived(data.venues.filter((v) => data.allTables.some((t) => t.venueId === v.id)));
 	let nVenue = $state('');
 	let nDate = $state('');
@@ -91,6 +134,7 @@
 		nParty = 2;
 		nTime = '';
 		nTable = 'auto';
+		picked = null;
 		sheetOpen = true;
 	}
 
@@ -122,6 +166,8 @@
 			toast.success(form.ok);
 			sheetOpen = false;
 		}
+		// A pre-order was just saved: take full payment for it, as a guest does online.
+		if (form && 'payOrder' in form && form.payOrder) takePayment(form.payOrder);
 	});
 </script>
 
@@ -220,6 +266,9 @@
 										<span class="rounded border border-border px-1 font-semibold text-ink">Pre-order</span>
 										{r.preOrder.count} {r.preOrder.count === 1 ? 'order' : 'orders'} · ₱{(r.preOrder.totalCentavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · {r.preOrder.paid ? 'paid' : 'unpaid'}
 										{#if r.preOrder.kitchen}· <span class="font-semibold {r.preOrder.kitchen === 'cooking' ? 'text-warning' : 'text-ok'}">{r.preOrder.kitchen}</span>{/if}
+										{#if data.canWrite && r.preOrder.unpaid.length > 0}
+											<Button size="sm" variant="outline" class="ml-1 h-6 px-2 text-xs" onclick={() => takePayment(r.preOrder!.unpaid[0]!)}>Take payment</Button>
+										{/if}
 									</div>
 								{/if}
 								{#if r.remarks}<div class="mt-0.5 line-clamp-1 text-xs text-ink-muted">“{r.remarks}”</div>{/if}
@@ -245,6 +294,9 @@
 												<a {...props} href="{base}/reservations/{r.code}">View details</a>
 											{/snippet}
 										</DropdownMenu.Item>
+										{#if data.canWrite && (r.status === 'pending' || r.status === 'confirmed') && data.menus[r.venueId]}
+											<DropdownMenu.Item onSelect={() => addPreOrderTo(r)}>Add pre-order</DropdownMenu.Item>
+										{/if}
 										<DropdownMenu.Separator />
 										{#each moves as to (to)}
 											<DropdownMenu.Item
@@ -295,7 +347,7 @@
 			{#if bookable.length > 1}
 				<div>
 					<Label for="nrVenue">Venue</Label>
-					<Select.Root type="single" bind:value={nVenue} onValueChange={() => { nTable = 'auto'; nTime = ''; }}>
+					<Select.Root type="single" bind:value={nVenue} onValueChange={() => { nTable = 'auto'; nTime = ''; picked = null; }}>
 						<Select.Trigger id="nrVenue" class="mt-1 w-full">{venueLabel}</Select.Trigger>
 						<Select.Content>
 							{#each bookable as v (v.id)}<Select.Item value={v.id} label={v.title} />{/each}
@@ -365,9 +417,52 @@
 				<Label for="nrRemarks">Remarks</Label>
 				<Textarea id="nrRemarks" name="remarks" rows={2} maxlength={500} placeholder="Allergies, occasion, high chair…" class="mt-1" />
 			</div>
+
+			<!-- Dishes ordered ahead: saved with the booking, paid in full right after. -->
+			<section aria-labelledby="nrPreTitle" class="pb-2">
+				<div class="flex items-baseline justify-between">
+					<h3 id="nrPreTitle" class="text-sm font-medium text-ink">Pre-order</h3>
+					<span class="text-xs text-ink-muted">Optional</span>
+				</div>
+				<input type="hidden" name="preOrder" value={picked ? JSON.stringify({ lines: picked.lines, remarks: picked.remarks }) : ''} />
+				{#if !data.menus[nVenue]}
+					<p class="mt-1 text-xs text-ink-muted">This venue has no menu yet, so dishes can't be ordered ahead.</p>
+				{:else if picked}
+					<div class="mt-1.5 overflow-hidden rounded-lg border border-border">
+						<ul class="divide-y divide-border text-sm">
+							{#each picked.summary as l, i (i)}
+								<li class="flex items-baseline gap-2 px-3 py-2">
+									<span class="tabular-nums text-ink-muted">{l.quantity}×</span>
+									<span class="min-w-0 flex-1 text-ink">{l.name}</span>
+									<span class="tabular-nums text-ink">{peso(l.lineTotalCentavos)}</span>
+								</li>
+							{/each}
+						</ul>
+						<div class="flex items-baseline justify-between border-t border-border bg-surface-2/60 px-3 py-2">
+							<span class="text-xs text-ink-muted">Paid in full after booking, VAT included</span>
+							<span class="font-semibold tabular-nums text-ink">{peso(picked.totalCentavos)}</span>
+						</div>
+						<div class="flex gap-1 border-t border-border px-2 py-1.5">
+							<Button type="button" variant="ghost" size="sm" onclick={pickForNew}>Change dishes</Button>
+							<Button type="button" variant="ghost" size="sm" class="text-ink-muted" onclick={() => (picked = null)}>Remove</Button>
+						</div>
+					</div>
+					<p class="mt-1.5 text-xs text-ink-muted">The kitchen gets it shortly before the table's time, or when the party is seated.</p>
+				{:else}
+					<button type="button" onclick={pickForNew} class="mt-1.5 flex w-full items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-left text-sm text-brand hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-brand">
+						<UtensilsIcon class="size-4" aria-hidden="true" />
+						<span>Add dishes <span class="text-ink-muted">for when they arrive</span></span>
+					</button>
+				{/if}
+			</section>
 		</form>
 		<Sheet.Footer>
-			<Button type="submit" form="newResForm" disabled={!nTime || !nVenue}>Book table</Button>
+			<Button type="submit" form="newResForm" disabled={!nTime || !nVenue}>{picked ? `Book table and pre-order ${peso(picked.totalCentavos)}` : 'Book table'}</Button>
 		</Sheet.Footer>
 	</Sheet.Content>
 </Sheet.Root>
+
+{#if data.canWrite}
+	<NewOrderSheet bind:open={pickOpen} {data} defaultVenueId={pickVenue} {pick} />
+	<PayDialog bind:open={payOpen} order={payFor} shiftOpen={data.shiftOpen} slug={page.params.hotel ?? ''} inHouse={data.inHouse} payAccounts={data.payAccounts} />
+{/if}

@@ -1,3 +1,14 @@
+<script lang="ts" module>
+	/** What the sheet hands back in pick-only mode (a reservation's pre-order): the lines to send, and
+	 *  a summary to show before anything is saved. */
+	export interface PickedDishes {
+		lines: { menuItemId: string; quantity: number; remarks?: string; addonIds: string[] }[];
+		remarks?: string;
+		summary: { name: string; quantity: number; lineTotalCentavos: number }[];
+		totalCentavos: number;
+	}
+</script>
+
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
@@ -25,15 +36,23 @@
 		data,
 		defaultVenueId = null,
 		defaultTableId = null,
-		onplaced
+		onplaced = () => {},
+		pick = null
 	}: {
 		open: boolean;
-		data: PageData;
+		/** The Orders board's data, or any page that loads the same menus (Reservations). */
+		data: Pick<PageData, 'menus' | 'vatRateBps'> & {
+			venues: { id: string; title: string }[];
+			tables: { id: string; venueId: string; name: string; seats: number }[];
+		};
+		/** Pick-only mode: no order is saved; the dishes go back to the caller. The venue is fixed to
+		 *  `defaultVenueId`. `keep` keeps the dishes picked last time ("Change dishes"). */
+		pick?: { title: string; keep: boolean; done: (picked: PickedDishes) => void } | null;
 		defaultVenueId?: string | null;
 		/** A table to start the order on (from the Floor); its venue wins over `defaultVenueId`. */
 		defaultTableId?: string | null;
 		/** Called after an order is saved. `payNow` means the cashier asked to take payment next. */
-		onplaced: (order: { id: string; code: string }, payNow: boolean) => void;
+		onplaced?: (order: { id: string; code: string }, payNow: boolean) => void;
 	} = $props();
 
 	const peso = (c: number) =>
@@ -83,10 +102,12 @@
 			orderType = 'dine_in';
 			tableId = startTable ? startTable.id : 'none';
 			guestName = '';
-			orderRemarks = '';
 			search = '';
 			category = 'all';
-			cart = [];
+			if (!pick?.keep) {
+				cart = [];
+				orderRemarks = '';
+			}
 			editing = null;
 			pane = 'menu';
 		});
@@ -190,6 +211,21 @@
 		})
 	);
 
+	function usePicked() {
+		if (!pick || cart.length === 0) return;
+		pick.done({
+			lines: JSON.parse(payload).lines,
+			remarks: orderRemarks.trim() || undefined,
+			summary: cart.map((l, i) => ({
+				name: l.addons.length ? `${l.item.name} (${l.addons.map((a) => a.name).join(', ')})` : l.item.name,
+				quantity: l.quantity,
+				lineTotalCentavos: priced[i]!.lineTotalCentavos
+			})),
+			totalCentavos: total
+		});
+		open = false;
+	}
+
 	let submitting = $state(false);
 	let payNowFlag = $state(false);
 	const venueLabel = $derived(data.venues.find((v) => v.id === venueId)?.title ?? 'Choose a venue');
@@ -200,8 +236,10 @@
 <Sheet.Root bind:open>
 	<Sheet.Content side="right" class="flex w-full flex-col gap-0 p-0 sm:max-w-4xl">
 		<Sheet.Header class="border-b border-border py-4 pr-14 pl-5">
-			<Sheet.Title>New order</Sheet.Title>
-			<Sheet.Description>Pick dishes, then review the order. Prices include VAT.</Sheet.Description>
+			<Sheet.Title>{pick ? pick.title : 'New order'}</Sheet.Title>
+			<Sheet.Description>
+				{pick ? 'Pick the dishes ordered ahead. Nothing is saved until the booking is.' : 'Pick dishes, then review the order.'} Prices include VAT.
+			</Sheet.Description>
 		</Sheet.Header>
 
 		{#if venuesWithMenu.length === 0}
@@ -227,7 +265,7 @@
 				<!-- Menu -->
 				<section class="min-h-0 flex-col border-border @2xl:flex @2xl:border-r {pane === 'menu' ? 'flex' : 'hidden'}" aria-label="Menu">
 					<div class="space-y-3 border-b border-border px-5 py-3">
-						{#if venuesWithMenu.length > 1}
+						{#if venuesWithMenu.length > 1 && !pick}
 							<Select.Root type="single" value={venueId} onValueChange={changeVenue}>
 								<Select.Trigger class="w-full" aria-label="Venue">{venueLabel}</Select.Trigger>
 								<Select.Content>
@@ -335,7 +373,7 @@
 
 				<!-- Cart -->
 				<aside class="min-h-0 flex-col @2xl:flex {pane === 'cart' ? 'flex' : 'hidden'}" aria-label="This order">
-					<div class="space-y-3 border-b border-border px-5 py-3">
+					<div class="space-y-3 border-b border-border px-5 py-3 {pick ? 'hidden' : ''}">
 						<ToggleGroup.Root type="single" bind:value={orderType} variant="outline" class="w-full">
 							<ToggleGroup.Item value="dine_in" class="flex-1">Dine-in</ToggleGroup.Item>
 							<ToggleGroup.Item value="takeaway" class="flex-1">Takeaway</ToggleGroup.Item>
@@ -375,6 +413,16 @@
 						{/each}
 					</ul>
 
+					{#if pick}
+						<div class="space-y-3 border-t border-border px-5 py-4">
+							<Textarea bind:value={orderRemarks} rows={2} maxlength={500} placeholder="Note for the kitchen (optional)" aria-label="Order note" class="min-h-0" />
+							<div class="flex items-baseline justify-between">
+								<span class="text-sm text-ink-muted">{itemCount} {itemCount === 1 ? 'item' : 'items'}, VAT included</span>
+								<span class="text-xl font-semibold tabular-nums text-ink">{peso(total)}</span>
+							</div>
+							<Button type="button" class="w-full" disabled={cart.length === 0} onclick={usePicked}>Use these dishes</Button>
+						</div>
+					{:else}
 					<form
 						method="POST"
 						action="?/create"
@@ -406,6 +454,7 @@
 							<Button type="submit" disabled={cart.length === 0 || submitting} onclick={() => (payNowFlag = true)}>Place &amp; pay</Button>
 						</div>
 					</form>
+					{/if}
 				</aside>
 			</div>
 			</div>

@@ -25,10 +25,11 @@
 		payAccounts
 	}: {
 		open: boolean;
-		order: PageData['orders'][number] | null;
+		/** An order on the board, or a reservation's pre-order (the fields this dialog reads). */
+		order: Pick<PageData['orders'][number], 'id' | 'code' | 'tableLabel' | 'guestName' | 'totalCentavos' | 'vatCentavos'> | null;
 		shiftOpen: boolean;
 		slug: string;
-		inHouse: PageData['inHouse'];
+		inHouse: Pick<PageData['inHouse'][number], 'bookingId' | 'roomNumber' | 'guestName' | 'bookingCode'>[];
 		/** Account each card / e-wallet payment posts to (Finance settings → Dining payment accounts). */
 		payAccounts: Record<'card' | 'gcash' | 'maya', string | null>;
 	} = $props();
