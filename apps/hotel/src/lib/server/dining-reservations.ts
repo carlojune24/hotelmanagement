@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { randomInt } from 'node:crypto';
 import { db } from './db/index';
 import {
@@ -17,6 +17,8 @@ import {
 import { writeAudit } from './audit';
 import { OrderError, createDiningOrder, ensureOpenCheck, type OrderLineInput } from './dining-orders';
 import type { SessionUser } from './auth/session';
+import { heldForReservation } from './dining-hold';
+import { groupByStation, type StationState } from '../dining-orders';
 import {
 	HOLDING_STATUSES,
 	availableSlots,
@@ -573,52 +575,96 @@ export async function reassignReservationTables(args: {
 	});
 }
 
-/** A reservation's pre-orders as the guest may see them on their ticket (never other guests'). */
-export interface GuestPreOrderView {
+/** One order of a sitting as the guest may see it on their ticket (never other guests'). */
+export interface GuestSittingOrder {
+	/** Ordered ahead with the booking, or added at the table once seated. */
+	kind: 'pre_order' | 'table';
 	code: string;
 	accessToken: string;
 	status: string;
 	paymentStatus: string;
 	totalCentavos: number;
 	items: { name: string; quantity: number }[];
+	/** Where each station is with it (Kitchen cooking, Bar ready), while it is being made. */
+	stations: { label: string; state: StationState }[];
+	/** A pre-order the kitchen does not see yet (`dining-hold.ts`). */
+	held: boolean;
+	/** Pre-orders: when the kitchen starts it, the venue's prep time before the table. */
+	kitchenStartsAtIso: string | null;
 	/** Cancelled after being paid: the venue still owes the guest a refund. */
 	refundDue: boolean;
 }
 
-export async function listPreOrdersForReservation(hotelId: string, reservationId: string): Promise<GuestPreOrderView[]> {
+/**
+ * Everything ordered for one reservation: its pre-orders, and the orders on the table's check once the
+ * party is seated (added at the table by staff or by QR). For the guest's ticket tracker.
+ */
+export async function listSittingOrders(hotelId: string, reservationId: string): Promise<GuestSittingOrder[]> {
+	const [r] = await db
+		.select({ startsAt: diningReservations.startsAt, prepMinutes: diningItems.prepMinutes })
+		.from(diningReservations)
+		.innerJoin(diningItems, eq(diningItems.id, diningReservations.diningItemId))
+		.where(and(eq(diningReservations.id, reservationId), eq(diningReservations.hotelId, hotelId)))
+		.limit(1);
+	if (!r) return [];
+	const checkIds = (
+		await db.select({ id: diningTableChecks.id }).from(diningTableChecks).where(eq(diningTableChecks.reservationId, reservationId))
+	).map((c) => c.id);
 	const orders = await db
 		.select({
 			id: diningOrders.id,
 			code: diningOrders.code,
 			accessToken: diningOrders.accessToken,
+			orderType: diningOrders.orderType,
 			status: diningOrders.status,
 			paymentStatus: diningOrders.paymentStatus,
-			total: diningOrders.totalCentavos
+			total: diningOrders.totalCentavos,
+			held: sql<boolean>`${heldForReservation}`
 		})
 		.from(diningOrders)
 		.where(
 			and(
 				eq(diningOrders.hotelId, hotelId),
-				eq(diningOrders.reservationId, reservationId),
-				eq(diningOrders.orderType, 'pre_order')
+				or(
+					and(eq(diningOrders.reservationId, reservationId), eq(diningOrders.orderType, 'pre_order')),
+					checkIds.length ? inArray(diningOrders.checkId, checkIds) : undefined
+				)
 			)
 		)
 		.orderBy(asc(diningOrders.createdAt));
-	if (orders.length === 0) return [];
+	// A table's orders that never reached the kitchen (QR still waiting, online not paid) are not news to the guest.
+	const shown = orders.filter((o) => o.status !== 'pending_acceptance' || o.orderType === 'pre_order');
+	if (shown.length === 0) return [];
 	const items = await db
-		.select({ orderId: diningOrderItems.orderId, name: diningOrderItems.name, quantity: diningOrderItems.quantity })
+		.select({
+			orderId: diningOrderItems.orderId,
+			name: diningOrderItems.name,
+			quantity: diningOrderItems.quantity,
+			stationName: diningOrderItems.stationName,
+			startedAt: diningOrderItems.startedAt,
+			readyAt: diningOrderItems.readyAt
+		})
 		.from(diningOrderItems)
-		.where(inArray(diningOrderItems.orderId, orders.map((o) => o.id)))
+		.where(inArray(diningOrderItems.orderId, shown.map((o) => o.id)))
 		.orderBy(asc(diningOrderItems.sortOrder));
-	return orders.map((o) => ({
-		code: o.code,
-		accessToken: o.accessToken,
-		status: o.status,
-		paymentStatus: o.paymentStatus,
-		totalCentavos: o.total,
-		items: items.filter((i) => i.orderId === o.id).map((i) => ({ name: i.name, quantity: i.quantity })),
-		refundDue: o.status === 'cancelled' && o.paymentStatus === 'paid'
-	}));
+	const kitchenStartsAt = new Date(r.startsAt.getTime() - r.prepMinutes * 60_000).toISOString();
+	return shown.map((o) => {
+		const mine = items.filter((i) => i.orderId === o.id);
+		const pre = o.orderType === 'pre_order';
+		return {
+			kind: pre ? 'pre_order' : 'table',
+			code: o.code,
+			accessToken: o.accessToken,
+			status: o.status,
+			paymentStatus: o.paymentStatus,
+			totalCentavos: o.total,
+			items: mine.map((i) => ({ name: i.name, quantity: i.quantity })),
+			stations: groupByStation(mine).map((g) => ({ label: g.label, state: g.state })),
+			held: !!o.held,
+			kitchenStartsAtIso: pre ? kitchenStartsAt : null,
+			refundDue: o.status === 'cancelled' && o.paymentStatus === 'paid'
+		};
+	});
 }
 
 export interface GuestReservationView {

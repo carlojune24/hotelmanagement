@@ -2,7 +2,7 @@ import { error, fail } from '@sveltejs/kit';
 import {
 	ReservationError,
 	getReservationForGuest,
-	listPreOrdersForReservation,
+	listSittingOrders,
 	setReservationStatus
 } from '$lib/server/dining-reservations';
 import { loadOnlineOrderingConfig } from '$lib/server/dining-online';
@@ -22,12 +22,15 @@ export const load: PageServerLoad = async ({ locals, params, url, depends }) => 
 		(reservation.status === 'confirmed' || reservation.status === 'pending') &&
 		reservation.startsAt.getTime() > Date.now() + ordering.prepMinutes * 60_000;
 
-	// What this booking has already ordered, so a guest who paid is not invited to order again.
-	const preOrders = await listPreOrdersForReservation(locals.hotel!.id, reservation.id);
+	// Everything ordered for this sitting (ahead, and at the table once seated), for the tracker.
+	const orders = await listSittingOrders(locals.hotel!.id, reservation.id);
 
 	return {
 		canPreOrder,
-		preOrders,
+		orders,
+		timezone: locals.hotel!.timezone,
+		/** When this was loaded, for the tracker's "updated" time. */
+		nowIso: new Date().toISOString(),
 		reservation: {
 			...reservation,
 			startsAt: reservation.startsAt.toISOString(),

@@ -14,6 +14,7 @@
 	import CalendarPlusIcon from '@lucide/svelte/icons/calendar-plus';
 	import PrinterIcon from '@lucide/svelte/icons/printer';
 	import PhoneIcon from '@lucide/svelte/icons/phone';
+	import EveningTracker from './evening-tracker.svelte';
 	import type { ActionData, PageData } from './$types';
 	const base = $derived(guestBase(page));
 
@@ -45,10 +46,11 @@
 		)
 	);
 
-	// Keep the page current while the reservation is still live (staff seating the party, etc.).
+	// Keep the tracker current while anything is still moving: the table, or food not yet served.
+	const live = $derived(!done || data.orders.some((o) => o.status !== 'served' && o.status !== 'cancelled'));
 	$effect(() => {
-		if (done) return;
-		const timer = setInterval(() => invalidate('app:dining-reservation'), 20_000);
+		if (!live) return;
+		const timer = setInterval(() => invalidate('app:dining-reservation'), 15_000);
 		return () => clearInterval(timer);
 	});
 
@@ -163,36 +165,16 @@
 			</div>
 		</div>
 
-		{#if data.preOrders.length > 0}
-			<section class="mt-6" aria-labelledby="preorder-h">
-				<h2 id="preorder-h" class="ledger-label border-b border-[var(--ledger-rule)] pb-2">Your pre-order</h2>
-				<ul class="divide-y divide-[var(--ledger-rule)]">
-					{#each data.preOrders as p (p.code)}
-						<li class="py-3">
-							<div class="flex flex-wrap items-baseline justify-between gap-2">
-								<span class="ledger-data text-sm">{p.code}</span>
-								<span class="ledger-data text-sm">₱{(p.totalCentavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-							</div>
-							<p class="text-sm text-[var(--ledger-ink-muted)]">{p.items.map((i) => `${i.quantity}× ${i.name}`).join(', ')}</p>
-							<p class="mt-1 text-sm">
-								{#if p.refundDue}
-									Cancelled. You paid for this, so the restaurant will send your refund.
-								{:else if p.status === 'cancelled'}
-									Cancelled. Nothing is due.
-								{:else if p.status === 'pending_payment'}
-									Waiting for payment. Open it to pay and secure your order.
-								{:else if p.paymentStatus === 'paid'}
-									Paid. The kitchen prepares it for your table time.
-								{:else}
-									Placed. Pay at the restaurant.
-								{/if}
-								<a class="underline underline-offset-2" href="{base}/dining/order/{p.code}?t={p.accessToken}">View order</a>
-							</p>
-						</li>
-					{/each}
-				</ul>
-			</section>
-		{/if}
+		<EveningTracker
+			status={r.status}
+			tableNames={r.tableNames}
+			startsAtIso={r.startsAt}
+			orders={data.orders}
+			timezone={data.timezone}
+			nowIso={data.nowIso}
+			orderHref={(o) => `${base}/dining/order/${o.code}?t=${o.accessToken}`}
+		/>
+
 
 		<div class="no-print mt-6 flex flex-wrap items-center gap-x-5 gap-y-2">
 			{#if r.status !== 'cancelled' && r.status !== 'no_show'}
@@ -205,7 +187,7 @@
 			</button>
 			{#if data.canPreOrder}
 				<a href="{base}/dining/order?venue={r.venueId}&reservation={r.code}&t={data.token}" class="ledger-btn-ghost inline-flex min-h-11 items-center gap-1.5 text-sm">
-					{data.preOrders.some((p) => p.status !== 'cancelled') ? 'Add another order' : 'Pre-order your meal'}
+					{data.orders.some((p) => p.kind === 'pre_order' && p.status !== 'cancelled') ? 'Add another order' : 'Pre-order your meal'}
 				</a>
 			{/if}
 			{#if data.canCancel}
