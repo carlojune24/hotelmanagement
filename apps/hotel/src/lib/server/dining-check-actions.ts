@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { requireCap } from './auth/rbac';
 import { recordId } from '../rate-validation';
 import { FinanceError } from './finance/shared';
-import { OrderError } from './dining-orders';
+import { OrderError, type DiningDiscountChoice } from './dining-orders';
 import { closeCheck, settleCheck } from './dining-checks';
 import { toPayDocuments } from '../print-batch';
 
@@ -15,6 +15,35 @@ import { toPayDocuments } from '../print-batch';
 
 const businessError = (e: unknown) => e instanceof OrderError || e instanceof FinanceError;
 const toCentavos = (php: number) => Math.round(php * 100);
+
+/** The discount fields `discount-fields.svelte` posts; spread into an action's form schema. */
+export const discountFields = {
+	discountKind: z.enum(['none', 'sc_pwd', 'staff']).default('none'),
+	diners: z.coerce.number().int().min(1).max(500).optional(),
+	// One per senior / PWD guest, as JSON [{ name, idNumber }] (the dialog builds the list).
+	claimants: z
+		.string()
+		.optional()
+		.transform((s, ctx) => {
+			try {
+				return z
+					.array(z.object({ name: z.string().max(160), idNumber: z.string().max(60) }))
+					.max(50)
+					.parse(s ? JSON.parse(s) : []);
+			} catch {
+				ctx.addIssue({ code: 'custom', message: 'bad claimants' });
+				return z.NEVER;
+			}
+		})
+};
+
+export function toDiscountChoice(d: {
+	discountKind: 'none' | 'sc_pwd' | 'staff';
+	claimants?: { name: string; idNumber: string }[];
+	diners?: number;
+}): DiningDiscountChoice | null {
+	return d.discountKind === 'none' ? null : { kind: d.discountKind, claimants: d.claimants, diners: d.diners };
+}
 
 export async function settleTableAction(event: RequestEvent) {
 	requireCap(event.locals.user, event.locals.role, 'dining:write');
@@ -30,27 +59,10 @@ export async function settleTableAction(event: RequestEvent) {
 			billToName: z.string().trim().max(160).optional(),
 			billToAddress: z.string().trim().max(300).optional(),
 			billToTin: z.string().trim().max(40).optional(),
-			discountKind: z.enum(['none', 'sc_pwd', 'staff']).default('none'),
-			diners: z.coerce.number().int().min(1).max(500).optional(),
-			// One per senior / PWD guest, as JSON [{ name, idNumber }] (the dialog builds the list).
-			claimants: z
-				.string()
-				.optional()
-				.transform((s, ctx) => {
-					try {
-						return z
-							.array(z.object({ name: z.string().max(160), idNumber: z.string().max(60) }))
-							.max(50)
-							.parse(s ? JSON.parse(s) : []);
-					} catch {
-						ctx.addIssue({ code: 'custom', message: 'bad claimants' });
-						return z.NEVER;
-					}
-				})
+			...discountFields
 		})
 		.safeParse(Object.fromEntries(await event.request.formData()));
 	if (!parsed.success) return fail(400, { error: 'Check the payment details.' });
-	const { discountKind } = parsed.data;
 	try {
 		const r = await settleCheck({
 			hotelId: event.locals.hotel!.id,
@@ -59,10 +71,7 @@ export async function settleTableAction(event: RequestEvent) {
 			tenderedCentavos: parsed.data.tendered != null ? toCentavos(parsed.data.tendered) : null,
 			referenceNo: parsed.data.referenceNo ?? null,
 			bookingId: parsed.data.bookingId ?? null,
-			discount:
-				discountKind === 'none'
-					? null
-					: { kind: discountKind, claimants: parsed.data.claimants, diners: parsed.data.diners },
+			discount: toDiscountChoice(parsed.data),
 			documents: toPayDocuments(parsed.data.documents),
 			billTo: { name: parsed.data.billToName, address: parsed.data.billToAddress, tin: parsed.data.billToTin },
 			actor: event.locals.user

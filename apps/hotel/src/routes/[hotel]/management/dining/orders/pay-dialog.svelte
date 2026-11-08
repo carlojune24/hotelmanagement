@@ -12,6 +12,7 @@
 	import BedDoubleIcon from '@lucide/svelte/icons/bed-double';
 	import DocumentChoice from './document-choice.svelte';
 	import DoneDocuments from './done-documents.svelte';
+	import DiscountFields from './discount-fields.svelte';
 	import type { DocumentChoice as DocChoice, IssuedDocument } from '$lib/print-batch';
 	import type { PageData } from './$types';
 
@@ -72,7 +73,9 @@
 	});
 	const chosen = $derived(inHouse.find((g) => g.bookingId === bookingId) ?? null);
 
-	const total = $derived(order?.totalCentavos ?? 0);
+	let discount = $state<{ net: number; less: number; label: string } | null>(null);
+	let discountReady = $state(true);
+	const total = $derived(discount?.net ?? order?.totalCentavos ?? 0);
 	const tenderedCentavos = $derived(Math.round((Number(tendered) || 0) * 100));
 	const change = $derived(Math.max(0, tenderedCentavos - total));
 	const shortBy = $derived(Math.max(0, total - tenderedCentavos));
@@ -89,7 +92,9 @@
 	const roomBlocked = $derived(method === 'room' && !chosen);
 	// Card and e-wallets need the slip's approval no. / the wallet's reference no., like room payments.
 	const needsReference = $derived(method === 'card' || method === 'gcash' || method === 'maya');
-	const refBlocked = $derived(needsReference && !referenceNo.trim());
+	const refBlocked = $derived((needsReference && !referenceNo.trim()) || (method !== 'room' && !discountReady));
+	// What was actually paid, for the done screen (`order` refreshes to the net total too, but later).
+	let paidTotal = $state(0);
 </script>
 
 <Dialog.Root bind:open>
@@ -110,7 +115,7 @@
 					<CircleCheckIcon class="mx-auto size-10 text-brand" aria-hidden="true" />
 					<div>
 						<Dialog.Title class="text-lg">Paid</Dialog.Title>
-						<p class="mt-1 text-sm text-ink-muted">{order.code} · {peso(order.totalCentavos)}</p>
+						<p class="mt-1 text-sm text-ink-muted">{order.code} · {peso(paidTotal)}</p>
 					</div>
 					{#if paid.changeCentavos > 0}
 						<div class="rounded-lg bg-surface-2 px-4 py-3">
@@ -136,8 +141,11 @@
 				</Dialog.Header>
 
 				<div class="rounded-lg bg-surface-2 px-4 py-3 text-center">
-					<p class="text-xs text-ink-muted">Amount due, VAT included</p>
+					<p class="text-xs text-ink-muted">Amount due</p>
 					<p class="text-3xl font-semibold tabular-nums text-ink">{peso(total)}</p>
+					{#if discount}
+						<p class="mt-1 text-xs text-ink-muted tabular-nums">{peso(order.totalCentavos)} less {peso(discount.less)} {discount.label}</p>
+					{/if}
 				</div>
 
 				<form
@@ -153,6 +161,7 @@
 								await invalidateAll();
 							} else if (result.type === 'success' && result.data?.paid) {
 								printNow = printAfter;
+								paidTotal = total;
 							paid = result.data.paid as { changeCentavos: number; documents: IssuedDocument[]; documentError: string | null };
 								await invalidateAll();
 							} else {
@@ -174,6 +183,8 @@
 						<input type="hidden" name="method" value={method} />
 						<input type="hidden" name="bookingId" value={bookingId} />
 					</div>
+
+					<DiscountFields orders={[order]} off={method === 'room'} bind:discount bind:ready={discountReady} />
 
 					{#if method === 'room'}
 						<div>

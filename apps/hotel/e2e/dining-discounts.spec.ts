@@ -87,7 +87,7 @@ test('managers set the dining discount rates, and Senior / PWD comes off only th
 	await expect(record, 'name, ID and diners are required for SC/PWD').toBeDisabled();
 	await dlg.getByLabel('Name', { exact: true }).fill('Lola Test');
 	await dlg.getByLabel('OSCA / PWD ID no.').fill('OSCA-0001');
-	await dlg.getByLabel('Diners at the table, in all').fill('4');
+	await dlg.getByLabel('Diners in all').fill('4');
 	await dlg.getByLabel('Reference no.').fill(ref);
 	await expect(record).toBeEnabled();
 	await record.click();

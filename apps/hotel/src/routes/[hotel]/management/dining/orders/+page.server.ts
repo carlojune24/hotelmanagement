@@ -31,7 +31,7 @@ import {
 	respondToDiningCancellation
 } from '$lib/server/dining-online';
 import { UploadValidationError, deleteUploadIfOwned, saveUpload } from '$lib/server/uploads';
-import { closeTableAction, settleTableAction } from '$lib/server/dining-check-actions';
+import { closeTableAction, discountFields, settleTableAction, toDiscountChoice } from '$lib/server/dining-check-actions';
 import { listOpenChecks } from '$lib/server/dining-checks';
 import { chargeDiningOrderToRoom, listInHouseGuests, undoDiningRoomCharge } from '$lib/server/dining-room-charge';
 import { DocumentError, issueDiningDocument, listDiningDocumentsForOrders } from '$lib/server/finance/documents';
@@ -342,7 +342,8 @@ export const actions: Actions = {
 				documents: z.enum(['or', 'invoice', 'bill', 'none']).default('or'),
 				billToName: z.string().trim().max(160).optional(),
 				billToAddress: z.string().trim().max(300).optional(),
-				billToTin: z.string().trim().max(40).optional()
+				billToTin: z.string().trim().max(40).optional(),
+				...discountFields
 			})
 			.safeParse({ ...raw, tenderedPhp: raw.tenderedPhp === '' ? undefined : raw.tenderedPhp });
 		if (!parsed.success) return fail(400, { error: 'Choose how the guest is paying.' });
@@ -354,6 +355,7 @@ export const actions: Actions = {
 				method: d.method,
 				tenderedCentavos: d.tenderedPhp != null ? toCentavos(d.tenderedPhp) : null,
 				referenceNo: d.referenceNo ?? null,
+				discount: toDiscountChoice(d),
 				documents: toPayDocuments(d.documents),
 				billTo: { name: d.billToName, address: d.billToAddress, tin: d.billToTin },
 				actor: event.locals.user
