@@ -7,7 +7,7 @@ import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { deleteUploadIfOwned, saveUpload, UploadValidationError } from '$lib/server/uploads';
 import { MAX_GALLERY_IMAGES } from '$lib/branding';
-import { diningConfigSchema, parseDiningConfig, mergeDiningConfigIntoConfig } from '$lib/server/dining';
+import { diningConfigSchema, diningDiscountRates, parseDiningConfig, mergeDiningConfigIntoConfig } from '$lib/server/dining';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -20,7 +20,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 		.where(eq(diningItems.hotelId, hotelId))
 		.orderBy(asc(diningItems.sortOrder), asc(diningItems.title));
 
-	return { items, dining: parseDiningConfig(locals.hotel!.config) };
+	return { items, dining: parseDiningConfig(locals.hotel!.config), discounts: diningDiscountRates(locals.hotel!.config) };
 };
 
 const createSchema = z.object({
@@ -39,7 +39,41 @@ const introSchema = diningConfigSchema.pick({
 	introBody: true
 });
 
+const pct = z.coerce.number().min(0).max(100);
+
 export const actions: Actions = {
+	updateDiscounts: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		const hotel = event.locals.hotel!;
+
+		const parsed = z
+			.object({ scPwdDiscountPct: pct, staffDiscountPct: pct })
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { error: 'Each discount must be a percentage from 0 to 100.' });
+
+		const before = diningDiscountRates(hotel.config);
+		const after = {
+			scPwdBps: Math.round(parsed.data.scPwdDiscountPct * 100),
+			staffBps: Math.round(parsed.data.staffDiscountPct * 100)
+		};
+		const nextConfig = mergeDiningConfigIntoConfig(hotel.config, {
+			...parseDiningConfig(hotel.config),
+			scPwdDiscountBps: after.scPwdBps,
+			staffDiscountBps: after.staffBps
+		});
+		await db.update(hotels).set({ config: nextConfig, updatedAt: new Date() }).where(eq(hotels.id, hotel.id));
+		await writeAudit({
+			hotelId: hotel.id,
+			actor: event.locals.user,
+			action: 'hotel.update_dining_discounts',
+			entityType: 'hotel',
+			entityId: hotel.id,
+			before,
+			after
+		});
+		return { ok: 'Discounts saved.' };
+	},
+
 	create: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
 		const hotelId = event.locals.hotel!.id;

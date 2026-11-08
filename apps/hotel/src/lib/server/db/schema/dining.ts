@@ -528,6 +528,21 @@ export const diningOrders = pgTable(
 		 *  room number at that moment (a snapshot, so the card still reads right after the guest moves). */
 		folioChargeId: uuid('folio_charge_id'),
 		roomLabel: text('room_label'),
+		// --- discount taken at settle (see `lib/dining-discount.ts`) ---
+		// `totalCentavos` / `vatCentavos` above are already net of it (they stay "what the guest pays");
+		// the pre-discount total is `total + discount + discountVatRemoved`.
+		/** 'sc_pwd' or 'staff'. Null when no discount. */
+		discountKind: text('discount_kind'),
+		/** Snapshot of the % used (basis points), so a later settings change never rewrites history. */
+		discountBps: integer('discount_bps'),
+		discountCentavos: bigint('discount_centavos', { mode: 'number' }).notNull().default(0),
+		/** SC/PWD only: the VAT on the qualifying share, removed because that share is VAT-exempt. */
+		discountVatRemovedCentavos: bigint('discount_vat_removed_centavos', { mode: 'number' }).notNull().default(0),
+		/** SC/PWD only: each qualifying guest's name and OSCA/PWD ID, and how many dined in all. */
+		discountClaimants: jsonb('discount_claimants').$type<{ name: string; idNumber: string }[]>(),
+		discountDiners: integer('discount_diners'),
+		/** `vatCentavos` before the discount, so voiding the payment restores it exactly. */
+		discountVatBeforeCentavos: bigint('discount_vat_before_centavos', { mode: 'number' }),
 		paidAt: timestamp('paid_at', { withTimezone: true }),
 		paidByUserId: uuid('paid_by_user_id').references(() => users.id, { onDelete: 'set null' }),
 		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),

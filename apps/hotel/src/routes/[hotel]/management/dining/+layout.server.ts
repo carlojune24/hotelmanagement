@@ -1,6 +1,7 @@
 import { roleCan } from '$lib/authz';
 import { requireCap } from '$lib/server/auth/rbac';
 import { listServiceAlerts } from '$lib/server/dining-orders';
+import { diningDiscountRates } from '$lib/server/dining';
 import { countUnreadDiningMessages } from '$lib/server/dining-messages';
 import type { LayoutServerLoad } from './$types';
 
@@ -28,6 +29,8 @@ export const load: LayoutServerLoad = async ({ locals, depends }) => {
 		/** Guest messages nobody has opened yet, shown as a badge on the Messages tab. */
 		unreadMessages,
 		/** Food the kitchen has finished and nobody has served yet, and QR orders to accept. */
-		alerts
+		alerts,
+		/** What the Settle dialog offers (Dining settings → Discounts). */
+		discountRates: diningDiscountRates(locals.hotel!.config)
 	};
 };

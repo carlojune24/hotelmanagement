@@ -37,6 +37,8 @@ import {
 } from './finance/documents';
 import type { BillTo, IssuedDocument, PayDocuments } from '../print-batch';
 import { venueBelongsToHotel } from './dining-menu';
+import { diningDiscountRates } from './dining';
+import { computeDiningDiscount, type DiningClaimant, type DiningDiscountKind, type DiningDiscountResult } from '../dining-discount';
 import { heldForReservation, releasedToKitchen } from './dining-hold';
 import { sendDiningOrderEmail } from './email/send-dining-order';
 import {
@@ -761,10 +763,35 @@ export async function countAwaitingAcceptance(hotelId: string, venueId?: string 
  * drawer shift for cash or the bank/e-wallet account otherwise, in the same transaction that
  * marks the order paid. Same accountability as Quick Sale: no open shift, no cash payment.
  */
+/** A discount the cashier gives at settle. `claimants` and `diners` are for `sc_pwd` only. */
+export interface DiningDiscountChoice {
+	kind: DiningDiscountKind;
+	claimants?: DiningClaimant[];
+	diners?: number;
+}
+
+/** Checks a discount choice against the hotel's rates and returns the % to use. Throws on a bad choice. */
+export function resolveDiningDiscount(hotelConfig: unknown, d: DiningDiscountChoice): { bps: number; claimants: DiningClaimant[]; diners: number } {
+	const rates = diningDiscountRates(hotelConfig);
+	const bps = d.kind === 'staff' ? rates.staffBps : rates.scPwdBps;
+	if (bps <= 0) throw new OrderError('That discount is turned off in Dining settings.');
+	if (d.kind === 'staff') return { bps, claimants: [], diners: 1 };
+	const claimants = (d.claimants ?? []).map((c) => ({ name: c.name.trim(), idNumber: c.idNumber.trim() }));
+	if (claimants.length === 0 || claimants.some((c) => !c.name || !c.idNumber)) {
+		throw new OrderError('Enter the name and OSCA / PWD ID of each senior or PWD guest.');
+	}
+	const diners = d.diners ?? claimants.length;
+	if (!Number.isInteger(diners) || diners < claimants.length) {
+		throw new OrderError('Diners at the table must be at least the number of senior / PWD guests.');
+	}
+	return { bps, claimants, diners };
+}
+
 export async function payDiningOrder(args: {
 	hotelId: string;
 	orderId: string;
 	method: PaymentMethod;
+	discount?: DiningDiscountChoice | null;
 	tenderedCentavos?: number | null;
 	/** Card approval no. / GCash or Maya reference no. Required for those methods. */
 	referenceNo?: string | null;
@@ -793,18 +820,23 @@ export async function payDiningOrder(args: {
 	if (order.paymentStatus === 'room_charged') throw new OrderError('This order is charged to a room bill. Take it off the bill first to pay it another way.');
 	if (order.paymentStatus !== 'unpaid') throw new OrderError('This order is already paid.');
 
-	const [hotel] = await db.select({ timezone: hotels.timezone }).from(hotels).where(eq(hotels.id, args.hotelId)).limit(1);
+	const [hotel] = await db.select({ timezone: hotels.timezone, config: hotels.config }).from(hotels).where(eq(hotels.id, args.hotelId)).limit(1);
 	if (!hotel) throw new OrderError('Hotel not found.');
 	const businessDate = businessDateFor(hotel.timezone);
+
+	const discount = args.discount ? { kind: args.discount.kind, ...resolveDiningDiscount(hotel.config, args.discount) } : null;
+	const discounted = (o: { totalCentavos: number; vatCentavos: number }): DiningDiscountResult | null =>
+		discount ? computeDiningDiscount(o, discount.kind, discount.bps, discount.claimants.length, discount.diners) : null;
+	const due = discounted(order)?.netCentavos ?? order.totalCentavos;
 
 	let tendered: number | null = null;
 	let change = 0;
 	if (args.method === 'cash') {
-		if (!Number.isInteger(args.tenderedCentavos) || (args.tenderedCentavos ?? 0) < order.totalCentavos) {
+		if (!Number.isInteger(args.tenderedCentavos) || (args.tenderedCentavos ?? 0) < due) {
 			throw new FinanceError('Cash tendered must cover the total.');
 		}
 		tendered = args.tenderedCentavos!;
-		change = changeFor(tendered, order.totalCentavos);
+		change = changeFor(tendered, due);
 	}
 	// Card and e-wallet payments carry the slip's approval no. / the wallet's reference no., like room payments.
 	const needsRef = args.method === 'card' || args.method === 'gcash' || args.method === 'maya';
@@ -824,6 +856,11 @@ export async function payDiningOrder(args: {
 		const locked = await loadOrderForUpdate(tx, args.hotelId, args.orderId);
 		if (locked.paymentStatus !== 'unpaid') throw new OrderError('This order is already paid.');
 		if (locked.status === 'cancelled') throw new OrderError('A cancelled order cannot be paid.');
+		// An unpaid order is always at full price; a discount still on it means a path forgot to restore it.
+		if (locked.discountKind) throw new OrderError('This order still carries an earlier discount. Void its payment properly first.');
+		const d = discounted(locked);
+		const amountCentavos = d?.netCentavos ?? locked.totalCentavos;
+		if (tendered != null && tendered < amountCentavos) throw new FinanceError('Cash tendered must cover the total.');
 
 		const movementId = await recordCashMovement(
 			{
@@ -832,7 +869,7 @@ export async function payDiningOrder(args: {
 				direction: 'in',
 				category: 'dining_revenue',
 				cashAccountId,
-				amountCentavos: locked.totalCentavos,
+				amountCentavos,
 				counterpartyType: locked.guestName ? 'guest' : null,
 				counterpartyName: locked.guestName,
 				sourceType: 'dining_order',
@@ -858,7 +895,20 @@ export async function payDiningOrder(args: {
 				cashMovementId: movementId,
 				paidAt: new Date(),
 				paidByUserId: args.actor?.id ?? null,
-				updatedAt: new Date()
+				updatedAt: new Date(),
+				...(d && discount
+					? {
+							totalCentavos: d.netCentavos,
+							vatCentavos: d.netVatCentavos,
+							discountVatBeforeCentavos: locked.vatCentavos,
+							discountKind: discount.kind,
+							discountBps: discount.bps,
+							discountCentavos: d.discountCentavos,
+							discountVatRemovedCentavos: d.vatRemovedCentavos,
+							discountClaimants: discount.kind === 'sc_pwd' ? discount.claimants : null,
+							discountDiners: discount.kind === 'sc_pwd' ? discount.diners : null
+						}
+					: {})
 			})
 			.where(eq(diningOrders.id, locked.id));
 
@@ -873,7 +923,18 @@ export async function payDiningOrder(args: {
 			after: {
 				code: locked.code,
 				orderId: locked.id,
-				totalCentavos: locked.totalCentavos,
+				totalCentavos: amountCentavos,
+				...(d && discount
+					? {
+							grossCentavos: locked.totalCentavos,
+							discountKind: discount.kind,
+							discountBps: discount.bps,
+							discountCentavos: d.discountCentavos,
+							discountVatRemovedCentavos: d.vatRemovedCentavos,
+							discountClaimants: discount.claimants,
+							discountDiners: discount.diners
+						}
+					: {}),
 				method: args.method,
 				referenceNo: referenceNo || null,
 				tenderedCentavos: tendered,
@@ -909,7 +970,7 @@ export async function payDiningOrder(args: {
 	}
 
 	return {
-		totalCentavos: order.totalCentavos,
+		totalCentavos: due,
 		changeCentavos: change,
 		receiptId: documents.find((d) => d.type === 'official_receipt')?.id ?? null,
 		documents,
@@ -967,6 +1028,16 @@ export async function voidDiningOrderPayment(args: {
 			paidAt: null,
 			paidByUserId: null,
 			businessDate: null,
+			// A discount was given with the payment, so it goes with it: back to the full price.
+			totalCentavos: order.totalCentavos + order.discountCentavos + order.discountVatRemovedCentavos,
+			vatCentavos: order.discountVatBeforeCentavos ?? order.vatCentavos,
+			discountVatBeforeCentavos: null,
+			discountKind: null,
+			discountBps: null,
+			discountCentavos: 0,
+			discountVatRemovedCentavos: 0,
+			discountClaimants: null,
+			discountDiners: null,
 			updatedAt: new Date()
 		})
 		.where(eq(diningOrders.id, order.id));
@@ -1323,6 +1394,21 @@ export async function diningSalesReport(
 	if (n(fees?.gross) > 0) {
 		byItem.set('Delivery fee', { quantity: n(fees?.orders), grossCentavos: n(fees?.gross) });
 		byStation.set('Delivery fee', { quantity: n(fees?.orders), grossCentavos: n(fees?.gross) });
+	}
+	// Dishes are at full price, so discounts given at settle get their own (negative) station line, so
+	// By station still adds up to the day's sales. Not in Top dishes: that list is cut at 25.
+	const discounts = await db
+		.select({
+			kind: diningOrders.discountKind,
+			orders: sql<number>`count(*)`,
+			less: sql<number>`coalesce(sum(${diningOrders.discountCentavos} + ${diningOrders.discountVatRemovedCentavos}), 0)`
+		})
+		.from(diningOrders)
+		.where(and(where, sql`${diningOrders.discountKind} is not null`))
+		.groupBy(diningOrders.discountKind);
+	for (const d of discounts) {
+		const label = d.kind === 'staff' ? 'Less: Staff discount' : 'Less: Senior / PWD discount and VAT';
+		byStation.set(label, { quantity: n(d.orders), grossCentavos: -n(d.less) });
 	}
 	for (const r of itemRows) {
 		const i = byItem.get(r.name) ?? { quantity: 0, grossCentavos: 0 };

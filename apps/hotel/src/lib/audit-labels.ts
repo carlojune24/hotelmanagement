@@ -90,6 +90,7 @@ export const ACTION_LABELS: Record<string, string> = {
 	'dining_order.accept': 'Order accepted',
 	'dining_order.decline': 'Order declined',
 	'dining_order.paid': 'Payment taken at the cashier',
+	'hotel.update_dining_discounts': 'Dining discount rates changed',
 	'dining_order.void_payment': 'Payment voided',
 	'dining_order.paymongo_paid': 'Online payment confirmed (PayMongo)',
 	'dining_order.payment_failed': 'Online payment attempt failed',
@@ -246,6 +247,9 @@ export function detailOf(action: string, before: Json, after: Json): { detail: s
 			if (method(str(after.method))) bits.push(`by ${method(str(after.method))}`);
 			if (num(after.tenderedCentavos) != null) bits.push(`tendered ${peso(num(after.tenderedCentavos)!)}`);
 			if ((num(after.changeCentavos) ?? 0) > 0) bits.push(`change ${peso(num(after.changeCentavos)!)}`);
+			if ((num(after.discountCentavos) ?? 0) + (num(after.discountVatRemovedCentavos) ?? 0) > 0) {
+				bits.push(`${str(after.discountKind) === 'staff' ? 'staff' : 'senior / PWD'} discount ${peso((num(after.discountCentavos) ?? 0) + (num(after.discountVatRemovedCentavos) ?? 0))}`);
+			}
 			amount = num(after.totalCentavos);
 			break;
 		case 'dining_order.void_payment': {

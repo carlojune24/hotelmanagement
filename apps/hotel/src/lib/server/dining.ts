@@ -21,8 +21,18 @@ export const diningConfigSchema = z.object({
 	 *  block if unset. */
 	introEyebrow: z.string().max(60).optional(),
 	introHeading: z.string().max(160).optional(),
-	introBody: z.string().max(2000).optional()
+	introBody: z.string().max(2000).optional(),
+	/** Discount % (basis points) the cashier can give at settle. Set by admins / managers in Dining settings. */
+	scPwdDiscountBps: z.number().int().min(0).max(10000).optional(),
+	/** Unset or 0 hides the Staff discount at settle. */
+	staffDiscountBps: z.number().int().min(0).max(10000).optional()
 });
+
+/** SC/PWD defaults to the legal 20%; staff is off until a manager sets it. */
+export function diningDiscountRates(config: unknown): { scPwdBps: number; staffBps: number } {
+	const d = parseDiningConfig(config);
+	return { scPwdBps: d.scPwdDiscountBps ?? 2000, staffBps: d.staffDiscountBps ?? 0 };
+}
 
 export type DiningConfig = z.infer<typeof diningConfigSchema>;
 

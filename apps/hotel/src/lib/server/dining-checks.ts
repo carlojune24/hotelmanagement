@@ -15,7 +15,8 @@ import { writeAudit } from './audit';
 import type { SessionUser } from './auth/session';
 import type { PaymentMethod } from './finance/payments';
 import { chargeDiningOrderToRoom } from './dining-room-charge';
-import { OrderError, cancelDiningOrder, payDiningOrder } from './dining-orders';
+import { OrderError, cancelDiningOrder, payDiningOrder, resolveDiningDiscount, type DiningDiscountChoice } from './dining-orders';
+import { computeDiningDiscount } from '../dining-discount';
 import { loadHolds } from './dining-reservations';
 import { HOLDING_STATUSES, localParts, zonedToUtc } from '../dining-slots';
 import { checkStage, summarizeCheck, type CheckOrderLite, type CheckSummary } from '../dining-checks';
@@ -36,6 +37,7 @@ export interface OpenCheck extends CheckSummary {
 		id: string;
 		code: string;
 		source: string;
+		vatCentavos: number;
 		/** Where each station is with this order, for the table panel on the Floor. */
 		stations: { label: string; state: StationState }[];
 	})[];
@@ -73,7 +75,9 @@ export async function listOpenChecks(hotelId: string, venueId?: string | null): 
 			source: diningOrders.source,
 			status: diningOrders.status,
 			paymentStatus: diningOrders.paymentStatus,
-			totalCentavos: diningOrders.totalCentavos
+			totalCentavos: diningOrders.totalCentavos,
+			/** For the Settle dialog's discount preview. */
+			vatCentavos: diningOrders.vatCentavos
 		})
 		.from(diningOrders)
 		.where(inArray(diningOrders.checkId, checks.map((c) => c.id)))
@@ -138,6 +142,8 @@ export async function settleCheck(args: {
 	/** Card approval no. / GCash or Maya reference no.; one slip covers the whole table. */
 	referenceNo?: string | null;
 	bookingId?: string | null;
+	/** Taken off every unpaid order on the check; not for a room charge. */
+	discount?: DiningDiscountChoice | null;
 	/** What to issue for each order paid; see `payDiningOrder`. A room charge issues nothing. */
 	documents?: PayDocuments;
 	billTo?: BillTo;
@@ -157,7 +163,17 @@ export async function settleCheck(args: {
 		throw new OrderError('An order on this table is still waiting to be accepted. Accept or decline it first.');
 	}
 	const unpaid = orders.filter((o) => o.status !== 'cancelled' && o.paymentStatus === 'unpaid');
-	const owed = unpaid.reduce((s, o) => s + o.totalCentavos, 0);
+	if (args.discount && args.method === 'room') {
+		throw new OrderError('A discount can\'t go on a room charge. Take payment here, or apply it on the room bill.');
+	}
+	let dueOf = (o: DiningOrder) => o.totalCentavos;
+	if (args.discount) {
+		const [h] = await db.select({ config: hotels.config }).from(hotels).where(eq(hotels.id, args.hotelId)).limit(1);
+		const r = resolveDiningDiscount(h?.config, args.discount);
+		const kind = args.discount.kind;
+		dueOf = (o) => computeDiningDiscount(o, kind, r.bps, r.claimants.length, r.diners).netCentavos;
+	}
+	const owed = unpaid.reduce((s, o) => s + dueOf(o), 0);
 
 	if (unpaid.length > 0) {
 		if (args.method === 'cash' && (!Number.isInteger(args.tenderedCentavos) || (args.tenderedCentavos ?? 0) < owed)) {
@@ -178,7 +194,8 @@ export async function settleCheck(args: {
 				orderId: o.id,
 				method: args.method,
 				// The change is worked out for the table as a whole; each order is tendered exactly.
-				tenderedCentavos: args.method === 'cash' ? o.totalCentavos : null,
+				tenderedCentavos: args.method === 'cash' ? dueOf(o) : null,
+				discount: args.discount ?? null,
 				referenceNo: args.referenceNo,
 				documents: args.documents,
 				billTo: args.billTo,
@@ -207,6 +224,7 @@ export async function settleCheck(args: {
 				tenderedCentavos: args.method === 'cash' ? (args.tenderedCentavos ?? null) : null,
 				changeCentavos,
 				bookingId: args.method === 'room' ? (args.bookingId ?? null) : null,
+				discountKind: args.discount?.kind ?? null,
 				documents: documents.map((d) => d.formattedNo),
 				documentError: documentErrors[0] ?? null
 			}

@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
+	import { page } from '$app/state';
+	import { computeDiningDiscount, type DiningDiscountKind } from '$lib/dining-discount';
 	import { invalidateAll } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
@@ -49,6 +51,9 @@
 	let docChoice = $state<DocChoice>('or');
 	let printAfter = $state(true);
 	let printNow = $state(false);
+	let discountKind = $state<'none' | DiningDiscountKind>('none');
+	let claimants = $state<{ name: string; idNumber: string }[]>([{ name: '', idNumber: '' }]);
+	let diners = $state('');
 
 	// Only `open` is tracked: the floor plan refreshes `check` every few seconds, and that must
 	// not wipe the amount the cashier is typing.
@@ -63,11 +68,34 @@
 			bookingId = '';
 			submitting = false;
 			done = null;
+			discountKind = 'none';
+			claimants = [{ name: '', idNumber: '' }];
+			diners = '';
 		});
 	});
 
 	const unpaid = $derived(check?.orders.filter((o) => o.status !== 'cancelled' && o.status !== 'pending_acceptance' && o.paymentStatus === 'unpaid') ?? []);
-	const total = $derived(check?.unpaidCentavos ?? 0);
+	const rates = $derived((page.data as { discountRates?: { scPwdBps: number; staffBps: number } }).discountRates ?? { scPwdBps: 0, staffBps: 0 });
+	const pct = (bps: number) => `${bps / 100}%`;
+	// A room charge goes on the guest's room bill, where the hotel's own SC/PWD claim applies.
+	const kind = $derived(method === 'room' || !discountKind ? 'none' : discountKind);
+	const dinersN = $derived(Math.floor(Number(diners)) || 0);
+	const scPwdReady = $derived(
+		claimants.every((c) => c.name.trim() && c.idNumber.trim()) && dinersN >= claimants.length
+	);
+	// Per order then summed, exactly like the server, so the cash check agrees to the centavo.
+	const discounted = $derived.by(() => {
+		if (kind === 'none' || (kind === 'sc_pwd' && dinersN < claimants.length)) return null;
+		const bps = kind === 'staff' ? rates.staffBps : rates.scPwdBps;
+		return unpaid.reduce(
+			(s, o) => {
+				const r = computeDiningDiscount(o, kind, bps, claimants.length, Math.max(dinersN, 1));
+				return { less: s.less + r.discountCentavos + r.vatRemovedCentavos, net: s.net + r.netCentavos };
+			},
+			{ less: 0, net: 0 }
+		);
+	});
+	const total = $derived(discounted?.net ?? check?.unpaidCentavos ?? 0);
 	const tenderedCentavos = $derived(Math.round((Number(tendered) || 0) * 100));
 	const change = $derived(Math.max(0, tenderedCentavos - total));
 	const shortBy = $derived(Math.max(0, total - tenderedCentavos));
@@ -93,6 +121,7 @@
 			(method === 'room' && !chosen) ||
 			// Card and e-wallets need the slip's approval no. / the wallet's reference no., like room payments.
 			((method === 'card' || method === 'gcash' || method === 'maya') && !referenceNo.trim()) ||
+			(kind === 'sc_pwd' && !scPwdReady) ||
 			unpaid.length === 0
 	);
 	// Settling frees the table only if everything has also been served.
@@ -146,8 +175,14 @@
 				</ul>
 
 				<div class="rounded-lg bg-surface-2 px-4 py-3 text-center">
-					<p class="text-xs text-ink-muted">Amount due, VAT included</p>
-					<p class="text-3xl font-semibold tabular-nums text-ink">{peso(total)}</p>
+					<p class="text-xs text-ink-muted">Amount due{kind === 'sc_pwd' ? '' : ', VAT included'}</p>
+					<p class="text-3xl font-semibold tabular-nums text-ink" data-amount-due>{peso(total)}</p>
+					{#if discounted}
+						<p class="mt-1 text-xs text-ink-muted tabular-nums">
+							{peso(check.unpaidCentavos)} less {peso(discounted.less)}
+							{kind === 'sc_pwd' ? 'senior / PWD discount and VAT' : 'staff discount'}
+						</p>
+					{/if}
 				</div>
 
 				<form
@@ -181,6 +216,52 @@
 						<input type="hidden" name="method" value={method} />
 						<input type="hidden" name="bookingId" value={bookingId} />
 					</div>
+
+					<input type="hidden" name="discountKind" value={kind} />
+					{#if method !== 'room'}
+						<div>
+							<Label class="text-xs">Discount</Label>
+							<ToggleGroup.Root type="single" bind:value={discountKind} variant="outline" class="mt-1 w-full">
+								<ToggleGroup.Item value="none" class="flex-1">None</ToggleGroup.Item>
+								{#if rates.scPwdBps > 0}
+									<ToggleGroup.Item value="sc_pwd" class="flex-1">Senior / PWD {pct(rates.scPwdBps)}</ToggleGroup.Item>
+								{/if}
+								{#if rates.staffBps > 0}
+									<ToggleGroup.Item value="staff" class="flex-1">Staff {pct(rates.staffBps)}</ToggleGroup.Item>
+								{/if}
+							</ToggleGroup.Root>
+						</div>
+					{/if}
+
+					{#if kind === 'sc_pwd'}
+						<fieldset class="space-y-2 rounded-lg border border-border p-3">
+							<legend class="px-1 text-xs text-ink-muted">Senior / PWD guests</legend>
+							<input type="hidden" name="claimants" value={JSON.stringify(claimants)} />
+							{#each claimants as c, i (i)}
+								<div class="flex items-end gap-2">
+									<div class="min-w-0 flex-1">
+										<Label for="claimantName{i}" class="text-xs">Name</Label>
+										<Input id="claimantName{i}" bind:value={c.name} maxlength={160} autocomplete="off" class="mt-1" />
+									</div>
+									<div class="min-w-0 flex-1">
+										<Label for="claimantId{i}" class="text-xs">OSCA / PWD ID no.</Label>
+										<Input id="claimantId{i}" bind:value={c.idNumber} maxlength={60} autocomplete="off" class="mt-1" />
+									</div>
+									{#if claimants.length > 1}
+										<Button type="button" variant="ghost" size="sm" aria-label="Remove guest {i + 1}" onclick={() => (claimants = claimants.filter((_, j) => j !== i))}>Remove</Button>
+									{/if}
+								</div>
+							{/each}
+							<Button type="button" variant="outline" size="sm" onclick={() => (claimants = [...claimants, { name: '', idNumber: '' }])}>Add another guest</Button>
+							<div>
+								<Label for="settleDiners" class="text-xs">Diners at the table, in all</Label>
+								<Input id="settleDiners" name="diners" type="number" inputmode="numeric" min={claimants.length} step="1" bind:value={diners} class="mt-1 w-28 tabular-nums" />
+								<p class="mt-1 text-xs text-ink-muted">
+									Only their share ({claimants.length} of {dinersN || '?'}) is VAT-exempt and gets {pct(rates.scPwdBps)} off.
+								</p>
+							</div>
+						</fieldset>
+					{/if}
 
 					{#if method === 'room'}
 						<div>

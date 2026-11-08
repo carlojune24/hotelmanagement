@@ -1044,10 +1044,34 @@ export async function buildDiningSnapshot(
 			vatable: true
 		});
 	}
-	const vatableGross = items.filter((i) => i.taxable).reduce((sum, i) => sum + i.lineTotalCentavos, 0) + deliveryFee;
+	let vatableGross = items.filter((i) => i.taxable).reduce((sum, i) => sum + i.lineTotalCentavos, 0) + deliveryFee;
 	const exemptGross = items.filter((i) => !i.taxable).reduce((sum, i) => sum + i.lineTotalCentavos, 0);
-	const vat = itemsVat + (deliveryFee > 0 ? Math.max(0, order.vatCentavos - itemsVat) : 0);
+	let vat = itemsVat + (deliveryFee > 0 ? Math.max(0, order.vatCentavos - itemsVat) : 0);
 	const gross = order.totalCentavos;
+
+	// A discount given at settle (lib/dining-discount.ts): the lines above are at full price, so the
+	// discount prints as "Less:" lines and the sales split is worked out on what is left. For SC/PWD
+	// only the qualifying share stops being VAT-able; the rest of the table stays VAT-able.
+	if (order.discountKind) {
+		const before = gross + order.discountCentavos + order.discountVatRemovedCentavos;
+		const p = `${(order.discountBps ?? 0) / 100}%`;
+		if (order.discountKind === 'sc_pwd') {
+			const who = (order.discountClaimants ?? []).map((c) => `${c.name} (ID ${c.idNumber})`).join(', ');
+			const n = order.discountClaimants?.length ?? 1;
+			const m = order.discountDiners ?? n;
+			lines.push(
+				{ description: `Less: VAT exempt, senior / PWD share (${n} of ${m} diners)`, quantity: 1, unitPriceCentavos: -order.discountVatRemovedCentavos, amountCentavos: -order.discountVatRemovedCentavos, vatable: false },
+				{ description: `Less: Senior / PWD discount ${p}: ${who}`, quantity: 1, unitPriceCentavos: -order.discountCentavos, amountCentavos: -order.discountCentavos, vatable: false }
+			);
+			vatableGross = Math.round((vatableGross * (m - n)) / m);
+		} else {
+			lines.push({ description: `Less: Staff discount ${p}`, quantity: 1, unitPriceCentavos: -order.discountCentavos, amountCentavos: -order.discountCentavos, vatable: true });
+			vatableGross = before > 0 ? Math.round((vatableGross * gross) / before) : 0;
+		}
+		vat = order.vatCentavos;
+	}
+	const vatableSales = vatableGross - vat;
+	const exemptSales = order.discountKind ? gross - vat - vatableSales : exemptGross;
 	const paid = order.paymentStatus === 'paid';
 	const isInvoice = type === 'invoice';
 
@@ -1076,8 +1100,8 @@ export async function buildDiningSnapshot(
 		},
 		lines,
 		totals: {
-			vatableSalesCentavos: vatableGross - vat,
-			vatExemptSalesCentavos: exemptGross,
+			vatableSalesCentavos: vatableSales,
+			vatExemptSalesCentavos: exemptSales,
 			zeroRatedSalesCentavos: 0,
 			vatCentavos: vat,
 			grossCentavos: gross,

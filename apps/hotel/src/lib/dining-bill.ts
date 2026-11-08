@@ -12,6 +12,11 @@ export interface BillOrderInput {
 	vatCentavos: number;
 	/** A delivery fee inside `totalCentavos`; shown as its own line so the bill adds up. */
 	deliveryFeeCentavos?: number;
+	/** A discount given at settle; `totalCentavos` is already net of it, so it prints as "Less:" lines. */
+	discountKind?: string | null;
+	discountBps?: number | null;
+	discountCentavos?: number;
+	discountVatRemovedCentavos?: number;
 	items: {
 		name: string;
 		quantity: number;
@@ -54,6 +59,14 @@ export const isSettled = (o: { paymentStatus: string }) => o.paymentStatus === '
 /** `Pad Thai (extra egg, no peanuts)` */
 export const describeItem = (name: string, addons: string[]) => (addons.length > 0 ? `${name} (${addons.join(', ')})` : name);
 
+function discountLines(o: BillOrderInput): BillLine[] {
+	if (!o.discountKind) return [];
+	const less = (description: string, c: number): BillLine => ({ orderCode: o.code, description, quantity: 1, unitPriceCentavos: -c, lineTotalCentavos: -c });
+	const p = `${(o.discountBps ?? 0) / 100}%`;
+	if (o.discountKind === 'staff') return [less(`Less: Staff discount ${p}`, o.discountCentavos ?? 0)];
+	return [less('Less: VAT exempt (senior / PWD share)', o.discountVatRemovedCentavos ?? 0), less(`Less: Senior / PWD discount ${p}`, o.discountCentavos ?? 0)];
+}
+
 export function buildBill(orders: BillOrderInput[]): BillTotals {
 	const live = orders.filter(isBillable);
 	const lines: BillLine[] = live.flatMap((o) => [
@@ -74,7 +87,8 @@ export function buildBill(orders: BillOrderInput[]): BillTotals {
 						lineTotalCentavos: o.deliveryFeeCentavos!
 					}
 				]
-			: [])
+			: []),
+		...discountLines(o)
 	]);
 	const total = live.reduce((s, o) => s + o.totalCentavos, 0);
 	const paid = live.filter(isSettled).reduce((s, o) => s + o.totalCentavos, 0);

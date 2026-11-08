@@ -3,6 +3,7 @@ import { db } from '../db/index';
 import {
 	bookings,
 	cashMovements,
+	diningOrders,
 	documents,
 	folios,
 	hotels,
@@ -19,6 +20,46 @@ import { writeAudit } from '../audit';
 import { inputVatOf } from './calc';
 import { daySnapshot } from './dayclose';
 import { getBirSettings } from './documents';
+import { computeDiningDiscount } from '../../dining-discount';
+
+/**
+ * Senior / PWD discounts given at the dining cashier that day (`lib/dining-discount.ts`). Dining money
+ * is already in the day's gross (as `dining_revenue`) at the discounted amount; this says how much of
+ * it was a VAT-exempt SC/PWD sale, and the discount and VAT removed, for the slip. The exempt part is
+ * recomputed from the snapshot on the order, so it matches what was charged to the centavo.
+ */
+async function diningScPwd(hotelId: string, businessDate: string) {
+	const rows = await db
+		.select({
+			total: diningOrders.totalCentavos,
+			discount: diningOrders.discountCentavos,
+			vatRemoved: diningOrders.discountVatRemovedCentavos,
+			vatBefore: diningOrders.discountVatBeforeCentavos,
+			bps: diningOrders.discountBps,
+			claimants: diningOrders.discountClaimants,
+			diners: diningOrders.discountDiners
+		})
+		.from(diningOrders)
+		.where(
+			and(
+				eq(diningOrders.hotelId, hotelId),
+				eq(diningOrders.businessDate, businessDate),
+				eq(diningOrders.paymentStatus, 'paid'),
+				eq(diningOrders.discountKind, 'sc_pwd')
+			)
+		);
+	let exempt = 0;
+	let discount = 0;
+	let vatRemoved = 0;
+	for (const r of rows) {
+		const n = r.claimants?.length ?? 1;
+		const before = { totalCentavos: r.total + r.discount + r.vatRemoved, vatCentavos: r.vatBefore ?? r.vatRemoved };
+		exempt += computeDiningDiscount(before, 'sc_pwd', r.bps ?? 0, n, r.diners ?? n).vatExemptCentavos;
+		discount += r.discount;
+		vatRemoved += r.vatRemoved;
+	}
+	return { exempt, discount, vatRemoved };
+}
 
 /** The computed figures on an X- or Z-reading — same shape for both; a Z also
  *  carries the counter and grand-total accumulation from its stored row. */
@@ -217,7 +258,8 @@ export async function computeReadingData(hotelId: string, businessDate: string):
 	const netSales = gross - refundAmount;
 	// SC/PWD sales are VAT-exempt, so VAT is worked out only on the rest. A hotel that is not VAT
 	// registered reports everything as exempt, as before.
-	const scPwdExempt = isVat ? await scPwdExemptCentavos(hotelId, businessDate) : 0;
+	const dining = await diningScPwd(hotelId, businessDate);
+	const scPwdExempt = isVat ? (await scPwdExemptCentavos(hotelId, businessDate)) + dining.exempt : 0;
 	const vatableGross = isVat ? netSales - scPwdExempt : 0;
 	const vat = isVat ? inputVatOf(vatableGross, hotel?.vatRateBps ?? 0) : 0;
 	const vatable = isVat ? vatableGross - vat : 0;
@@ -292,8 +334,8 @@ export async function computeReadingData(hotelId: string, businessDate: string):
 				sql`${scPwdDiscounts.appliedAt} >= ${businessDate}::date and ${scPwdDiscounts.appliedAt} < (${businessDate}::date + 1)`
 			)
 		);
-	const scPwd = scPwdRow?.sum ?? 0;
-	const scPwdVatRemoved = scPwdRow?.vatRemoved ?? 0;
+	const scPwd = (scPwdRow?.sum ?? 0) + dining.discount;
+	const scPwdVatRemoved = (scPwdRow?.vatRemoved ?? 0) + dining.vatRemoved;
 	const otherDisc = 0;
 	const scPwdCreditOwed = await scPwdCreditOwedCentavos(hotelId);
 

@@ -29,10 +29,28 @@ export async function settleTableAction(event: RequestEvent) {
 			documents: z.enum(['or', 'invoice', 'bill', 'none']).default('or'),
 			billToName: z.string().trim().max(160).optional(),
 			billToAddress: z.string().trim().max(300).optional(),
-			billToTin: z.string().trim().max(40).optional()
+			billToTin: z.string().trim().max(40).optional(),
+			discountKind: z.enum(['none', 'sc_pwd', 'staff']).default('none'),
+			diners: z.coerce.number().int().min(1).max(500).optional(),
+			// One per senior / PWD guest, as JSON [{ name, idNumber }] (the dialog builds the list).
+			claimants: z
+				.string()
+				.optional()
+				.transform((s, ctx) => {
+					try {
+						return z
+							.array(z.object({ name: z.string().max(160), idNumber: z.string().max(60) }))
+							.max(50)
+							.parse(s ? JSON.parse(s) : []);
+					} catch {
+						ctx.addIssue({ code: 'custom', message: 'bad claimants' });
+						return z.NEVER;
+					}
+				})
 		})
 		.safeParse(Object.fromEntries(await event.request.formData()));
 	if (!parsed.success) return fail(400, { error: 'Check the payment details.' });
+	const { discountKind } = parsed.data;
 	try {
 		const r = await settleCheck({
 			hotelId: event.locals.hotel!.id,
@@ -41,6 +59,10 @@ export async function settleTableAction(event: RequestEvent) {
 			tenderedCentavos: parsed.data.tendered != null ? toCentavos(parsed.data.tendered) : null,
 			referenceNo: parsed.data.referenceNo ?? null,
 			bookingId: parsed.data.bookingId ?? null,
+			discount:
+				discountKind === 'none'
+					? null
+					: { kind: discountKind, claimants: parsed.data.claimants, diners: parsed.data.diners },
 			documents: toPayDocuments(parsed.data.documents),
 			billTo: { name: parsed.data.billToName, address: parsed.data.billToAddress, tin: parsed.data.billToTin },
 			actor: event.locals.user

@@ -66,6 +66,27 @@
 		</form>
 	</div>
 
+	<div class="mt-8 rounded-xl border border-border bg-surface p-4 shadow-sm">
+		<h2 class="text-base font-semibold text-ink">Discounts</h2>
+		<p class="text-sm text-ink-muted">
+			What the cashier can take off when settling a table. Senior / PWD applies only to the qualifying
+			guests' share and makes that share VAT-exempt. Set Staff to 0 to hide it.
+		</p>
+		<form method="POST" action="?/updateDiscounts" use:enhance class="mt-4 space-y-3">
+			<div class="grid gap-3 sm:grid-cols-2">
+				<div>
+					<Label for="scPwdDiscountPct">Senior Citizen / PWD discount (%)</Label>
+					<Input id="scPwdDiscountPct" name="scPwdDiscountPct" type="number" inputmode="decimal" min="0" max="100" step="0.01" required value={data.discounts.scPwdBps / 100} class="mt-1 tabular-nums" />
+				</div>
+				<div>
+					<Label for="staffDiscountPct">Staff discount (%)</Label>
+					<Input id="staffDiscountPct" name="staffDiscountPct" type="number" inputmode="decimal" min="0" max="100" step="0.01" required value={data.discounts.staffBps / 100} class="mt-1 tabular-nums" />
+				</div>
+			</div>
+			<Button type="submit" size="sm">Save discounts</Button>
+		</form>
+	</div>
+
 	<div class="mt-8 flex items-center justify-between gap-4">
 		<div>
 			<h2 class="text-base font-semibold text-ink">Venues</h2>
