@@ -17,6 +17,7 @@
 	let {
 		orders,
 		off = false,
+		only = null,
 		discount = $bindable(null),
 		ready = $bindable(true)
 	}: {
@@ -24,6 +25,8 @@
 		orders: { totalCentavos: number; vatCentavos: number }[];
 		/** True for a room charge: the discount goes on the room bill there, not here. */
 		off?: boolean;
+		/** Offer only this discount, already picked (Senior / PWD after payment). */
+		only?: DiningDiscountKind | null;
 		/** Out: the discounted amount and what came off, or null when no discount applies. */
 		discount?: { net: number; less: number; label: string } | null;
 		/** Out: false while an SC/PWD discount is missing a name, an ID or the diner count. */
@@ -33,7 +36,8 @@
 	const rates = $derived((page.data as { discountRates?: { scPwdBps: number; staffBps: number } }).discountRates ?? { scPwdBps: 0, staffBps: 0 });
 	const pct = (bps: number) => `${bps / 100}%`;
 
-	let picked = $state<'none' | DiningDiscountKind>('none');
+	// svelte-ignore state_referenced_locally
+	let picked = $state<'none' | DiningDiscountKind>(only ?? 'none');
 	type Claimant = { type: 'senior_citizen' | 'pwd'; name: string; idNumber: string };
 	const blank = (): Claimant => ({ type: 'senior_citizen', name: '', idNumber: '' });
 	let claimants = $state<Claimant[]>([blank()]);
@@ -63,7 +67,7 @@
 </script>
 
 <input type="hidden" name="discountKind" value={kind} />
-{#if !off && (rates.scPwdBps > 0 || rates.staffBps > 0)}
+{#if !off && !only && (rates.scPwdBps > 0 || rates.staffBps > 0)}
 	<div>
 		<Label class="text-xs">Discount</Label>
 		<ToggleGroup.Root type="single" bind:value={picked} variant="outline" class="mt-1 w-full">

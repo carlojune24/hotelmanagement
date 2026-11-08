@@ -30,7 +30,7 @@ import {
 	respondToDiningCancellation
 } from '$lib/server/dining-online';
 import { UploadValidationError, deleteUploadIfOwned, saveUpload } from '$lib/server/uploads';
-import { chargeRoomAction, closeTableAction, payOrderAction, settleTableAction } from '$lib/server/dining-check-actions';
+import { chargeRoomAction, closeTableAction, discountAfterPaymentAction, payOrderAction, settleTableAction } from '$lib/server/dining-check-actions';
 import { listOpenChecks } from '$lib/server/dining-checks';
 import { listInHouseGuests, undoDiningRoomCharge } from '$lib/server/dining-room-charge';
 import { DocumentError, issueDiningDocument, listDiningDocumentsForOrders } from '$lib/server/finance/documents';
@@ -326,6 +326,7 @@ export const actions: Actions = {
 
 
 	pay: payOrderAction,
+	discountAfterPayment: discountAfterPaymentAction,
 
 	voidPayment: async (event) => {
 		const { user, role } = event.locals;

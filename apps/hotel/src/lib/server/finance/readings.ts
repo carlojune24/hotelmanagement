@@ -43,7 +43,8 @@ async function diningScPwd(hotelId: string, businessDate: string) {
 		.where(
 			and(
 				eq(diningOrders.hotelId, hotelId),
-				eq(diningOrders.businessDate, businessDate),
+				// Dated by the day the discount was given: after payment, that's the day of its refund.
+				sql`coalesce(${diningOrders.discountBusinessDate}, ${diningOrders.businessDate}) = ${businessDate}::date`,
 				eq(diningOrders.paymentStatus, 'paid'),
 				eq(diningOrders.discountKind, 'sc_pwd')
 			)

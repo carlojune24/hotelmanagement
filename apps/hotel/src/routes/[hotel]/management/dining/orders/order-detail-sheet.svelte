@@ -1,5 +1,6 @@
 <script lang="ts">
 	import * as Sheet from '$lib/components/ui/sheet/index.js';
+	import { Button } from '$lib/components/ui/button/index.js';
 	import { ORDER_STATUS_LABEL, ORDER_TYPE_LABEL } from '$lib/dining-orders';
 	import OrderCard from './order-card.svelte';
 	import type { ComponentProps } from 'svelte';
@@ -28,6 +29,8 @@
 		timezone: string;
 		canWrite: boolean;
 		canVoid: boolean;
+		/** Senior / PWD on a paid order, the difference refunded (managers: the `canVoid` rule). */
+		onscpwd?: (o: Order) => void;
 	} & Handlers = $props();
 
 	// Every action opens its own dialog or sheet, so leave this one first rather than stacking modals.
@@ -68,6 +71,13 @@
 					onrespond={leave(handlers.onrespond)}
 					onundoroom={leave(handlers.onundoroom)}
 				/>
+				{#if canVoid && handlers.onscpwd && order.paymentStatus === 'paid' && !order.discountKind}
+					<div class="mt-4 rounded-lg border border-border px-4 py-3">
+						<p class="text-sm text-ink">Senior or PWD guest showed their ID after paying?</p>
+						<p class="mt-0.5 text-xs text-ink-muted">Their share is discounted and the difference refunded. The receipt is issued again.</p>
+						<Button variant="outline" size="sm" class="mt-2" onclick={leave(() => handlers.onscpwd!(order))}>Apply Senior / PWD</Button>
+					</div>
+				{/if}
 			{:else}
 				<p class="text-sm text-ink-muted">This order is no longer on the board.</p>
 			{/if}

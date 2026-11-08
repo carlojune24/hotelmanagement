@@ -548,6 +548,10 @@ export async function buildDiningTrail(
 	for (const p of payments) {
 		const orderId = p.orderId;
 		const common = { orderId, amount: p.amountCentavos };
+		if (p.kind === 'discount_refund') {
+			record(`pay.discount_refund:${p.id}`, p.paidAt ?? p.createdAt, staff(p.createdByUserId), 'Senior / PWD discount after payment, difference refunded', [method(p.method) ? `via ${method(p.method)}` : null, p.referenceNo ? `ref ${p.referenceNo}` : null].filter(Boolean).join(' · '), common);
+			continue;
+		}
 		if (p.kind === 'refund') {
 			record(`pay.refund:${p.id}`, p.paidAt ?? p.createdAt, staff(p.createdByUserId), 'Refund recorded', [method(p.method) ? `via ${method(p.method)}` : null, p.referenceNo ? `ref ${p.referenceNo}` : null, p.note].filter(Boolean).join(' · '), common);
 			continue;

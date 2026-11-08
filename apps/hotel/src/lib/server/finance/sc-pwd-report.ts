@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/index';
 import { bookings, diningOrders, documents, hotels, scPwdDiscounts, users } from '../db/schema/index';
 import { computeDiningDiscount } from '../../dining-discount';
@@ -29,6 +29,8 @@ export interface ScPwdTrailRow {
 	givenBy: string | null;
 	/** Set on a hotel claim that was undone; such a row counts in no total. */
 	reversedOn: string | null;
+	/** A dining discount given after the bill was paid: what was handed back. Null when given at payment. */
+	refundedAfterPaymentCentavos: number | null;
 }
 
 export interface ScPwdPeriodRow {
@@ -125,16 +127,20 @@ async function hotelRows(hotelId: string, from: string, to: string): Promise<ScP
 		discountCentavos: r.discount,
 		receipts: receipts.get(r.orderId) ?? [],
 		givenBy: r.by,
-		reversedOn: r.reversedOn
+		reversedOn: r.reversedOn,
+		refundedAfterPaymentCentavos: null
 	}));
 }
 
 async function diningRows(hotelId: string, from: string, to: string): Promise<ScPwdTrailRow[]> {
+	// The day the discount was given: the payment day, or later when it came after payment (and its refund).
+	const day = sql<string>`coalesce(${diningOrders.discountBusinessDate}, ${diningOrders.businessDate})::text`;
 	const rows = await db
 		.select({
 			id: diningOrders.id,
 			code: diningOrders.code,
-			date: diningOrders.businessDate,
+			date: day,
+			after: diningOrders.discountBusinessDate,
 			total: diningOrders.totalCentavos,
 			vatBefore: diningOrders.discountVatBeforeCentavos,
 			bps: diningOrders.discountBps,
@@ -151,8 +157,7 @@ async function diningRows(hotelId: string, from: string, to: string): Promise<Sc
 				eq(diningOrders.hotelId, hotelId),
 				eq(diningOrders.discountKind, 'sc_pwd'),
 				eq(diningOrders.paymentStatus, 'paid'),
-				gte(diningOrders.businessDate, from),
-				lte(diningOrders.businessDate, to)
+				sql`${day}::date between ${from}::date and ${to}::date`
 			)
 		)
 		.orderBy(asc(diningOrders.paidAt));
@@ -174,7 +179,8 @@ async function diningRows(hotelId: string, from: string, to: string): Promise<Sc
 			discountCentavos: r.discount,
 			receipts: receipts.get(r.id) ?? [],
 			givenBy: r.by,
-			reversedOn: null
+			reversedOn: null,
+			refundedAfterPaymentCentavos: r.after ? r.discount + r.vat : null
 		};
 	});
 }

@@ -17,9 +17,10 @@ import type { SessionUser } from './auth/session';
 import { FinanceError, businessDateFor } from './finance/shared';
 import { recordCashMovement } from './finance/cash';
 import { diningDrawerId, resolvePaymentAccount } from './finance/payments';
-import { getBirSettings, issueDiningDocument } from './finance/documents';
+import { cancelDocument, getBirSettings, issueDiningDocument, listDiningOrderDocuments } from './finance/documents';
+import { computeDiningDiscount, type DiningClaimant } from '../dining-discount';
 import { getPaymongoClient, isOnlinePaymentEnabled } from './paymongo/client';
-import { createDiningOrder, OrderError, type OrderLineInput } from './dining-orders';
+import { createDiningOrder, OrderError, resolveDiningDiscount, type OrderLineInput } from './dining-orders';
 import { heldForReservation } from './dining-hold';
 import { attachPreOrdersToCheck } from './dining-reservations';
 import { sendDiningOrderEmail } from './email/send-dining-order';
@@ -1015,28 +1016,9 @@ export async function recordDiningRefund(args: {
 	const refundable = order.totalCentavos - alreadyRefunded;
 	if (args.amountCentavos > refundable) throw new OrderError(`At most ${peso(refundable)} can still be refunded on this order.`);
 
-	// Where the money leaves from: the drawer for cash (needs an open shift), otherwise the account it came into.
 	const [hotel] = await db.select({ timezone: hotels.timezone }).from(hotels).where(eq(hotels.id, args.hotelId)).limit(1);
 	const businessDate = businessDateFor(hotel?.timezone ?? 'Asia/Manila');
-	let cashAccountId: string;
-	let shiftId: string | null = null;
-	if (args.method === 'cash') {
-		// Out of the till that took the money, not whichever drawer dining points at today —
-		// otherwise an order paid before the dining drawer existed refunds from a till that
-		// never held its cash. Dining's drawer only stands in when the order carries none.
-		const paidInto = order.paymentMethod === 'cash' ? order.cashAccountId : null;
-		const acct = await resolvePaymentAccount(
-			args.hotelId,
-			'cash',
-			paidInto ?? (await diningDrawerId(args.hotelId))
-		);
-		cashAccountId = acct.cashAccountId;
-		shiftId = acct.shiftId;
-	} else if (order.cashAccountId && order.paymentMethod !== 'cash') {
-		cashAccountId = order.cashAccountId;
-	} else {
-		cashAccountId = (await resolvePaymentAccount(args.hotelId, 'card', null, 'dining')).cashAccountId;
-	}
+	const { cashAccountId, shiftId } = await refundAccountFor(args.hotelId, order, args.method);
 
 	const result = await db.transaction(async (tx) => {
 		const [locked] = await tx.select().from(diningOrders).where(eq(diningOrders.id, order.id)).for('update');
@@ -1113,6 +1095,176 @@ export async function recordDiningRefund(args: {
 		return { full, refundId: row!.id };
 	});
 	return { refundedCentavos: alreadyRefunded + args.amountCentavos, fullyRefunded: result.full };
+}
+
+/** Where refunded money leaves from: the drawer for cash (needs an open shift), otherwise the account it came into. */
+async function refundAccountFor(
+	hotelId: string,
+	order: { paymentMethod: string | null; cashAccountId: string | null },
+	method: RefundMethod
+): Promise<{ cashAccountId: string; shiftId: string | null }> {
+	if (method === 'cash') {
+		// Out of the till that took the money, not whichever drawer dining points at today —
+		// otherwise an order paid before the dining drawer existed refunds from a till that
+		// never held its cash. Dining's drawer only stands in when the order carries none.
+		const paidInto = order.paymentMethod === 'cash' ? order.cashAccountId : null;
+		const acct = await resolvePaymentAccount(hotelId, 'cash', paidInto ?? (await diningDrawerId(hotelId)));
+		return { cashAccountId: acct.cashAccountId, shiftId: acct.shiftId };
+	}
+	if (order.cashAccountId && order.paymentMethod !== 'cash') return { cashAccountId: order.cashAccountId, shiftId: null };
+	return { cashAccountId: (await resolvePaymentAccount(hotelId, 'card', null, 'dining')).cashAccountId, shiftId: null };
+}
+
+/**
+ * A Senior Citizen / PWD discount on an order that was already paid in full (a table pre-order paid
+ * ahead, online or at the desk; or any paid order whose guest shows their ID late). The order is
+ * re-priced exactly as at the till (`computeDiningDiscount`), the difference goes back to the guest as
+ * a refund (cash movement out, category `refund`, from where the money came in), and the issued
+ * receipt / invoice is cancelled and issued again at the discounted price. Managers only (the action
+ * checks). The discount is dated today (`discount_business_date`), the day of its refund.
+ */
+export async function applyDiscountAfterPayment(args: {
+	hotelId: string;
+	orderId: string;
+	claimants: DiningClaimant[];
+	diners: number;
+	method: RefundMethod;
+	referenceNo?: string | null;
+	actor: Actor;
+}): Promise<{ refundCentavos: number; netCentavos: number; documents: string[]; documentError: string | null }> {
+	if (!(REFUND_METHODS as readonly string[]).includes(args.method)) throw new OrderError('Choose how the difference goes back.');
+	const [hotel] = await db.select({ timezone: hotels.timezone, config: hotels.config }).from(hotels).where(eq(hotels.id, args.hotelId)).limit(1);
+	if (!hotel) throw new OrderError('Hotel not found.');
+	const rule = resolveDiningDiscount(hotel.config, { kind: 'sc_pwd', claimants: args.claimants, diners: args.diners });
+
+	const [order] = await db.select().from(diningOrders).where(and(eq(diningOrders.id, args.orderId), eq(diningOrders.hotelId, args.hotelId))).limit(1);
+	if (!order) throw new OrderError('That order could not be found.');
+	const check = (o: typeof order) => {
+		if (o.status === 'cancelled') throw new OrderError('A cancelled order cannot be discounted.');
+		if (o.paymentStatus !== 'paid') throw new OrderError('Only a paid order can be discounted this way. Give the discount when taking payment.');
+		if (o.discountKind) throw new OrderError('This order already has a discount.');
+	};
+	check(order);
+	const [refunded] = await db.select({ id: diningPayments.id }).from(diningPayments).where(and(eq(diningPayments.orderId, order.id), eq(diningPayments.kind, 'refund'))).limit(1);
+	if (refunded) throw new OrderError('This order already had a refund, so it can\'t be re-priced. Record any further correction as a refund.');
+
+	const businessDate = businessDateFor(hotel.timezone);
+	const { cashAccountId, shiftId } = await refundAccountFor(args.hotelId, order, args.method);
+	const referenceNo = args.referenceNo?.trim() || null;
+
+	const done = await db.transaction(async (tx) => {
+		const [locked] = await tx.select().from(diningOrders).where(eq(diningOrders.id, order.id)).for('update');
+		check(locked!);
+		const d = computeDiningDiscount(locked!, 'sc_pwd', rule.bps, rule.claimants.length, rule.diners);
+		const refundCentavos = locked!.totalCentavos - d.netCentavos;
+		if (refundCentavos <= 0) throw new OrderError('There is nothing to take off this order.');
+
+		await tx
+			.update(diningOrders)
+			.set({
+				totalCentavos: d.netCentavos,
+				vatCentavos: d.netVatCentavos,
+				discountKind: 'sc_pwd',
+				discountBps: rule.bps,
+				discountCentavos: d.discountCentavos,
+				discountVatRemovedCentavos: d.vatRemovedCentavos,
+				discountVatBeforeCentavos: locked!.vatCentavos,
+				discountClaimants: rule.claimants,
+				discountDiners: rule.diners,
+				discountBusinessDate: businessDate,
+				updatedAt: new Date()
+			})
+			.where(eq(diningOrders.id, order.id));
+
+		const [row] = await tx
+			.insert(diningPayments)
+			.values({
+				hotelId: args.hotelId,
+				orderId: order.id,
+				// Its own kind: the order total is already net of it, so the usual refund limits
+				// ("at most the total minus what was refunded") must not count it a second time.
+				kind: 'discount_refund',
+				status: 'paid',
+				provider: 'manual',
+				method: args.method,
+				amountCentavos: refundCentavos,
+				referenceNo,
+				note: 'Senior / PWD discount after payment',
+				createdByUserId: args.actor?.id ?? null,
+				paidAt: new Date()
+			})
+			.returning({ id: diningPayments.id });
+		const movementId = await recordCashMovement(
+			{
+				hotelId: args.hotelId,
+				businessDate,
+				direction: 'out',
+				category: 'refund',
+				cashAccountId,
+				amountCentavos: refundCentavos,
+				counterpartyType: 'guest',
+				counterpartyName: order.guestName,
+				sourceType: 'dining_refund',
+				sourceId: row!.id,
+				shiftId,
+				memo: `Dining ${order.code}: SC/PWD discount after payment, refund via ${METHOD_LABEL[args.method]}${referenceNo ? ` (ref ${referenceNo})` : ''}`,
+				actor: args.actor
+			},
+			tx
+		);
+		await tx.update(diningPayments).set({ cashMovementId: movementId }).where(eq(diningPayments.id, row!.id));
+		await tx.insert(diningOrderMessages).values({
+			hotelId: args.hotelId,
+			orderId: order.id,
+			direction: 'staff',
+			authorUserId: args.actor?.id ?? null,
+			body: `Your Senior / PWD discount is applied. We have sent back ${peso(refundCentavos)} via ${METHOD_LABEL[args.method]}${referenceNo ? ` (reference ${referenceNo})` : ''}.`
+		});
+		await writeAudit({
+			tx,
+			hotelId: args.hotelId,
+			actor: args.actor,
+			action: 'dining_order.discount_after_payment',
+			entityType: 'dining_order',
+			entityId: order.id,
+			refCode: order.code,
+			before: { totalCentavos: locked!.totalCentavos, vatCentavos: locked!.vatCentavos },
+			after: {
+				orderId: order.id,
+				totalCentavos: d.netCentavos,
+				discountKind: 'sc_pwd',
+				discountBps: rule.bps,
+				discountCentavos: d.discountCentavos,
+				discountVatRemovedCentavos: d.vatRemovedCentavos,
+				discountClaimants: rule.claimants,
+				discountDiners: rule.diners,
+				refundId: row!.id,
+				cashMovementId: movementId,
+				amountCentavos: refundCentavos,
+				method: args.method,
+				referenceNo
+			}
+		});
+		return { refundCentavos, netCentavos: d.netCentavos };
+	});
+
+	// The receipt in force said the full price: cancel it (serial kept, BIR) and issue it again at the
+	// discounted price, which prints the "Less: Senior / PWD" lines. The refund stands either way.
+	const issued = await listDiningOrderDocuments(args.hotelId, order.id).catch(() => []);
+	const reissued: string[] = [];
+	let documentError: string | null = null;
+	for (const type of ['invoice', 'official_receipt'] as const) {
+		const old = issued.find((x) => x.type === type);
+		if (!old) continue;
+		try {
+			await cancelDocument(args.hotelId, old.id, 'Re-issued: Senior / PWD discount given after payment', args.actor);
+			reissued.push((await issueDiningDocument(args.hotelId, order.id, type, args.actor)).formattedNo);
+		} catch (e) {
+			console.warn('applyDiscountAfterPayment: could not re-issue', type, order.id, e);
+			documentError = e instanceof Error ? e.message : 'The receipt could not be issued again.';
+		}
+	}
+	return { ...done, documents: reissued, documentError };
 }
 
 // Re-exported so the webhook and pages share one place for the finance error type.

@@ -17,6 +17,7 @@
 	import NewOrderSheet from './new-order-sheet.svelte';
 	import PayDialog from './pay-dialog.svelte';
 	import OrderDetailSheet from './order-detail-sheet.svelte';
+	import DiscountAfterPaymentDialog from './discount-after-payment-dialog.svelte';
 	import SummaryTiles from './summary-tiles.svelte';
 	import ReadyCard from './ready-card.svelte';
 	import QueueCard from './queue-card.svelte';
@@ -164,6 +165,8 @@
 	let declineFor = $state<Order | null>(null);
 	let dispatchFor = $state<Order | null>(null);
 	let settleOpen = $state(false);
+	let scPwdOpen = $state(false);
+	let scPwdFor = $state<(typeof data.orders)[number] | null>(null);
 	let settleFor = $state<(typeof data.openChecks)[number] | null>(null);
 	let voidFor = $state<Order | null>(null);
 	let invoiceFor = $state<Order | null>(null);
@@ -513,7 +516,9 @@
 	ontalk={(o) => { threadOrderId = o.id; threadOpen = true; }}
 	onrespond={(o) => (respondFor = o)}
 	onundoroom={(o) => (undoRoomFor = o)}
+	onscpwd={(o) => { scPwdFor = o; scPwdOpen = true; }}
 />
+<DiscountAfterPaymentDialog bind:open={scPwdOpen} order={scPwdFor} />
 
 <NewOrderSheet bind:open={newOpen} {data} defaultVenueId={data.venueId} defaultTableId={newTable} onplaced={placed} />
 <PayDialog bind:open={payOpen} order={payOrder} shiftOpen={data.shiftOpen} {slug} inHouse={data.inHouse} payAccounts={data.payAccounts} />

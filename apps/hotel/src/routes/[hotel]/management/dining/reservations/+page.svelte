@@ -23,6 +23,7 @@
 	import { RESERVATION_TRANSITIONS } from '$lib/dining-slots';
 	import NewOrderSheet, { type PickedDishes } from '../orders/new-order-sheet.svelte';
 	import PayDialog from '../orders/pay-dialog.svelte';
+	import DiscountAfterPaymentDialog from '../orders/discount-after-payment-dialog.svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -86,6 +87,9 @@
 	let pick = $state<{ title: string; keep: boolean; done: (p: PickedDishes) => void } | null>(null);
 	let payOpen = $state(false);
 	let payFor = $state<{ id: string; code: string; tableLabel: string | null; guestName: string | null; totalCentavos: number; vatCentavos: number } | null>(null);
+
+	let scPwdOpen = $state(false);
+	let scPwdFor = $state<{ id: string; code: string; guestName: string | null; totalCentavos: number; vatCentavos: number } | null>(null);
 
 	function takePayment(o: NonNullable<typeof payFor>) {
 		payFor = o;
@@ -268,6 +272,9 @@
 										{#if r.preOrder.kitchen}· <span class="font-semibold {r.preOrder.kitchen === 'cooking' ? 'text-warning' : 'text-ok'}">{r.preOrder.kitchen}</span>{/if}
 										{#if data.canWrite && r.preOrder.unpaid.length > 0}
 											<Button size="sm" variant="outline" class="ml-1 h-6 px-2 text-xs" onclick={() => takePayment(r.preOrder!.unpaid[0]!)}>Take payment</Button>
+										{/if}
+										{#if data.canManage && r.preOrder.discountable.length > 0 && (r.status === 'pending' || r.status === 'confirmed' || r.status === 'seated')}
+											<Button size="sm" variant="outline" class="ml-1 h-6 px-2 text-xs" onclick={() => { scPwdFor = r.preOrder!.discountable[0]!; scPwdOpen = true; }}>Senior / PWD</Button>
 										{/if}
 									</div>
 								{/if}
@@ -464,5 +471,6 @@
 
 {#if data.canWrite}
 	<NewOrderSheet bind:open={pickOpen} {data} defaultVenueId={pickVenue} {pick} />
+	<DiscountAfterPaymentDialog bind:open={scPwdOpen} order={scPwdFor} />
 	<PayDialog bind:open={payOpen} order={payFor} shiftOpen={data.shiftOpen} slug={page.params.hotel ?? ''} inHouse={data.inHouse} payAccounts={data.payAccounts} />
 {/if}

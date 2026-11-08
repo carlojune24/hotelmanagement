@@ -22,7 +22,7 @@ import {
 import { OrderError } from '$lib/server/dining-orders';
 import { loadVenueMenu } from '$lib/server/dining-menu';
 import { listInHouseGuests } from '$lib/server/dining-room-charge';
-import { chargeRoomAction, payOrderAction } from '$lib/server/dining-check-actions';
+import { chargeRoomAction, discountAfterPaymentAction, payOrderAction } from '$lib/server/dining-check-actions';
 import { diningDrawerId, diningPayAccountNames } from '$lib/server/finance/payments';
 import { getDefaultOpenShift, getOpenShiftForDrawer } from '$lib/server/finance/shifts';
 import { localParts, zonedToUtc } from '$lib/dining-slots';
@@ -147,7 +147,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 					total: diningOrders.totalCentavos,
 					id: diningOrders.id,
 					code: diningOrders.code,
-					vat: diningOrders.vatCentavos
+					vat: diningOrders.vatCentavos,
+					discountKind: diningOrders.discountKind
 				})
 				.from(diningOrders)
 				.where(
@@ -182,6 +183,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
 	return {
 		canWrite: writer,
+		/** Senior / PWD after payment refunds money: managers only, like any refund. */
+		canManage: can('dining:manage') || can('hotel:admin'),
 		menus,
 		tables: allTables.filter((t) => menus[t.venueId]),
 		vatRateBps: locals.hotel!.vatRateBps,
@@ -223,6 +226,10 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 					unpaid: mine
 						.filter((o) => o.paymentStatus === 'unpaid')
 						.map((o) => ({ id: o.id, code: o.code, totalCentavos: o.total, vatCentavos: o.vat, guestName: r.guestName, tableLabel: null })),
+					/** Paid with no discount yet: a Senior / PWD can still be applied (the difference refunded). */
+					discountable: mine
+						.filter((o) => o.paymentStatus === 'paid' && !o.discountKind)
+						.map((o) => ({ id: o.id, code: o.code, totalCentavos: o.total, vatCentavos: o.vat, guestName: r.guestName })),
 					count: mine.length,
 					totalCentavos: mine.reduce((s, o) => s + o.total, 0),
 					paid: mine.every((o) => o.paymentStatus === 'paid' || o.paymentStatus === 'room_charged'),
@@ -345,6 +352,7 @@ export const actions: Actions = {
 	/** Take payment / charge to room, from the same dialog the Orders board uses. */
 	pay: payOrderAction,
 	chargeRoom: chargeRoomAction,
+	discountAfterPayment: discountAfterPaymentAction,
 
 	setStatus: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'dining:write');

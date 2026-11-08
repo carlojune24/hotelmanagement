@@ -91,6 +91,7 @@ export const ACTION_LABELS: Record<string, string> = {
 	'dining_order.decline': 'Order declined',
 	'dining_order.paid': 'Payment taken at the cashier',
 	'hotel.update_dining_discounts': 'Dining discount rates changed',
+	'dining_order.discount_after_payment': 'Senior / PWD discount after payment, difference refunded',
 	'dining_order.void_payment': 'Payment voided',
 	'dining_order.paymongo_paid': 'Online payment confirmed (PayMongo)',
 	'dining_order.payment_failed': 'Online payment attempt failed',

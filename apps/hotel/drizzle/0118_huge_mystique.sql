@@ -1,0 +1,1 @@
+ALTER TABLE "dining_orders" ADD COLUMN "discount_business_date" date;

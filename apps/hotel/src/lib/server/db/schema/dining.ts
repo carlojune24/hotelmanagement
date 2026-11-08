@@ -543,6 +543,9 @@ export const diningOrders = pgTable(
 		discountDiners: integer('discount_diners'),
 		/** `vatCentavos` before the discount, so voiding the payment restores it exactly. */
 		discountVatBeforeCentavos: bigint('discount_vat_before_centavos', { mode: 'number' }),
+		/** Set when the discount was given after the order was paid (and the difference refunded): the day it
+		 *  was given, which reports and readings use instead of `business_date`. Null when given at payment. */
+		discountBusinessDate: date('discount_business_date', { mode: 'string' }),
 		paidAt: timestamp('paid_at', { withTimezone: true }),
 		paidByUserId: uuid('paid_by_user_id').references(() => users.id, { onDelete: 'set null' }),
 		createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),

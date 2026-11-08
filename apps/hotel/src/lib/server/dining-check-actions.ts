@@ -7,6 +7,8 @@ import { FinanceError } from './finance/shared';
 import { DocumentError } from './finance/documents';
 import { chargeDiningOrderToRoom } from './dining-room-charge';
 import { OrderError, payDiningOrder, type DiningDiscountChoice } from './dining-orders';
+import { REFUND_METHODS, applyDiscountAfterPayment } from './dining-online';
+import { roleCan } from '../authz';
 import { closeCheck, settleCheck } from './dining-checks';
 import { toPayDocuments } from '../print-batch';
 
@@ -100,6 +102,43 @@ export async function closeTableAction(event: RequestEvent) {
 	try {
 		await closeCheck({ hotelId: event.locals.hotel!.id, checkId: parsed.data.checkId, actor: event.locals.user });
 		return { ok: 'The table is free again.' };
+	} catch (e) {
+		if (businessError(e)) return fail(400, { error: (e as Error).message });
+		throw e;
+	}
+}
+
+/**
+ * A Senior / PWD discount on an order already paid in full; the difference is refunded. Managers only,
+ * the same rule as recording a refund (Orders board and Reservations).
+ */
+export async function discountAfterPaymentAction(event: RequestEvent) {
+	const { user, role } = event.locals;
+	if (!user?.isPlatformAdmin && !(role && (roleCan(role.capabilities, 'dining:manage') || roleCan(role.capabilities, 'hotel:admin')))) {
+		requireCap(user, role, 'dining:manage');
+	}
+	const parsed = z
+		.object({
+			orderId: recordId(),
+			method: z.enum(REFUND_METHODS),
+			referenceNo: z.string().trim().max(80).optional(),
+			diners: discountFields.diners,
+			claimants: discountFields.claimants
+		})
+		.safeParse(Object.fromEntries(await event.request.formData()));
+	if (!parsed.success) return fail(400, { error: 'Check the guests and how the difference goes back.' });
+	const d = parsed.data;
+	try {
+		const r = await applyDiscountAfterPayment({
+			hotelId: event.locals.hotel!.id,
+			orderId: d.orderId,
+			claimants: d.claimants,
+			diners: d.diners ?? d.claimants.length,
+			method: d.method,
+			referenceNo: d.referenceNo ?? null,
+			actor: user
+		});
+		return { discounted: r };
 	} catch (e) {
 		if (businessError(e)) return fail(400, { error: (e as Error).message });
 		throw e;

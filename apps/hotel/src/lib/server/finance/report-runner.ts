@@ -315,7 +315,11 @@ export async function runReport(
 							peso(x.discountCentavos + x.vatRemovedCentavos),
 							x.receipts.join(', ') || '—',
 							x.givenBy ?? '—',
-							x.reversedOn ? `Reversed ${x.reversedOn} (not counted)` : 'Given'
+							x.reversedOn
+								? `Reversed ${x.reversedOn} (not counted)`
+								: x.refundedAfterPaymentCentavos != null
+									? `Given after payment, ${peso(x.refundedAfterPaymentCentavos)} refunded`
+									: 'Given'
 						])
 					}
 				]

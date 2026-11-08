@@ -248,6 +248,9 @@
 									<span class="ml-1.5 whitespace-nowrap">{peso(x.vatRemovedCentavos)} VAT</span>
 								</p>
 								<p class="text-xs tabular-nums text-ink-muted">on {peso(x.baseCentavos)}</p>
+								{#if x.refundedAfterPaymentCentavos != null}
+									<p class="mt-0.5 text-xs text-ink-muted">Given after payment, refunded</p>
+								{/if}
 							{/if}
 						</div>
 					</li>

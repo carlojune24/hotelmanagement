@@ -995,6 +995,10 @@ export async function voidDiningOrderPayment(args: {
 		.limit(1);
 	if (!order) throw new OrderError('That order could not be found.');
 	if (order.paymentStatus !== 'paid' || !order.cashMovementId) throw new OrderError('This order has no payment to void.');
+	// Its Senior / PWD difference was already handed back: voiding the payment would reverse that money twice.
+	if (order.discountBusinessDate) {
+		throw new OrderError('This order had a Senior / PWD discount refunded after payment. Correct it with a refund instead of voiding the payment.');
+	}
 
 	// If a previous attempt voided the movement but failed to update the order, don't void twice.
 	const [movement] = await db
@@ -1082,6 +1086,8 @@ export interface OrderView {
 	source: string;
 	totalCentavos: number;
 	vatCentavos: number;
+	/** A discount already on the order ('sc_pwd' or 'staff'); null when none. */
+	discountKind: string | null;
 	paymentMethod: string | null;
 	/** Room number when the order is charged to an in-house guest's room bill. */
 	roomLabel: string | null;
@@ -1172,6 +1178,7 @@ async function hydrate(rows: { o: DiningOrder; venueTitle: string; bookingOrderI
 		source: o.source,
 		totalCentavos: o.totalCentavos,
 		vatCentavos: o.vatCentavos,
+		discountKind: o.discountKind,
 		paymentMethod: o.paymentMethod,
 		roomLabel: o.roomLabel,
 		pickupAt: o.pickupAt,
