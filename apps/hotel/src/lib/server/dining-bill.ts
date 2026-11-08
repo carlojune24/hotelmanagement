@@ -62,6 +62,8 @@ async function loadOrders(hotelId: string, where: ReturnType<typeof eq>): Promis
 		discountBps: o.discountBps,
 		discountCentavos: o.discountCentavos,
 		discountVatRemovedCentavos: o.discountVatRemovedCentavos,
+		discountGuests: o.discountClaimants?.length ?? null,
+		discountDiners: o.discountDiners,
 		deliveryAddress: o.deliveryAddress,
 		guestName: o.guestName,
 		orderType: o.orderType,

@@ -17,6 +17,9 @@ export interface BillOrderInput {
 	discountBps?: number | null;
 	discountCentavos?: number;
 	discountVatRemovedCentavos?: number;
+	/** Senior / PWD: how many qualifying guests of how many diners, for the "1 of 2" on the VAT line. */
+	discountGuests?: number | null;
+	discountDiners?: number | null;
 	items: {
 		name: string;
 		quantity: number;
@@ -64,7 +67,8 @@ function discountLines(o: BillOrderInput): BillLine[] {
 	const less = (description: string, c: number): BillLine => ({ orderCode: o.code, description, quantity: 1, unitPriceCentavos: -c, lineTotalCentavos: -c });
 	const p = `${(o.discountBps ?? 0) / 100}%`;
 	if (o.discountKind === 'staff') return [less(`Less: Staff discount ${p}`, o.discountCentavos ?? 0)];
-	return [less('Less: VAT exempt (senior / PWD share)', o.discountVatRemovedCentavos ?? 0), less(`Less: Senior / PWD discount ${p}`, o.discountCentavos ?? 0)];
+	const share = o.discountGuests && o.discountDiners ? `, ${o.discountGuests} of ${o.discountDiners}` : '';
+	return [less(`Less: VAT exempt (senior / PWD share${share})`, o.discountVatRemovedCentavos ?? 0), less(`Less: Senior / PWD discount ${p}`, o.discountCentavos ?? 0)];
 }
 
 export function buildBill(orders: BillOrderInput[]): BillTotals {

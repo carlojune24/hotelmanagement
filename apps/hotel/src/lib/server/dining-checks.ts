@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-or
 import { db } from './db/index';
 import {
 	diningItems,
+	diningOrderItemAddons,
 	diningOrderItems,
 	diningOrders,
 	diningReservations,
@@ -41,6 +42,16 @@ export interface OpenCheck extends CheckSummary {
 		/** Already discounted ('sc_pwd' / 'staff'), so no second discount is offered. */
 		discountKind: string | null;
 		guestName: string | null;
+		/** Everything the table panel's bill breakdown needs (`buildBill`, same as the printed bill). */
+		deliveryFeeCentavos: number;
+		discountBps: number | null;
+		discountCentavos: number;
+		discountVatRemovedCentavos: number;
+		discountClaimants: { type?: 'senior_citizen' | 'pwd'; name: string; idNumber: string }[] | null;
+		discountGuests: number | null;
+		discountDiners: number | null;
+		paymentMethod: string | null;
+		items: { name: string; quantity: number; unitPriceCentavos: number; addonsCentavos: number; lineTotalCentavos: number; addons: string[] }[];
 		/** Where each station is with this order, for the table panel on the Floor. */
 		stations: { label: string; state: StationState }[];
 	})[];
@@ -82,7 +93,14 @@ export async function listOpenChecks(hotelId: string, venueId?: string | null): 
 			/** For the Settle dialog's discount preview. */
 			vatCentavos: diningOrders.vatCentavos,
 			discountKind: diningOrders.discountKind,
-			guestName: diningOrders.guestName
+			guestName: diningOrders.guestName,
+			deliveryFeeCentavos: diningOrders.deliveryFeeCentavos,
+			discountBps: diningOrders.discountBps,
+			discountCentavos: diningOrders.discountCentavos,
+			discountVatRemovedCentavos: diningOrders.discountVatRemovedCentavos,
+			discountClaimants: diningOrders.discountClaimants,
+			discountDiners: diningOrders.discountDiners,
+			paymentMethod: diningOrders.paymentMethod
 		})
 		.from(diningOrders)
 		.where(inArray(diningOrders.checkId, checks.map((c) => c.id)))
@@ -90,19 +108,43 @@ export async function listOpenChecks(hotelId: string, venueId?: string | null): 
 
 	const lines = await db
 		.select({
+			id: diningOrderItems.id,
 			orderId: diningOrderItems.orderId,
 			stationName: diningOrderItems.stationName,
 			startedAt: diningOrderItems.startedAt,
-			readyAt: diningOrderItems.readyAt
+			readyAt: diningOrderItems.readyAt,
+			name: diningOrderItems.name,
+			quantity: diningOrderItems.quantity,
+			unitPriceCentavos: diningOrderItems.unitPriceCentavos,
+			addonsCentavos: diningOrderItems.addonsCentavos,
+			lineTotalCentavos: diningOrderItems.lineTotalCentavos
 		})
 		.from(diningOrderItems)
-		.where(inArray(diningOrderItems.orderId, orders.map((o) => o.id)));
+		.where(inArray(diningOrderItems.orderId, orders.map((o) => o.id)))
+		.orderBy(asc(diningOrderItems.sortOrder));
+	const addons = lines.length
+		? await db
+				.select({ orderItemId: diningOrderItemAddons.orderItemId, name: diningOrderItemAddons.name })
+				.from(diningOrderItemAddons)
+				.where(inArray(diningOrderItemAddons.orderItemId, lines.map((l) => l.id)))
+		: [];
 
 	return checks.map((c) => {
 		const mine = orders
 			.filter((o) => o.checkId === c.id)
 			.map((o) => ({
 				...o,
+				discountGuests: o.discountClaimants?.length ?? null,
+				items: lines
+					.filter((l) => l.orderId === o.id)
+					.map((l) => ({
+						name: l.name,
+						quantity: l.quantity,
+						unitPriceCentavos: l.unitPriceCentavos,
+						addonsCentavos: l.addonsCentavos,
+						lineTotalCentavos: l.lineTotalCentavos,
+						addons: addons.filter((a) => a.orderItemId === l.id).map((a) => a.name)
+					})),
 				stations: groupByStation(lines.filter((l) => l.orderId === o.id)).map((g) => ({ label: g.label, state: g.state }))
 			}));
 		return {

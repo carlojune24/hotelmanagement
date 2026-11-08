@@ -17,6 +17,8 @@
 	import { STAGE_LABEL, type TableView } from '$lib/dining-floor';
 	import { ORDER_STATUS_LABEL, formatWait, type OrderStatus } from '$lib/dining-orders';
 	import { STAGE_STYLE } from './stage-style';
+	import { buildBill } from '$lib/dining-bill';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import type { PageData } from './$types';
 
 	type Check = PageData['checks'][number];
@@ -73,6 +75,16 @@
 
 	const peso = (c: number) =>
 		`₱${(c / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+	const signed = (c: number) => (c < 0 ? `−${peso(-c)}` : peso(c));
+
+	// The bill of each order, with the same maths as the printed guest bill (`buildBill`).
+	const bills = $derived(Object.fromEntries((check?.orders ?? []).map((o) => [o.id, buildBill([o])])));
+	// Open by default for a small table; the cashier can fold any of them.
+	let folded = $state<Record<string, boolean>>({});
+	const isOpen = (id: string) => folded[id] ?? (check?.orders.length ?? 0) <= 2;
+	const METHOD: Record<string, string> = { cash: 'cash', card: 'card', gcash: 'GCash', maya: 'Maya', bank_transfer: 'bank transfer', paymongo: 'online' };
+	const tableTotal = $derived(Object.values(bills).reduce((s, b) => s + b.totalCentavos, 0));
+	const tablePaid = $derived(Object.values(bills).reduce((s, b) => s + b.paidCentavos, 0));
 
 	const ACTIONS: Record<string, { label: string; variant: 'default' | 'outline' | 'destructive' }> = {
 		seated: { label: 'Seat', variant: 'default' },
@@ -159,6 +171,54 @@
 										</div>
 										<span class="shrink-0 text-sm tabular-nums text-ink">{peso(o.totalCentavos)}</span>
 									</div>
+									{#if bills[o.id] && bills[o.id]!.lines.length > 0}
+										{@const b = bills[o.id]!}
+										{@const dishes = b.lines.filter((l) => l.lineTotalCentavos >= 0)}
+										{@const less = b.lines.filter((l) => l.lineTotalCentavos < 0)}
+										<button
+											type="button"
+											class="mt-1.5 inline-flex items-center gap-1 text-xs text-ink-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-brand"
+											aria-expanded={isOpen(o.id)}
+											aria-controls="bill-{o.id}"
+											onclick={() => (folded[o.id] = isOpen(o.id))}
+										>
+											<ChevronDownIcon class="size-3.5 transition-transform {isOpen(o.id) ? '' : '-rotate-90'}" aria-hidden="true" />
+											{isOpen(o.id) ? 'Hide bill' : `Show bill (${dishes.reduce((n, l) => n + l.quantity, 0)} items)`}
+										</button>
+										{#if isOpen(o.id)}
+											<div id="bill-{o.id}" class="mt-1.5 rounded-lg bg-surface-2/60 px-3 py-2 text-xs">
+												<ul class="space-y-1">
+													{#each dishes as l, i (i)}
+														<li class="flex gap-2">
+															<span class="w-6 shrink-0 tabular-nums text-ink-muted">{l.quantity}×</span>
+															<span class="min-w-0 flex-1 text-ink">{l.description}</span>
+															<span class="shrink-0 tabular-nums text-ink">{peso(l.lineTotalCentavos)}</span>
+														</li>
+													{/each}
+												</ul>
+												<dl class="mt-2 space-y-1 border-t border-border pt-2">
+													{#if less.length > 0}
+														<div class="flex justify-between"><dt class="text-ink-muted">Subtotal</dt><dd class="tabular-nums text-ink">{peso(dishes.reduce((s, l) => s + l.lineTotalCentavos, 0))}</dd></div>
+														{#each less as l, i (i)}
+															<div class="flex justify-between gap-3"><dt class="text-ink-muted">{l.description}</dt><dd class="shrink-0 tabular-nums text-ink">{signed(l.lineTotalCentavos)}</dd></div>
+														{/each}
+													{/if}
+													<div class="flex justify-between text-sm"><dt class="font-medium text-ink">Total</dt><dd class="font-semibold tabular-nums text-ink">{peso(b.totalCentavos)}</dd></div>
+													<div class="flex justify-between">
+														<dt class="text-ink-muted">VAT included {peso(b.vatCentavos)}</dt>
+														<dd class="text-ink-muted">
+															{o.paymentStatus === 'paid' ? `Paid${o.paymentMethod ? ` by ${METHOD[o.paymentMethod] ?? o.paymentMethod}` : ''}` : o.paymentStatus === 'room_charged' ? 'On the room bill' : 'Not paid yet'}
+														</dd>
+													</div>
+												</dl>
+												{#if o.discountKind === 'sc_pwd' && o.discountClaimants?.length}
+													<p class="mt-2 border-t border-border pt-2 text-ink-muted">
+														{o.discountClaimants.map((c) => `${c.name} (${c.type === 'pwd' ? 'PWD' : c.type === 'senior_citizen' ? 'Senior' : 'ID'} ${c.idNumber})`).join(', ')}
+													</p>
+												{/if}
+											</div>
+										{/if}
+									{/if}
 									{#if o.discountKind === 'sc_pwd'}
 										<p class="mt-1 text-xs text-ink-muted">Senior / PWD discount applied</p>
 									{:else if canClear && onscpwd && o.paymentStatus === 'paid' && !o.discountKind && o.status !== 'cancelled'}
@@ -190,6 +250,12 @@
 								<li class="px-3 py-4 text-center text-sm text-ink-muted">No orders yet.</li>
 							{/each}
 						</ul>
+						{#if check.orders.length > 1}
+							<dl class="mt-3 flex justify-between text-sm">
+								<div><dt class="inline text-ink-muted">Table total</dt> <dd class="inline tabular-nums text-ink">{peso(tableTotal)}</dd></div>
+								<div><dt class="inline text-ink-muted">Paid</dt> <dd class="inline tabular-nums text-ink">{peso(tablePaid)}</dd></div>
+							</dl>
+						{/if}
 						<div class="mt-3 flex items-baseline justify-between">
 							<span class="text-sm text-ink-muted">Still to pay</span>
 							<span class="text-xl font-semibold tabular-nums text-ink">{peso(check.unpaidCentavos)}</span>
