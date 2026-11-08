@@ -4,6 +4,8 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import * as ToggleGroup from '$lib/components/ui/toggle-group/index.js';
+	import XIcon from '@lucide/svelte/icons/x';
+	import PlusIcon from '@lucide/svelte/icons/plus';
 	import { computeDiningDiscount, type DiningDiscountKind } from '$lib/dining-discount';
 
 	/**
@@ -77,35 +79,55 @@
 {/if}
 
 {#if kind === 'sc_pwd'}
-	<fieldset class="space-y-2 rounded-lg border border-border p-3">
-		<legend class="px-1 text-xs text-ink-muted">Senior / PWD guests</legend>
+	<fieldset class="space-y-1.5">
+		<legend class="text-xs font-medium text-ink">Senior / PWD guests</legend>
 		<input type="hidden" name="claimants" value={JSON.stringify(claimants)} />
-		{#each claimants as c, i (i)}
-			<ToggleGroup.Root type="single" value={c.type} onValueChange={(v) => v && (c.type = v as Claimant['type'])} variant="outline" size="sm" class="w-full" aria-label="Guest {i + 1} is a">
-				<ToggleGroup.Item value="senior_citizen" class="flex-1">Senior</ToggleGroup.Item>
-				<ToggleGroup.Item value="pwd" class="flex-1">PWD</ToggleGroup.Item>
-			</ToggleGroup.Root>
-			<div class="flex items-end gap-2">
-				<div class="min-w-0 flex-1">
-					<Label for="claimantName{i}" class="text-xs">Name</Label>
-					<Input id="claimantName{i}" bind:value={c.name} maxlength={160} autocomplete="off" class="mt-1" />
+		<div class="divide-y divide-border overflow-hidden rounded-lg border border-border">
+			<!-- How many dined decides the share the discount covers, so it comes first. -->
+			<div class="bg-surface-2/50 px-3 py-2.5">
+				<div class="flex items-center justify-between gap-3">
+					<Label for="discountDiners" class="text-sm">Diners at the table</Label>
+					<Input id="discountDiners" name="diners" type="number" inputmode="numeric" min={claimants.length} step="1" bind:value={diners} class="h-8 w-20 text-right tabular-nums" />
 				</div>
-				<div class="min-w-0 flex-1">
-					<Label for="claimantId{i}" class="text-xs">{c.type === 'pwd' ? 'PWD ID no.' : 'OSCA ID no.'}</Label>
-					<Input id="claimantId{i}" bind:value={c.idNumber} maxlength={60} autocomplete="off" class="mt-1" />
-				</div>
-				{#if claimants.length > 1}
-					<Button type="button" variant="ghost" size="sm" aria-label="Remove guest {i + 1}" onclick={() => (claimants = claimants.filter((_, j) => j !== i))}>Remove</Button>
-				{/if}
+				<p class="mt-1 text-xs text-ink-muted" aria-live="polite">
+					{#if dinersN >= claimants.length}
+						{claimants.length} of {dinersN} share is VAT-exempt and gets {pct(rates.scPwdBps)} off.
+					{:else}
+						Enter how many dined, at least {claimants.length}. For one person eating alone, enter 1.
+					{/if}
+				</p>
 			</div>
-		{/each}
-		<Button type="button" variant="outline" size="sm" onclick={() => (claimants = [...claimants, blank()])}>Add another guest</Button>
-		<div>
-			<Label for="discountDiners" class="text-xs">Diners in all</Label>
-			<Input id="discountDiners" name="diners" type="number" inputmode="numeric" min={claimants.length} step="1" bind:value={diners} class="mt-1 w-28 tabular-nums" />
-			<p class="mt-1 text-xs text-ink-muted">
-				Only their share ({claimants.length} of {dinersN || '?'}) is VAT-exempt and gets {pct(rates.scPwdBps)} off. For one person eating alone, enter 1.
-			</p>
+
+			{#each claimants as c, i (i)}
+				<div class="space-y-2 px-3 py-2.5">
+					<div class="flex items-center gap-2">
+						<span class="text-sm font-medium text-ink">Guest {i + 1}</span>
+						<ToggleGroup.Root type="single" value={c.type} onValueChange={(v) => v && (c.type = v as Claimant['type'])} variant="outline" size="sm" class="ml-auto w-36" aria-label="Guest {i + 1} is a">
+							<ToggleGroup.Item value="senior_citizen" class="flex-1">Senior</ToggleGroup.Item>
+							<ToggleGroup.Item value="pwd" class="flex-1">PWD</ToggleGroup.Item>
+						</ToggleGroup.Root>
+						{#if claimants.length > 1}
+							<Button type="button" variant="ghost" size="icon" class="size-8 text-ink-muted" aria-label="Remove guest {i + 1}" onclick={() => (claimants = claimants.filter((_, j) => j !== i))}>
+								<XIcon class="size-4" />
+							</Button>
+						{/if}
+					</div>
+					<div class="grid grid-cols-2 gap-2">
+						<div class="min-w-0">
+							<Label for="claimantName{i}" class="text-xs text-ink-muted">Name</Label>
+							<Input id="claimantName{i}" bind:value={c.name} maxlength={160} autocomplete="off" class="mt-1 h-9" />
+						</div>
+						<div class="min-w-0">
+							<Label for="claimantId{i}" class="text-xs text-ink-muted">{c.type === 'pwd' ? 'PWD ID no.' : 'OSCA ID no.'}</Label>
+							<Input id="claimantId{i}" bind:value={c.idNumber} maxlength={60} autocomplete="off" class="mt-1 h-9" />
+						</div>
+					</div>
+				</div>
+			{/each}
+
+			<button type="button" class="flex w-full items-center gap-1.5 px-3 py-2.5 text-sm text-brand hover:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand" onclick={() => (claimants = [...claimants, blank()])}>
+				<PlusIcon class="size-4" aria-hidden="true" /> Add guest
+			</button>
 		</div>
 	</fieldset>
 {/if}

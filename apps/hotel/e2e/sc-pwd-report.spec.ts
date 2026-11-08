@@ -64,11 +64,11 @@ test('the Senior / PWD report lists each discount, counts by type and side, and 
 	await dlg.getByRole('radio', { name: /^Senior \/ PWD/ }).click();
 	await dlg.getByLabel('Name', { exact: true }).fill('Lola Report');
 	await dlg.getByLabel('OSCA ID no.').fill('OSCA-R1');
-	await dlg.getByRole('button', { name: 'Add another guest' }).click();
+	await dlg.getByRole('button', { name: 'Add guest' }).click();
 	await dlg.getByRole('group', { name: 'Guest 2 is a' }).getByRole('radio', { name: 'PWD' }).click();
 	await dlg.locator('#claimantName1').fill('Juan Report');
 	await dlg.getByLabel('PWD ID no.').fill('PWD-R2');
-	await dlg.getByLabel('Diners in all').fill('3');
+	await dlg.getByLabel('Diners at the table').fill('3');
 	await dlg.getByLabel('Reference no.').fill(`SCR-${Date.now().toString().slice(-6)}`);
 	await dlg.getByRole('button', { name: /^Record ₱/ }).click();
 	await expect

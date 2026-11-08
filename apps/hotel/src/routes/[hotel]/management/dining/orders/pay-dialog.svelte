@@ -98,7 +98,7 @@
 </script>
 
 <Dialog.Root bind:open>
-	<Dialog.Content class="max-h-[92dvh] overflow-y-auto sm:max-w-md">
+	<Dialog.Content class="max-h-[92dvh] overflow-y-auto sm:max-w-lg">
 		{#if order}
 			{#if charged}
 				<div class="space-y-4 py-2 text-center">
