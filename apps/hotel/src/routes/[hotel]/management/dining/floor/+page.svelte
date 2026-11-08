@@ -26,6 +26,7 @@
 	import { zonedToUtc } from '$lib/dining-slots';
 	import { floorCounts, tableView, urgencyRank, type FloorFilter, type TableView } from '$lib/dining-floor';
 	import SettleDialog from './settle-dialog.svelte';
+	import DiscountAfterPaymentDialog from '../orders/discount-after-payment-dialog.svelte';
 	import StatusBar from './status-bar.svelte';
 	import TablePlan from './table-plan.svelte';
 	import TableList from './table-list.svelte';
@@ -187,6 +188,9 @@
 		panelOpen = false;
 		joinFor = { from, into };
 	}
+	let scPwdOpen = $state(false);
+	let scPwdFor = $state<Check['orders'][number] | null>(null);
+
 	function openSettle(check: Check) {
 		panelOpen = false;
 		settleFor = check;
@@ -437,6 +441,7 @@
 	onsettle={openSettle}
 	onclear={openClear}
 	onjoin={openJoin}
+	onscpwd={(o) => { scPwdFor = o; scPwdOpen = true; }}
 />
 
 <!-- Add / edit table -->
@@ -558,6 +563,7 @@
 	</Dialog.Content>
 </Dialog.Root>
 
+<DiscountAfterPaymentDialog bind:open={scPwdOpen} order={scPwdFor} />
 <SettleDialog bind:open={settleOpen} check={settleFor} shiftOpen={data.shiftOpen} slug={page.params.hotel ?? ''} inHouse={data.inHouse} payAccounts={data.payAccounts} />
 
 <!-- Join one table's tab into another's -->

@@ -38,6 +38,9 @@ export interface OpenCheck extends CheckSummary {
 		code: string;
 		source: string;
 		vatCentavos: number;
+		/** Already discounted ('sc_pwd' / 'staff'), so no second discount is offered. */
+		discountKind: string | null;
+		guestName: string | null;
 		/** Where each station is with this order, for the table panel on the Floor. */
 		stations: { label: string; state: StationState }[];
 	})[];
@@ -77,7 +80,9 @@ export async function listOpenChecks(hotelId: string, venueId?: string | null): 
 			paymentStatus: diningOrders.paymentStatus,
 			totalCentavos: diningOrders.totalCentavos,
 			/** For the Settle dialog's discount preview. */
-			vatCentavos: diningOrders.vatCentavos
+			vatCentavos: diningOrders.vatCentavos,
+			discountKind: diningOrders.discountKind,
+			guestName: diningOrders.guestName
 		})
 		.from(diningOrders)
 		.where(inArray(diningOrders.checkId, checks.map((c) => c.id)))

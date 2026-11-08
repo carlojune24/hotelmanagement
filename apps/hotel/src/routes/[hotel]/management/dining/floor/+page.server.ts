@@ -29,7 +29,7 @@ import {
 	moveCheckToTable,
 	requestBill,
 } from '$lib/server/dining-checks';
-import { closeTableAction, settleTableAction } from '$lib/server/dining-check-actions';
+import { closeTableAction, discountAfterPaymentAction, settleTableAction } from '$lib/server/dining-check-actions';
 import { listInHouseGuests } from '$lib/server/dining-room-charge';
 import { FinanceError } from '$lib/server/finance/shared';
 import { getDefaultOpenShift } from '$lib/server/finance/shifts';
@@ -587,6 +587,9 @@ export const actions: Actions = {
 	// ---- the table's check -----------------------------------------------------------------
 	/** Pays every unpaid order on the table at once, and frees the table when all is served. */
 	settle: settleTableAction,
+
+	/** Senior / PWD on an order on this table that is already paid (a pre-order paid ahead): managers. */
+	discountAfterPayment: discountAfterPaymentAction,
 
 	/** Frees a table whose orders are all served and paid. */
 	closeTable: closeTableAction,

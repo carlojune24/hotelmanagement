@@ -45,7 +45,8 @@
 		fmtTime,
 		onsettle,
 		onclear,
-		onjoin
+		onjoin,
+		onscpwd
 	}: {
 		open: boolean;
 		table: PanelTable | null;
@@ -66,6 +67,8 @@
 		onsettle: (check: Check) => void;
 		onclear: (check: Check) => void;
 		onjoin: (from: Check, into: Check) => void;
+		/** Senior / PWD on a paid order, the difference refunded (managers: the `canClear` rule). */
+		onscpwd?: (order: Check['orders'][number]) => void;
 	} = $props();
 
 	const peso = (c: number) =>
@@ -156,6 +159,11 @@
 										</div>
 										<span class="shrink-0 text-sm tabular-nums text-ink">{peso(o.totalCentavos)}</span>
 									</div>
+									{#if o.discountKind === 'sc_pwd'}
+										<p class="mt-1 text-xs text-ink-muted">Senior / PWD discount applied</p>
+									{:else if canClear && onscpwd && o.paymentStatus === 'paid' && !o.discountKind && o.status !== 'cancelled'}
+										<Button variant="outline" size="sm" class="mt-1.5 h-7 px-2.5 text-xs" onclick={() => onscpwd(o)}>Senior / PWD on this paid order</Button>
+									{/if}
 									{#if o.stations.length > 1 && (o.status === 'new' || o.status === 'accepted' || o.status === 'preparing')}
 										<p class="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-ink-muted">
 											{#each o.stations as g (g.label)}
