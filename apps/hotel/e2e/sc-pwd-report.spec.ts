@@ -76,26 +76,35 @@ test('the Senior / PWD report lists each discount, counts by type and side, and 
 		.toBe('paid');
 	const [paid] = await sql<{ d: string; v: string; date: string }[]>`
 		select discount_centavos as d, discount_vat_removed_centavos as v, business_date::text as date from dining_orders where id = ${order!.id}`;
-	const off = ((Number(paid!.d) + Number(paid!.v)) / 100).toFixed(2);
+	const off = Number(paid!.d) + Number(paid!.v);
+	const peso = (c: number) => `₱${(c / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 	// This week, dining only: the order is in the trail with both guests and links to its trail page.
 	await page.goto(`${report}?scope=dining`);
 	await page.getByRole('link', { name: 'This week' }).click();
-	const row = page.getByRole('row', { name: new RegExp(order!.code) });
-	await expect(row).toContainText('Lola Report (OSCA-R1); Juan Report (PWD-R2)');
-	await expect(row).toContainText('Senior; PWD');
-	await expect(row).toContainText(off);
+	const entry = page.locator('ol > li').filter({ hasText: order!.code });
+	await expect(entry).toContainText('Lola Report');
+	await expect(entry).toContainText('ID OSCA-R1');
+	await expect(entry).toContainText('Juan Report');
+	await expect(entry).toContainText('ID PWD-R2');
+	await expect(entry.getByText('Senior', { exact: true })).toBeVisible();
+	await expect(entry.getByText('PWD', { exact: true })).toBeVisible();
+	await expect(entry).toContainText(peso(off));
 
 	// Hotel only: the dining order is not there.
 	await page.getByRole('link', { name: 'Hotel', exact: true }).click();
-	await expect(page.getByRole('row', { name: new RegExp(order!.code) })).toHaveCount(0);
+	await expect(page.locator('ol > li').filter({ hasText: order!.code })).toHaveCount(0);
 
-	// Overall, by month: the month's Total off equals the sum of the trail's Total off column.
+	// Overall, by month: the big total equals the By period table's total, and the sum of the register.
 	await page.goto(`${report}?from=${paid!.date}&to=${paid!.date}&group=month`);
-	const cells = await page.locator('table').nth(1).locator('tbody tr td:nth-child(9)').allTextContents();
-	const trailSum = cells.reduce((s, c) => s + Math.round(Number(c) * 100), 0);
-	const monthTotal = await page.locator('table').first().locator('tbody tr td:nth-child(8)').first().textContent();
-	expect(Math.round(Number(monthTotal) * 100)).toBe(trailSum);
+	const toCentavos = (s: string | null) => Math.round(Number((s ?? '').replace(/[^0-9.-]/g, '')) * 100);
+	const big = toCentavos(await page.getByRole('region', { name: 'Totals' }).locator('p').first().textContent());
+	const footer = toCentavos(await page.locator('tfoot td').last().textContent());
+	const entries = await page.locator('ol > li').evaluateAll((els) =>
+		els.filter((e) => !e.textContent?.includes('Reversed')).map((e) => e.querySelector('div.text-right p')?.textContent ?? '')
+	);
+	expect(footer).toBe(big);
+	expect(entries.reduce((s, e) => s + toCentavos(e), 0)).toBe(big);
 
 	// The DN- link opens the order's own trail (payment, cash movement, receipt).
 	await page.getByRole('link', { name: order!.code }).click();
