@@ -1284,6 +1284,10 @@
 							oninput={requestModifyQuote}
 							class="mt-1"
 						/>
+						{#if data.detail.booking.status === 'checked_in'}
+							<!-- disabled inputs aren't submitted; the action still needs checkIn -->
+							<input type="hidden" name="checkIn" value={modifyCheckIn} />
+						{/if}
 					</div>
 					<div>
 						<Label for="modify-check-out" class="text-xs">Check-out</Label>
