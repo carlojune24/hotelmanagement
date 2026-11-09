@@ -24,7 +24,7 @@
 	import ListIcon from '@lucide/svelte/icons/list';
 	import CalendarClockIcon from '@lucide/svelte/icons/calendar-clock';
 	import { zonedToUtc } from '$lib/dining-slots';
-	import { floorCounts, tableView, urgencyRank, type FloorFilter, type TableView } from '$lib/dining-floor';
+	import { floorCounts, tableLabel, tableView, urgencyRank, type FloorFilter, type TableView } from '$lib/dining-floor';
 	import SettleDialog from './settle-dialog.svelte';
 	import DiscountAfterPaymentDialog from '../orders/discount-after-payment-dialog.svelte';
 	import StatusBar from './status-bar.svelte';
@@ -579,19 +579,19 @@
 	<Dialog.Content class="sm:max-w-sm">
 		{#if joinFor}
 			<Dialog.Header>
-				<Dialog.Title>Join table {joinFor.from.tableName} into {joinFor.into.tableName}?</Dialog.Title>
+				<Dialog.Title>Join {tableLabel(joinFor.from.tableName)} into {tableLabel(joinFor.into.tableName)}?</Dialog.Title>
 				<Dialog.Description>
-					Table {joinFor.from.tableName}'s orders move onto table {joinFor.into.tableName}'s bill, and the two are paid together.
-					Table {joinFor.from.tableName} becomes free. This can't be undone.
+					{tableLabel(joinFor.from.tableName)}'s orders move onto {tableLabel(joinFor.into.tableName)}'s bill, and the two are paid together.
+					{tableLabel(joinFor.from.tableName)} becomes free. This can't be undone.
 				</Dialog.Description>
 			</Dialog.Header>
 			<dl class="space-y-1 rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm">
 				<div class="flex justify-between gap-3">
-					<dt class="text-ink-muted">Table {joinFor.from.tableName} still to pay</dt>
+					<dt class="text-ink-muted">{tableLabel(joinFor.from.tableName)} still to pay</dt>
 					<dd class="tabular-nums text-ink">{peso(joinFor.from.unpaidCentavos)}</dd>
 				</div>
 				<div class="flex justify-between gap-3">
-					<dt class="text-ink-muted">Table {joinFor.into.tableName} still to pay</dt>
+					<dt class="text-ink-muted">{tableLabel(joinFor.into.tableName)} still to pay</dt>
 					<dd class="tabular-nums text-ink">{peso(joinFor.into.unpaidCentavos)}</dd>
 				</div>
 				<div class="flex justify-between gap-3 border-t border-border pt-1 font-semibold">
@@ -616,7 +616,7 @@
 	<Dialog.Content class="sm:max-w-sm">
 		{#if clearFor}
 			<Dialog.Header>
-				<Dialog.Title>Clear table {clearFor.tableName}?</Dialog.Title>
+				<Dialog.Title>Clear {tableLabel(clearFor.tableName)}?</Dialog.Title>
 				<Dialog.Description>
 					Use this when the table can't be settled normally. Orders that were never paid or served are cancelled; paid ones are marked
 					served. It is recorded against you.

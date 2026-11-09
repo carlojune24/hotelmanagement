@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tableLabel } from '$lib/dining-floor';
 	import { untrack } from 'svelte';
 	import { enhance, applyAction, deserialize } from '$app/forms';
 	import { goto, invalidate, invalidateAll } from '$app/navigation';
@@ -289,12 +290,12 @@
 								{#if o.source === 'online'}
 									<span class="rounded bg-brand px-1.5 py-0.5 text-[11px] font-semibold tracking-wide text-brand-ink uppercase">Online</span>
 									<span class="font-semibold text-ink">
-										{#if o.orderType === 'pre_order'}Pre-order · Table {o.tableLabel ?? '?'}
+										{#if o.orderType === 'pre_order'}Pre-order · {tableLabel(o.tableLabel ?? '?')}
 										{:else if o.fulfilment === 'delivery'}Delivery
 										{:else}Pickup{/if}{#if o.pickupAt} · {slotFmt.format(new Date(o.pickupAt))}{/if}
 									</span>
 								{:else}
-									<span class="font-semibold text-ink">Table {o.tableLabel ?? '?'}</span>
+									<span class="font-semibold text-ink">{tableLabel(o.tableLabel ?? '?')}</span>
 								{/if}
 								<span class="font-mono text-xs text-ink-muted">{o.code}</span>
 								<span class="text-xs tabular-nums {waitClass(o)}">{formatWait(waitedMin(o))} ago</span>
@@ -433,7 +434,7 @@
 							{#each data.openChecks as c (c.id)}
 								<div class="w-64 shrink-0 rounded-xl border-2 bg-surface p-3 {c.stage === 'needs_payment' ? 'border-warning/70' : c.stage === 'ready_to_clear' ? 'border-brand/60' : 'border-border'}">
 									<div class="flex items-center justify-between gap-2">
-										<p class="font-semibold text-ink">Table {c.tableName}</p>
+										<p class="font-semibold text-ink">{tableLabel(c.tableName)}</p>
 										<Badge variant={c.stage === 'needs_payment' ? 'destructive' : c.stage === 'ready_to_clear' ? 'default' : 'outline'}>{CHECK_STAGE_LABEL[c.stage]}</Badge>
 									</div>
 									<p class="mt-1 text-xs text-ink-muted">
@@ -566,7 +567,7 @@
 						{declineFor.guestName ?? 'The guest'} sees your reason on their order page.
 						{#if declineFor.paymentStatus === 'paid'}This order is already paid, so it will be listed under Refunds due.{/if}
 					{:else}
-						The guest at table {declineFor.tableLabel ?? '?'} sees your reason on their phone.
+						The guest at {tableLabel(declineFor.tableLabel ?? '?')} sees your reason on their phone.
 					{/if}
 				</Dialog.Description>
 			</Dialog.Header>

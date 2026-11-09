@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tableLabel } from '$lib/dining-floor';
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
@@ -122,10 +123,10 @@
 					{#each g.tables as t (t.id)}
 						<li class="flex flex-col rounded-xl border border-border bg-surface p-4">
 							<div class="flex items-baseline justify-between">
-								<p class="text-base font-semibold text-ink">Table {t.name}</p>
+								<p class="text-base font-semibold text-ink">{tableLabel(t.name)}</p>
 								<p class="text-xs text-ink-muted">{t.seats} seats</p>
 							</div>
-							<div class="mx-auto my-3 aspect-square w-full max-w-44 rounded-lg border border-border bg-white p-1 [&>svg]:size-full" aria-label="QR code for table {t.name}" role="img">
+							<div class="mx-auto my-3 aspect-square w-full max-w-44 rounded-lg border border-border bg-white p-1 [&>svg]:size-full" aria-label="QR code for {tableLabel(t.name)}" role="img">
 								{@html t.svg}
 							</div>
 							<p class="truncate text-xs text-ink-muted" title={t.link}>{t.link}</p>
@@ -133,7 +134,7 @@
 								<Button variant="outline" size="sm" class="flex-1" onclick={() => copy(t.link)}><CopyIcon class="size-3.5" /> Copy link</Button>
 								<Button variant="outline" size="sm" href={t.link} target="_blank" rel="noopener">Open</Button>
 								{#if data.canManage}
-									<Button variant="ghost" size="icon" class="size-8" aria-label="Rotate the QR code for table {t.name}" onclick={() => (rotating = t)}>
+									<Button variant="ghost" size="icon" class="size-8" aria-label="Rotate the QR code for {tableLabel(t.name)}" onclick={() => (rotating = t)}>
 										<RefreshCwIcon class="size-4" />
 									</Button>
 								{/if}
@@ -150,7 +151,7 @@
 	<Dialog.Content class="sm:max-w-sm">
 		{#if rotating}
 			<Dialog.Header>
-				<Dialog.Title>New QR code for table {rotating.name}?</Dialog.Title>
+				<Dialog.Title>New QR code for {tableLabel(rotating.name)}?</Dialog.Title>
 				<Dialog.Description>
 					The printed code stops working straight away, so you will need to print and replace it. Do this if a code was photographed or
 					shared outside the restaurant.

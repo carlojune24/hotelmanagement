@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tableLabel } from '$lib/dining-floor';
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { invalidateAll } from '$app/navigation';
@@ -110,7 +111,7 @@
 				<div class="space-y-4 py-2 text-center">
 					<CircleCheckIcon class="mx-auto size-10 text-brand" aria-hidden="true" />
 					<div>
-						<Dialog.Title class="text-lg">Table {check.tableName} paid</Dialog.Title>
+						<Dialog.Title class="text-lg">{tableLabel(check.tableName)} paid</Dialog.Title>
 						<p class="mt-1 text-sm text-ink-muted">
 							{done.closed ? 'The table is free again.' : 'It stays open until everything is served.'}
 						</p>
@@ -132,7 +133,7 @@
 				</div>
 			{:else}
 				<Dialog.Header>
-					<Dialog.Title>Settle table {check.tableName}</Dialog.Title>
+					<Dialog.Title>Settle {tableLabel(check.tableName)}</Dialog.Title>
 					<Dialog.Description>
 						{unpaid.length} unpaid {unpaid.length === 1 ? 'order' : 'orders'}. They are paid together with one method.
 					</Dialog.Description>

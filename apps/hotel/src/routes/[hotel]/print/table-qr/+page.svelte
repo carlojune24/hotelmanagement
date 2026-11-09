@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tableLabel } from '$lib/dining-floor';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -11,8 +12,8 @@
 		<article class="tent">
 			<p class="venue">{data.hotelName} · {data.venueTitle}</p>
 			<p class="cta">Scan to see the menu<br />and order from your table</p>
-			<div class="qr" role="img" aria-label="QR code for table {t.name}">{@html t.svg}</div>
-			<p class="table">Table {t.name}</p>
+			<div class="qr" role="img" aria-label="QR code for {tableLabel(t.name)}">{@html t.svg}</div>
+			<p class="table">{tableLabel(t.name)}</p>
 			{#if t.area}<p class="area">{t.area}</p>{/if}
 		</article>
 	{:else}

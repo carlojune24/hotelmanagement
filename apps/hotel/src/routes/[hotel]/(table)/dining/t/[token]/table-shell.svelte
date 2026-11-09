@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tableLabel } from '$lib/dining-floor';
 	import { browser } from '$app/environment';
 	import { invalidate } from '$app/navigation';
 	import { page } from '$app/state';
@@ -40,7 +41,7 @@
 				{#if logoUrl}<img class="tq-logo" src={logoUrl} alt="" />{/if}
 				<div class="tq-brand-text">
 					<span class="tq-brand-name">{page.data.hotel?.name}</span>
-					<span class="tq-table-pill">Table {data.table.name}{data.table.areaName ? ` · ${data.table.areaName}` : ''}</span>
+					<span class="tq-table-pill">{tableLabel(data.table.name)}{data.table.areaName ? ` · ${data.table.areaName}` : ''}</span>
 				</div>
 			</div>
 			{#if onOrders}

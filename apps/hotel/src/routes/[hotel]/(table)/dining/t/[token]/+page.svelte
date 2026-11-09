@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tableLabel } from '$lib/dining-floor';
 	import { page } from '$app/state';
 	import MinusIcon from '@lucide/svelte/icons/minus';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -115,7 +116,7 @@
 </script>
 
 <svelte:head>
-	<title>Menu · Table {page.data.table?.name ?? ''} — {hotel.name}</title>
+	<title>Menu · {tableLabel(page.data.table?.name ?? '')} — {hotel.name}</title>
 </svelte:head>
 
 <!-- Spoken only: "Added Pray Rays. 2 in your cart." -->
@@ -136,7 +137,7 @@
 	<!-- A warm welcome and the three steps, instead of a paragraph nobody reads. -->
 	<section class="tq-hero" aria-labelledby="menu-title">
 		<div class="tq-hero-weave" aria-hidden="true"></div>
-		<p class="tq-hero-eyebrow">{page.data.table?.venueTitle} · Table {page.data.table?.name}</p>
+		<p class="tq-hero-eyebrow">{page.data.table?.venueTitle} · {tableLabel(page.data.table?.name ?? "")}</p>
 		<h1 id="menu-title" class="ledger-display tq-title">What would you like?</h1>
 		<ol class="tq-hero-steps">
 			<li><span class="tq-step-num" aria-hidden="true">1</span> Choose your dishes</li>

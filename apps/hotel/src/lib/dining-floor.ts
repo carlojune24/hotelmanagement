@@ -153,3 +153,6 @@ export function floorCounts(views: TableView[]): Record<FloorFilter, number> {
 	for (const { key } of FILTERS) out[key] = views.filter((v) => matchesFilter(v, key)).length;
 	return out;
 }
+
+// Tables are often already named "Table 4": only add the word when it isn't there.
+export const tableLabel = (name: string) => (/^table\b/i.test(name) ? name : `Table ${name}`);

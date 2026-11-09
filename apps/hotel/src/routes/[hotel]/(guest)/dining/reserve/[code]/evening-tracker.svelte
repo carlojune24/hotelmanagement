@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tableLabel } from '$lib/dining-floor';
 	import CheckIcon from '@lucide/svelte/icons/check';
 
 	/**
@@ -58,8 +59,7 @@
 	const tableTrack = $derived<Track>({
 		steps: [
 			{ label: status === 'pending' ? 'Awaiting payment' : 'Reserved' },
-			// Tables are often already named "Table 4": only add the word when the name is just a number.
-			{ label: tableNames.length ? `Seated, ${tableNames.map((n) => (/^[0-9]/.test(n) ? `Table ${n}` : n)).join(', ')}` : 'Seated' },
+			{ label: tableNames.length ? `Seated, ${tableNames.map(tableLabel).join(', ')}` : 'Seated' },
 			{ label: 'Done' }
 		],
 		// Reserved is ticked once confirmed; Seated only lights up when the party actually sits down.

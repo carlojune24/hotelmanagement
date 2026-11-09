@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tableLabel } from '$lib/dining-floor';
 	import { enhance } from '$app/forms';
 	import { invalidate } from '$app/navigation';
 	import { page } from '$app/state';
@@ -33,7 +34,7 @@
 </script>
 
 <svelte:head>
-	<title>My orders · Table {data.table.name} — {hotel.name}</title>
+	<title>My orders · {tableLabel(data.table.name)} — {hotel.name}</title>
 </svelte:head>
 
 <main class="tq-main tq-narrow">

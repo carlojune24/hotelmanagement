@@ -14,7 +14,7 @@
 	import PrinterIcon from '@lucide/svelte/icons/printer';
 	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
 	import { RESERVATION_TRANSITIONS } from '$lib/dining-slots';
-	import { STAGE_LABEL, type TableView } from '$lib/dining-floor';
+	import { STAGE_LABEL, tableLabel, type TableView } from '$lib/dining-floor';
 	import { ORDER_STATUS_LABEL, formatWait, type OrderStatus } from '$lib/dining-orders';
 	import { STAGE_STYLE } from './stage-style';
 	import { buildBill } from '$lib/dining-bill';
@@ -122,7 +122,7 @@
 		{#if table && view}
 			<Sheet.Header class="border-b border-border py-4 pr-14 pl-5">
 				<div class="flex flex-wrap items-center gap-2">
-					<Sheet.Title class="text-xl">Table {table.name}</Sheet.Title>
+					<Sheet.Title class="text-xl">{tableLabel(table.name)}</Sheet.Title>
 					<Badge variant="outline" class="gap-1.5 text-ink">
 						<span class="size-1.5 rounded-full {STAGE_STYLE[view.stage].dot}" aria-hidden="true"></span>{STAGE_LABEL[view.stage]}
 					</Badge>
@@ -287,7 +287,7 @@
 										<Select.Trigger class="h-9 flex-1 text-sm" aria-label="Join this table's orders to another table's bill">{joinLabel}</Select.Trigger>
 										<Select.Content>
 											{#each joinTargets as t (t.id)}
-												<Select.Item value={t.id} label="Table {t.tableName} · {t.orders.length} {t.orders.length === 1 ? 'order' : 'orders'} · {peso(t.unpaidCentavos)}" />
+												<Select.Item value={t.id} label="{tableLabel(t.tableName)} · {t.orders.length} {t.orders.length === 1 ? 'order' : 'orders'} · {peso(t.unpaidCentavos)}" />
 											{/each}
 										</Select.Content>
 									</Select.Root>
@@ -394,7 +394,7 @@
 							<DropdownMenu.Root>
 								<DropdownMenu.Trigger>
 									{#snippet child({ props })}
-										<Button {...props} variant="ghost" size="icon" class="size-11 shrink-0" aria-label="More for table {table.name}">
+										<Button {...props} variant="ghost" size="icon" class="size-11 shrink-0" aria-label="More for {tableLabel(table.name)}">
 											<EllipsisIcon class="size-5" />
 										</Button>
 									{/snippet}
