@@ -37,9 +37,9 @@
 	<div class="mb-2 mt-6 flex flex-wrap items-center justify-between gap-3">
 		<h2 class="text-sm font-semibold text-ink">Shift history</h2>
 		<div class="inline-flex rounded-lg border border-border bg-surface-2 p-1" role="group" aria-label="Source">
-			{#each [['', 'All'], ['hotel', 'Hotel'], ['dining', 'Dining']] as const as [v, label] (v)}
+			{#each [['all', 'All'], ['hotel', 'Hotel'], ['dining', 'Dining']] as const as [v, label] (v)}
 				<a
-					href={v ? `?src=${v}` : page.url.pathname}
+					href={v === 'hotel' ? page.url.pathname : `?src=${v}`}
 					data-sveltekit-noscroll
 					aria-current={data.side === v ? 'true' : undefined}
 					class="min-w-20 rounded-md px-4 py-2 text-center text-sm font-semibold {data.side === v ? 'bg-background text-ink shadow-sm' : 'text-ink-muted hover:text-ink'}"

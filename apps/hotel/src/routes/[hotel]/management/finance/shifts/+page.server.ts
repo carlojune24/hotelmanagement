@@ -10,7 +10,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	requireCap(locals.user, locals.role, 'finance:read');
 	const hotel = locals.hotel!;
 	const src = url.searchParams.get('src');
-	const side = src === 'hotel' || src === 'dining' ? src : undefined;
+	// Defaults to Hotel; All has to be asked for.
+	const side = src === 'all' ? undefined : src === 'dining' ? 'dining' : 'hotel';
 	const [shifts, expenseCategories] = await Promise.all([
 		listShifts(hotel.id, 80, null, side),
 		listExpenseCategories(hotel.id)
@@ -19,7 +20,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const reconciliations = await Promise.all(openIds.map((id) => getShiftReconciliation(hotel.id, id)));
 	return {
 		shifts,
-		side: side ?? '',
+		side: side ?? 'all',
 		expenseCategories: expenseCategories.map((c) => ({ id: c.id, name: c.name, group: c.group })),
 		openReconciliations: reconciliations.filter((r): r is NonNullable<typeof r> => !!r)
 	};
