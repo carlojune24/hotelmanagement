@@ -6,17 +6,20 @@ import { addShiftEvent, closeShift, getShiftReconciliation, listShifts } from '$
 import { listExpenseCategories } from '$lib/server/finance/accounts';
 import type { Actions, PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ locals }) => {
+export const load: PageServerLoad = async ({ locals, url }) => {
 	requireCap(locals.user, locals.role, 'finance:read');
 	const hotel = locals.hotel!;
+	const src = url.searchParams.get('src');
+	const side = src === 'hotel' || src === 'dining' ? src : undefined;
 	const [shifts, expenseCategories] = await Promise.all([
-		listShifts(hotel.id, 80),
+		listShifts(hotel.id, 80, null, side),
 		listExpenseCategories(hotel.id)
 	]);
 	const openIds = shifts.filter((s) => s.status === 'open').map((s) => s.id);
 	const reconciliations = await Promise.all(openIds.map((id) => getShiftReconciliation(hotel.id, id)));
 	return {
 		shifts,
+		side: side ?? '',
 		expenseCategories: expenseCategories.map((c) => ({ id: c.id, name: c.name, group: c.group })),
 		openReconciliations: reconciliations.filter((r): r is NonNullable<typeof r> => !!r)
 	};

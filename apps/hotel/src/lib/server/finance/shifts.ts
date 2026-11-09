@@ -643,9 +643,26 @@ export async function closeShift(input: {
 }
 
 /** List for the Shifts page — recent shifts with cashier names + variance. `cashAccountId`
- *  narrows it to one drawer, which is how a register shows its own history and nobody else's. */
-export async function listShifts(hotelId: string, limit = 60, cashAccountId?: string | null) {
+ *  narrows it to one drawer, which is how a register shows its own history and nobody else's.
+ *  `side` splits by the dining drawer: 'dining' is that drawer alone, 'hotel' every other. */
+export async function listShifts(
+	hotelId: string,
+	limit = 60,
+	cashAccountId?: string | null,
+	side?: 'hotel' | 'dining'
+) {
 	const opened = users;
+	let sideCond;
+	if (side) {
+		const [fs] = await db
+			.select({ dining: financeSettings.diningDrawerAccountId })
+			.from(financeSettings)
+			.where(eq(financeSettings.hotelId, hotelId))
+			.limit(1);
+		const dining = fs?.dining ?? null;
+		if (side === 'dining') sideCond = dining ? eq(cashierShifts.cashAccountId, dining) : sql`false`;
+		else if (dining) sideCond = sql`${cashierShifts.cashAccountId} <> ${dining}`;
+	}
 	return db
 		.select({
 			id: cashierShifts.id,
@@ -666,9 +683,11 @@ export async function listShifts(hotelId: string, limit = 60, cashAccountId?: st
 		.innerJoin(cashAccounts, eq(cashAccounts.id, cashierShifts.cashAccountId))
 		.leftJoin(opened, eq(opened.id, cashierShifts.openedByUserId))
 		.where(
-			cashAccountId
-				? and(eq(cashierShifts.hotelId, hotelId), eq(cashierShifts.cashAccountId, cashAccountId))
-				: eq(cashierShifts.hotelId, hotelId)
+			and(
+				eq(cashierShifts.hotelId, hotelId),
+				cashAccountId ? eq(cashierShifts.cashAccountId, cashAccountId) : undefined,
+				sideCond
+			)
 		)
 		.orderBy(desc(cashierShifts.openedAt))
 		.limit(limit);

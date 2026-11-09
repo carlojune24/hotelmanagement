@@ -13,6 +13,10 @@
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 	const slug = $derived(page.params.hotel!);
 	const peso = (c: number) => `₱${(c / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+	const at = (d: string | Date | null) =>
+		d
+			? new Date(d).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short', timeZone: data.hotel?.timezone })
+			: '—';
 
 	$effect(() => {
 		if (form && 'ok' in form && form.ok) toast.success(form.ok);
@@ -71,7 +75,8 @@
 			<Table.Root>
 				<Table.Header>
 					<Table.Row>
-						<Table.Head>Date</Table.Head>
+						<Table.Head>Opened</Table.Head>
+						<Table.Head>Closed</Table.Head>
 						<Table.Head>Cashier</Table.Head>
 						<Table.Head class="text-right">Opening</Table.Head>
 						<Table.Head class="text-right">Expected</Table.Head>
@@ -83,11 +88,12 @@
 					{#each data.shifts as s (s.id)}
 						<Table.Row>
 							<Table.Cell class="whitespace-nowrap text-ink-muted">
-								{s.businessDate}
+								{at(s.openedAt)}
 								{#if s.status === 'open'}
 									<Badge variant="outline" class="ml-1.5 border-transparent bg-ok/15 text-ok">Open</Badge>
 								{/if}
 							</Table.Cell>
+							<Table.Cell class="whitespace-nowrap text-ink-muted">{at(s.closedAt)}</Table.Cell>
 							<Table.Cell class="text-ink-muted">{s.openedByName ?? '—'}</Table.Cell>
 							<Table.Cell class="text-right tabular-nums text-ink-muted">
 								{peso(s.openingFloatCentavos)}
@@ -110,7 +116,7 @@
 						</Table.Row>
 					{:else}
 						<Table.Row>
-							<Table.Cell colspan={6} class="py-8 text-center text-sm text-ink-muted">
+							<Table.Cell colspan={7} class="py-8 text-center text-sm text-ink-muted">
 								No shifts on this drawer yet.
 							</Table.Cell>
 						</Table.Row>
