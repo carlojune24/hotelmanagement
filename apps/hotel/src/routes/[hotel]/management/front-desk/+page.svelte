@@ -219,6 +219,13 @@
 			: 0;
 	let depositOverrideConfirming = $state(false);
 	let shiftFloat = $state('');
+	let closeShiftOpen = $state(false);
+	let closeCounted = $state('');
+	const closeVariance = $derived.by(() => {
+		const c = parseFloat(closeCounted || '');
+		const s = data.cashier.openShift;
+		return s && Number.isFinite(c) ? Math.round(c * 100) - s.expectedCashCentavos : null;
+	});
 
 	let hallDetailOpen = $state(false);
 	$effect(() => {
@@ -1357,6 +1364,10 @@
 					<BanknoteIcon class="size-3.5" />
 					Shift open · float {peso(data.cashier.openShift.openingFloatCentavos)}
 				</a>
+				<Button size="sm" variant="outline" onclick={() => ((closeCounted = ''), (closeShiftOpen = true))}>
+					<ClockIcon class="size-3.5" />
+					Close shift
+				</Button>
 			{:else if data.cashier.hasDrawerAccount}
 				<form method="POST" action="?/openShift" use:enhance class="flex items-center gap-1.5">
 					<span class="text-xs text-ink-muted">{data.cashier.drawer?.name}</span>
@@ -3965,6 +3976,56 @@
 		</span>
 	{/if}
 {/snippet}
+
+<Dialog.Root bind:open={closeShiftOpen}>
+	<Dialog.Content class="sm:max-w-md">
+		{#if data.cashier.openShift}
+			{@const s = data.cashier.openShift}
+			<Dialog.Header>
+				<Dialog.Title>Close shift: {s.drawerName}</Dialog.Title>
+				<Dialog.Description>
+					Opened {new Date(s.openedAt).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short', timeZone: data.hotel?.timezone })}
+					by {s.openedByName ?? '—'}. Count the cash in the drawer before closing.
+				</Dialog.Description>
+			</Dialog.Header>
+			<div class="grid grid-cols-2 gap-2 text-sm">
+				<div><div class="text-xs text-ink-muted">Opening float</div><div class="tabular-nums">{peso(s.openingFloatCentavos)}</div></div>
+				<div><div class="text-xs text-ink-muted">Cash in</div><div class="tabular-nums text-ok">{peso(s.cashInCentavos)}</div></div>
+				<div><div class="text-xs text-ink-muted">Cash out / drops</div><div class="tabular-nums text-danger">{peso(s.cashOutCentavos)}</div></div>
+				<div><div class="text-xs text-ink-muted">Expected in drawer</div><div class="font-semibold tabular-nums">{peso(s.expectedCashCentavos)}</div></div>
+			</div>
+			<form
+				id="close-shift-form"
+				method="POST"
+				action="?/closeShift"
+				class="space-y-3"
+				use:enhance={() => async ({ result, update }) => {
+					if (result.type === 'success') closeShiftOpen = false;
+					await update();
+				}}
+			>
+				<input type="hidden" name="shiftId" value={s.id} />
+				<div class="space-y-1">
+					<Label for="closeCounted">Counted cash (₱)</Label>
+					<Input id="closeCounted" name="counted" type="number" min="0" step="0.01" bind:value={closeCounted} required />
+				</div>
+				<div class="space-y-1">
+					<Label for="closeNotes">Notes</Label>
+					<Input id="closeNotes" name="notes" maxlength={500} />
+				</div>
+				{#if closeVariance !== null}
+					<p class="text-sm font-semibold {closeVariance < 0 ? 'text-danger' : closeVariance > 0 ? 'text-brand' : 'text-ok'}">
+						{closeVariance === 0 ? 'Balanced' : closeVariance > 0 ? `Over ${peso(closeVariance)}` : `Short ${peso(-closeVariance)}`}
+					</p>
+				{/if}
+			</form>
+			<Dialog.Footer>
+				<Button variant="outline" onclick={() => (closeShiftOpen = false)}>Cancel</Button>
+				<Button type="submit" form="close-shift-form">Close shift</Button>
+			</Dialog.Footer>
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>
 
 <Dialog.Root bind:open={hallCheckoutOpen}>
 	<Dialog.Content class="sm:max-w-md">

@@ -24,7 +24,7 @@
 	});
 </script>
 
-<div class="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6">
+<div class="mx-auto w-full max-w-screen-2xl px-4 py-6 sm:px-6">
 	<h1 class="mb-1 text-xl font-semibold tracking-tight text-ink">
 		{data.drawer?.name ?? 'Dining drawer'}
 	</h1>
@@ -75,9 +75,8 @@
 			<Table.Root>
 				<Table.Header>
 					<Table.Row>
-						<Table.Head>Opened</Table.Head>
-						<Table.Head>Closed</Table.Head>
-						<Table.Head>Cashier</Table.Head>
+						<Table.Head>Opened / by</Table.Head>
+						<Table.Head>Closed / by</Table.Head>
 						<Table.Head class="text-right">Opening</Table.Head>
 						<Table.Head class="text-right">Expected</Table.Head>
 						<Table.Head class="text-right">Counted</Table.Head>
@@ -92,9 +91,12 @@
 								{#if s.status === 'open'}
 									<Badge variant="outline" class="ml-1.5 border-transparent bg-ok/15 text-ok">Open</Badge>
 								{/if}
+								<div class="text-xs text-ink">{s.openedByName ?? '—'}</div>
 							</Table.Cell>
-							<Table.Cell class="whitespace-nowrap text-ink-muted">{at(s.closedAt)}</Table.Cell>
-							<Table.Cell class="text-ink-muted">{s.openedByName ?? '—'}</Table.Cell>
+							<Table.Cell class="whitespace-nowrap text-ink-muted">
+								{at(s.closedAt)}
+								{#if s.closedAt}<div class="text-xs text-ink">{s.closedByName ?? '—'}</div>{/if}
+							</Table.Cell>
 							<Table.Cell class="text-right tabular-nums text-ink-muted">
 								{peso(s.openingFloatCentavos)}
 							</Table.Cell>
@@ -116,7 +118,7 @@
 						</Table.Row>
 					{:else}
 						<Table.Row>
-							<Table.Cell colspan={7} class="py-8 text-center text-sm text-ink-muted">
+							<Table.Cell colspan={6} class="py-8 text-center text-sm text-ink-muted">
 								No shifts on this drawer yet.
 							</Table.Cell>
 						</Table.Row>

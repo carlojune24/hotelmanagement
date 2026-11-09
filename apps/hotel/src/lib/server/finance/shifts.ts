@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '../db/index';
 import {
 	cashAccounts,
@@ -652,6 +653,7 @@ export async function listShifts(
 	side?: 'hotel' | 'dining'
 ) {
 	const opened = users;
+	const closed = alias(users, 'closed_by');
 	let sideCond;
 	if (side) {
 		const [fs] = await db
@@ -670,6 +672,7 @@ export async function listShifts(
 			status: cashierShifts.status,
 			drawerName: cashAccounts.name,
 			openedByName: opened.name,
+			closedByName: closed.name,
 			openedAt: cashierShifts.openedAt,
 			closedAt: cashierShifts.closedAt,
 			openingFloatCentavos: cashierShifts.openingFloatCentavos,
@@ -682,6 +685,7 @@ export async function listShifts(
 		.from(cashierShifts)
 		.innerJoin(cashAccounts, eq(cashAccounts.id, cashierShifts.cashAccountId))
 		.leftJoin(opened, eq(opened.id, cashierShifts.openedByUserId))
+		.leftJoin(closed, eq(closed.id, cashierShifts.closedByUserId))
 		.where(
 			and(
 				eq(cashierShifts.hotelId, hotelId),

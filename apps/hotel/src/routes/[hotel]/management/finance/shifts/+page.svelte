@@ -27,7 +27,7 @@
 
 </script>
 
-<div class="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
+<div class="mx-auto w-full max-w-screen-2xl px-4 py-6 sm:px-6">
 	<h1 class="mb-4 text-xl font-semibold tracking-tight text-ink">Cashier shifts</h1>
 
 	{#each data.openReconciliations as r (r.shift.id)}
@@ -51,10 +51,9 @@
 		<Table.Root>
 			<Table.Header>
 				<Table.Row>
-					<Table.Head>Opened</Table.Head>
-					<Table.Head>Closed</Table.Head>
+					<Table.Head>Opened / by</Table.Head>
+					<Table.Head>Closed / by</Table.Head>
 					<Table.Head>Drawer</Table.Head>
-					<Table.Head>Cashier</Table.Head>
 					<Table.Head class="text-right">Opening</Table.Head>
 					<Table.Head class="text-right">Expected</Table.Head>
 					<Table.Head class="text-right">Counted</Table.Head>
@@ -65,10 +64,15 @@
 			<Table.Body>
 				{#each data.shifts as s (s.id)}
 					<Table.Row>
-						<Table.Cell class="whitespace-nowrap text-ink-muted">{at(s.openedAt)}</Table.Cell>
-						<Table.Cell class="whitespace-nowrap text-ink-muted">{at(s.closedAt)}</Table.Cell>
+						<Table.Cell class="whitespace-nowrap text-ink-muted">
+							{at(s.openedAt)}
+							<div class="text-xs text-ink">{s.openedByName ?? '—'}</div>
+						</Table.Cell>
+						<Table.Cell class="whitespace-nowrap text-ink-muted">
+							{at(s.closedAt)}
+							{#if s.closedAt}<div class="text-xs text-ink">{s.closedByName ?? '—'}</div>{/if}
+						</Table.Cell>
 						<Table.Cell class="text-ink">{s.drawerName}</Table.Cell>
-						<Table.Cell class="text-ink-muted">{s.openedByName ?? '—'}</Table.Cell>
 						<Table.Cell class="text-right tabular-nums text-ink-muted"
 							>{peso(s.openingFloatCentavos)}</Table.Cell
 						>
@@ -101,7 +105,7 @@
 					</Table.Row>
 				{:else}
 					<Table.Row
-						><Table.Cell colspan={9} class="py-6 text-center text-ink-muted"
+						><Table.Cell colspan={8} class="py-6 text-center text-ink-muted"
 							>No shifts yet.</Table.Cell
 						></Table.Row
 					>

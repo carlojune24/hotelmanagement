@@ -67,7 +67,7 @@ import {
 	reverseScPwdDiscount
 } from '$lib/server/sc-pwd-discount';
 import { getFinanceSettings } from '$lib/server/finance/settings';
-import { getDefaultOpenShift } from '$lib/server/finance/shifts';
+import { closeShift, getDefaultOpenShift, getShiftReconciliation } from '$lib/server/finance/shifts';
 import { openShift as openShiftFn } from '$lib/server/finance/shifts';
 import { emailCheck, nameError, phoneError } from '$lib/guest-validation';
 import { MAX_ROOMS_PER_LINE } from '$lib/pricing-utils';
@@ -170,6 +170,8 @@ export const load: PageServerLoad = async ({ locals }) => {
 	const frontDeskDrawer =
 		drawers.find((d) => d.id === financeSettings.defaultDrawerAccountId) ??
 		(spareDrawers.length === 1 ? spareDrawers[0]! : null);
+	// What the Close shift dialog counts against.
+	const openRecon = openShift ? await getShiftReconciliation(hotel.id, openShift.id) : null;
 
 	// The OTAs this hotel takes bookings from: the OTA form offers exactly these.
 	const otaNames = (await listOtaChannels(hotel.id, { activeOnly: true })).map((c) => c.name);
@@ -200,7 +202,12 @@ export const load: PageServerLoad = async ({ locals }) => {
 						id: openShift.id,
 						openedAt: openShift.openedAt,
 						openingFloatCentavos: openShift.openingFloatCentavos,
-						drawerId: openShift.cashAccountId
+						drawerId: openShift.cashAccountId,
+						drawerName: openRecon?.drawerName ?? 'Drawer',
+						openedByName: openRecon?.openedByName ?? null,
+						cashInCentavos: openRecon?.cashInCentavos ?? 0,
+						cashOutCentavos: openRecon?.cashOutCentavos ?? 0,
+						expectedCashCentavos: openRecon?.expectedCashCentavos ?? openShift.openingFloatCentavos
 					}
 				: null
 		},
@@ -948,6 +955,42 @@ export const actions: Actions = {
 				actor: event.locals.user
 			});
 			return { ok: floatNote ?? 'Shift opened.' };
+		} catch (e) {
+			if (e instanceof FinanceError) return fail(400, { shiftError: e.message });
+			throw e;
+		}
+	},
+
+	closeShift: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'shift:write');
+		const hotel = event.locals.hotel!;
+		const parsed = z
+			.object({
+				shiftId: z.string().uuid(),
+				counted: z.coerce.number().min(0).max(10_000_000),
+				notes: z.string().max(500).optional()
+			})
+			.safeParse(Object.fromEntries(await event.request.formData()));
+		if (!parsed.success) return fail(400, { shiftError: 'Enter the counted cash.' });
+
+		// The counter closes its own till only — never dining's or another register's.
+		const open = await getDefaultOpenShift(hotel.id);
+		if (!open || open.id !== parsed.data.shiftId)
+			return fail(400, { shiftError: 'That is not the front desk’s open shift. Reload the page.' });
+		try {
+			const r = await closeShift({
+				hotelId: hotel.id,
+				shiftId: open.id,
+				countedCentavos: Math.round(parsed.data.counted * 100),
+				notes: parsed.data.notes || null,
+				actor: event.locals.user
+			});
+			return {
+				ok:
+					r.varianceCentavos === 0
+						? 'Shift closed — balanced.'
+						: `Shift closed — ${r.varianceCentavos > 0 ? 'over' : 'short'} ₱${(Math.abs(r.varianceCentavos) / 100).toFixed(2)}.`
+			};
 		} catch (e) {
 			if (e instanceof FinanceError) return fail(400, { shiftError: e.message });
 			throw e;
