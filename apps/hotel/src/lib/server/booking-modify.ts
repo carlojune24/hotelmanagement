@@ -685,7 +685,8 @@ export async function modifyBookingStay(
 				unitPriceCentavos: deltaCentavos,
 				taxCentavos: 0,
 				totalCentavos: deltaCentavos,
-				addedByUserId: actor?.id ?? null
+				addedByUserId: actor?.id ?? null,
+				source: 'stay_change'
 			});
 			noteParts.push(
 				`room type/rate plan changed — ${deltaCentavos >= 0 ? 'charge' : 'credit'} ₱${(Math.abs(deltaCentavos) / 100).toFixed(2)}`
@@ -709,7 +710,8 @@ export async function modifyBookingStay(
 					unitPriceCentavos: sign * seg.amountCentavos,
 					taxCentavos: 0,
 					totalCentavos: sign * seg.amountCentavos,
-					addedByUserId: actor?.id ?? null
+					addedByUserId: actor?.id ?? null,
+					source: 'stay_change'
 				});
 				noteParts.push(
 					`${seg.direction} ${seg.nights.length} night(s) on the ${seg.edge} — ${seg.direction === 'added' ? 'charge' : 'credit'} ₱${(seg.amountCentavos / 100).toFixed(2)}`
@@ -727,7 +729,8 @@ export async function modifyBookingStay(
 					unitPriceCentavos: extraBedDeltaCentavos,
 					taxCentavos: 0,
 					totalCentavos: extraBedDeltaCentavos,
-					addedByUserId: actor?.id ?? null
+					addedByUserId: actor?.id ?? null,
+					source: 'stay_change'
 				});
 			}
 			noteParts.push(extraBedNote ?? `extra beds ${bookingRoom.extraBeds} → ${extraBeds}`);

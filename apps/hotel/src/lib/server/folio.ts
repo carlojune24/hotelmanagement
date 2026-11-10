@@ -289,6 +289,7 @@ export interface FolioChargeLine {
 	taxCentavos: number;
 	totalCentavos: number;
 	isBaseCharge: boolean;
+	source: string | null;
 	voidedAt: Date | null;
 	voidReason: string | null;
 	createdAt: Date;
@@ -374,6 +375,7 @@ export async function getFolioDetail(hotelId: string, target: FolioTarget): Prom
 			taxCentavos: c.taxCentavos,
 			totalCentavos: c.totalCentavos,
 			isBaseCharge: c.isBaseCharge,
+			source: c.source,
 			voidedAt: c.voidedAt,
 			voidReason: c.voidReason,
 			createdAt: c.createdAt
@@ -696,6 +698,9 @@ export async function voidFolioCharge(
 		if (!charge) throw new FolioError('Charge not found.');
 		if (charge.isBaseCharge)
 			throw new FolioError("The room/hall stay charge itself can't be voided.");
+		// Voiding only the charge would leave the booking's dates, total and room assignment changed.
+		if (charge.source === 'stay_change')
+			throw new FolioError("A stay change can't be voided — use Modify stay to change the dates back.");
 		if (charge.voidedAt) throw new FolioError('That charge is already voided.');
 
 		await tx

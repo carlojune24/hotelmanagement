@@ -2558,7 +2558,7 @@
 														Voided{#if c.voidReason}
 															— {c.voidReason}{/if}
 													</div>
-												{:else if !c.isBaseCharge}
+												{:else if !c.isBaseCharge && c.source !== 'stay_change'}
 													<form method="POST" action="?/voidCharge" use:enhance>
 														<input type="hidden" name="bookingId" value={o.bookingId} />
 														<input type="hidden" name="chargeId" value={c.id} />
