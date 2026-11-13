@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/index';
 import { attemptCode, diningOrders, guests, hotels, orders, paymentAttempts } from '../db/schema/index';
 import { DEFAULT_ACCENT_COLOR, DEFAULT_PAPER_COLOR, parseBranding } from '../branding';
-import { PENDING_ORDER_TTL_MINUTES } from '../orders';
+import { getHoldDeadline } from '../orders';
 import { renderPaymentStatus } from './payment-status';
 import { sendMail, type SendMailResult } from './send';
 import { hotelOrigin } from '../hotel-origin';
@@ -46,7 +46,7 @@ export async function sendPaymentStatusEmail(
 			reference = order.id.slice(0, 8).toUpperCase();
 			trackUrl = `${origin}/${hotel.slug}/confirmation/${order.id}?t=${order.accessToken}`;
 			mailOrderId = order.id;
-			holdUntil = new Date(order.createdAt.getTime() + PENDING_ORDER_TTL_MINUTES * 60_000).toLocaleString('en-PH', {
+			holdUntil = (await getHoldDeadline(order)).at.toLocaleString('en-PH', {
 				timeZone: hotel.timezone,
 				dateStyle: 'medium',
 				timeStyle: 'short'

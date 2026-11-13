@@ -14,6 +14,10 @@ import { SLUG, futureDate, staffLogin, uniqueGuest } from './helpers';
  * The hold is now measured from the order's last entry into `pending_payment`, so a
  * reinstatement restarts the clock instead of starting out expired.
  *
+ * The booking checks in TODAY on purpose: a hold lasts until 1 day before check-in (max 3 days), so
+ * only a check-in less than 24h away falls back to the short PENDING_ORDER_TTL_MINUTES hold this
+ * spec waits out.
+ *
  * Needs a short hold window and real waiting, so it is opt-in. Run the dev server with the
  * floor value and run this spec against it:
  *   PENDING_ORDER_TTL_MINUTES=5 pnpm dev
@@ -30,7 +34,7 @@ const TTL_MS = TTL_MIN * 60_000;
 /** Books a room online and abandons the payment, leaving a `pending_payment` hold. */
 async function startUnpaidBooking(page: import('playwright/test').Page) {
 	const guest = uniqueGuest();
-	await page.goto(`/${SLUG}/rooms?checkIn=${futureDate(21)}&checkOut=${futureDate(23)}&adults=2`);
+	await page.goto(`/${SLUG}/rooms?checkIn=${futureDate(0)}&checkOut=${futureDate(2)}&adults=2`);
 	await page.getByRole('button', { name: /Book|Select|Reserve/ }).first().click();
 	await page.waitForURL(/\/details/);
 	await page.locator('input[name="fullName"], #fullName').fill(guest.name);

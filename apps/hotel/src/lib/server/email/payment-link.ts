@@ -28,7 +28,11 @@ export interface PaymentLinkEmailData {
 	payUrl: string;
 	/** When the hold lapses if unpaid, already formatted for the hotel's timezone. */
 	holdUntil: string;
+	/** True when the hold runs to 1 day before check-in (not the short or capped hold): adds that line to the email. */
+	expiresBeforeCheckIn?: boolean;
 }
+
+const CHECKIN_EXPIRY_NOTE = 'This link expires 1 day before your check-in date.';
 
 const FONT_DISPLAY = "Georgia, 'Times New Roman', 'Noto Serif', serif";
 const FONT_BODY =
@@ -80,7 +84,7 @@ export function renderPaymentLink(data: PaymentLinkEmailData): RenderedEmail {
 <tr><td style="padding:28px 28px 8px;">
 	<div style="font-family:${FONT_DISPLAY};font-size:22px;color:${accentDeep};">${esc(hotel.name)}</div>
 	<div style="margin-top:14px;font-family:${FONT_DISPLAY};font-size:26px;line-height:1.2;color:${INK};">Finish your booking</div>
-	<div style="margin-top:10px;font-family:${FONT_BODY};font-size:14px;line-height:1.55;color:${INK_MUTED};">${esc(data.guestName)}, your booking was started but not paid, so it isn't confirmed yet. Your room${data.lines.length === 1 ? ' is' : 's are'} held for you until <strong style="color:${INK};">${esc(data.holdUntil)}</strong>.</div>
+	<div style="margin-top:10px;font-family:${FONT_BODY};font-size:14px;line-height:1.55;color:${INK_MUTED};">${esc(data.guestName)}, your booking was started but not paid, so it isn't confirmed yet. Your room${data.lines.length === 1 ? ' is' : 's are'} held for you until <strong style="color:${INK};">${esc(data.holdUntil)}</strong>.${data.expiresBeforeCheckIn ? ` ${CHECKIN_EXPIRY_NOTE}` : ''}</div>
 </td></tr>
 <tr><td style="padding:8px 28px;">
 	<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${linesHtml}
@@ -101,7 +105,7 @@ export function renderPaymentLink(data: PaymentLinkEmailData): RenderedEmail {
 		'',
 		'FINISH YOUR BOOKING',
 		`${data.guestName}, your booking was started but not paid, so it isn't confirmed yet.`,
-		`Your room${data.lines.length === 1 ? ' is' : 's are'} held until ${data.holdUntil}.`,
+		`Your room${data.lines.length === 1 ? ' is' : 's are'} held until ${data.holdUntil}.${data.expiresBeforeCheckIn ? ` ${CHECKIN_EXPIRY_NOTE}` : ''}`,
 		'',
 		...data.lines.map((l) => `- ${l}`),
 		`Due now: ${dueLine}`,

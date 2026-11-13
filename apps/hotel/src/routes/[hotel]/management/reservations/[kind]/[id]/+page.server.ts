@@ -43,7 +43,7 @@ import {
 	listRoomTypeOptionsForModify,
 	modifyBookingStay
 } from '$lib/server/booking-modify';
-import { PENDING_ORDER_TTL_MINUTES } from '$lib/server/orders';
+import { getHoldDeadline, PENDING_ORDER_TTL_MINUTES } from '$lib/server/orders';
 import { saveUpload } from '$lib/server/uploads';
 import {
 	SecurityDepositError,
@@ -601,8 +601,20 @@ export const actions: Actions = {
 			// The cancellation already killed the guest's checkout session, so they can't pay from
 			// their old email link — without a fresh one this hold releases itself again.
 			if (res.reinstatedTo === 'pending_payment') {
+					const detail =
+						event.params.kind === 'room'
+							? await getRoomBookingDetail(hotelId, event.params.id)
+							: await getHallBookingDetail(hotelId, event.params.id);
+					const deadline = detail
+						? await getHoldDeadline({ id: detail.order.id, hotelId, createdAt: detail.order.createdAt }).catch(() => null)
+						: null;
+					const when = deadline?.at.toLocaleString('en-PH', {
+						timeZone: event.locals.hotel!.timezone,
+						dateStyle: 'medium',
+						timeStyle: 'short'
+					});
 				bits.push(
-					`It is unpaid and releases itself again in ${PENDING_ORDER_TTL_MINUTES} minutes — send the guest a payment link, or confirm the payment manually.`
+					`It is unpaid and releases itself again ${when ? `at ${when}` : `in ${PENDING_ORDER_TTL_MINUTES} minutes`} — send the guest a payment link, or confirm the payment manually.`
 				);
 			}
 			return { ok: bits.join(' ') };

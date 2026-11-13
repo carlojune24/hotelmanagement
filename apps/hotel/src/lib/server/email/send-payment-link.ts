@@ -11,7 +11,7 @@ import {
 	roomTypes
 } from '../db/schema/index';
 import { DEFAULT_ACCENT_COLOR, DEFAULT_PAPER_COLOR, parseBranding } from '../branding';
-import { PENDING_ORDER_TTL_MINUTES } from '../orders';
+import { getHoldDeadline } from '../orders';
 import { renderPaymentLink } from './payment-link';
 import { sendMail, type SendMailResult } from './send';
 import { hotelOrigin } from '../hotel-origin';
@@ -55,8 +55,8 @@ export async function sendPaymentLink(orderId: string): Promise<SendMailResult> 
 		]);
 
 		const origin = hotelOrigin(hotel);
-		const expiresAt = new Date(order.createdAt.getTime() + PENDING_ORDER_TTL_MINUTES * 60_000);
-		const holdUntil = expiresAt.toLocaleString('en-PH', {
+		const deadline = await getHoldDeadline(order);
+		const holdUntil = deadline.at.toLocaleString('en-PH', {
 			timeZone: hotel.timezone,
 			dateStyle: 'medium',
 			timeStyle: 'short'
@@ -81,7 +81,8 @@ export async function sendPaymentLink(orderId: string): Promise<SendMailResult> 
 			totalCentavos: order.totalCentavos,
 			dueNowCentavos: order.amountDueNowCentavos ?? order.totalCentavos,
 			payUrl: `${origin}/${hotel.slug}/review/${order.id}?t=${order.accessToken}`,
-			holdUntil
+			holdUntil,
+			expiresBeforeCheckIn: deadline.rule === 'checkin'
 		});
 
 		return await sendMail({

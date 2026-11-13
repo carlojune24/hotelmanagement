@@ -1,5 +1,6 @@
-import { and, eq, gt, inArray, lt, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, lt, min, sql } from 'drizzle-orm';
 import { env } from '$env/dynamic/private';
+import { zonedToUtc } from '$lib/dining-slots';
 import { db } from './db/index';
 import {
 	bookingRooms,
@@ -7,6 +8,7 @@ import {
 	bookingStatusHistory,
 	hallBookings,
 	hallBookingStatusHistory,
+	hotels,
 	orders,
 	orderStatusHistory,
 	roomTypes
@@ -40,6 +42,95 @@ const holdStartedAt = () => sql`coalesce((
 		where h.order_id = ${orders.id} and h.to_status = 'pending_payment'
 	), ${orders.createdAt})`;
 
+/** Single-order version of {@link holdStartedAt}, for emails that quote the hold deadline. */
+export async function getHoldStartedAt(order: { id: string; createdAt: Date }): Promise<Date> {
+	const [row] = await db
+		.select({ at: sql<Date | null>`max(${orderStatusHistory.createdAt})`.mapWith(orderStatusHistory.createdAt) })
+		.from(orderStatusHistory)
+		.where(and(eq(orderStatusHistory.orderId, order.id), eq(orderStatusHistory.toStatus, 'pending_payment')));
+	return row?.at ?? order.createdAt;
+}
+
+/** An unpaid hold normally lasts until this many hours before check-in... */
+export const HOLD_BEFORE_CHECKIN_HOURS = 24;
+/** ...but never longer than this after the hold began, so an unpaid far-ahead booking can't block a room for months. */
+export const HOLD_MAX_DAYS = 3;
+
+/** Which limit set the deadline: `checkin` = 1 day before check-in, `cap` = the max-days cap, `ttl` = the short floor. */
+export type HoldRule = 'checkin' | 'cap' | 'ttl';
+
+/**
+ * When an unpaid hold lapses: `max(holdStart + ttl, min(checkInAt − 24h, holdStart + 3 days))`.
+ * A booking made inside the last day before check-in therefore keeps the short ttl hold, and
+ * `checkInAt: null` (no dated line) does too. Pure; the sweep, the front-desk list and the emails
+ * all go through it so they can never disagree.
+ */
+export function computeHoldDeadline(input: {
+	holdStart: Date;
+	checkInAt: Date | null;
+	ttlMinutes?: number;
+}): { at: Date; rule: HoldRule } {
+	const start = input.holdStart.getTime();
+	const floor = start + (input.ttlMinutes ?? PENDING_ORDER_TTL_MINUTES) * 60_000;
+	if (!input.checkInAt) return { at: new Date(floor), rule: 'ttl' };
+	const beforeCheckIn = input.checkInAt.getTime() - HOLD_BEFORE_CHECKIN_HOURS * 3_600_000;
+	const cap = start + HOLD_MAX_DAYS * 86_400_000;
+	const wanted = Math.min(beforeCheckIn, cap);
+	if (wanted <= floor) return { at: new Date(floor), rule: 'ttl' };
+	return { at: new Date(wanted), rule: beforeCheckIn <= cap ? 'checkin' : 'cap' };
+}
+
+/** Earliest room check-in / hall event date per order, as `YYYY-MM-DD`. */
+async function earliestStartByOrder(orderIds: string[]): Promise<Map<string, string>> {
+	const out = new Map<string, string>();
+	if (orderIds.length === 0) return out;
+	const [rooms, halls] = await Promise.all([
+		db
+			.select({ orderId: bookings.orderId, d: min(bookings.checkIn) })
+			.from(bookings)
+			.where(inArray(bookings.orderId, orderIds))
+			.groupBy(bookings.orderId),
+		db
+			.select({ orderId: hallBookings.orderId, d: min(hallBookings.eventDate) })
+			.from(hallBookings)
+			.where(inArray(hallBookings.orderId, orderIds))
+			.groupBy(hallBookings.orderId)
+	]);
+	for (const r of [...rooms, ...halls]) {
+		if (r.orderId && r.d && (!out.has(r.orderId) || r.d < out.get(r.orderId)!)) out.set(r.orderId, r.d);
+	}
+	return out;
+}
+
+/** `startDate` is the earliest check-in date; it is read at the hotel's own check-in time and timezone. */
+function deadlineFor(
+	holdStart: Date,
+	startDate: string | undefined,
+	hotel: { timezone: string; checkInTime: string },
+	ttlMinutes?: number
+) {
+	const checkInAt = startDate ? zonedToUtc(startDate, hotel.checkInTime.slice(0, 5), hotel.timezone) : null;
+	return computeHoldDeadline({ holdStart, checkInAt, ttlMinutes });
+}
+
+/** The hold deadline for one order — what the guest emails quote. */
+export async function getHoldDeadline(order: {
+	id: string;
+	hotelId: string;
+	createdAt: Date;
+}): Promise<{ at: Date; rule: HoldRule }> {
+	const [holdStart, starts, [hotel]] = await Promise.all([
+		getHoldStartedAt(order),
+		earliestStartByOrder([order.id]),
+		db
+			.select({ timezone: hotels.timezone, checkInTime: hotels.checkInTime })
+			.from(hotels)
+			.where(eq(hotels.id, order.hotelId))
+	]);
+	if (!hotel) return computeHoldDeadline({ holdStart, checkInAt: null });
+	return deadlineFor(holdStart, starts.get(order.id), hotel);
+}
+
 export interface UnpaidHold {
 	roomTypeName: string;
 	rooms: number;
@@ -62,6 +153,7 @@ export async function listUnpaidHolds(
 ): Promise<UnpaidHold[]> {
 	const rows = await db
 		.select({
+			orderId: orders.id,
 			roomTypeName: roomTypes.name,
 			quantity: bookingRooms.quantity,
 			checkIn: bookings.checkIn,
@@ -81,13 +173,21 @@ export async function listUnpaidHolds(
 				gt(bookings.checkOut, checkIn)
 			)
 		);
+	if (rows.length === 0) return [];
+	const [[hotel], starts] = await Promise.all([
+		db.select({ timezone: hotels.timezone, checkInTime: hotels.checkInTime }).from(hotels).where(eq(hotels.id, hotelId)),
+		earliestStartByOrder([...new Set(rows.map((r) => r.orderId))])
+	]);
 	return rows
 		.map((r) => ({
 			roomTypeName: r.roomTypeName,
 			rooms: r.quantity,
 			checkIn: r.checkIn,
 			checkOut: r.checkOut,
-			expiresAtIso: new Date(r.orderCreatedAt.getTime() + PENDING_ORDER_TTL_MINUTES * 60_000).toISOString()
+			expiresAtIso: (hotel
+				? deadlineFor(r.orderCreatedAt, starts.get(r.orderId), hotel)
+				: computeHoldDeadline({ holdStart: r.orderCreatedAt, checkInAt: null })
+			).at.toISOString()
 		}))
 		.sort((a, b) => a.expiresAtIso.localeCompare(b.expiresAtIso));
 }
@@ -137,16 +237,21 @@ export async function expirePendingOrders(opts?: {
 	const now = opts?.now ?? new Date();
 	const ttlMinutes = opts?.ttlMinutes ?? PENDING_ORDER_TTL_MINUTES;
 	const cutoff = new Date(now.getTime() - ttlMinutes * 60_000);
-	const note = opts?.reason ?? `Expired — payment not completed within ${ttlMinutes} min`;
+	const note = opts?.reason ?? 'Expired — payment not completed before the hold lapsed';
 
-	const candidates = await db
+	// The short ttl is the earliest any hold can lapse, so this cheap query narrows to orders that *might* be
+	// due; the real deadline (up to 1 day before check-in) is applied just below.
+	const maybeDue = await db
 		.select({
 			id: orders.id,
 			hotelId: orders.hotelId,
 			holdStartedAt: holdStartedAt().mapWith(orders.createdAt),
-			checkoutSessionId: orders.paymongoCheckoutSessionId
+			checkoutSessionId: orders.paymongoCheckoutSessionId,
+			timezone: hotels.timezone,
+			checkInTime: hotels.checkInTime
 		})
 		.from(orders)
+		.innerJoin(hotels, eq(hotels.id, orders.hotelId))
 		.where(
 			and(
 				eq(orders.status, 'pending_payment'),
@@ -154,6 +259,11 @@ export async function expirePendingOrders(opts?: {
 				opts?.hotelId ? eq(orders.hotelId, opts.hotelId) : undefined
 			)
 		);
+	if (maybeDue.length === 0) return { expiredOrderIds: [] };
+	const starts = await earliestStartByOrder(maybeDue.map((o) => o.id));
+	const candidates = maybeDue
+		.map((o) => ({ ...o, deadline: deadlineFor(o.holdStartedAt, starts.get(o.id), o, ttlMinutes) }))
+		.filter((o) => o.deadline.at.getTime() <= now.getTime());
 	if (candidates.length === 0) return { expiredOrderIds: [] };
 
 	const expiredOrderIds: string[] = [];
@@ -246,7 +356,7 @@ export async function expirePendingOrders(opts?: {
 				action: 'booking.order_expired',
 				entityType: 'order',
 				entityId: candidate.id,
-				after: { ttlMinutes, cutoff: cutoff.toISOString() }
+				after: { ttlMinutes, cutoff: cutoff.toISOString(), deadline: candidate.deadline.at.toISOString(), rule: candidate.deadline.rule }
 			});
 		} catch (e) {
 			console.error('expirePendingOrders: could not write audit', candidate.id, e);
