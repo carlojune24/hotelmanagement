@@ -27,6 +27,7 @@
 	import PaymentFields from '$lib/components/staff/payment-fields.svelte';
 	import WalkinPaymentFields from '$lib/components/staff/walkin-payment-fields.svelte';
 	import GuestContactFields from '$lib/components/staff/guest-contact-fields.svelte';
+	import SpecialRequest from '$lib/components/staff/special-request.svelte';
 	import FolioPromoTrail from '$lib/components/staff/folio-promo-trail.svelte';
 	import IdCameraCapture from '$lib/components/staff/id-camera-capture.svelte';
 	import AvailabilityCalendarSheet, {
@@ -2074,13 +2075,10 @@
 										<dd class="text-right font-medium text-danger">{peso(o.balanceCentavos)}</dd>
 									</div>
 								{/if}
-								{#if o.specialRequests}
-									<div class="flex items-center justify-between gap-3">
-										<dt class="text-ink-muted">Special request</dt>
-										<dd class="truncate text-right font-medium text-ink">{o.specialRequests}</dd>
-									</div>
-								{/if}
 							</dl>
+							{#if o.specialRequests}
+								<div class="mt-2"><SpecialRequest text={o.specialRequests} /></div>
+							{/if}
 							<Accordion.Root type="single" class="mt-2 border-t border-border pt-1">
 								<Accordion.Item value="guest-details">
 									<Accordion.Trigger
@@ -3628,9 +3626,7 @@
 						<div class="text-sm text-ink-muted">{formHallBookingDetail.guest.phone}</div>
 					{/if}
 					{#if formHallBookingDetail.guest.specialRequests}
-						<p class="mt-2 text-xs text-ink-muted">
-							Special requests: {formHallBookingDetail.guest.specialRequests}
-						</p>
+						<div class="mt-3"><SpecialRequest text={formHallBookingDetail.guest.specialRequests} /></div>
 					{/if}
 				</div>
 

@@ -23,6 +23,7 @@
 	import IdCameraCapture from '$lib/components/staff/id-camera-capture.svelte';
 	import FolioPromoTrail from '$lib/components/staff/folio-promo-trail.svelte';
 	import ConfirmationCode from '$lib/components/staff/confirmation-code.svelte';
+	import SpecialRequest from '$lib/components/staff/special-request.svelte';
 	import { formatClockTime } from '$lib/stay-dates';
 	import type { ActionData, PageData } from './$types';
 
@@ -388,21 +389,31 @@
 				<span class="truncate">{data.detail.guest.email}</span>
 				{#if data.detail.guest.phone}<span>{data.detail.guest.phone}</span>{/if}
 			</div>
-			{#if data.detail.guest.specialRequests || data.canAdmin}
+			{#if data.detail.guest.specialRequests}
+				<div class="mt-3">
+					<SpecialRequest
+						text={data.detail.guest.specialRequests}
+						onedit={data.canAdmin
+							? () => {
+									requestsText = data.detail.guest.specialRequests ?? '';
+									requestsOpen = true;
+								}
+							: undefined}
+					/>
+				</div>
+			{:else if data.canAdmin}
 				<p class="mt-1.5 text-xs text-ink-muted">
-					Special requests: {data.detail.guest.specialRequests ?? 'none'}
-					{#if data.canAdmin}
-						<button
-							type="button"
-							class="ml-1 underline underline-offset-2 hover:text-ink"
-							onclick={() => {
-								requestsText = data.detail.guest.specialRequests ?? '';
-								requestsOpen = true;
-							}}
-						>
-							{data.detail.guest.specialRequests ? 'Edit' : 'Add'}
-						</button>
-					{/if}
+					Special requests: none
+					<button
+						type="button"
+						class="ml-1 underline underline-offset-2 hover:text-ink"
+						onclick={() => {
+							requestsText = '';
+							requestsOpen = true;
+						}}
+					>
+						Add
+					</button>
 				</p>
 			{/if}
 		</div>
