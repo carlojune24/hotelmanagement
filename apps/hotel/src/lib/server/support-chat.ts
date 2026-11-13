@@ -31,8 +31,9 @@ const AGENT_FRESH_SECONDS = 30;
 const RESUME_GRACE_MINUTES = 5;
 /** An open chat whose agent has been silent this long goes back to the queue. */
 const REQUEUE_AFTER_SECONDS = 120;
-/** An open chat nobody has written in for this long is closed (and its messages deleted). */
-const IDLE_CLOSE_MINUTES = 120;
+/** An open chat nobody has written in for this long is closed (and its messages deleted). Long enough for a
+ * guest who closed the tab to come back the next day and still find the reply. */
+const IDLE_CLOSE_MINUTES = 24 * 60;
 /** A chat still waiting for a team member (e.g. nobody was online overnight) keeps its place this long. */
 const QUEUE_IDLE_HOURS = 24;
 const GUEST_MESSAGES_PER_HOUR = 40;
@@ -1205,16 +1206,43 @@ export async function sweepSupportChats(): Promise<{ requeued: number; closed: n
 		});
 	}
 
-	const closedRows = await db.execute<{ id: string; hotel_id: string }>(sql`
+	const closedRows = await db.execute<{
+		id: string;
+		hotel_id: string;
+		guest_email: string | null;
+		guest_name: string | null;
+	}>(sql`
 		update support_conversations sc
 		set status = 'closed', closed_at = now(), updated_at = now()
 		where (
 			(sc.status = 'open' and sc.last_message_at < now() - ${sql.raw(`interval '${IDLE_CLOSE_MINUTES} minutes'`)})
 			or (sc.status = 'queued' and sc.last_message_at < now() - ${sql.raw(`interval '${QUEUE_IDLE_HOURS} hours'`)})
 		)
-		returning sc.id, sc.hotel_id`);
+		returning sc.id, sc.hotel_id, sc.guest_email, sc.guest_name`);
+	const missed: Parameters<typeof sendSupportReply>[0][] = [];
 	for (const r of closedRows) {
 		await db.transaction(async (tx) => {
+			// The guest never saw the team's last answer: email it before the messages are deleted.
+			if (r.guest_email) {
+				const rows = await tx
+					.select({ direction: m.direction, body: m.body, readAt: m.readAt, staffName: users.name })
+					.from(m)
+					.leftJoin(users, eq(users.id, m.authorUserId))
+					.where(eq(m.conversationId, r.id))
+					.orderBy(asc(m.createdAt));
+				const first = rows.findIndex((x) => x.direction === 'staff' && !x.readAt);
+				if (first >= 0) {
+					const replies = rows.slice(first).filter((x) => x.direction === 'staff');
+					missed.push({
+						hotelId: r.hotel_id,
+						to: r.guest_email,
+						guestName: r.guest_name ?? 'there',
+						originalMessage: rows.slice(0, first).findLast((x) => x.direction === 'guest')?.body ?? '',
+						replyBody: replies.map((x) => x.body).join('\n\n'),
+						staffName: replies.at(-1)!.staffName ?? 'Our team'
+					});
+				}
+			}
 			await purgeMessages(tx, r.id);
 			await writeAudit({
 				tx,
@@ -1238,6 +1266,8 @@ export async function sweepSupportChats(): Promise<{ requeued: number; closed: n
 		using support_conversations sc
 		where sm.conversation_id = sc.id and sc.status = 'closed'
 		returning sm.id`);
+	// After commit, so a failed send never undoes the close. Best-effort: sendSupportReply never throws.
+	for (const mail of missed) await sendSupportReply(mail);
 
 	const hotelIds = await db.execute<{ hotel_id: string }>(
 		sql`select distinct hotel_id from support_conversations where status = 'queued'`
