@@ -5,6 +5,7 @@ import { db } from '$lib/server/db/index';
 import { amenityItems, cashAccounts, roomTypes } from '$lib/server/db/schema/index';
 import { listOtaChannels } from '$lib/server/ota-channels';
 import { requireCap } from '$lib/server/auth/rbac';
+import { canOverrideCapacity } from '$lib/server/capacity-override';
 import { MAX_EXTENSION_HOURS } from '$lib/extension-hours';
 import { getHallBookingDetail, getRoomBookingDetail } from '$lib/server/reservations';
 import {
@@ -76,6 +77,26 @@ import { expirePendingOrders, listUnpaidHolds } from '$lib/server/orders';
 import type { Actions, PageServerLoad } from './$types';
 
 const PAYMENT_METHODS = ['cash', 'card', 'gcash', 'maya', 'bank_transfer', 'cheque'] as const;
+
+type Locals = App.Locals;
+
+/** Search / preview: the over-capacity tick only counts for someone allowed to use it — otherwise it's ignored. */
+function overrideRequested(locals: Locals, raw: Record<string, FormDataEntryValue>): boolean {
+	return raw.overCapacity === 'on' && canOverrideCapacity(locals.role, locals.hotel!.config);
+}
+
+/** Create: a ticked override needs permission and a reason (saved to the audit log). */
+function readCapacityOverride(
+	locals: Locals,
+	raw: Record<string, FormDataEntryValue>
+): { reason: string } | { error: string; status: 400 | 403 } | null {
+	if (raw.overCapacity !== 'on') return null;
+	if (!canOverrideCapacity(locals.role, locals.hotel!.config))
+		return { error: 'Only a hotel admin can override guest capacity.', status: 403 };
+	const reason = typeof raw.overrideReason === 'string' ? raw.overrideReason.trim().slice(0, 300) : '';
+	if (reason.length < 3) return { error: 'Enter a reason for the over-capacity booking.', status: 400 };
+	return { reason };
+}
 
 export const load: PageServerLoad = async ({ locals }) => {
 	requireCap(locals.user, locals.role, 'booking:read');
@@ -182,6 +203,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 	return {
 		businessDate,
 		otaNames,
+		canOverrideCapacity: canOverrideCapacity(locals.role, hotel.config),
 		timezone: hotel.timezone,
 		checkInTime: hotel.checkInTime,
 		checkOutTime: hotel.checkOutTime,
@@ -1122,7 +1144,7 @@ export const actions: Actions = {
 		} catch {
 			return fail(400, { walkInPreviewError: 'Select at least one room and try again.' });
 		}
-		const walkInPreview = await previewWalkInAvailability(hotelId, items);
+		const walkInPreview = await previewWalkInAvailability(hotelId, items, overrideRequested(event.locals, raw));
 		return { walkInPreview };
 	},
 
@@ -1141,7 +1163,8 @@ export const actions: Actions = {
 				walkInError: 'Check-out must be after check-in.'
 			};
 		}
-		const availableRoomTypes = await searchAvailability({ hotelId, ...search });
+		const overCapacity = overrideRequested(event.locals, raw);
+		const availableRoomTypes = await searchAvailability({ hotelId, ...search, overCapacity });
 		// Nothing fit even with extra beds — tell staff whether more rooms of some type
 		// would actually help, instead of a bare dead end.
 		const suggestedRoomCount =
@@ -1179,6 +1202,9 @@ export const actions: Actions = {
 			});
 		}
 
+		const override = readCapacityOverride(event.locals, raw);
+		if (override && 'error' in override) return fail(override.status, { walkInError: override.error });
+
 		const toLedger = d.method === 'city_ledger';
 		if (toLedger) {
 			try {
@@ -1211,6 +1237,7 @@ export const actions: Actions = {
 							notes: d.billNotes?.trim() || null
 						}
 					: undefined,
+				overCapacity: override ?? undefined,
 				actor: event.locals.user
 			});
 			orderId = result.orderId;
@@ -1268,6 +1295,9 @@ export const actions: Actions = {
 			return fail(400, { walkInError: 'Your cart looks empty — add a room before continuing.' });
 		}
 
+		const override = readCapacityOverride(event.locals, raw);
+		if (override && 'error' in override) return fail(override.status, { walkInError: override.error });
+
 		let orderId: string;
 		try {
 			const result = await createWalkInBooking({
@@ -1289,6 +1319,7 @@ export const actions: Actions = {
 						cancellationPolicy: d.cancellationPolicy
 					}
 				},
+				overCapacity: override ?? undefined,
 				actor: event.locals.user
 			});
 			orderId = result.orderId;

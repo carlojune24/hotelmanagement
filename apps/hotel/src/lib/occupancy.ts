@@ -44,7 +44,10 @@ export function resolveOccupancyPlan(
 	policy: RoomTypeOccupancyPolicy,
 	occupancy: number,
 	roomCount: number,
-	maxRoomCount: number = MAX_ROOMS_PER_LINE
+	maxRoomCount: number = MAX_ROOMS_PER_LINE,
+	/** Staff override: take the party as-is, adding as many extra beds as it takes. Callers must
+	 *  have already checked the user is allowed to (`canOverrideCapacity`). */
+	overCapacity = false
 ): OccupancyPlan {
 	const baseCapacity = policy.maxOccupancy * roomCount;
 
@@ -64,7 +67,7 @@ export function resolveOccupancyPlan(
 	const perBedCapacity = Math.max(policy.extraBedCapacity, 1);
 	const maxBedsTotal = policy.extraBedAllowed ? Math.max(policy.maxExtraBeds, 0) * roomCount : 0;
 	const extraBedsNeeded = Math.ceil(shortfall / perBedCapacity);
-	const fitsWithExtraBeds = policy.extraBedAllowed && extraBedsNeeded <= maxBedsTotal;
+	const fitsWithExtraBeds = overCapacity || (policy.extraBedAllowed && extraBedsNeeded <= maxBedsTotal);
 
 	if (fitsWithExtraBeds) {
 		return {

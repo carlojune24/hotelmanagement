@@ -217,13 +217,15 @@ export async function searchAvailability(
 		roomCount?: number;
 		/** Restrict to room types flagged wheelchair-accessible. */
 		accessibleOnly?: boolean;
+		/** Staff-only capacity override (see `canOverrideCapacity`): a party over the limit still fits, with extra beds. */
+		overCapacity?: boolean;
 	},
 	/** The caller's transaction when searching inside one: without it each read takes another
 	 *  pooled connection while the first is still held, which deadlocks the pool under load. */
 	tx?: Tx
 ): Promise<AvailableRoomType[]> {
 	const conn = tx ?? db;
-	const { hotelId, checkIn, checkOut, occupancy, roomCount = 1, accessibleOnly } = params;
+	const { hotelId, checkIn, checkOut, occupancy, roomCount = 1, accessibleOnly, overCapacity = false } = params;
 	if (checkIn >= checkOut) throw new Error('checkOut must be after checkIn');
 	const stayNights = nightsBetween(checkIn, checkOut).length;
 
@@ -256,7 +258,9 @@ export async function searchAvailability(
 					extraBedCapacity: t.extraBedCapacity
 				},
 				occupancy,
-				roomCount
+				roomCount,
+				undefined,
+				overCapacity
 			)
 		);
 	}
@@ -384,7 +388,9 @@ export async function searchAvailability(
 					extraBedCapacity: type.extraBedCapacity
 				},
 				occupancy,
-				roomCount
+				roomCount,
+				undefined,
+				overCapacity
 			);
 			ratePlansOut.push({
 				id: plan.id,

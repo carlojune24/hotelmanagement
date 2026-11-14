@@ -721,7 +721,8 @@ export interface WalkInAvailabilityCheckResult {
  */
 export async function previewWalkInAvailability(
 	hotelId: string,
-	items: WalkInAvailabilityCheckItem[]
+	items: WalkInAvailabilityCheckItem[],
+	overCapacity = false
 ): Promise<WalkInAvailabilityCheckResult[]> {
 	const results: WalkInAvailabilityCheckResult[] = [];
 	for (const item of items) {
@@ -739,7 +740,8 @@ export async function previewWalkInAvailability(
 			checkOut: item.checkOut,
 			occupancy: item.occupancy,
 			roomCount: item.roomCount,
-			roomTypeId: item.roomTypeId
+			roomTypeId: item.roomTypeId,
+			overCapacity
 		});
 		if (!available || available.ratePlans.length === 0) {
 			results.push({
@@ -882,13 +884,15 @@ export async function createWalkInBooking(params: {
 	/** Charge to the city ledger instead of taking payment at the desk. Authorised by the caller
 	 *  (hotel admin only — enforced in the route action, as at check-out). */
 	cityLedger?: CityLedgerHandoff;
+	/** Over-capacity booking, with the staff member's reason. Authorised by the caller (`canOverrideCapacity`). */
+	overCapacity?: { reason: string };
 	actor: SessionUser | null;
 }): Promise<{ bookingIds: string[]; orderId: string }> {
 	// Destructured as `roomItems`, not `rooms` — this function needs the actual
 	// `rooms` table (physical rooms) for the pre-assignment checks below, and
 	// shadowing it with the cart's room *lines* would silently query the wrong
 	// thing (a real bug this once was, caught by `npm run check`).
-	const { hotelId, businessDate, guest, rooms: roomItems, actor } = params;
+	const { hotelId, businessDate, guest, rooms: roomItems, actor, overCapacity } = params;
 	const payment: WalkInPaymentInput = params.payment ?? { method: 'cash' };
 	if (roomItems.length === 0) {
 		throw new WalkInError('Add at least one room before creating the booking.');
@@ -954,7 +958,8 @@ export async function createWalkInBooking(params: {
 					checkOut: item.checkOut,
 					occupancy: item.occupancy,
 					roomCount: item.roomCount,
-					roomTypeId: item.roomTypeId
+					roomTypeId: item.roomTypeId,
+					overCapacity: !!overCapacity
 				},
 				tx
 			);
@@ -1257,6 +1262,17 @@ export async function createWalkInBooking(params: {
 			tenderedCentavos: payment.tenderedCentavos ?? null
 		}
 	});
+
+	if (overCapacity) {
+		await writeAudit({
+			hotelId,
+			actor,
+			action: 'booking.capacity_override',
+			entityType: 'booking',
+			entityId: bookingIds[0]!,
+			after: { reason: overCapacity.reason, bookingIds, rooms: roomItems }
+		});
+	}
 
 	return { bookingIds, orderId };
 }

@@ -820,6 +820,11 @@
 	let pickedTiles = $state<PickedTile[]>([]);
 	let pickPreviewLoading = $state(false);
 
+	// Staff capacity override: one tick + reason per booking, shared by pick mode and the walk-in search.
+	// The server re-checks permission on every request, so this only decides what the page shows.
+	let overCapacity = $state(false);
+	let overrideReason = $state('');
+
 	function pickedTileFor(c: RoomGridCell): PickedTile {
 		return {
 			roomId: c.roomId,
@@ -924,7 +929,7 @@
 	} | null {
 		const policy = data.roomTypePolicies[tile.roomTypeId];
 		if (!policy || !tile.occupancy) return null;
-		const plan = resolveOccupancyPlan(policy, tile.occupancy, 1);
+		const plan = resolveOccupancyPlan(policy, tile.occupancy, 1, undefined, overCapacity);
 		if (!plan.fits) {
 			return {
 				kind: 'blocked',
@@ -983,6 +988,14 @@
 
 	const pickHasBlockedTile = $derived(
 		pickedTiles.some((t) => pickTileOccupancyHint(t)?.kind === 'blocked')
+	);
+
+	/** A picked room whose guest count doesn't fit even with every extra bed the type allows. */
+	const pickNeedsOverride = $derived(
+		pickedTiles.some((t) => {
+			const policy = data.roomTypePolicies[t.roomTypeId];
+			return !!policy && !!t.occupancy && !resolveOccupancyPlan(policy, t.occupancy, 1).fits;
+		})
 	);
 
 	const pickPreviewItemsJson = $derived(
@@ -1930,6 +1943,9 @@
 								</div>
 							{/each}
 						</div>
+						{#if pickNeedsOverride || overCapacity}
+							{@render capacityOverrideBlock('pick', false)}
+						{/if}
 						<form
 							method="POST"
 							action="?/previewWalkIn"
@@ -1942,6 +1958,7 @@
 							}}
 						>
 							<input type="hidden" name="itemsJson" value={pickPreviewItemsJson} />
+							<input type="hidden" name="overCapacity" value={overCapacity ? 'on' : ''} />
 							<Button
 								type="submit"
 								class="w-full"
@@ -3255,8 +3272,13 @@
 							/>
 						</div>
 					</div>
+					<input type="hidden" name="overCapacity" value={overCapacity ? 'on' : ''} />
 					<Button type="submit" variant="outline" class="w-full">Check availability</Button>
 				</form>
+
+				{#if overCapacity || formAvailableRoomTypes?.length === 0}
+					{@render capacityOverrideBlock('search', true)}
+				{/if}
 
 				{#if formAvailableRoomTypes}
 					{#if formAvailableRoomTypes.length === 0}
@@ -3480,6 +3502,11 @@
 							)}
 						/>
 						<input type="hidden" name="originRoomId" value={selectedRoomId ?? ''} />
+						<input type="hidden" name="overCapacity" value={overCapacity ? 'on' : ''} />
+						<input type="hidden" name="overrideReason" value={overrideReason} />
+						{#if overCapacity}
+							{@render capacityOverrideBlock('create', false)}
+						{/if}
 						<div class="grid grid-cols-2 gap-1 rounded-lg bg-surface-2 p-1 text-sm" role="group" aria-label="Booking type">
 							{#each [['walkin', 'Walk-in'], ['ota', 'OTA booking']] as [key, label] (key)}
 								<button
@@ -3599,6 +3626,43 @@
 		</div>
 	</Sheet.Content>
 </Sheet.Root>
+
+{#snippet capacityOverrideBlock(idSuffix: string, rerunSearch: boolean)}
+	{#if data.canOverrideCapacity}
+		<div class="mt-3 space-y-2 rounded-lg border border-warning/40 bg-warning/5 p-3">
+			<label class="flex items-start gap-2 text-xs font-medium text-ink">
+				<input
+					type="checkbox"
+					class="mt-0.5 size-3.5"
+					bind:checked={overCapacity}
+					onchange={() => rerunSearch && scheduleWalkInSearch()}
+				/>
+				<span>
+					Allow over capacity
+					<span class="block font-normal text-ink-muted">
+						Book more guests than the room's limit, with extra beds. Logged with your name.
+					</span>
+				</span>
+			</label>
+			{#if overCapacity}
+				<div>
+					<Label for="override-reason-{idSuffix}" class="text-xs">Reason</Label>
+					<Input
+						id="override-reason-{idSuffix}"
+						bind:value={overrideReason}
+						maxlength={300}
+						placeholder="e.g. Guest's family needs 2 extra beds"
+						class="h-8 text-xs"
+					/>
+				</div>
+			{/if}
+		</div>
+	{:else}
+		<p class="mt-3 text-xs text-ink-muted">
+			Over a room's guest limit? Ask a hotel admin to allow an over-capacity booking.
+		</p>
+	{/if}
+{/snippet}
 
 {#snippet hallDetailPanel()}
 	<div class="p-4" data-testid="hall-detail">

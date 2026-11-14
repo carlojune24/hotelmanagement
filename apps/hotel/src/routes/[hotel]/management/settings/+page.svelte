@@ -6,6 +6,7 @@
 	import PaletteIcon from '@lucide/svelte/icons/palette';
 	import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
 	import ClockIcon from '@lucide/svelte/icons/clock';
+	import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
 	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
 	import GemIcon from '@lucide/svelte/icons/gem';
 	import ZapIcon from '@lucide/svelte/icons/zap';
@@ -52,6 +53,12 @@
 			icon: ClockIcon,
 			label: 'Check-in & check-out',
 			desc: 'Standard times and extension fees your front desk works from.'
+		},
+		{
+			href: 'booking-rules',
+			icon: ShieldCheckIcon,
+			label: 'Booking rules',
+			desc: 'Exceptions staff can make, like booking more guests into a room than its limit.'
 		},
 		{
 			href: 'payments-email',

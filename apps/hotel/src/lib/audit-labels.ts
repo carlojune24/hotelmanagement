@@ -24,6 +24,8 @@ export const ACTION_LABELS: Record<string, string> = {
 	'hall_booking.cancel': 'Cancelled a hall booking',
 	'booking.no_show': 'Marked as no-show',
 	'booking.modify_stay': 'Modified stay dates',
+	'booking.capacity_override': 'Booked over guest capacity',
+	'hotel.update_capacity_override': 'Front-desk capacity override changed',
 	'booking.reinstate': 'Reinstated a booking',
 	'hall_booking.reinstate': 'Reinstated a hall booking',
 	'booking.order_expired': 'Order expired — hold released',
