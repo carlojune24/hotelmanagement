@@ -144,6 +144,12 @@
 		}
 		return total;
 	}
+	/** End time of yesterday's overnight shift, which runs into `date`'s morning. */
+	// shortcut: the week's first day can't see the previous week's last night (not loaded); load that day if it matters.
+	function carryEnd(employeeId: string, date: string): string | null {
+		const p = shifts.get(k(employeeId, addDays(date, -1)));
+		return p && !p.isRestDay && p.endTime && crossesMidnight(p.startTime, p.endTime) ? p.endTime : null;
+	}
 	function headcount(date: string): number {
 		let n = 0;
 		for (const e of data.employees) {
@@ -1006,6 +1012,7 @@
 										{@const tpl = s ? matchTemplate(s) : undefined}
 										{@const nd = s ? nightMins(s) : 0}
 										{@const cellWarnings = warningsByCell.get(key) ?? []}
+										{@const carry = carryEnd(emp.id, d)}
 										{@const isSel = selected.has(key) || dragKeys.has(key)}
 										{@const lv = data.leave[key]}
 										{@const cal = data.calendar[d]}
@@ -1024,7 +1031,7 @@
 														? s.isRestDay
 															? 'rest day'
 															: `${tpl ? tpl.name + ', ' : ''}${range(s)}${nd > 0 ? ', ' + formatHours(nd) + ' night differential' : ''}`
-														: 'no shift'}{cellWarnings.length
+														: 'no shift'}{carry ? `. Still on last night's shift until ${shortTime(carry)}` : ''}{cellWarnings.length
 														? '. ' + cellWarnings.map((w) => w.message).join(' ')
 														: ''}"
 													onpointerdown={(e) => onCellPointerDown(e, cell)}
@@ -1039,6 +1046,13 @@
 														? 'ring-2 ring-brand ring-inset'
 														: ''} {isArmed ? 'cursor-crosshair' : 'cursor-pointer'}"
 												>
+													{#if carry}
+														<span
+															class="flex items-center gap-1 text-[11px] text-ink-muted tabular-nums"
+															title="Last night's shift runs until {shortTime(carry)}"
+															><MoonIcon class="size-3" />until {shortTime(carry)}</span
+														>
+													{/if}
 													{#if s}
 														{#if s.isRestDay}
 															<span class="text-xs">Rest</span>
@@ -1056,7 +1070,7 @@
 																>
 															{/if}
 														{/if}
-													{:else}
+													{:else if !carry}
 														<PlusIcon
 															class="size-3.5 text-ink-muted opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
 														/>
@@ -1180,9 +1194,13 @@
 																		<Input id="cb" type="number" min="0" max="600" bind:value={customBreak} class="mt-1 h-8 px-2 text-sm" />
 																	</div>
 																</div>
-																{#if crossesMidnight(customStart, customEnd)}
-																	<p class="text-xs text-ink-muted">Ends the next day.</p>
-																{:else}
+																{#if customStart && customEnd && customStart !== customEnd}
+																	{@const endDay = crossesMidnight(customStart, customEnd) ? addDays(d, 1) : d}
+																	<p class="text-xs text-ink-muted tabular-nums">
+																		{dayName(d)} {dayNum(d)}, {shortTime(customStart)} → <span class={endDay !== d ? 'font-medium text-ink' : ''}>{dayName(endDay)} {dayNum(endDay)}, {shortTime(customEnd)}</span>
+																	</p>
+																{/if}
+																{#if !crossesMidnight(customStart, customEnd)}
 																	<Button type="button" variant="ghost" size="sm" class="h-7 px-2" onclick={() => startCustomSplit()}>
 																		<PlusIcon class="size-3.5" /> Add second part
 																	</Button>
