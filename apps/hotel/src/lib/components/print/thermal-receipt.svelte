@@ -117,7 +117,7 @@
 		<div class="tr-doctype">{doc.typeLabel}</div>
 		{#if doc.formattedNo}<div class="tr-serial-no">No. {doc.formattedNo}</div>{/if}
 		<div class="tr-copy-tag" class:is-cancelled={cancelled}>
-			{cancelled ? '✖ CANCELLED ✖' : !doc.formattedNo ? 'NOT AN OFFICIAL RECEIPT' : doc.isReprint ? 'REPRINT' : 'ORIGINAL'}
+			{cancelled ? '✖ CANCELLED ✖' : !doc.formattedNo ? (isInvoice ? 'NOT AN INVOICE' : 'NOT AN OFFICIAL RECEIPT') : doc.isReprint ? 'REPRINT' : 'ORIGINAL'}
 		</div>
 	</div>
 
@@ -225,6 +225,9 @@
 				{#if doc.formattedNo}
 					Computer-generated {doc.typeLabel.toLowerCase()} for the guest's reference — not a
 					BIR-registered document.
+				{:else if isInvoice}
+					Statement of charges for the guest's reference. Not an Invoice or Official Receipt; not
+					valid for claim of input tax. An official document follows once BIR registration is complete.
 				{:else}
 					Acknowledges payment received. Not an Official Receipt or Invoice; an official document
 					follows once BIR registration is complete.

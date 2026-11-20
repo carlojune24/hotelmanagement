@@ -86,7 +86,7 @@
 					class:is-reprint={doc.isReprint && !cancelled}
 					class:is-cancelled={cancelled}
 				>
-					{cancelled ? 'CANCELLED' : !doc.formattedNo ? 'NOT AN OFFICIAL RECEIPT' : doc.isReprint ? 'REPRINT' : 'ORIGINAL'}
+					{cancelled ? 'CANCELLED' : !doc.formattedNo ? (isInvoice ? 'NOT AN INVOICE' : 'NOT AN OFFICIAL RECEIPT') : doc.isReprint ? 'REPRINT' : 'ORIGINAL'}
 				</div>
 				<dl class="af-serial-meta">
 					<div><dt>Date issued</dt><dd class="af-mono">{fmtDateTime(doc.issuedAtIso)}</dd></div>
@@ -223,6 +223,10 @@
 						Computer-generated {doc.typeLabel.toLowerCase()} for the guest's reference. This is not a
 						BIR-registered document. Set the hotel's BIR details in Finance → BIR → Setup to issue a
 						compliant document.
+					{:else if isInvoice}
+						This is a statement of charges and payments for the guest's reference. It is not an Invoice
+						or Official Receipt and is not valid for claim of input tax; an official document will be
+						issued once the hotel's BIR registration is complete.
 					{:else}
 						This acknowledges payment received. It is not an Official Receipt or Invoice; an official
 						document will be issued once the hotel's BIR registration is complete.

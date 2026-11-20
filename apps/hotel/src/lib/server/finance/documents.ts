@@ -1335,6 +1335,30 @@ export async function buildAcknowledgmentForPayment(
 	return snap;
 }
 
+/**
+ * The folio's Invoice, or — while the hotel has no invoice series (not yet BIR-registered) — an
+ * unnumbered Statement of Account built from the same folio. The statement consumes no serial and
+ * persists nothing; once a series exists the same call issues the real Invoice.
+ */
+export async function getInvoiceOrStatementForTarget(
+	hotelId: string,
+	target: FolioTarget,
+	actor: SessionUser | null
+): Promise<DocumentSnapshot> {
+	try {
+		return (await getOrIssueInvoiceForTarget(hotelId, target, actor)).snapshot;
+	} catch (e) {
+		if (!(e instanceof NoSeriesError)) throw e;
+	}
+	const snap = await buildInvoiceSnapshot(hotelId, target);
+	snap.bir.configured = false;
+	snap.bir.serialRange = null;
+	snap.document.typeLabel = 'Statement of Account';
+	snap.document.issuedAtIso = new Date().toISOString();
+	snap.document.preparedBy = actor?.name ?? null;
+	return snap;
+}
+
 export interface DocumentListRow {
 	id: string;
 	type: DocType;

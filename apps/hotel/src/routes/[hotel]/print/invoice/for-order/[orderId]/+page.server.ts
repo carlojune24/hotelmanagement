@@ -4,7 +4,7 @@ import { db } from '$lib/server/db/index';
 import { bookings, hallBookings, orders } from '$lib/server/db/schema/index';
 import { requireCap } from '$lib/server/auth/rbac';
 import { parseBranding } from '$lib/server/branding';
-import { DocumentError, getBirSettings, getOrIssueInvoiceForTarget } from '$lib/server/finance/documents';
+import { DocumentError, getBirSettings, getInvoiceOrStatementForTarget } from '$lib/server/finance/documents';
 import type { FolioTarget } from '$lib/server/folio';
 import type { PageServerLoad } from './$types';
 
@@ -36,14 +36,14 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 	if (targets.length === 0) error(404, 'Not found');
 
 	try {
-		const [rendered, birSettings] = await Promise.all([
+		const [snapshots, birSettings] = await Promise.all([
 			Promise.all(
-				targets.map((target) => getOrIssueInvoiceForTarget(hotel.id, target, locals.user ?? null))
+				targets.map((target) => getInvoiceOrStatementForTarget(hotel.id, target, locals.user ?? null))
 			),
 			getBirSettings(hotel.id)
 		]);
 		return {
-			snapshots: rendered.map((r) => r.snapshot),
+			snapshots,
 			logoUrl: parseBranding(hotel.config).logoUrl ?? null,
 			thermalPaperWidthMm: (birSettings?.thermalPaperWidthMm === 58 ? 58 : 80) as 58 | 80,
 			format: url.searchParams.get('format') === 'a4' ? ('a4' as const) : ('thermal' as const)

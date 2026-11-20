@@ -1,7 +1,7 @@
 import { error } from '@sveltejs/kit';
 import { requireCap } from '$lib/server/auth/rbac';
 import { parseBranding } from '$lib/server/branding';
-import { DocumentError, getBirSettings, getOrIssueInvoiceForTarget } from '$lib/server/finance/documents';
+import { DocumentError, getBirSettings, getInvoiceOrStatementForTarget } from '$lib/server/finance/documents';
 import type { FolioTarget } from '$lib/server/folio';
 import type { PageServerLoad } from './$types';
 
@@ -21,12 +21,12 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 			: { kind: 'hall', hallBookingId: params.id };
 
 	try {
-		const [rendered, birSettings] = await Promise.all([
-			getOrIssueInvoiceForTarget(hotel.id, target, locals.user ?? null),
+		const [snapshot, birSettings] = await Promise.all([
+			getInvoiceOrStatementForTarget(hotel.id, target, locals.user ?? null),
 			getBirSettings(hotel.id)
 		]);
 		return {
-			snapshot: rendered.snapshot,
+			snapshot,
 			logoUrl: parseBranding(hotel.config).logoUrl ?? null,
 			thermalPaperWidthMm: (birSettings?.thermalPaperWidthMm === 58 ? 58 : 80) as 58 | 80,
 			format: url.searchParams.get('format') === 'a4' ? ('a4' as const) : ('thermal' as const)
