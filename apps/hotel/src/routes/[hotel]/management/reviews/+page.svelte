@@ -71,7 +71,9 @@
 									<div class="text-xs text-ink-muted">
 										{r.roomTypeName} · {r.checkIn} → {r.checkOut}
 									</div>
-									<p class="mt-2 text-sm text-ink">{r.comment}</p>
+									{#if r.comment}
+										<p class="mt-2 text-sm text-ink">{r.comment}</p>
+									{/if}
 									{#if r.moderationNote}
 										<p class="mt-1 text-xs text-ink-muted">Note: {r.moderationNote}</p>
 									{/if}

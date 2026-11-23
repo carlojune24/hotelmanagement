@@ -69,7 +69,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 const submitSchema = z.object({
 	rating: z.coerce.number().int().min(1).max(5),
 	guestDisplayName: z.string().min(1).max(120),
-	comment: z.string().min(10).max(2000)
+	comment: z.string().max(2000).default('')
 });
 
 export const actions: Actions = {
@@ -88,7 +88,7 @@ export const actions: Actions = {
 		}
 
 		const parsed = submitSchema.safeParse(Object.fromEntries(formData));
-		if (!parsed.success) return fail(400, { error: 'Add a rating and a few words about your stay.' });
+		if (!parsed.success) return fail(400, { error: 'Pick a star rating to continue.' });
 
 		try {
 			await db.insert(reviews).values({

@@ -720,7 +720,9 @@
 									<StarIcon class="size-4 {i < r.rating ? 'fill-current' : 'opacity-25'}" aria-hidden="true" />
 								{/each}
 							</div>
-							<blockquote style="margin-top: 0.75rem">“{r.comment}”</blockquote>
+							{#if r.comment}
+								<blockquote style="margin-top: 0.75rem">“{r.comment}”</blockquote>
+							{/if}
 							<figcaption>{r.guestDisplayName}</figcaption>
 						</figure>
 					{/each}

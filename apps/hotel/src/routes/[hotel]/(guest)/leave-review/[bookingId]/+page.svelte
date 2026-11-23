@@ -32,7 +32,9 @@
 					/>
 				{/each}
 			</div>
-			<p class="mt-2 max-w-md text-sm text-[var(--ledger-ink)]">{data.existingReview.comment}</p>
+			{#if data.existingReview.comment}
+				<p class="mt-2 max-w-md text-sm text-[var(--ledger-ink)]">{data.existingReview.comment}</p>
+			{/if}
 			<p class="mt-3 text-xs text-[var(--ledger-ink-muted)]">
 				{#if data.existingReview.status === 'pending'}
 					Thanks — your review is waiting on the hotel to take a look before it goes live.
@@ -86,13 +88,11 @@
 					</p>
 				</div>
 				<div>
-					<Label for="comment" class="ledger-label">Your review</Label>
+					<Label for="comment" class="ledger-label">Your review (optional)</Label>
 					<textarea
 						id="comment"
 						name="comment"
 						rows="5"
-						required
-						minlength={10}
 						maxlength={2000}
 						placeholder="What stood out about your stay?"
 						class="ledger-field mt-1"
