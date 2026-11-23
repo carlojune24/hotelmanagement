@@ -495,7 +495,10 @@ export async function addWalkInExtras(
 	hotelId: string,
 	target: FolioTarget,
 	extras: WalkInExtra[],
-	actor: SessionUser | null
+	actor: SessionUser | null,
+	/** A room walk-in taxes a catalog item per its own `taxable` flag, like adding it to a stay later;
+	 *  the hall walk-in keeps its extras VAT-free. Custom lines are never taxed. */
+	opts: { honourTaxable?: boolean } = {}
 ): Promise<number> {
 	let total = 0;
 	for (const x of extras) {
@@ -518,7 +521,7 @@ export async function addWalkInExtras(
 				description: item.name,
 				quantity: x.quantity,
 				unitPriceCentavos: item.priceCentavos,
-				taxable: false,
+				taxable: opts.honourTaxable ? item.taxable : false,
 				amenityItemId: item.id
 			};
 		} else {

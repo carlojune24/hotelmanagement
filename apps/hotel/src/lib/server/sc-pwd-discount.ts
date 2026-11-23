@@ -20,8 +20,8 @@ import type { Tx } from './finance/shared';
 // Setup's form (the "Discounts" field lives on the Hotel details card in Finance Settings
 // instead) — the `onConflictDoUpdate` below only ever touches this one column, so saving it
 // never resets any other `bir_settings` field, and vice versa.
-export async function getScPwdDiscountBps(hotelId: string): Promise<number> {
-	const [row] = await db
+export async function getScPwdDiscountBps(hotelId: string, exec: Pick<typeof db, 'select'> = db): Promise<number> {
+	const [row] = await exec
 		.select({ scPwdDiscountBps: birSettings.scPwdDiscountBps })
 		.from(birSettings)
 		.where(eq(birSettings.hotelId, hotelId))
@@ -117,16 +117,43 @@ export interface ApplyScPwdDiscountInput {
 export async function applyScPwdDiscount(
 	input: ApplyScPwdDiscountInput
 ): Promise<{ scPwdDiscountId: string }> {
+	const { scPwdDiscountId, totalReductionCentavos, discountBps } = await db.transaction((tx: Tx) =>
+		applyScPwdDiscountTx(tx, input)
+	);
+	await auditScPwdApply(input, scPwdDiscountId, discountBps, totalReductionCentavos);
+	return { scPwdDiscountId };
+}
+
+/** Audit entry for an applied discount — call after the transaction that applied it commits. */
+export async function auditScPwdApply(
+	input: ApplyScPwdDiscountInput,
+	scPwdDiscountId: string,
+	discountBps: number,
+	totalReductionCentavos: number
+) {
+	await writeAudit({
+		hotelId: input.hotelId,
+		actor: input.actor,
+		action: 'sc_pwd.apply',
+		entityType: 'booking',
+		entityId: input.bookingId,
+		after: { scPwdDiscountId, claimantType: input.claimantType, discountBps, totalReductionCentavos }
+	});
+}
+
+/** The same discount inside the caller's transaction — a walk-in applies it to the booking it just
+ *  created, so the guest pays the discounted amount instead of being refunded afterwards. The caller
+ *  audits via `auditScPwdApply` once the transaction commits. */
+export async function applyScPwdDiscountTx(
+	tx: Tx,
+	input: ApplyScPwdDiscountInput
+): Promise<{ scPwdDiscountId: string; totalReductionCentavos: number; discountBps: number }> {
 	const claimantName = input.claimantName.trim();
 	const idNumber = input.idNumber.trim();
 	if (!claimantName) throw new ScPwdDiscountError("Enter the claimant's name.");
 	if (!idNumber) throw new ScPwdDiscountError('Enter the OSCA/PWD ID number.');
 
-	const [booking] = await db
-		.select()
-		.from(bookings)
-		.where(eq(bookings.id, input.bookingId))
-		.limit(1);
+	const [booking] = await tx.select().from(bookings).where(eq(bookings.id, input.bookingId)).limit(1);
 	if (!booking || booking.hotelId !== input.hotelId) {
 		throw new ScPwdDiscountError('Booking not found.');
 	}
@@ -134,12 +161,17 @@ export async function applyScPwdDiscount(
 		throw new ScPwdDiscountError('Only a confirmed or checked-in booking can carry this discount.');
 	}
 
-	const existing = await getActiveScPwdClaim(input.hotelId, input.bookingId);
+	const [existing] = await tx
+		.select({ id: scPwdDiscounts.id })
+		.from(scPwdDiscounts)
+		.where(and(eq(scPwdDiscounts.bookingId, input.bookingId), isNull(scPwdDiscounts.reversedAt)))
+		.limit(1);
 	if (existing) {
 		throw new ScPwdDiscountError('A Senior Citizen/PWD discount is already applied to this booking.');
 	}
 
-	const discountBps = await getScPwdDiscountBps(input.hotelId);
+	// On `tx`, not `db`: a second pooled connection inside a transaction can deadlock the pool.
+	const discountBps = await getScPwdDiscountBps(input.hotelId, tx);
 	const calc = computeScPwdDiscount({
 		subtotalCentavos: booking.subtotalCentavos,
 		feesCentavos: booking.feesCentavos,
@@ -150,62 +182,44 @@ export async function applyScPwdDiscount(
 	const pctLabel = (discountBps / 100).toFixed(discountBps % 100 === 0 ? 0 : 2);
 	const typeLabel = CLAIMANT_TYPE_LABEL[input.claimantType];
 
-	const scPwdDiscountId = await db.transaction(async (tx: Tx) => {
-		const folioId = await ensureFolio(tx, input.hotelId, { kind: 'room', bookingId: input.bookingId });
+	const folioId = await ensureFolio(tx, input.hotelId, { kind: 'room', bookingId: input.bookingId });
 
-		let folioChargeId: string | null = null;
-		if (calc.totalReductionCentavos > 0) {
-			const [charge] = await tx
-				.insert(folioCharges)
-				.values({
-					folioId,
-					description: `SC/PWD discount (${pctLabel}%) — ${typeLabel}, ID ${idNumber} — ${claimantName}`,
-					quantity: 1,
-					unitPriceCentavos: -calc.totalReductionCentavos,
-					taxCentavos: 0,
-					totalCentavos: -calc.totalReductionCentavos,
-					addedByUserId: input.actor?.id ?? null
-				})
-				.returning({ id: folioCharges.id });
-			folioChargeId = charge!.id;
-		}
-
-		const [row] = await tx
-			.insert(scPwdDiscounts)
+	let folioChargeId: string | null = null;
+	if (calc.totalReductionCentavos > 0) {
+		const [charge] = await tx
+			.insert(folioCharges)
 			.values({
-				hotelId: input.hotelId,
-				bookingId: input.bookingId,
-				claimantType: input.claimantType,
-				claimantName,
-				idNumber,
-				discountBps,
-				baseAmountCentavos: calc.baseAmountCentavos,
-				vatRemovedCentavos: calc.vatRemovedCentavos,
-				discountCentavos: calc.discountCentavos,
-				folioChargeId,
-				appliedByUserId: input.actor?.id ?? null
+				folioId,
+				description: `SC/PWD discount (${pctLabel}%) — ${typeLabel}, ID ${idNumber} — ${claimantName}`,
+				quantity: 1,
+				unitPriceCentavos: -calc.totalReductionCentavos,
+				taxCentavos: 0,
+				totalCentavos: -calc.totalReductionCentavos,
+				addedByUserId: input.actor?.id ?? null
 			})
-			.returning({ id: scPwdDiscounts.id });
-		return row!.id;
-	});
+			.returning({ id: folioCharges.id });
+		folioChargeId = charge!.id;
+	}
 
-	await writeAudit({
-		hotelId: input.hotelId,
-		actor: input.actor,
-		action: 'sc_pwd.apply',
-		entityType: 'booking',
-		entityId: input.bookingId,
-		after: {
-			scPwdDiscountId,
+	const [row] = await tx
+		.insert(scPwdDiscounts)
+		.values({
+			hotelId: input.hotelId,
+			bookingId: input.bookingId,
 			claimantType: input.claimantType,
+			claimantName,
+			idNumber,
 			discountBps,
-			totalReductionCentavos: calc.totalReductionCentavos
-		}
-	});
+			baseAmountCentavos: calc.baseAmountCentavos,
+			vatRemovedCentavos: calc.vatRemovedCentavos,
+			discountCentavos: calc.discountCentavos,
+			folioChargeId,
+			appliedByUserId: input.actor?.id ?? null
+		})
+		.returning({ id: scPwdDiscounts.id });
 
-	return { scPwdDiscountId };
+	return { scPwdDiscountId: row!.id, totalReductionCentavos: calc.totalReductionCentavos, discountBps };
 }
-
 /** Undoes an active claim — voids its folio charge (never `isBaseCharge`, so `voidFolioCharge`
  *  needs no change) and marks the claim row reversed. The correction path for a mis-typed ID
  *  or a wrongly-flagged guest; also how a post-discount stay modification is handled — reverse

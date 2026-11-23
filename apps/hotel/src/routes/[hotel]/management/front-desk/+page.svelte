@@ -57,6 +57,12 @@
 	import type { AvailableRatePlan, AvailableRoomType } from '$lib/server/availability';
 	import type { PriceBreakdown } from '$lib/server/pricing';
 	import { MAX_ROOMS_PER_LINE, addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
+	import { computeScPwdDiscount } from '$lib/sc-pwd-discount';
+	import { splitRoomLine } from '$lib/room-split';
+	import WalkinExtras, {
+		extraLineTotal,
+		type WalkInExtraLine
+	} from '$lib/components/staff/walkin-extras.svelte';
 	import { resolveOccupancyPlan } from '$lib/occupancy';
 	import { suggestedExtensionHours, MAX_EXTENSION_HOURS } from '$lib/extension-hours';
 	import { AMENITY_CATEGORY_LABELS, AMENITY_CATEGORY_ORDER } from '$lib/amenity-categories';
@@ -732,7 +738,7 @@
 	/** Scales a cart line's own per-room quote by its own quantity and adds the
 	 *  extra-bed fee if needed — same math `createWalkInBooking` actually charges,
 	 *  so the cart's displayed total never understates what's about to be charged. */
-	function walkInCartLineTotal(line: WalkInCartLine): number {
+	function walkInCartLinePrice(line: WalkInCartLine): PriceBreakdown {
 		let price = scaleRoomPrice(line.perRoomPrice, line.roomCount);
 		if (line.extraBedsNeeded > 0 && line.extraBedFeeCentavos) {
 			price = addFlatFeeCentavos(
@@ -742,11 +748,62 @@
 				data.vatRateBps
 			);
 		}
-		return price.totalCentavos;
+		return price;
 	}
+	const walkInCartLineTotal = (line: WalkInCartLine): number => walkInCartLinePrice(line).totalCentavos;
 	const walkInCartGrandTotal = $derived(
 		walkInCart.reduce((sum, line) => sum + walkInCartLineTotal(line), 0)
 	);
+
+	// Extras and the Senior Citizen / PWD claim, shown live. Display only: the server re-prices both.
+	let walkInExtras = $state<WalkInExtraLine[]>([]);
+	let scPwdOn = $state(false);
+	let scPwdType = $state<'senior_citizen' | 'pwd'>('senior_citizen');
+	let scPwdIdNumber = $state('');
+	let scPwdName = $state('');
+	let scPwdLineIndex = $state(0);
+	const walkInExtrasTotal = $derived(
+		walkInExtras.reduce((n, x) => n + extraLineTotal(x, data.vatRateBps), 0)
+	);
+	/** The discount on the claimed room — the first room of the chosen cart line, split exactly as the server does. */
+	const scPwdCalc = $derived.by(() => {
+		const line = scPwdOn ? walkInCart[Math.min(scPwdLineIndex, walkInCart.length - 1)] : undefined;
+		if (!line) return null;
+		const price = walkInCartLinePrice(line);
+		const [share] = splitRoomLine(
+			{
+				subtotalCentavos: price.subtotalCentavos,
+				feesCentavos: price.fees.reduce((s, f) => s + f.amountCentavos, 0),
+				vatCentavos: price.vatCentavos,
+				totalCentavos: price.totalCentavos
+			},
+			line.occupancy,
+			line.extraBedsNeeded,
+			line.roomCount
+		);
+		return computeScPwdDiscount({
+			subtotalCentavos: share!.subtotalCentavos,
+			feesCentavos: share!.feesCentavos,
+			vatCentavos: share!.vatCentavos,
+			discountBps: data.scPwdDiscountBps
+		});
+	});
+	const walkInNetTotal = $derived(
+		walkInCartGrandTotal + walkInExtrasTotal - (scPwdCalc?.totalReductionCentavos ?? 0)
+	);
+	/** Each cart line's bill after the extras (on the first line) and the discount (on the claimed line). */
+	const walkInRoomBills = $derived(
+		walkInCart.map((l, i) => {
+			let cents = walkInCartLineTotal(l);
+			if (i === 0) cents += walkInExtrasTotal;
+			if (scPwdCalc && i === Math.min(scPwdLineIndex, walkInCart.length - 1)) {
+				cents -= scPwdCalc.totalReductionCentavos;
+			}
+			return cents;
+		})
+	);
+	const scPwdIncomplete = $derived(scPwdOn && !scPwdIdNumber.trim());
+	const scPwdPctLabel = $derived((data.scPwdDiscountBps / 100).toFixed(data.scPwdDiscountBps % 100 === 0 ? 0 : 2));
 
 	/** Adds a room type/rate plan to the walk-in cart, merging into an existing line
 	 *  (bumping its quantity) if that same combination is already there. */
@@ -1135,6 +1192,11 @@
 		const wasPick = walkInFlow === 'pick';
 		walkInOpen = false;
 		walkInCart = [];
+		walkInExtras = [];
+		scPwdOn = false;
+		scPwdIdNumber = '';
+		scPwdName = '';
+		scPwdLineIndex = 0;
 		walkInFlow = null;
 		if (wasPick) {
 			pickMode = true;
@@ -3209,7 +3271,7 @@
 </div>
 
 <Sheet.Root bind:open={walkInOpen}>
-	<Sheet.Content side="right" class="w-full overflow-y-auto sm:max-w-md">
+	<Sheet.Content side="right" class="w-full overflow-y-auto sm:max-w-xl">
 		<Sheet.Header>
 			<Sheet.Title>Walk-in booking</Sheet.Title>
 		</Sheet.Header>
@@ -3403,7 +3465,8 @@
 								</div>
 								{#if line.ratePlanOptions && line.ratePlanOptions.length > 1}
 									<select
-										class="mt-0.5 block w-full max-w-full min-w-0 truncate rounded-md border border-input bg-transparent px-1.5 py-0.5 text-xs text-ink-muted"
+										class="mt-1 block h-9 w-full max-w-full min-w-0 truncate rounded-md border border-input bg-transparent px-2 text-sm text-ink"
+										aria-label="Rate plan for {line.roomTypeName}"
 										value={line.ratePlanId}
 										onchange={(e) => setWalkInCartLineRatePlan(line.id, e.currentTarget.value)}
 									>
@@ -3411,12 +3474,12 @@
 											<option value={opt.id} disabled={!opt.fitsParty}>{opt.name}{opt.fitsParty ? '' : ' (too small for party)'}</option>
 										{/each}
 									</select>
-								{:else}
-									<div class="line-clamp-2 text-xs break-words text-ink-muted" title={line.ratePlanName}>
-										{line.ratePlanName}
-									</div>
 								{/if}
-								<div class="text-[11px] text-ink-muted">{line.checkIn} → {line.checkOut}</div>
+								<!-- The chosen rate in full, outside the dropdown, which truncates and is hard to read. -->
+								<div class="mt-1 text-sm font-medium break-words text-ink" data-testid="walkin-rate-name">
+									{line.ratePlanName}
+								</div>
+								<div class="text-xs text-ink-muted">{line.checkIn} → {line.checkOut}</div>
 								{#if line.extraBedsNeeded > 0}
 									<span
 										class="mt-1 inline-block rounded border border-border px-1 py-0.5 text-[10px] font-medium text-ink"
@@ -3608,17 +3671,107 @@
 								<Label for="wiSpecialRequests">Special requests</Label>
 								<textarea id="wiSpecialRequests" name="specialRequests" maxlength={1000} rows="2" class={textareaClass}></textarea>
 							</div>
+						<section class="space-y-3 rounded-lg border border-border p-3" aria-label="Senior Citizen or PWD discount">
+							<label class="flex items-start gap-2 text-sm font-semibold text-ink">
+								<input type="checkbox" class="mt-0.5 size-4" bind:checked={scPwdOn} />
+								<span>
+									Senior Citizen / PWD discount
+									<span class="block text-xs font-normal text-ink-muted">
+										{scPwdPctLabel}% off the room, VAT removed. Applied now, so the guest pays the lower amount.
+									</span>
+								</span>
+							</label>
+							{#if scPwdOn}
+								<input type="hidden" name="scPwdOn" value="on" />
+								<input type="hidden" name="scPwdLineIndex" value={Math.min(scPwdLineIndex, walkInCart.length - 1)} />
+								<div class="grid grid-cols-2 gap-3">
+									<div>
+										<Label for="scPwdTypeSel" class="text-xs">Type</Label>
+										<select
+											id="scPwdTypeSel"
+											name="scPwdClaimantType"
+											bind:value={scPwdType}
+											class="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+										>
+											<option value="senior_citizen">Senior Citizen</option>
+											<option value="pwd">PWD</option>
+										</select>
+									</div>
+									<div>
+										<Label for="scPwdIdNo" class="text-xs">OSCA / PWD ID no.</Label>
+										<Input id="scPwdIdNo" name="scPwdIdNumber" bind:value={scPwdIdNumber} maxlength={60} autocomplete="off" class="mt-1" />
+									</div>
+								</div>
+								<div class="grid grid-cols-2 gap-3">
+									<div>
+										<Label for="scPwdClaimant" class="text-xs">Name on the ID</Label>
+										<Input id="scPwdClaimant" name="scPwdClaimantName" bind:value={scPwdName} maxlength={160} placeholder="Blank = the guest's name" class="mt-1" />
+									</div>
+									{#if walkInCart.length > 1}
+										<div>
+											<Label for="scPwdRoomSel" class="text-xs">Applies to room</Label>
+											<select
+												id="scPwdRoomSel"
+												bind:value={scPwdLineIndex}
+												class="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+											>
+												{#each walkInCart as l, i (l.id)}
+													<option value={i}>
+														{l.roomNumber ? `Room ${l.roomNumber}` : l.roomTypeName}{l.roomCount > 1 ? ` (first of ${l.roomCount})` : ''}
+													</option>
+												{/each}
+											</select>
+										</div>
+									{/if}
+								</div>
+								{#if scPwdIncomplete}
+									<p class="text-xs text-danger">Enter the OSCA / PWD ID number to apply the discount.</p>
+								{/if}
+							{/if}
+						</section>
+
+						<WalkinExtras bind:extras={walkInExtras} options={data.amenityItemOptions} vatRateBps={data.vatRateBps} />
+
+						{#if walkInExtrasTotal > 0 || scPwdCalc}
+							<dl class="space-y-1 rounded-lg bg-surface-2 px-3 py-2.5 text-sm" aria-label="Price summary">
+								<div class="flex justify-between text-ink-muted">
+									<dt>Rooms</dt>
+									<dd class="tabular-nums">{peso(walkInCartGrandTotal)}</dd>
+								</div>
+								{#if walkInExtrasTotal > 0}
+									<div class="flex justify-between text-ink-muted">
+										<dt>Extras</dt>
+										<dd class="tabular-nums">{peso(walkInExtrasTotal)}</dd>
+									</div>
+								{/if}
+								{#if scPwdCalc}
+									<div class="flex justify-between text-ink-muted">
+										<dt>VAT removed (exempt sale)</dt>
+										<dd class="tabular-nums">−{peso(scPwdCalc.vatRemovedCentavos)}</dd>
+									</div>
+									<div class="flex justify-between text-ink-muted">
+										<dt>{scPwdType === 'pwd' ? 'PWD' : 'Senior Citizen'} discount ({scPwdPctLabel}%)</dt>
+										<dd class="tabular-nums">−{peso(scPwdCalc.discountCentavos)}</dd>
+									</div>
+								{/if}
+								<div class="flex justify-between border-t border-border pt-1.5 font-semibold text-ink">
+									<dt>Total due now</dt>
+									<dd class="tabular-nums">{peso(walkInNetTotal)}</dd>
+								</div>
+							</dl>
+						{/if}
+
 						<WalkinPaymentFields
-						totalCentavos={walkInCartGrandTotal}
+						totalCentavos={walkInNetTotal}
 						cashier={data.cashier}
 						canCityLedger={canChargeCityLedger}
-						rooms={walkInCart.map((l) => ({
+						rooms={walkInCart.map((l, i) => ({
 							label: `${l.roomNumber ? `Room ${l.roomNumber} · ` : ''}${l.roomTypeName}${l.roomCount > 1 ? ` × ${l.roomCount}` : ''}`,
-							totalCentavos: walkInCartLineTotal(l)
+							totalCentavos: walkInRoomBills[i]!
 						}))}
 					/>
 						{/if}
-						<Button type="submit" class="w-full" disabled={(walkInMode === 'ota' && otaInvalid) || !walkInContactValid}>
+						<Button type="submit" class="w-full" disabled={(walkInMode === 'ota' && otaInvalid) || !walkInContactValid || (walkInMode === 'walkin' && scPwdIncomplete)}>
 							{walkInMode === 'ota' ? 'Create OTA booking' : 'Create booking & record payment'}
 						</Button>
 							</form>

@@ -65,6 +65,7 @@ import {
 	ScPwdDiscountError,
 	applyScPwdDiscount,
 	getActiveScPwdClaim,
+	getScPwdDiscountBps,
 	reverseScPwdDiscount
 } from '$lib/server/sc-pwd-discount';
 import { getFinanceSettings } from '$lib/server/finance/settings';
@@ -113,7 +114,8 @@ export const load: PageServerLoad = async ({ locals }) => {
 		financeSettings,
 		openShift,
 		drawers,
-		roomTypePolicyRows
+		roomTypePolicyRows,
+		scPwdDiscountBps
 	] = await Promise.all([
 		getRoomStatusGrid(hotel.id, businessDate, hotel.checkOutTime, hotel.timezone, hotel.checkInTime),
 		getHallStatusBoard(hotel.id, businessDate),
@@ -153,7 +155,8 @@ export const load: PageServerLoad = async ({ locals }) => {
 				extraBedCapacity: roomTypes.extraBedCapacity
 			})
 			.from(roomTypes)
-			.where(eq(roomTypes.hotelId, hotel.id))
+			.where(eq(roomTypes.hotelId, hotel.id)),
+		getScPwdDiscountBps(hotel.id)
 	]);
 	const roomTypePolicies = Object.fromEntries(
 		roomTypePolicyRows.map((t) => [
@@ -210,6 +213,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 		lateCheckoutFeePerHourCentavos: hotel.lateCheckoutFeePerHourCentavos,
 		earlyCheckInFeePerHourCentavos: hotel.earlyCheckInFeePerHourCentavos,
 		vatRateBps: hotel.vatRateBps,
+		scPwdDiscountBps,
 		amenityItemOptions,
 		hallGrid,
 		roomTypePolicies,
@@ -324,7 +328,15 @@ const createSchema = z
 		billToName: z.string().max(160).optional(),
 		billToCompany: z.string().max(160).optional(),
 		billReference: z.string().max(120).optional(),
-		billNotes: z.string().max(500).optional()
+		billNotes: z.string().max(500).optional(),
+		// Extras added at the desk (breakfast…); catalog lines are re-priced server-side.
+		extrasJson: z.string().max(20000).optional(),
+		// Senior Citizen / PWD claim, applied to the cart line `scPwdLineIndex` at booking time.
+		scPwdOn: z.literal('on').optional(),
+		scPwdClaimantType: z.enum(['senior_citizen', 'pwd']).default('senior_citizen'),
+		scPwdIdNumber: z.string().max(60).optional(),
+		scPwdClaimantName: z.string().max(160).optional(),
+		scPwdLineIndex: z.coerce.number().int().min(0).max(50).default(0)
 	})
 	.merge(paymentFieldsSchema.extend({ method: z.enum([...PAYMENT_METHODS, 'city_ledger']) }));
 
@@ -1215,6 +1227,18 @@ export const actions: Actions = {
 			if (!d.billToName?.trim()) return fail(400, { walkInError: 'Enter who the booking is billed to.' });
 		}
 
+		let extras: z.infer<typeof hallExtrasSchema>;
+		try {
+			extras = hallExtrasSchema.parse(JSON.parse(d.extrasJson || '[]'));
+		} catch {
+			return fail(400, { walkInError: 'Check the extras and try again.' });
+		}
+		// The claimant's name and ID are checked again server-side (`applyScPwdDiscountTx`); here only
+		// that the claimed room exists in the cart.
+		if (d.scPwdOn && d.scPwdLineIndex >= items.length) {
+			return fail(400, { walkInError: 'Pick the room the discount applies to.' });
+		}
+
 		let orderId: string;
 		try {
 			const result = await createWalkInBooking({
@@ -1227,6 +1251,15 @@ export const actions: Actions = {
 					specialRequests: d.specialRequests ?? null
 				},
 				rooms: items,
+				extras,
+				scPwd: d.scPwdOn
+					? {
+							lineIndex: d.scPwdLineIndex,
+							claimantType: d.scPwdClaimantType,
+							claimantName: d.scPwdClaimantName || d.fullName,
+							idNumber: d.scPwdIdNumber ?? ''
+						}
+					: undefined,
 				// A city-ledger booking takes no desk payment; the method is only a placeholder here.
 				payment: walkInPaymentFrom({ ...d, method: d.method === 'city_ledger' ? 'cash' : d.method }, raw.allocationsJson),
 				cityLedger: toLedger

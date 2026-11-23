@@ -42,6 +42,12 @@ import { getBirSettings, issueInvoice } from './finance/documents';
 import { priceEventHall, type PriceBreakdown } from './pricing';
 import { addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
 import { writeAudit } from './audit';
+import {
+	ScPwdDiscountError,
+	applyScPwdDiscountTx,
+	auditScPwdApply,
+	type ScPwdClaimantType
+} from './sc-pwd-discount';
 import { flagRoomForHousekeeping, flagHallForHousekeeping, getHallCloseGate } from './housekeeping';
 import { hallOvertimeAmount, hallOvertimeHours } from '$lib/hall-overtime';
 import type { SessionUser } from './auth/session';
@@ -884,6 +890,12 @@ export async function createWalkInBooking(params: {
 	/** Charge to the city ledger instead of taking payment at the desk. Authorised by the caller
 	 *  (hotel admin only — enforced in the route action, as at check-out). */
 	cityLedger?: CityLedgerHandoff;
+	/** Extras (breakfast, custom items) charged on the first room's folio and paid with the booking.
+	 *  Catalog lines are re-priced here; the client's prices are never trusted. Not for OTA bookings. */
+	extras?: WalkInExtra[];
+	/** A Senior Citizen / PWD claim on one room (`lineIndex` = its cart line), applied now so the guest
+	 *  pays the discounted amount — not refunded after. The rate is the hotel's setting. Not for OTA bookings. */
+	scPwd?: { lineIndex: number; claimantType: ScPwdClaimantType; claimantName: string; idNumber: string };
 	/** Over-capacity booking, with the staff member's reason. Authorised by the caller (`canOverrideCapacity`). */
 	overCapacity?: { reason: string };
 	actor: SessionUser | null;
@@ -922,7 +934,7 @@ export async function createWalkInBooking(params: {
 		? { cashAccountId: null, shiftId: null }
 		: await resolvePaymentAccount(hotelId, payment.method);
 
-	const { bookingIds, totalPaidCentavos, orderId } = await db.transaction(async (tx) => {
+	const { bookingIds, totalPaidCentavos, orderId, extrasCentavos, scPwdApplied } = await db.transaction(async (tx) => {
 		for (const key of lockKeysForRooms(roomItems)) {
 			await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${hotelId}), hashtext(${key}))`);
 		}
@@ -1187,6 +1199,51 @@ export async function createWalkInBooking(params: {
 			}
 		}
 
+		// Extras and the SC/PWD discount ride on the rooms' folios, so each room's bill (and the
+		// per-room payment split below) is its booking total plus those lines. The guest pays the net.
+		let extrasCentavos = 0;
+		let scPwdReductionCentavos = 0;
+		let scPwdApplied: { id: string; bookingId: string; discountBps: number; reduction: number } | null = null;
+		if (!ota) {
+			if (params.extras && params.extras.length > 0) {
+				extrasCentavos = await addWalkInExtras(
+					tx,
+					hotelId,
+					{ kind: 'room', bookingId: bookingIds[0]! },
+					params.extras,
+					actor,
+					{ honourTaxable: true }
+				);
+				bookingTotals[0]! += extrasCentavos;
+			}
+			if (params.scPwd) {
+				const roomIdx = lineOfBooking.indexOf(params.scPwd.lineIndex);
+				if (roomIdx < 0) throw new WalkInError('Pick the room the discount applies to.');
+				try {
+					const r = await applyScPwdDiscountTx(tx, {
+						hotelId,
+						bookingId: bookingIds[roomIdx]!,
+						claimantType: params.scPwd.claimantType,
+						claimantName: params.scPwd.claimantName,
+						idNumber: params.scPwd.idNumber,
+						actor
+					});
+					scPwdReductionCentavos = r.totalReductionCentavos;
+					bookingTotals[roomIdx]! -= r.totalReductionCentavos;
+					scPwdApplied = {
+						id: r.scPwdDiscountId,
+						bookingId: bookingIds[roomIdx]!,
+						discountBps: r.discountBps,
+						reduction: r.totalReductionCentavos
+					};
+				} catch (e) {
+					if (e instanceof ScPwdDiscountError) throw new WalkInError(e.message);
+					throw e;
+				}
+			}
+		}
+		const grandTotalCentavos = totalCentavos + extrasCentavos - scPwdReductionCentavos;
+
 		// Full settlement + its cash-ledger movement, in the same transaction — one
 		// payment for the whole sale, attached to the first line's booking/folio.
 		if (ota || params.cityLedger) {
@@ -1210,14 +1267,14 @@ export async function createWalkInBooking(params: {
 					actor
 				});
 			}
-			return { bookingIds, totalPaidCentavos: 0, orderId: order!.id };
+			return { bookingIds, totalPaidCentavos: 0, orderId: order!.id, extrasCentavos, scPwdApplied };
 		}
 		await recordWalkInPayment(tx, {
 			hotelId,
 			orderId: order!.id,
 			target: { kind: 'room', bookingId: bookingIds[0]! },
 			method: payment.method,
-			amountCentavos: walkInAmountPaid(totalCentavos, payment),
+			amountCentavos: walkInAmountPaid(grandTotalCentavos, payment),
 			tenderedCentavos: payment.tenderedCentavos ?? null,
 			referenceNo: payment.referenceNo ?? null,
 			bankName: payment.bankName ?? null,
@@ -1234,7 +1291,7 @@ export async function createWalkInBooking(params: {
 					? walkInAllocations(
 							bookingIds,
 							bookingTotals,
-							walkInAmountPaid(totalCentavos, payment),
+							walkInAmountPaid(grandTotalCentavos, payment),
 							payment.allocationsCentavos,
 							lineOfBooking
 						)
@@ -1243,10 +1300,28 @@ export async function createWalkInBooking(params: {
 
 		return {
 			bookingIds,
-			totalPaidCentavos: walkInAmountPaid(totalCentavos, payment),
-			orderId: order!.id
+			totalPaidCentavos: walkInAmountPaid(grandTotalCentavos, payment),
+			orderId: order!.id,
+			extrasCentavos,
+			scPwdApplied
 		};
 	});
+
+	if (scPwdApplied) {
+		await auditScPwdApply(
+			{
+				hotelId,
+				bookingId: scPwdApplied.bookingId,
+				claimantType: params.scPwd!.claimantType,
+				claimantName: params.scPwd!.claimantName,
+				idNumber: params.scPwd!.idNumber,
+				actor
+			},
+			scPwdApplied.id,
+			scPwdApplied.discountBps,
+			scPwdApplied.reduction
+		);
+	}
 
 	await writeAudit({
 		hotelId,
@@ -1259,7 +1334,9 @@ export async function createWalkInBooking(params: {
 			bookingIds,
 			paymentMethod: params.cityLedger ? 'city_ledger' : payment.method,
 			amountCentavos: totalPaidCentavos,
-			tenderedCentavos: payment.tenderedCentavos ?? null
+			tenderedCentavos: payment.tenderedCentavos ?? null,
+			extrasCentavos,
+			scPwdReductionCentavos: scPwdApplied?.reduction ?? 0
 		}
 	});
 
