@@ -1,0 +1,1 @@
+ALTER TABLE "paymongo_settings" ADD COLUMN "paused" boolean DEFAULT false NOT NULL;

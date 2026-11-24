@@ -33,6 +33,8 @@ export const paymongoSettings = pgTable('paymongo_settings', {
 	webhookSecretEnc: text('webhook_secret_enc'),
 	status: paymongoConnectionStatus('status').notNull().default('connected'),
 	lastError: text('last_error'),
+	/** Staff kill switch: keys stay connected but guests book as "pay at the hotel" (no PayMongo calls). */
+	paused: boolean('paused').notNull().default(false),
 	connectedAt: timestamp('connected_at', { withTimezone: true }).notNull().defaultNow(),
 	connectedByUserId: uuid('connected_by_user_id').references(() => users.id, {
 		onDelete: 'set null'

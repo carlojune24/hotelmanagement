@@ -131,6 +131,32 @@
 
 			<form
 				method="POST"
+				action="?/setPaymongoPaused"
+				use:enhance={run('pause')}
+				class="mt-4 flex flex-wrap items-center gap-3 border-t border-border pt-4"
+			>
+				<input type="hidden" name="paused" value={data.paymongo.paused ? '0' : '1'} />
+				<Button
+					type="submit"
+					size="sm"
+					variant={data.paymongo.paused ? 'default' : 'outline'}
+					disabled={busy !== null}
+				>
+					{data.paymongo.paused ? 'Resume online payments' : 'Pause online payments'}
+				</Button>
+				<p class="min-w-0 flex-1 text-xs text-ink-muted">
+					{#if data.paymongo.paused}
+						<span class="font-medium text-danger">Paused.</span> Guests still book online, but the booking is
+						confirmed and the full amount is paid at the hotel.
+					{:else}
+						Use this if PayMongo is down or the account is closed. Bookings then confirm as pay-at-the-hotel
+						instead of failing. Pause rather than Disconnect.
+					{/if}
+				</p>
+			</form>
+
+			<form
+				method="POST"
 				action="?/reconnectPaymongo"
 				use:enhance={run('reconnect')}
 				class="mt-4 border-t border-border pt-4"

@@ -1,5 +1,9 @@
 import { fail } from '@sveltejs/kit';
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { db } from '$lib/server/db/index';
+import { paymongoSettings } from '$lib/server/db/schema/index';
+import { writeAudit } from '$lib/server/audit';
 import { requireCap } from '$lib/server/auth/rbac';
 import {
 	PAYMONGO_WEBHOOK_EVENTS,
@@ -111,6 +115,28 @@ export const actions: Actions = {
 			if (msg) return fail(400, { error: msg });
 			throw e;
 		}
+	},
+
+	// Kill switch: keys stay connected, but guests book as "pay at the hotel" and PayMongo is never called.
+	setPaymongoPaused: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		const paused = String((await event.request.formData()).get('paused')) === '1';
+		await db
+			.update(paymongoSettings)
+			.set({ paused, updatedAt: new Date() })
+			.where(eq(paymongoSettings.hotelId, event.locals.hotel!.id));
+		await writeAudit({
+			hotelId: event.locals.hotel!.id,
+			actor: event.locals.user,
+			action: paused ? 'paymongo.pause' : 'paymongo.resume',
+			entityType: 'paymongo_settings',
+			entityId: event.locals.hotel!.id
+		});
+		return {
+			ok: paused
+				? 'Online payments paused — guests now book and pay at the hotel.'
+				: 'Online payments resumed — guests pay through PayMongo again.'
+		};
 	},
 
 	disconnectPaymongo: async (event) => {

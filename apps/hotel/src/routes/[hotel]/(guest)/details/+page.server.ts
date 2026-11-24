@@ -19,7 +19,7 @@ import { computeDownpayment } from '$lib/downpayment';
 import { splitInteger, splitProportional, splitRoomLine } from '$lib/room-split';
 import { downpaymentBpsByRatePlan } from '$lib/server/downpayment-lookup';
 import { searchAvailability } from '$lib/server/availability';
-import { isOnlinePaymentEnabled } from '$lib/server/paymongo/client';
+import { hasPaymongoConnection } from '$lib/server/paymongo/client';
 import { checkHallAvailability } from '$lib/server/hall-availability';
 import { MAX_ROOMS_PER_LINE, addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
 import {
@@ -79,9 +79,10 @@ function lockKeysFor(items: CartLineInput[]): string[] {
 export const actions: Actions = {
 	createOrder: async (event) => {
 		const hotelId = event.locals.hotel!.id;
-		// No PayMongo account connected (Settings → Payments & email) = no online payment, so
-		// don't create an order that would hold rooms with no way to pay for them.
-		if (!(await isOnlinePaymentEnabled(hotelId))) {
+		// Never connected PayMongo (Settings → Payments & email) = online booking off, so don't create an
+		// order with no way to pay. A connected-but-paused hotel still books: the review page confirms it
+		// as pay-at-the-hotel.
+		if (!(await hasPaymongoConnection(hotelId))) {
 			return fail(400, {
 				error: "Online booking isn't available for this hotel yet — please contact the hotel directly to reserve."
 			});

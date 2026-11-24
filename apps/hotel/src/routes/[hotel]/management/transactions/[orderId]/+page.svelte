@@ -691,7 +691,11 @@
 						The credit is the SC/PWD discount, applied after the guest paid. Refund it from the room above.
 					</p>
 				{/if}
-				{#if data.order.amountDueNowCentavos != null && balance > 0}
+				{#if data.order.amountDueNowCentavos === 0 && balance > 0}
+					<p class="mt-2 text-xs text-ink-muted">
+						Booked as pay-at-the-hotel (PayMongo was unavailable). Nothing was paid online; the full balance is collected here.
+					</p>
+				{:else if data.order.amountDueNowCentavos != null && balance > 0}
 					<p class="mt-2 text-xs text-ink-muted">
 						The guest paid the downpayment online; the rest is collected here.
 					</p>

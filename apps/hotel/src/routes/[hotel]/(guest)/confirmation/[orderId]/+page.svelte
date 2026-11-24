@@ -102,6 +102,12 @@
 			</span>
 			<div>
 				<h1 class="ledger-display text-2xl sm:text-3xl">You're booked, {data.guestName.split(' ')[0]}</h1>
+				{#if owesAtHotel && data.payment && data.payment.paidCentavos === 0}
+					<p class="mt-2 text-sm font-medium" role="status">
+						Your reservation is successful, but please make the payment at the hotel (walk-in) because
+						PayMongo is under maintenance.
+					</p>
+				{/if}
 				<p class="mt-1 text-sm text-[var(--ledger-ink-muted)]">
 					A confirmation is on its way to your email. Keep your confirmation code handy — it's all
 					you need at check-in.
@@ -206,7 +212,7 @@
 						{/if}
 						{#if owesAtHotel && data.payment}
 							<tr>
-								<td class="ledger-label py-1 {data.promo ? '' : 'pt-3'}">Paid online</td>
+								<td class="ledger-label py-1 {data.promo ? '' : 'pt-3'}">{data.payment.paidCentavos > 0 ? 'Paid online' : 'Paid so far'}</td>
 								<td class="ledger-data py-1 text-right {data.promo ? '' : 'pt-3'}"
 									>{peso(data.payment.paidCentavos)}</td
 								>
@@ -284,7 +290,7 @@
 							aria-hidden="true"
 						/>
 						<span>
-							Pay the remaining
+							Pay {data.payment.paidCentavos > 0 ? 'the remaining' : 'the full'}
 							<span class="ledger-data font-medium">{peso(data.payment.dueAtHotelCentavos)}</span> when you
 							arrive.
 						</span>

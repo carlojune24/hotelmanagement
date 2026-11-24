@@ -15,6 +15,7 @@ import {
 } from '$lib/server/front-desk';
 import { sendBookingConfirmation } from '$lib/server/email/send-booking-confirmation';
 import { sendPaymentLink } from '$lib/server/email/send-payment-link';
+import { isOnlinePaymentEnabled } from '$lib/server/paymongo/client';
 import { sendBookingCancellation } from '$lib/server/email/send-booking-cancellation';
 import {
 	CancellationError,
@@ -686,6 +687,10 @@ export const actions: Actions = {
 		if (!detail) return fail(404, { error: 'Booking not found.' });
 		if (detail.order.status !== 'pending_payment')
 			return fail(400, { error: 'Only a booking waiting for payment can be sent a payment link.' });
+
+		// Paused / closed PayMongo: a link would send the guest to a dead checkout.
+		if (!(await isOnlinePaymentEnabled(hotelId)))
+			return fail(400, { error: 'Online payments are paused — confirm this booking manually instead.' });
 
 		const res = await sendPaymentLink(detail.order.id);
 		if (!res.ok) return fail(502, { error: `Could not send: ${res.error ?? 'unknown error'}` });

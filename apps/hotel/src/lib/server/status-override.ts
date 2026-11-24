@@ -48,13 +48,18 @@ export class StatusOverrideError extends Error {}
 export async function manuallyConfirmOrder(input: {
 	hotelId: string;
 	orderId: string;
-	method: PaymentMethod;
+	/** Required unless `payAtHotel`. */
+	method?: PaymentMethod;
 	referenceNo?: string | null;
 	reason: string;
 	actor: SessionUser | null;
+	/** Online payment is unavailable: confirm with nothing paid; the whole balance is collected at the front desk. */
+	payAtHotel?: boolean;
 }): Promise<void> {
 	const reason = input.reason.trim();
 	if (!reason) throw new StatusOverrideError('Enter a reason for the manual confirmation.');
+	if (!input.payAtHotel && !input.method) throw new StatusOverrideError('Choose how it was paid.');
+	const note = input.payAtHotel ? `Pay at hotel — ${reason}` : `[Override] Manually confirmed — ${reason}`;
 
 	const [order] = await db
 		.select()
@@ -79,22 +84,22 @@ export async function manuallyConfirmOrder(input: {
 	}
 
 	try {
-		for (const b of pendingRooms) {
+		for (const b of input.payAtHotel ? [] : pendingRooms) {
 			await recordPayment({
 				hotelId: input.hotelId,
 				target: { kind: 'room', bookingId: b.id },
-				method: input.method,
+				method: input.method!,
 				amountCentavos: b.totalCentavos,
 				purpose: 'settlement',
 				referenceNo: input.referenceNo,
 				actor: input.actor
 			});
 		}
-		for (const h of pendingHalls) {
+		for (const h of input.payAtHotel ? [] : pendingHalls) {
 			await recordPayment({
 				hotelId: input.hotelId,
 				target: { kind: 'hall', hallBookingId: h.id },
-				method: input.method,
+				method: input.method!,
 				amountCentavos: h.totalCentavos,
 				purpose: 'settlement',
 				referenceNo: input.referenceNo,
@@ -120,7 +125,7 @@ export async function manuallyConfirmOrder(input: {
 				bookingId: b.id,
 				fromStatus: 'pending_payment',
 				toStatus: 'confirmed',
-				note: `[Override] Manually confirmed — ${reason}`
+				note
 			});
 		}
 		for (const h of pendingHalls) {
@@ -136,12 +141,17 @@ export async function manuallyConfirmOrder(input: {
 				hallBookingId: h.id,
 				fromStatus: 'pending_payment',
 				toStatus: 'confirmed',
-				note: `[Override] Manually confirmed — ${reason}`
+				note
 			});
 		}
 		const flippedOrder = await tx
 			.update(orders)
-			.set({ status: 'confirmed', updatedAt: new Date() })
+			// 0 = "nothing due now, all of it at the hotel": the confirmation page and email read it before the email below sends.
+			.set({
+				status: 'confirmed',
+				updatedAt: new Date(),
+				...(input.payAtHotel ? { amountDueNowCentavos: 0 } : {})
+			})
 			.where(and(eq(orders.id, order.id), eq(orders.status, 'pending_payment')))
 			.returning({ id: orders.id });
 		if (flippedOrder.length === 0) {
@@ -151,17 +161,17 @@ export async function manuallyConfirmOrder(input: {
 			orderId: order.id,
 			fromStatus: 'pending_payment',
 			toStatus: 'confirmed',
-			note: `[Override] Manually confirmed — ${reason}`
+			note
 		});
 	});
 
 	await writeAudit({
 		hotelId: input.hotelId,
 		actor: input.actor,
-		action: 'order.manual_confirm',
+		action: input.payAtHotel ? 'order.pay_at_hotel' : 'order.manual_confirm',
 		entityType: 'order',
 		entityId: order.id,
-		after: { reason, method: input.method, referenceNo: input.referenceNo ?? null }
+		after: { reason, method: input.method ?? null, referenceNo: input.referenceNo ?? null }
 	});
 
 	void sendBookingConfirmation(order.id).catch((e) =>

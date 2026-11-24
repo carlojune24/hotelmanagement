@@ -13,7 +13,8 @@ import {
 	roomTypes
 } from '$lib/server/db/schema/index';
 import { createCheckoutSession, type CheckoutLineItem } from '$lib/server/paymongo/checkout';
-import { PaymentsNotConfiguredError } from '$lib/server/paymongo/client';
+import { PaymentsNotConfiguredError, isOnlinePaymentEnabled } from '$lib/server/paymongo/client';
+import { manuallyConfirmOrder, StatusOverrideError } from '$lib/server/status-override';
 import { recordAttempt, reusableCheckoutUrl, supersedeOpenAttempts } from '$lib/server/paymongo/attempts';
 import { verifyOrderNow } from '$lib/server/paymongo/verify';
 import { sendPaymentStatusEmail } from '$lib/server/email/send-payment-status';
@@ -68,6 +69,22 @@ async function loadOrderLines(orderId: string) {
 	return { roomLines, hallLines };
 }
 
+/**
+ * Online payment is unavailable: confirm the booking with nothing paid; the guest pays the full amount at the
+ * hotel. Always redirects to the confirmation page (or throws). If the order changed underneath us (a payment
+ * landed, or it expired), the confirmation page already says the right thing.
+ */
+async function payAtHotel(hotelId: string, order: { id: string; accessToken: string }, reason: string): Promise<never> {
+	// Close any checkout link the guest already opened, so it can't be paid against a booking that is now pay-at-hotel.
+	await supersedeOpenAttempts(hotelId, { orderId: order.id }).catch(() => undefined);
+	try {
+		await manuallyConfirmOrder({ hotelId, orderId: order.id, reason, actor: null, payAtHotel: true });
+	} catch (e) {
+		if (!(e instanceof StatusOverrideError)) throw e;
+	}
+	redirect(303, `../confirmation/${order.id}?t=${order.accessToken}`);
+}
+
 import { getOrderPromo } from '$lib/server/promo-codes';
 import { orderSecurityDepositCentavos } from '$lib/server/security-deposit-lookup';
 
@@ -100,6 +117,8 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 			dueNowCentavos: order.amountDueNowCentavos ?? order.totalCentavos
 		},
 		promo,
+		// Staff paused PayMongo: the page offers "confirm, pay at the hotel" instead of a PayMongo checkout.
+		payAtHotel: !(await isOnlinePaymentEnabled(hotelId)),
 		securityDepositCentavos,
 		guest: { fullName: guest!.fullName, email: guest!.email },
 		roomLines,
@@ -120,6 +139,11 @@ export const actions: Actions = {
 		}
 		if (order.status !== 'pending_payment') {
 			return fail(400, { error: 'This order can no longer be paid.' });
+		}
+
+		// PayMongo paused by staff: skip every PayMongo call and book as pay-at-the-hotel.
+		if (!(await isOnlinePaymentEnabled(hotelId))) {
+			await payAtHotel(hotelId, order, 'online payments paused by the hotel');
 		}
 
 		// A payment may already have landed (the webhook could not reach us): confirm it instead of starting another.
@@ -181,7 +205,10 @@ export const actions: Actions = {
 					error: "Online payment isn't available for this hotel right now — please contact the hotel directly."
 				});
 			}
-			throw e;
+			// PayMongo is down / the account is closed / any other failure: don't lose the booking.
+			console.error('review pay: PayMongo checkout failed, falling back to pay-at-hotel', order.id, e);
+			await payAtHotel(hotelId, order, `PayMongo unavailable (${e instanceof Error ? e.message : 'error'})`);
+			throw e; // unreachable: payAtHotel always redirects or throws
 		}
 		const { checkoutSessionId, checkoutUrl } = session;
 

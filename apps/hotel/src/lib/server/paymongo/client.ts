@@ -35,14 +35,24 @@ export async function getPaymongoClient(hotelId: string): Promise<PayMongoClient
 	return client;
 }
 
-/** Whether guests of this hotel can pay online right now. */
-export async function isOnlinePaymentEnabled(hotelId: string): Promise<boolean> {
+/** Whether the hotel has connected PayMongo at all (paused or not). */
+export async function hasPaymongoConnection(hotelId: string): Promise<boolean> {
 	const [row] = await db
 		.select({ hotelId: paymongoSettings.hotelId })
 		.from(paymongoSettings)
 		.where(eq(paymongoSettings.hotelId, hotelId))
 		.limit(1);
 	return !!row;
+}
+
+/** Whether guests of this hotel can pay online right now: connected and not paused by staff. */
+export async function isOnlinePaymentEnabled(hotelId: string): Promise<boolean> {
+	const [row] = await db
+		.select({ paused: paymongoSettings.paused })
+		.from(paymongoSettings)
+		.where(eq(paymongoSettings.hotelId, hotelId))
+		.limit(1);
+	return !!row && !row.paused;
 }
 
 /** Call after a hotel's keys change (connect / disconnect) so the next call re-reads them. */

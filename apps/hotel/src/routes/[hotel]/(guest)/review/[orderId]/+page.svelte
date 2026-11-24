@@ -16,7 +16,7 @@
 	const peso = (centavos: number) =>
 		`₱${(centavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 	let submitting = $state(false);
-	const partial = $derived(data.order.dueNowCentavos < data.order.totalCentavos);
+	const partial = $derived(!data.payAtHotel && data.order.dueNowCentavos < data.order.totalCentavos);
 	/** With a downpayment policy the guest picks: just the downpayment, or the whole bill now. */
 	let payOption = $state<'partial' | 'full'>('partial');
 	const chargeNow = $derived(
@@ -237,7 +237,9 @@
 
 			<!-- What happens next, so paying never feels like a leap. -->
 			<ol class="mt-6 grid gap-3 text-sm sm:grid-cols-3">
-				{#each [{ n: 1, t: 'Pay securely', d: 'You’re sent to PayMongo to complete payment.' }, { n: 2, t: 'Get confirmed', d: 'We email your confirmation and receipt right away.' }, { n: 3, t: 'Arrive & enjoy', d: partial && payOption === 'partial' ? `Pay the remaining ${peso(dueAtHotel)} at the hotel.` : 'Just bring your confirmation code.' }] as step (step.n)}
+				{#each data.payAtHotel
+					? [{ n: 1, t: 'Confirm', d: 'Nothing is charged online right now.' }, { n: 2, t: 'Get confirmed', d: 'We email your confirmation right away.' }, { n: 3, t: 'Pay at the hotel', d: `Pay ${peso(data.order.totalCentavos)} at the front desk when you arrive.` }]
+					: [{ n: 1, t: 'Pay securely', d: 'You’re sent to PayMongo to complete payment.' }, { n: 2, t: 'Get confirmed', d: 'We email your confirmation and receipt right away.' }, { n: 3, t: 'Arrive & enjoy', d: partial && payOption === 'partial' ? `Pay the remaining ${peso(dueAtHotel)} at the hotel.` : 'Just bring your confirmation code.' }] as step (step.n)}
 					<li class="flex gap-3 rounded-md border border-[var(--ledger-rule)] px-3 py-3">
 						<span
 							class="ledger-data flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold"
@@ -268,12 +270,14 @@
 					disabled={submitting}
 				>
 					{submitting
-						? 'Redirecting…'
-						: `Pay ${peso(chargeNow)} ${partial && payOption === 'partial' ? 'now ' : ''}with PayMongo`}
+						? data.payAtHotel ? 'Confirming…' : 'Redirecting…'
+						: data.payAtHotel ? `Confirm booking — pay ${peso(data.order.totalCentavos)} at the hotel` : `Pay ${peso(chargeNow)} ${partial && payOption === 'partial' ? 'now ' : ''}with PayMongo`}
 				</Button>
 				<p class="flex items-center gap-1.5 text-xs text-[var(--ledger-ink-muted)]">
 					<LockIcon class="size-3.5" aria-hidden="true" />
-					Payment is handled securely by PayMongo — the hotel never sees your card details.
+					{data.payAtHotel
+						? "PayMongo is under maintenance, so your reservation is confirmed now and the payment is made at the hotel (walk-in)."
+						: 'Payment is handled securely by PayMongo — the hotel never sees your card details.'}
 				</p>
 			</div>
 		</form>

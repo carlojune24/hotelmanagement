@@ -274,6 +274,7 @@ export async function getPaymongoConnection(hotelId: string) {
 			webhookUrl: paymongoSettings.webhookUrl,
 			status: paymongoSettings.status,
 			lastError: paymongoSettings.lastError,
+			paused: paymongoSettings.paused,
 			connectedAt: paymongoSettings.connectedAt
 		})
 		.from(paymongoSettings)

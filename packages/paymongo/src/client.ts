@@ -58,7 +58,9 @@ export class PayMongoClient {
 				'Content-Type': 'application/json',
 				Accept: 'application/json'
 			},
-			body: options.body != null ? JSON.stringify(options.body) : undefined
+			body: options.body != null ? JSON.stringify(options.body) : undefined,
+			// A dead or hanging PayMongo must fail fast so the guest booking can fall back to pay-at-hotel.
+			signal: AbortSignal.timeout(8000)
 		});
 
 		const payload = await res.json().catch(() => null);

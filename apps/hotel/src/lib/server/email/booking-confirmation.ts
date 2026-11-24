@@ -180,6 +180,8 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 		.join('');
 
 	const partial = data.payment && data.payment.dueAtHotelCentavos > 0 ? data.payment : null;
+	// Online payment was unavailable: nothing was charged, the whole bill is paid at the hotel.
+	const atHotel = partial !== null && partial.paidCentavos === 0;
 
 	const ticketRows =
 		row('Guest', esc(data.guestName)) +
@@ -189,7 +191,7 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 		hallRows +
 		ruleRow +
 		(partial
-			? row('Paid', money(partial.paidCentavos, currency), { emphasis: true }) +
+			? (atHotel ? '' : row('Paid', money(partial.paidCentavos, currency), { emphasis: true })) +
 				row('Due at the hotel', money(partial.dueAtHotelCentavos, currency), { emphasis: true })
 			: row('Total paid', money(data.totalCentavos, currency), { emphasis: true })) +
 		row('Confirmation', esc(data.confirmationCode));
@@ -213,7 +215,7 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 			: '') +
 		(partial
 			? priceRow('Total', money(data.totalCentavos, currency), { total: true }) +
-				priceRow('Paid now', money(partial.paidCentavos, currency)) +
+				(atHotel ? '' : priceRow('Paid now', money(partial.paidCentavos, currency))) +
 				priceRow('Due at the hotel', money(partial.dueAtHotelCentavos, currency))
 			: priceRow('Total paid', money(data.totalCentavos, currency), { total: true }));
 
@@ -251,7 +253,7 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 	<tr><td style="padding:32px 4px 0;">
 		<div style="font-family:${FONT_DISPLAY};font-size:26px;font-weight:500;color:${INK};letter-spacing:-0.01em;">Reservation confirmed</div>
 		<div style="margin-top:10px;font-family:${FONT_DATA};font-size:20px;font-weight:700;letter-spacing:2px;color:${accentDeep};">${esc(data.confirmationCode)}</div>
-		<div style="margin-top:10px;font-family:${FONT_BODY};font-size:14px;line-height:1.55;color:${INK_MUTED};">${esc(data.guestName)}, your stay is booked${partial ? `. ${esc(money(partial.paidCentavos, currency))} is paid; the remaining ${esc(money(partial.dueAtHotelCentavos, currency))} is due at the hotel` : ' and paid in full'}.</div>
+		<div style="margin-top:10px;font-family:${FONT_BODY};font-size:14px;line-height:1.55;color:${INK_MUTED};">${esc(data.guestName)}, your stay is booked${atHotel ? `. Your reservation is successful, but please make the payment of ${esc(money(data.totalCentavos, currency))} at the hotel (walk-in) because PayMongo is under maintenance` : partial ? `. ${esc(money(partial.paidCentavos, currency))} is paid; the remaining ${esc(money(partial.dueAtHotelCentavos, currency))} is due at the hotel` : ' and paid in full'}.</div>
 	</td></tr>
 
 	<!-- the ticket -->
@@ -274,7 +276,7 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 		<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
 			${breakdown}
 		</table>
-		<div style="margin-top:8px;font-family:${FONT_BODY};font-size:12px;color:${INK_MUTED};">${partial ? 'Downpayment paid via PayMongo. The balance is paid at the hotel.' : 'Paid in full via PayMongo.'}</div>
+		<div style="margin-top:8px;font-family:${FONT_BODY};font-size:12px;color:${INK_MUTED};">${atHotel ? 'Nothing was charged online. Please pay the full amount at the hotel (walk-in) — PayMongo is under maintenance.' : partial ? 'Downpayment paid via PayMongo. The balance is paid at the hotel.' : 'Paid in full via PayMongo.'}</div>
 		${data.paymentRef ? `<div style="margin-top:8px;font-family:${FONT_BODY};font-size:12px;color:${INK_MUTED};">Payment reference: <span style="font-family:${FONT_DATA};color:${INK};">${esc(data.paymentRef)}</span><br>Quote it with your confirmation code if you ever ask about this payment.</div>` : ''}
 	</td></tr>
 
@@ -308,7 +310,7 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 	<tr><td style="padding:16px 4px 0;border-top:1px solid ${RULE};">
 		<div style="font-family:${FONT_BODY};font-size:13px;line-height:1.6;color:${INK_MUTED};">
 			${esc([hotel.name, hotel.city].filter(Boolean).join(' · '))}<br />
-			Booked directly with ${esc(hotel.name)}. The price you saw is the price you paid.
+			Booked directly with ${esc(hotel.name)}.${atHotel ? '' : ' The price you saw is the price you paid.'}
 			${contactBits ? `<br />${esc(contactBits)}` : ''}
 		</div>
 	</td></tr>
@@ -328,7 +330,9 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 	tLines.push('RESERVATION CONFIRMED');
 	tLines.push(`Confirmation code:  ${data.confirmationCode}`);
 	tLines.push(
-		partial
+		atHotel
+			? `${data.guestName}, your stay is booked. Your reservation is successful, but please make the payment of ${money(data.totalCentavos, currency)} at the hotel (walk-in) because PayMongo is under maintenance.`
+			: partial
 			? `${data.guestName}, your stay is booked. ${money(partial.paidCentavos, currency)} is paid; the remaining ${money(partial.dueAtHotelCentavos, currency)} is due at the hotel.`
 			: `${data.guestName}, your stay is booked and paid in full.`
 	);
@@ -358,7 +362,7 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 		);
 	if (partial) {
 		tLines.push(`TOTAL       ${money(data.totalCentavos, currency)}`);
-		tLines.push(`PAID NOW    ${money(partial.paidCentavos, currency)}   (via PayMongo)`);
+		if (!atHotel) tLines.push(`PAID NOW    ${money(partial.paidCentavos, currency)}   (via PayMongo)`);
 		tLines.push(`DUE AT HOTEL ${money(partial.dueAtHotelCentavos, currency)}`);
 	} else {
 		tLines.push(`TOTAL PAID  ${money(data.totalCentavos, currency)}   (via PayMongo)`);
@@ -382,7 +386,7 @@ export function renderBookingConfirmation(data: BookingConfirmationData): Render
 	}
 	tLines.push('');
 	tLines.push(`${[hotel.name, hotel.city].filter(Boolean).join(' - ')}`);
-	tLines.push('Booked directly with ' + hotel.name + '. The price you saw is the price you paid.');
+	tLines.push('Booked directly with ' + hotel.name + '.' + (atHotel ? '' : ' The price you saw is the price you paid.'));
 	if (contactBits) tLines.push(contactBits.replace(/·/g, '-'));
 
 	return { subject, html, text: tLines.join('\n') };
