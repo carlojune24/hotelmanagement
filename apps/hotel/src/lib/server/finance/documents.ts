@@ -20,8 +20,9 @@ import {
 	users
 } from '../db/schema/index';
 import type { BirSettings, DocumentSeries, IssuedDocument } from '../db/schema/documents';
+import type { ScPwdDiscount } from '../db/schema/index';
 import { getFolioDetail, getOrderIdForTarget, getOrderLedger, type FolioTarget } from '../folio';
-import { getActiveScPwdClaim } from '../sc-pwd-discount';
+import { getActiveScPwdClaim, getActiveScPwdClaimsForBookings } from '../sc-pwd-discount';
 import { writeAudit } from '../audit';
 import { businessDateFor } from './shared';
 import type { SessionUser } from '../auth/session';
@@ -106,6 +107,34 @@ export interface DocumentSnapshot {
 		balanceCarriedCentavos: number | null;
 	};
 	amountInWords: string;
+	/** Senior Citizen / PWD discounts behind this document, one per room — printed as a summary
+	 *  with the claimants' IDs and a signature line. Absent on documents issued before it existed. */
+	scPwd?: ScPwdDocSummary[];
+}
+
+export interface ScPwdDocSummary {
+	claimants: { type: 'senior_citizen' | 'pwd'; name: string; idNumber: string }[];
+	/** Everyone in the room; null on claims made before the per-head split. */
+	guestCount: number | null;
+	discountBps: number;
+	/** The qualifying share before the discount, VAT-inclusive. */
+	shareCentavos: number;
+	/** That share without VAT: the VAT-exempt sale the discount is worked out on. */
+	vatExemptSaleCentavos: number;
+	vatRemovedCentavos: number;
+	discountCentavos: number;
+}
+
+function scPwdDocSummary(c: ScPwdDiscount): ScPwdDocSummary {
+	return {
+		claimants: c.claimants ?? [{ type: c.claimantType, name: c.claimantName, idNumber: c.idNumber }],
+		guestCount: c.guestCount,
+		discountBps: c.discountBps,
+		shareCentavos: c.baseAmountCentavos + c.vatRemovedCentavos,
+		vatExemptSaleCentavos: c.baseAmountCentavos,
+		vatRemovedCentavos: c.vatRemovedCentavos,
+		discountCentavos: c.discountCentavos
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -553,11 +582,20 @@ export async function buildInvoiceSnapshot(
 		}
 	}
 
-	// A room whose base charge carries an active Senior Citizen/PWD claim is a VAT-exempt
-	// sale in full (not "VATable minus a discount") — see lib/sc-pwd-discount.ts. Halls have
-	// no check-in step, so no claim can exist for one.
+	// Senior Citizen/PWD (lib/sc-pwd-discount.ts): only the qualifying share of the covered charges
+	// is VAT-exempt; the rest of each charge stays VATable. A claim made before the per-head split
+	// (`lines` null) covered the whole base charge, so that whole room stays exempt as before.
+	// Halls have no check-in step, so no claim can exist for one.
 	const activeScPwdClaim =
 		target.kind === 'room' ? await getActiveScPwdClaim(hotelId, target.bookingId) : null;
+	const legacyScPwd = activeScPwdClaim != null && activeScPwdClaim.lines == null;
+	/** Qualifying share per folio charge ('base' = the seeded room charge). */
+	const scPwdShare = new Map<string, { share: number; vat: number }>();
+	for (const l of activeScPwdClaim?.lines ?? []) {
+		const id = l.key.startsWith('charge:') ? l.key.slice('charge:'.length) : 'base';
+		const cur = scPwdShare.get(id) ?? { share: 0, vat: 0 };
+		scPwdShare.set(id, { share: cur.share + l.shareCentavos, vat: cur.vat + l.shareVatCentavos });
+	}
 
 	const nonVoid = folio.charges.filter((c) => !c.voidedAt);
 	// A redeemed promo code is already baked into the room's base charge (the folio seeds from the
@@ -567,7 +605,37 @@ export async function buildInvoiceSnapshot(
 	const promo = target.kind === 'room' ? folio.promo : null;
 	const lines: DocumentSnapshotLine[] = nonVoid.flatMap((c) => {
 		const net = c.quantity * c.unitPriceCentavos;
-		const vatable = isVat && !activeScPwdClaim && (c.isBaseCharge || c.taxCentavos > 0);
+		// The "promo removed" line undoes part of the VATable room price, so it's VATable like the promo.
+		const vatable =
+			isVat &&
+			!legacyScPwd &&
+			(c.isBaseCharge || c.taxCentavos > 0 || c.id === activeScPwdClaim?.promoDroppedChargeId);
+		// The discount line prints as its two parts, the way dining's receipt does.
+		if (activeScPwdClaim && !legacyScPwd && c.id === activeScPwdClaim.folioChargeId) {
+			const sum = scPwdDocSummary(activeScPwdClaim);
+			const who = sum.claimants
+				.map((x) => `${x.name} (${x.type === 'pwd' ? 'PWD' : 'Senior'} ID ${x.idNumber})`)
+				.join(', ');
+			const of = sum.guestCount ? `, ${sum.claimants.length} of ${sum.guestCount} guests` : '';
+			const out: DocumentSnapshotLine[] = [];
+			if (sum.vatRemovedCentavos > 0) {
+				out.push({
+					description: `Less: VAT exempt, Senior / PWD share${of}`,
+					quantity: 1,
+					unitPriceCentavos: -sum.vatRemovedCentavos,
+					amountCentavos: -sum.vatRemovedCentavos,
+					vatable: false
+				});
+			}
+			out.push({
+				description: `Less: Senior / PWD discount ${sum.discountBps / 100}%: ${who}`,
+				quantity: 1,
+				unitPriceCentavos: -sum.discountCentavos,
+				amountCentavos: -sum.discountCentavos,
+				vatable: false
+			});
+			return out;
+		}
 		if (c.isBaseCharge && promo && promo.discountCentavos > 0) {
 			const grossCentavos = c.totalCentavos + promo.discountCentavos;
 			return [
@@ -604,9 +672,13 @@ export async function buildInvoiceSnapshot(
 	if (isVat) {
 		for (const c of nonVoid) {
 			if (c.isBaseCharge) {
-				// A discounted base charge contributes nothing here — its full (already
-				// discounted) amount falls into `vatExemptSales` via the remainder formula below.
-				if (activeScPwdClaim) continue;
+				// A pre-split claim made the whole base charge exempt — it falls into
+				// `vatExemptSales` via the remainder formula below.
+				if (legacyScPwd) continue;
+				// The Senior/PWD share of it is exempt (remainder formula); the rest stays VATable.
+				const sc = scPwdShare.get('base') ?? { share: 0, vat: 0 };
+				vatCentavos -= sc.vat;
+				vatableSales -= sc.share - sc.vat;
 				// The seeded line already bundles VAT — recover it from the booking/hall breakdown.
 				if (target.kind === 'room') {
 					const [b] = await db
@@ -638,8 +710,9 @@ export async function buildInvoiceSnapshot(
 					}
 				}
 			} else if (c.taxCentavos > 0) {
-				vatCentavos += c.taxCentavos;
-				vatableSales += c.quantity * c.unitPriceCentavos;
+				const sc = scPwdShare.get(c.id) ?? { share: 0, vat: 0 };
+				vatCentavos += c.taxCentavos - sc.vat;
+				vatableSales += c.quantity * c.unitPriceCentavos - (sc.share - sc.vat);
 			}
 		}
 	}
@@ -686,7 +759,8 @@ export async function buildInvoiceSnapshot(
 			changeCentavos: null,
 			balanceCarriedCentavos: null
 		},
-		amountInWords: amountInWords(gross)
+		amountInWords: amountInWords(gross),
+		scPwd: activeScPwdClaim ? [scPwdDocSummary(activeScPwdClaim)] : []
 	};
 }
 
@@ -749,6 +823,12 @@ export async function buildReceiptSnapshot(
 	const isRefund = pay.amountCentavos < 0;
 	const amount = Math.abs(pay.amountCentavos);
 
+	// The Senior/PWD discounts on this order's rooms, so the OR / acknowledgment shows them too.
+	const roomIds = (
+		await db.select({ id: bookings.id }).from(bookings).where(eq(bookings.orderId, pay.orderId))
+	).map((r) => r.id);
+	const scPwd = [...(await getActiveScPwdClaimsForBookings(roomIds)).values()].map(scPwdDocSummary);
+
 	return {
 		...base,
 		document: {
@@ -794,7 +874,8 @@ export async function buildReceiptSnapshot(
 			changeCentavos: pay.changeCentavos ?? null,
 			balanceCarriedCentavos: balanceCarried
 		},
-		amountInWords: amountInWords(amount)
+		amountInWords: amountInWords(amount),
+		scPwd
 	};
 }
 

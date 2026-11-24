@@ -841,6 +841,13 @@
       "when": 1794279781313,
       "tag": "0119_tag_stay_change_charges",
       "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1795480621921,
+      "tag": "0120_sc_pwd_per_head",
+      "breakpoints": true
     }
   ]
 }

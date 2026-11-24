@@ -65,6 +65,8 @@ import {
 	ScPwdDiscountError,
 	applyScPwdDiscount,
 	getActiveScPwdClaim,
+	loadScPwdOptions,
+	parseScPwdForm,
 	getScPwdDiscountBps,
 	reverseScPwdDiscount
 } from '$lib/server/sc-pwd-discount';
@@ -253,7 +255,9 @@ async function loadRoomDetailPayload(hotelId: string, bookingId: string) {
 	const folio = await getFolioDetail(hotelId, { kind: 'room', bookingId });
 	const securityDeposit = await getSecurityDepositForTarget(hotelId, { kind: 'room', bookingId });
 	const scPwdClaim = await getActiveScPwdClaim(hotelId, bookingId);
-	return { roomDetail: detail, folio, securityDeposit, scPwdClaim };
+	// What the discount could cover, for the apply form — only while there's no active claim.
+	const scPwdOptions = scPwdClaim ? null : await loadScPwdOptions(hotelId, bookingId);
+	return { roomDetail: detail, folio, securityDeposit, scPwdClaim, scPwdOptions };
 }
 
 /** Same idea as `loadRoomDetailPayload`, for a function hall booking's dialog. */
@@ -333,9 +337,7 @@ const createSchema = z
 		extrasJson: z.string().max(20000).optional(),
 		// Senior Citizen / PWD claim, applied to the cart line `scPwdLineIndex` at booking time.
 		scPwdOn: z.literal('on').optional(),
-		scPwdClaimantType: z.enum(['senior_citizen', 'pwd']).default('senior_citizen'),
-		scPwdIdNumber: z.string().max(60).optional(),
-		scPwdClaimantName: z.string().max(160).optional(),
+		// Claimants, guest count and the extra-bed tick come from `parseScPwdForm`.
 		scPwdLineIndex: z.coerce.number().int().min(0).max(50).default(0)
 	})
 	.merge(paymentFieldsSchema.extend({ method: z.enum([...PAYMENT_METHODS, 'city_ledger']) }));
@@ -460,9 +462,7 @@ export const actions: Actions = {
 			await applyScPwdDiscount({
 				hotelId,
 				bookingId,
-				claimantType: raw.get('scPwdClaimantType') === 'pwd' ? 'pwd' : 'senior_citizen',
-				claimantName: (raw.get('scPwdClaimantName') as string) || '',
-				idNumber: (raw.get('scPwdIdNumber') as string) || '',
+				...parseScPwdForm(raw),
 				actor: event.locals.user
 			});
 		} catch (e) {
@@ -1194,7 +1194,8 @@ export const actions: Actions = {
 	walkInCreate: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'booking:write');
 		const hotel = event.locals.hotel!;
-		const raw = Object.fromEntries(await event.request.formData());
+		const form = await event.request.formData();
+		const raw = Object.fromEntries(form);
 		const parsed = createSchema.safeParse(raw);
 		if (!parsed.success) {
 			return fail(400, { walkInError: 'Check the guest details and selection and try again.' });
@@ -1238,6 +1239,7 @@ export const actions: Actions = {
 		if (d.scPwdOn && d.scPwdLineIndex >= items.length) {
 			return fail(400, { walkInError: 'Pick the room the discount applies to.' });
 		}
+		const scPwd = d.scPwdOn ? parseScPwdForm(form) : null;
 
 		let orderId: string;
 		try {
@@ -1252,12 +1254,13 @@ export const actions: Actions = {
 				},
 				rooms: items,
 				extras,
-				scPwd: d.scPwdOn
+				scPwd: scPwd
 					? {
 							lineIndex: d.scPwdLineIndex,
-							claimantType: d.scPwdClaimantType,
-							claimantName: d.scPwdClaimantName || d.fullName,
-							idNumber: d.scPwdIdNumber ?? ''
+							// The first guest's name may be left blank on the walk-in sheet: it's the booking guest.
+							claimants: scPwd.claimants.map((c, i) => (i === 0 && !c.name.trim() ? { ...c, name: d.fullName } : c)),
+							guestCount: scPwd.guestCount,
+							extraBed: scPwd.chargeKeys?.includes('extra_bed') ?? false
 						}
 					: undefined,
 				// A city-ledger booking takes no desk payment; the method is only a placeholder here.

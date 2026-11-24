@@ -1,5 +1,6 @@
 import { relations, sql } from 'drizzle-orm';
-import { bigint, index, integer, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import type { ScPwdShareLine } from '../../../sc-pwd-discount';
 import { createdAt, pk, updatedAt } from './_shared';
 import { hotels } from './hotels';
 import { bookings } from './bookings';
@@ -40,6 +41,17 @@ export const scPwdDiscounts = pgTable(
 		/** The negative `folio_charges` row this claim posted — plain uuid, no FK, same
 		 *  posture as `payments.folio_id`. */
 		folioChargeId: uuid('folio_charge_id'),
+		/** Every qualifying guest in the room. `claimantType`/`claimantName`/`idNumber` above repeat
+		 *  the first one, for the reports. Null on claims made before the per-head split. */
+		claimants: jsonb('claimants').$type<{ type: 'senior_citizen' | 'pwd'; name: string; idNumber: string }[]>(),
+		/** Everyone staying in the room, so the per-head share is `claimants.length` of this. */
+		guestCount: integer('guest_count'),
+		/** The charges the discount covers and each one's qualifying share (see `computeScPwdShare`).
+		 *  Null on older claims, which covered the whole base charge. */
+		lines: jsonb('lines').$type<ScPwdShareLine[]>(),
+		/** A promo and SC/PWD don't stack: when SC/PWD was the lower price, the promo's amount
+		 *  is added back on this folio line, voided along with `folioChargeId` on reversal. */
+		promoDroppedChargeId: uuid('promo_dropped_charge_id'),
 		appliedByUserId: uuid('applied_by_user_id').references(() => users.id, { onDelete: 'set null' }),
 		appliedAt: timestamp('applied_at', { withTimezone: true }).notNull().defaultNow(),
 		reversedByUserId: uuid('reversed_by_user_id').references(() => users.id, { onDelete: 'set null' }),

@@ -1,16 +1,19 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull } from 'drizzle-orm';
 import { db } from './db/index';
 import {
 	birSettings,
+	bookingRooms,
 	bookings,
 	folioCharges,
+	folios,
+	ratePlans,
 	scPwdDiscounts,
 	type ScPwdDiscount
 } from './db/schema/index';
 import { writeAudit } from './audit';
 import type { SessionUser } from './auth/session';
 import { ensureFolio, voidFolioCharge } from './folio';
-import { computeScPwdDiscount } from '$lib/sc-pwd-discount';
+import { computeScPwdShare, roomChargeOptions, type ScPwdChargeOption } from '$lib/sc-pwd-discount';
 import type { Tx } from './finance/shared';
 
 // Reads/writes `bir_settings.sc_pwd_discount_bps` directly (not `finance/documents.ts`'s
@@ -97,22 +100,119 @@ export async function getActiveScPwdClaimsForBookings(
 	return map;
 }
 
+export interface ScPwdClaimant {
+	type: ScPwdClaimantType;
+	name: string;
+	idNumber: string;
+}
+
 export interface ApplyScPwdDiscountInput {
 	hotelId: string;
 	bookingId: string;
-	claimantType: ScPwdClaimantType;
-	claimantName: string;
-	idNumber: string;
+	/** One per qualifying guest in the room. */
+	claimants: ScPwdClaimant[];
+	/** Everyone staying in the room; null = the booking's own guest count. */
+	guestCount: number | null;
+	/** Keys from `loadScPwdOptions` to cover; null = the defaults (room nights only). */
+	chargeKeys: string[] | null;
 	actor: SessionUser | null;
 }
 
+/** Reads the SC/PWD fields posted by `sc-pwd-fields.svelte`: `scPwdClaimants` (JSON),
+ *  `scPwdGuests` and one `scPwdCharge` per ticked charge (`scPwdChargesSent` marks that the
+ *  list was shown, so an empty list means "none ticked", not "use the defaults"). */
+export function parseScPwdForm(form: FormData): Pick<ApplyScPwdDiscountInput, 'claimants' | 'guestCount' | 'chargeKeys'> {
+	let raw: unknown = [];
+	try {
+		raw = JSON.parse(String(form.get('scPwdClaimants') ?? '[]'));
+	} catch {
+		raw = [];
+	}
+	const claimants = (Array.isArray(raw) ? raw : []).slice(0, 20).map((c) => ({
+		type: (c?.type === 'pwd' ? 'pwd' : 'senior_citizen') as ScPwdClaimantType,
+		name: String(c?.name ?? '').slice(0, 160),
+		idNumber: String(c?.idNumber ?? '').slice(0, 60)
+	}));
+	const guests = Math.floor(Number(form.get('scPwdGuests')));
+	return {
+		claimants,
+		guestCount: Number.isFinite(guests) && guests > 0 ? guests : null,
+		chargeKeys: form.has('scPwdChargesSent') ? form.getAll('scPwdCharge').map(String) : null
+	};
+}
+
+type Exec = Pick<typeof db, 'select'>;
+
+/** What the SC/PWD discount can cover on a room booking: its room nights (per head), its extra
+ *  bed, and any other live positive charge on its folio (the claimant's own, in full). Amounts
+ *  come from the booking/folio here, never from the form. `promoCentavos` is the booking's promo
+ *  discount, which SC/PWD replaces rather than stacks on. */
+export async function loadScPwdOptions(
+	hotelId: string,
+	bookingId: string,
+	exec: Exec = db
+): Promise<{ options: ScPwdChargeOption[]; guestCount: number; promoCentavos: number; discountBps: number } | null> {
+	const [b] = await exec.select().from(bookings).where(eq(bookings.id, bookingId)).limit(1);
+	if (!b || b.hotelId !== hotelId) return null;
+	const beds = await exec
+		.select({ n: bookingRooms.extraBeds, fee: ratePlans.extraBedFeeCentavos })
+		.from(bookingRooms)
+		.innerJoin(ratePlans, eq(ratePlans.id, bookingRooms.ratePlanId))
+		.where(eq(bookingRooms.bookingId, bookingId));
+	// shortcut: priced at the rate plan's current per-bed fee (the booking keeps fees as one sum),
+	// capped at the booking's fees in roomChargeOptions; store the bed fee on the booking if rates drift.
+	const extraBedCentavos = beds.reduce((s, r) => s + r.n * (r.fee ?? 0), 0);
+	const options = roomChargeOptions({
+		subtotalCentavos: b.subtotalCentavos,
+		feesCentavos: b.feesCentavos,
+		vatCentavos: b.vatCentavos,
+		extraBedCentavos
+	});
+	const charges = await exec
+		.select({
+			id: folioCharges.id,
+			description: folioCharges.description,
+			total: folioCharges.totalCentavos,
+			tax: folioCharges.taxCentavos
+		})
+		.from(folioCharges)
+		.innerJoin(folios, eq(folios.id, folioCharges.folioId))
+		.where(
+			and(
+				eq(folios.bookingId, bookingId),
+				eq(folios.hotelId, hotelId),
+				eq(folioCharges.isBaseCharge, false),
+				isNull(folioCharges.voidedAt),
+				gt(folioCharges.totalCentavos, 0)
+			)
+		)
+		.orderBy(asc(folioCharges.createdAt));
+	for (const c of charges) {
+		options.push({
+			key: `charge:${c.id}`,
+			label: c.description,
+			amountCentavos: c.total,
+			vatCentavos: c.tax,
+			perHead: false,
+			defaultOn: false
+		});
+	}
+	return {
+		options,
+		guestCount: b.occupancy,
+		promoCentavos: b.discountCentavos ?? 0,
+		discountBps: await getScPwdDiscountBps(hotelId, exec)
+	};
+}
+
 /**
- * Flags a room booking's base charge as a qualifying Senior Citizen / PWD sale and posts the
- * reduction to its folio in one negative charge line — see `lib/sc-pwd-discount.ts` for the
- * legal mechanics (the whole base charge becomes VAT-exempt, not just 20% off). Mirrors the
- * negative-charge precedent already used by `cancellation.ts`'s write-off lines: posted via a
- * direct `tx.insert(folioCharges)`, not `addAdHocCharge` (which rejects non-positive amounts).
- * Never blocks check-in when called from it — callers treat failures as best-effort.
+ * Flags a room booking as a qualifying Senior Citizen / PWD sale: the qualifying guests' share of
+ * the chosen charges becomes VAT-exempt and gets the % off (see `lib/sc-pwd-discount.ts`'s
+ * `computeScPwdShare`), posted as one negative folio line. A promo and SC/PWD don't stack — the
+ * guest gets the lower price: if the promo is lower this refuses; if SC/PWD is lower the promo's
+ * amount is added back on its own line. Negative lines go in by direct insert, like
+ * `cancellation.ts`'s write-offs (`addAdHocCharge` rejects them). Check-in callers treat failures
+ * as best-effort.
  */
 export async function applyScPwdDiscount(
 	input: ApplyScPwdDiscountInput
@@ -126,7 +226,7 @@ export async function applyScPwdDiscount(
 
 /** Audit entry for an applied discount — call after the transaction that applied it commits. */
 export async function auditScPwdApply(
-	input: ApplyScPwdDiscountInput,
+	input: Pick<ApplyScPwdDiscountInput, 'hotelId' | 'bookingId' | 'claimants' | 'guestCount' | 'actor'>,
 	scPwdDiscountId: string,
 	discountBps: number,
 	totalReductionCentavos: number
@@ -137,9 +237,18 @@ export async function auditScPwdApply(
 		action: 'sc_pwd.apply',
 		entityType: 'booking',
 		entityId: input.bookingId,
-		after: { scPwdDiscountId, claimantType: input.claimantType, discountBps, totalReductionCentavos }
+		after: {
+			scPwdDiscountId,
+			claimants: input.claimants.map((c) => ({ type: c.type, idNumber: c.idNumber })),
+			guestCount: input.guestCount,
+			discountBps,
+			totalReductionCentavos
+		}
 	});
 }
+
+const peso = (c: number) =>
+	`₱${(c / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /** The same discount inside the caller's transaction — a walk-in applies it to the booking it just
  *  created, so the guest pays the discounted amount instead of being refunded afterwards. The caller
@@ -148,10 +257,16 @@ export async function applyScPwdDiscountTx(
 	tx: Tx,
 	input: ApplyScPwdDiscountInput
 ): Promise<{ scPwdDiscountId: string; totalReductionCentavos: number; discountBps: number }> {
-	const claimantName = input.claimantName.trim();
-	const idNumber = input.idNumber.trim();
-	if (!claimantName) throw new ScPwdDiscountError("Enter the claimant's name.");
-	if (!idNumber) throw new ScPwdDiscountError('Enter the OSCA/PWD ID number.');
+	const claimants = input.claimants.map((c) => ({
+		type: c.type,
+		name: c.name.trim(),
+		idNumber: c.idNumber.trim()
+	}));
+	if (claimants.length === 0) throw new ScPwdDiscountError('Add at least one Senior Citizen/PWD guest.');
+	for (const c of claimants) {
+		if (!c.name) throw new ScPwdDiscountError("Enter each Senior/PWD guest's name.");
+		if (!c.idNumber) throw new ScPwdDiscountError(`Enter the OSCA/PWD ID number for ${c.name}.`);
+	}
 
 	const [booking] = await tx.select().from(bookings).where(eq(bookings.id, input.bookingId)).limit(1);
 	if (!booking || booking.hotelId !== input.hotelId) {
@@ -171,18 +286,50 @@ export async function applyScPwdDiscountTx(
 	}
 
 	// On `tx`, not `db`: a second pooled connection inside a transaction can deadlock the pool.
-	const discountBps = await getScPwdDiscountBps(input.hotelId, tx);
-	const calc = computeScPwdDiscount({
-		subtotalCentavos: booking.subtotalCentavos,
-		feesCentavos: booking.feesCentavos,
-		vatCentavos: booking.vatCentavos,
-		discountBps
-	});
+	const loaded = await loadScPwdOptions(input.hotelId, input.bookingId, tx);
+	if (!loaded) throw new ScPwdDiscountError('Booking not found.');
+	const { discountBps } = loaded;
+	const picked = loaded.options.filter((o) =>
+		input.chargeKeys ? input.chargeKeys.includes(o.key) : o.defaultOn
+	);
+	if (picked.length === 0) throw new ScPwdDiscountError('Tick at least one charge the discount covers.');
+	const guestCount = input.guestCount ?? loaded.guestCount;
+	if (guestCount < claimants.length) {
+		throw new ScPwdDiscountError(
+			`Guests in the room (${guestCount}) can't be fewer than the Senior/PWD guests (${claimants.length}).`
+		);
+	}
+
+	const calc = computeScPwdShare({ lines: picked, claimants: claimants.length, guests: guestCount, discountBps });
+	const promo = loaded.promoCentavos;
+	if (promo > 0 && calc.totalReductionCentavos <= promo) {
+		throw new ScPwdDiscountError(
+			`The promo already gives a lower price (${peso(promo)} off vs ${peso(calc.totalReductionCentavos)} for Senior/PWD). They can't be combined, so the promo stays.`
+		);
+	}
 
 	const pctLabel = (discountBps / 100).toFixed(discountBps % 100 === 0 ? 0 : 2);
-	const typeLabel = CLAIMANT_TYPE_LABEL[input.claimantType];
-
+	const who = claimants.map((c) => `${CLAIMANT_TYPE_LABEL[c.type]} ${c.name}, ID ${c.idNumber}`).join('; ');
 	const folioId = await ensureFolio(tx, input.hotelId, { kind: 'room', bookingId: input.bookingId });
+	const actorId = input.actor?.id ?? null;
+
+	let promoDroppedChargeId: string | null = null;
+	if (promo > 0) {
+		const [c] = await tx
+			.insert(folioCharges)
+			.values({
+				folioId,
+				description: "Promo removed: Senior/PWD discount is the lower price (they can't be combined)",
+				quantity: 1,
+				unitPriceCentavos: promo,
+				taxCentavos: 0,
+				totalCentavos: promo,
+				source: 'sc_pwd',
+				addedByUserId: actorId
+			})
+			.returning({ id: folioCharges.id });
+		promoDroppedChargeId = c!.id;
+	}
 
 	let folioChargeId: string | null = null;
 	if (calc.totalReductionCentavos > 0) {
@@ -190,12 +337,13 @@ export async function applyScPwdDiscountTx(
 			.insert(folioCharges)
 			.values({
 				folioId,
-				description: `SC/PWD discount (${pctLabel}%) — ${typeLabel}, ID ${idNumber} — ${claimantName}`,
+				description: `SC/PWD discount (${pctLabel}%, ${claimants.length} of ${guestCount} guests) — ${who}`,
 				quantity: 1,
 				unitPriceCentavos: -calc.totalReductionCentavos,
 				taxCentavos: 0,
 				totalCentavos: -calc.totalReductionCentavos,
-				addedByUserId: input.actor?.id ?? null
+				source: 'sc_pwd',
+				addedByUserId: actorId
 			})
 			.returning({ id: folioCharges.id });
 		folioChargeId = charge!.id;
@@ -206,19 +354,28 @@ export async function applyScPwdDiscountTx(
 		.values({
 			hotelId: input.hotelId,
 			bookingId: input.bookingId,
-			claimantType: input.claimantType,
-			claimantName,
-			idNumber,
+			claimantType: claimants[0]!.type,
+			claimantName: claimants[0]!.name,
+			idNumber: claimants[0]!.idNumber,
+			claimants,
+			guestCount,
+			lines: calc.lines,
 			discountBps,
 			baseAmountCentavos: calc.baseAmountCentavos,
 			vatRemovedCentavos: calc.vatRemovedCentavos,
 			discountCentavos: calc.discountCentavos,
 			folioChargeId,
-			appliedByUserId: input.actor?.id ?? null
+			promoDroppedChargeId,
+			appliedByUserId: actorId
 		})
 		.returning({ id: scPwdDiscounts.id });
 
-	return { scPwdDiscountId: row!.id, totalReductionCentavos: calc.totalReductionCentavos, discountBps };
+	// Net effect on the folio: promo added back, SC/PWD taken off.
+	return {
+		scPwdDiscountId: row!.id,
+		totalReductionCentavos: calc.totalReductionCentavos - promo,
+		discountBps
+	};
 }
 /** Undoes an active claim — voids its folio charge (never `isBaseCharge`, so `voidFolioCharge`
  *  needs no change) and marks the claim row reversed. The correction path for a mis-typed ID
@@ -233,11 +390,12 @@ export async function reverseScPwdDiscount(
 	const claim = await getActiveScPwdClaim(hotelId, bookingId);
 	if (!claim) throw new ScPwdDiscountError('No active Senior Citizen/PWD discount on this booking.');
 
-	if (claim.folioChargeId) {
+	for (const chargeId of [claim.folioChargeId, claim.promoDroppedChargeId]) {
+		if (!chargeId) continue;
 		await voidFolioCharge(
 			hotelId,
 			{ kind: 'room', bookingId },
-			claim.folioChargeId,
+			chargeId,
 			reason?.trim() || 'SC/PWD discount reversed',
 			actor
 		);

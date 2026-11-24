@@ -197,6 +197,22 @@
 
 	<div class="tr-rule tr-dashed"></div>
 
+	{#each snapshot.scPwd ?? [] as sc, i (i)}
+		<div class="tr-label">
+			Senior / PWD discount{sc.guestCount ? ` (${sc.claimants.length} of ${sc.guestCount} guests)` : ''}
+		</div>
+		{#each sc.claimants as c, j (j)}
+			<div class="tr-muted">{c.type === 'pwd' ? 'PWD' : 'Senior'}: {c.name}, ID {c.idNumber}</div>
+		{/each}
+		<div class="tr-row"><span>Senior / PWD share</span><span>{peso(sc.shareCentavos)}</span></div>
+		{#if sc.vatRemovedCentavos > 0}
+			<div class="tr-row"><span>Less: VAT exempt</span><span>({peso(sc.vatRemovedCentavos)})</span></div>
+		{/if}
+		<div class="tr-row"><span>VAT-exempt sale</span><span>{peso(sc.vatExemptSaleCentavos)}</span></div>
+		<div class="tr-row"><span>Less: {sc.discountBps / 100}% discount</span><span>({peso(sc.discountCentavos)})</span></div>
+		<div class="tr-rule tr-dashed"></div>
+	{/each}
+
 	<div class="tr-label">Amount in words</div>
 	<div class="tr-words">{snapshot.amountInWords}</div>
 
@@ -210,6 +226,12 @@
 		<div class="tr-sign-line"></div>
 		<div class="tr-muted">{isReceipt ? 'Payor / authorized rep.' : 'Authorized representative'}</div>
 	</div>
+	{#if snapshot.scPwd?.length}
+		<div class="tr-sign">
+			<div class="tr-sign-line"></div>
+			<div class="tr-muted">Signature of Senior / PWD</div>
+		</div>
+	{/if}
 
 	<div class="tr-rule tr-dashed"></div>
 

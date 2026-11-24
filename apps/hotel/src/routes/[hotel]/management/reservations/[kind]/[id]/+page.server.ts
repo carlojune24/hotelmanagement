@@ -54,7 +54,9 @@ import {
 import {
 	ScPwdDiscountError,
 	applyScPwdDiscount,
-	getActiveScPwdClaim
+	getActiveScPwdClaim,
+	loadScPwdOptions,
+	parseScPwdForm
 } from '$lib/server/sc-pwd-discount';
 import type { PaymentMethod } from '$lib/server/finance/payments';
 import type { Actions, PageServerLoad } from './$types';
@@ -119,6 +121,8 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 				getSecurityDepositForTarget(hotelId, { kind: 'room', bookingId: params.id }),
 				getActiveScPwdClaim(hotelId, params.id)
 			]);
+		// What the SC/PWD discount could cover, for the check-in form (only while none is applied).
+		const scPwdOptions = scPwdClaim ? null : await loadScPwdOptions(hotelId, params.id);
 		await markThreadReadByStaff(detail.order.id);
 
 		return {
@@ -136,6 +140,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 			securityDepositPolicy,
 			securityDeposit,
 			scPwdClaim,
+			scPwdOptions,
 			autoOpen:
 				actionHint === 'cancel' && cancelQuote
 					? 'cancel'
@@ -262,9 +267,7 @@ export const actions: Actions = {
 					await applyScPwdDiscount({
 						hotelId,
 						bookingId: event.params.id,
-						claimantType: raw.get('scPwdClaimantType') === 'pwd' ? 'pwd' : 'senior_citizen',
-						claimantName: (raw.get('scPwdClaimantName') as string) || '',
-						idNumber: (raw.get('scPwdIdNumber') as string) || '',
+						...parseScPwdForm(raw),
 						actor: event.locals.user
 					});
 				} catch (e) {

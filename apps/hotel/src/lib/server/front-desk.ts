@@ -46,7 +46,7 @@ import {
 	ScPwdDiscountError,
 	applyScPwdDiscountTx,
 	auditScPwdApply,
-	type ScPwdClaimantType
+	type ScPwdClaimant
 } from './sc-pwd-discount';
 import { flagRoomForHousekeeping, flagHallForHousekeeping, getHallCloseGate } from './housekeeping';
 import { hallOvertimeAmount, hallOvertimeHours } from '$lib/hall-overtime';
@@ -895,7 +895,14 @@ export async function createWalkInBooking(params: {
 	extras?: WalkInExtra[];
 	/** A Senior Citizen / PWD claim on one room (`lineIndex` = its cart line), applied now so the guest
 	 *  pays the discounted amount — not refunded after. The rate is the hotel's setting. Not for OTA bookings. */
-	scPwd?: { lineIndex: number; claimantType: ScPwdClaimantType; claimantName: string; idNumber: string };
+	scPwd?: {
+		lineIndex: number;
+		claimants: ScPwdClaimant[];
+		/** Everyone in that room; the qualifying share is `claimants.length` of it. */
+		guestCount: number | null;
+		/** Also cover the room's extra bed (the claimant's own, in full). */
+		extraBed: boolean;
+	};
 	/** Over-capacity booking, with the staff member's reason. Authorised by the caller (`canOverrideCapacity`). */
 	overCapacity?: { reason: string };
 	actor: SessionUser | null;
@@ -1223,9 +1230,10 @@ export async function createWalkInBooking(params: {
 					const r = await applyScPwdDiscountTx(tx, {
 						hotelId,
 						bookingId: bookingIds[roomIdx]!,
-						claimantType: params.scPwd.claimantType,
-						claimantName: params.scPwd.claimantName,
-						idNumber: params.scPwd.idNumber,
+						claimants: params.scPwd.claimants,
+						guestCount: params.scPwd.guestCount,
+						// Room nights only — never the extras just added (the user's rule), unless the bed is ticked.
+						chargeKeys: params.scPwd.extraBed ? ['room', 'extra_bed'] : ['room'],
 						actor
 					});
 					scPwdReductionCentavos = r.totalReductionCentavos;
@@ -1312,9 +1320,8 @@ export async function createWalkInBooking(params: {
 			{
 				hotelId,
 				bookingId: scPwdApplied.bookingId,
-				claimantType: params.scPwd!.claimantType,
-				claimantName: params.scPwd!.claimantName,
-				idNumber: params.scPwd!.idNumber,
+				claimants: params.scPwd!.claimants,
+				guestCount: params.scPwd!.guestCount,
 				actor
 			},
 			scPwdApplied.id,

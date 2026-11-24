@@ -195,11 +195,38 @@
 			</dl>
 		</section>
 
+		{#each snapshot.scPwd ?? [] as sc, i (i)}
+			<section class="af-scpwd">
+				<div class="af-label">
+					Senior Citizen / PWD discount{sc.guestCount ? ` — ${sc.claimants.length} of ${sc.guestCount} guests` : ''}
+				</div>
+				<ul>
+					{#each sc.claimants as c, j (j)}
+						<li>{c.type === 'pwd' ? 'PWD' : 'Senior Citizen'}: {c.name} — {c.type === 'pwd' ? 'PWD' : 'OSCA'} ID {c.idNumber}</li>
+					{/each}
+				</ul>
+				<dl class="af-totals">
+					<div><dt>Senior / PWD share</dt><dd class="af-mono">{peso(sc.shareCentavos)}</dd></div>
+					{#if sc.vatRemovedCentavos > 0}
+						<div><dt>Less: VAT removed (exempt)</dt><dd class="af-mono">({peso(sc.vatRemovedCentavos)})</dd></div>
+					{/if}
+					<div><dt>VAT-exempt sale</dt><dd class="af-mono">{peso(sc.vatExemptSaleCentavos)}</dd></div>
+					<div><dt>Less: {sc.discountBps / 100}% discount</dt><dd class="af-mono">({peso(sc.discountCentavos)})</dd></div>
+				</dl>
+			</section>
+		{/each}
+
 		<section class="af-signatures">
 			<div class="af-sign">
 				<div class="af-sign-line"></div>
 				<div class="af-label">{isReceipt ? 'Received payment by' : 'Prepared by'}</div>
 			</div>
+			{#if snapshot.scPwd?.length}
+				<div class="af-sign">
+					<div class="af-sign-line"></div>
+					<div class="af-label">Signature of Senior Citizen / PWD</div>
+				</div>
+			{/if}
 			<div class="af-sign">
 				<div class="af-sign-line"></div>
 				<div class="af-label">{isReceipt ? 'Payor / authorized representative' : 'Authorized representative'}</div>
@@ -492,6 +519,18 @@
 	}
 	.af-total-line dt {
 		color: var(--af-ink) !important;
+	}
+
+	/* Senior Citizen / PWD summary */
+	.af-scpwd {
+		margin-top: 4mm;
+		padding-top: 2mm;
+		border-top: 1px solid var(--af-rule);
+		font-size: 9pt;
+	}
+	.af-scpwd ul {
+		margin: 1mm 0;
+		padding-left: 4mm;
 	}
 
 	/* Signatures */

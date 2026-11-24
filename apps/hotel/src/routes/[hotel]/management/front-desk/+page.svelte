@@ -25,6 +25,7 @@
 	import PartyPopperIcon from '@lucide/svelte/icons/party-popper';
 	import ReceiptIcon from '@lucide/svelte/icons/receipt';
 	import PaymentFields from '$lib/components/staff/payment-fields.svelte';
+	import ScPwdFields from '$lib/components/staff/sc-pwd-fields.svelte';
 	import WalkinPaymentFields from '$lib/components/staff/walkin-payment-fields.svelte';
 	import GuestContactFields from '$lib/components/staff/guest-contact-fields.svelte';
 	import SpecialRequest from '$lib/components/staff/special-request.svelte';
@@ -57,7 +58,7 @@
 	import type { AvailableRatePlan, AvailableRoomType } from '$lib/server/availability';
 	import type { PriceBreakdown } from '$lib/server/pricing';
 	import { MAX_ROOMS_PER_LINE, addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
-	import { computeScPwdDiscount } from '$lib/sc-pwd-discount';
+	import { roomChargeOptions, type ScPwdShareResult } from '$lib/sc-pwd-discount';
 	import { splitRoomLine } from '$lib/room-split';
 	import WalkinExtras, {
 		extraLineTotal,
@@ -108,6 +109,9 @@
 	const formFolioError = $derived(form && 'folioError' in form ? form.folioError : undefined);
 	const formScPwdClaim = $derived(
 		form && 'scPwdClaim' in form ? form.scPwdClaim : undefined
+	);
+	const formScPwdOptions = $derived(
+		form && 'scPwdOptions' in form ? form.scPwdOptions : undefined
 	);
 	const formSecurityDeposit = $derived(
 		form && 'securityDeposit' in form ? form.securityDeposit : undefined
@@ -210,9 +214,7 @@
 	let roomRefundOpen = $state(false);
 	let idCaptureOpen = $state(false);
 	let scPwdToggleOpen = $state(false);
-	let scPwdClaimantTypeInput = $state('senior_citizen');
-	let scPwdIdNumberInput = $state('');
-	let scPwdClaimantNameInput = $state('');
+	let scPwdPanelReady = $state(true);
 	let hallPayOpen = $state(false);
 	let hallRefundOpen = $state(false);
 	let checkoutCityLedger = $state(false);
@@ -758,15 +760,16 @@
 	// Extras and the Senior Citizen / PWD claim, shown live. Display only: the server re-prices both.
 	let walkInExtras = $state<WalkInExtraLine[]>([]);
 	let scPwdOn = $state(false);
-	let scPwdType = $state<'senior_citizen' | 'pwd'>('senior_citizen');
-	let scPwdIdNumber = $state('');
-	let scPwdName = $state('');
 	let scPwdLineIndex = $state(0);
+	let scPwdReady = $state(true);
+	/** The worked discount from `ScPwdFields`, re-priced by the server. */
+	let scPwdPreview = $state<ScPwdShareResult | null>(null);
 	const walkInExtrasTotal = $derived(
 		walkInExtras.reduce((n, x) => n + extraLineTotal(x, data.vatRateBps), 0)
 	);
-	/** The discount on the claimed room — the first room of the chosen cart line, split exactly as the server does. */
-	const scPwdCalc = $derived.by(() => {
+	/** What the discount can cover on the claimed room — the first room of the chosen cart line,
+	 *  split exactly as the server does: its room nights and, if any, its extra bed. */
+	const scPwdWalkIn = $derived.by(() => {
 		const line = scPwdOn ? walkInCart[Math.min(scPwdLineIndex, walkInCart.length - 1)] : undefined;
 		if (!line) return null;
 		const price = walkInCartLinePrice(line);
@@ -781,13 +784,17 @@
 			line.extraBedsNeeded,
 			line.roomCount
 		);
-		return computeScPwdDiscount({
-			subtotalCentavos: share!.subtotalCentavos,
-			feesCentavos: share!.feesCentavos,
-			vatCentavos: share!.vatCentavos,
-			discountBps: data.scPwdDiscountBps
-		});
+		return {
+			guests: share!.occupancy,
+			options: roomChargeOptions({
+				subtotalCentavos: share!.subtotalCentavos,
+				feesCentavos: share!.feesCentavos,
+				vatCentavos: share!.vatCentavos,
+				extraBedCentavos: share!.extraBeds * (line.extraBedFeeCentavos ?? 0)
+			})
+		};
 	});
+	const scPwdCalc = $derived(scPwdWalkIn ? scPwdPreview : null);
 	const walkInNetTotal = $derived(
 		walkInCartGrandTotal + walkInExtrasTotal - (scPwdCalc?.totalReductionCentavos ?? 0)
 	);
@@ -802,7 +809,7 @@
 			return cents;
 		})
 	);
-	const scPwdIncomplete = $derived(scPwdOn && !scPwdIdNumber.trim());
+	const scPwdIncomplete = $derived(scPwdOn && !scPwdReady);
 	const scPwdPctLabel = $derived((data.scPwdDiscountBps / 100).toFixed(data.scPwdDiscountBps % 100 === 0 ? 0 : 2));
 
 	/** Adds a room type/rate plan to the walk-in cart, merging into an existing line
@@ -1194,8 +1201,6 @@
 		walkInCart = [];
 		walkInExtras = [];
 		scPwdOn = false;
-		scPwdIdNumber = '';
-		scPwdName = '';
 		scPwdLineIndex = 0;
 		walkInFlow = null;
 		if (wasPick) {
@@ -2531,14 +2536,26 @@
 								</div>
 								{#if formScPwdClaim}
 									<p class="text-xs text-ink-muted">
-										{formScPwdClaim.claimantType === 'pwd' ? 'PWD' : 'Senior Citizen'} —
-										{formScPwdClaim.claimantName}, ID {formScPwdClaim.idNumber}
+										{(formScPwdClaim.claimants ?? [
+											{ type: formScPwdClaim.claimantType, name: formScPwdClaim.claimantName, idNumber: formScPwdClaim.idNumber }
+										])
+											.map((c) => `${c.type === 'pwd' ? 'PWD' : 'Senior'} ${c.name}, ID ${c.idNumber}`)
+											.join('; ')}{formScPwdClaim.guestCount ? ` — ${formScPwdClaim.claimants?.length ?? 1} of ${formScPwdClaim.guestCount} guests` : ''}
 										(−₱{(
 											(formScPwdClaim.vatRemovedCentavos +
 												formScPwdClaim.discountCentavos) /
 											100
 										).toFixed(2)})
 									</p>
+									{#if creditOwedFor(o.bookingId) > 0}
+										<!-- A prepaid (online) booking discounted at check-in: the guest is owed the difference. -->
+										<div class="mt-2 rounded-md border border-warning/40 bg-warning/10 p-2 text-xs text-ink">
+											The guest has paid {peso(creditOwedFor(o.bookingId))} more than the discounted bill. Refund it now.
+											<Button type="button" size="sm" variant="outline" class="mt-1.5" onclick={() => (roomRefundOpen = true)}>
+												Refund {peso(creditOwedFor(o.bookingId))}
+											</Button>
+										</div>
+									{/if}
 									<form method="POST" action="?/reverseScPwd" use:enhance class="mt-2">
 										<input type="hidden" name="bookingId" value={o.bookingId} />
 										<Button type="submit" size="sm" variant="outline">Reverse</Button>
@@ -2546,40 +2563,18 @@
 								{:else if scPwdToggleOpen}
 									<form method="POST" action="?/flagScPwd" use:enhance class="space-y-2">
 										<input type="hidden" name="bookingId" value={o.bookingId} />
-										<div class="flex flex-wrap items-end gap-2">
-											<div>
-												<Label for="scPwdClaimantTypeInput" class="text-xs">Type</Label>
-												<select
-													id="scPwdClaimantTypeInput"
-													name="scPwdClaimantType"
-													bind:value={scPwdClaimantTypeInput}
-													class="mt-1 rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm"
-												>
-													<option value="senior_citizen">Senior Citizen</option>
-													<option value="pwd">PWD</option>
-												</select>
-											</div>
-											<div>
-												<Label for="scPwdIdNumberInput" class="text-xs">ID no.</Label>
-												<Input
-													id="scPwdIdNumberInput"
-													name="scPwdIdNumber"
-													bind:value={scPwdIdNumberInput}
-													class="w-32"
-												/>
-											</div>
-											<div>
-												<Label for="scPwdClaimantNameInput" class="text-xs">Claimant name</Label>
-												<Input
-													id="scPwdClaimantNameInput"
-													name="scPwdClaimantName"
-													bind:value={scPwdClaimantNameInput}
-													class="w-40"
-												/>
-											</div>
-										</div>
+										{#if formScPwdOptions}
+											<ScPwdFields
+												options={formScPwdOptions.options}
+												defaultGuests={formScPwdOptions.guestCount}
+												discountBps={formScPwdOptions.discountBps}
+												promoCentavos={formScPwdOptions.promoCentavos}
+												defaultName={formRoomDetail?.guest.fullName ?? ''}
+												bind:ready={scPwdPanelReady}
+											/>
+										{/if}
 										<div class="flex gap-2">
-											<Button type="submit" size="sm">Apply discount</Button>
+											<Button type="submit" size="sm" disabled={!formScPwdOptions || !scPwdPanelReady}>Apply discount</Button>
 											<Button
 												type="button"
 												variant="ghost"
@@ -2596,10 +2591,7 @@
 										variant="outline"
 										size="sm"
 										aria-expanded={scPwdToggleOpen}
-										onclick={() => {
-											scPwdClaimantNameInput = formRoomDetail?.guest.fullName ?? '';
-											scPwdToggleOpen = true;
-										}}
+										onclick={() => (scPwdToggleOpen = true)}
 									>
 										Flag Senior Citizen / PWD
 									</Button>
@@ -3677,55 +3669,40 @@
 								<span>
 									Senior Citizen / PWD discount
 									<span class="block text-xs font-normal text-ink-muted">
-										{scPwdPctLabel}% off the room, VAT removed. Applied now, so the guest pays the lower amount.
+										{scPwdPctLabel}% off their share of the room{data.vatRateBps > 0 ? ', VAT removed' : ''}. Applied now, so the guest pays the lower amount.
 									</span>
 								</span>
 							</label>
 							{#if scPwdOn}
 								<input type="hidden" name="scPwdOn" value="on" />
 								<input type="hidden" name="scPwdLineIndex" value={Math.min(scPwdLineIndex, walkInCart.length - 1)} />
-								<div class="grid grid-cols-2 gap-3">
+								{#if walkInCart.length > 1}
 									<div>
-										<Label for="scPwdTypeSel" class="text-xs">Type</Label>
+										<Label for="scPwdRoomSel" class="text-xs">Applies to room</Label>
 										<select
-											id="scPwdTypeSel"
-											name="scPwdClaimantType"
-											bind:value={scPwdType}
+											id="scPwdRoomSel"
+											bind:value={scPwdLineIndex}
 											class="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
 										>
-											<option value="senior_citizen">Senior Citizen</option>
-											<option value="pwd">PWD</option>
+											{#each walkInCart as l, i (l.id)}
+												<option value={i}>
+													{l.roomNumber ? `Room ${l.roomNumber}` : l.roomTypeName}{l.roomCount > 1 ? ` (first of ${l.roomCount})` : ''}
+												</option>
+											{/each}
 										</select>
 									</div>
-									<div>
-										<Label for="scPwdIdNo" class="text-xs">OSCA / PWD ID no.</Label>
-										<Input id="scPwdIdNo" name="scPwdIdNumber" bind:value={scPwdIdNumber} maxlength={60} autocomplete="off" class="mt-1" />
-									</div>
-								</div>
-								<div class="grid grid-cols-2 gap-3">
-									<div>
-										<Label for="scPwdClaimant" class="text-xs">Name on the ID</Label>
-										<Input id="scPwdClaimant" name="scPwdClaimantName" bind:value={scPwdName} maxlength={160} placeholder="Blank = the guest's name" class="mt-1" />
-									</div>
-									{#if walkInCart.length > 1}
-										<div>
-											<Label for="scPwdRoomSel" class="text-xs">Applies to room</Label>
-											<select
-												id="scPwdRoomSel"
-												bind:value={scPwdLineIndex}
-												class="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
-											>
-												{#each walkInCart as l, i (l.id)}
-													<option value={i}>
-														{l.roomNumber ? `Room ${l.roomNumber}` : l.roomTypeName}{l.roomCount > 1 ? ` (first of ${l.roomCount})` : ''}
-													</option>
-												{/each}
-											</select>
-										</div>
-									{/if}
-								</div>
-								{#if scPwdIncomplete}
-									<p class="text-xs text-danger">Enter the OSCA / PWD ID number to apply the discount.</p>
+								{/if}
+								{#if scPwdWalkIn}
+									{#key `${scPwdLineIndex}:${scPwdWalkIn.guests}`}
+										<ScPwdFields
+											options={scPwdWalkIn.options}
+											defaultGuests={scPwdWalkIn.guests}
+											discountBps={data.scPwdDiscountBps}
+											firstNameOptional
+											bind:preview={scPwdPreview}
+											bind:ready={scPwdReady}
+										/>
+									{/key}
 								{/if}
 							{/if}
 						</section>
@@ -3745,12 +3722,14 @@
 									</div>
 								{/if}
 								{#if scPwdCalc}
+									{#if scPwdCalc.vatRemovedCentavos > 0}
+										<div class="flex justify-between text-ink-muted">
+											<dt>VAT removed (exempt sale)</dt>
+											<dd class="tabular-nums">−{peso(scPwdCalc.vatRemovedCentavos)}</dd>
+										</div>
+									{/if}
 									<div class="flex justify-between text-ink-muted">
-										<dt>VAT removed (exempt sale)</dt>
-										<dd class="tabular-nums">−{peso(scPwdCalc.vatRemovedCentavos)}</dd>
-									</div>
-									<div class="flex justify-between text-ink-muted">
-										<dt>{scPwdType === 'pwd' ? 'PWD' : 'Senior Citizen'} discount ({scPwdPctLabel}%)</dt>
+										<dt>Senior / PWD discount ({scPwdPctLabel}%)</dt>
 										<dd class="tabular-nums">−{peso(scPwdCalc.discountCentavos)}</dd>
 									</div>
 								{/if}

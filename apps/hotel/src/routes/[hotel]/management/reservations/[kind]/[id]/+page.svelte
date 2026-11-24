@@ -24,6 +24,7 @@
 	import FolioPromoTrail from '$lib/components/staff/folio-promo-trail.svelte';
 	import ConfirmationCode from '$lib/components/staff/confirmation-code.svelte';
 	import SpecialRequest from '$lib/components/staff/special-request.svelte';
+	import ScPwdFields from '$lib/components/staff/sc-pwd-fields.svelte';
 	import { formatClockTime } from '$lib/stay-dates';
 	import type { ActionData, PageData } from './$types';
 
@@ -40,9 +41,9 @@
 	});
 
 	let scPwdFlagged = $state(false);
-	let scPwdClaimantType = $state('senior_citizen');
-	let scPwdIdNumber = $state('');
-	let scPwdClaimantName = $state(data.kind === 'room' ? data.detail.guest.fullName : '');
+	let scPwdReady = $state(true);
+	// A half-filled SC/PWD form would be skipped silently at check-in, so hold the button until it's complete.
+	const scPwdBlocks = $derived(scPwdFlagged && !scPwdReady);
 
 	let cancelOpen = $state(data.autoOpen === 'cancel');
 	let confirmingNoShow = $state(data.autoOpen === 'no-show');
@@ -497,41 +498,24 @@
 				{/if}
 			{/snippet}
 			{#snippet scPwdFields()}
-				<div class="mt-3 space-y-2 rounded-md border border-border p-3">
-					<label class="flex items-center gap-2 text-sm">
-						<input type="checkbox" name="scPwdFlagged" bind:checked={scPwdFlagged} class="size-4" />
-						Guest is a Senior Citizen or PWD (BIR discount)
-					</label>
-					{#if scPwdFlagged}
-						<div class="flex flex-wrap items-end gap-2">
-							<div>
-								<Label for="scPwdClaimantType" class="text-xs">Type</Label>
-								<select
-									id="scPwdClaimantType"
-									name="scPwdClaimantType"
-									bind:value={scPwdClaimantType}
-									class="mt-1 rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm"
-								>
-									<option value="senior_citizen">Senior Citizen</option>
-									<option value="pwd">PWD</option>
-								</select>
-							</div>
-							<div>
-								<Label for="scPwdIdNumber" class="text-xs">OSCA / PWD ID no.</Label>
-								<Input id="scPwdIdNumber" name="scPwdIdNumber" bind:value={scPwdIdNumber} class="w-36" />
-							</div>
-							<div>
-								<Label for="scPwdClaimantName" class="text-xs">Claimant name</Label>
-								<Input
-									id="scPwdClaimantName"
-									name="scPwdClaimantName"
-									bind:value={scPwdClaimantName}
-									class="w-44"
-								/>
-							</div>
-						</div>
-					{/if}
-				</div>
+				{#if data.kind === 'room' && data.scPwdOptions}
+					<div class="mt-3 space-y-2 rounded-md border border-border p-3">
+						<label class="flex items-center gap-2 text-sm">
+							<input type="checkbox" name="scPwdFlagged" bind:checked={scPwdFlagged} class="size-4" />
+							Senior Citizen or PWD in this room (BIR discount)
+						</label>
+						{#if scPwdFlagged}
+							<ScPwdFields
+								options={data.scPwdOptions.options}
+								defaultGuests={data.scPwdOptions.guestCount}
+								discountBps={data.scPwdOptions.discountBps}
+								promoCentavos={data.scPwdOptions.promoCentavos}
+								defaultName={data.detail.guest.fullName}
+								bind:ready={scPwdReady}
+							/>
+						{/if}
+					</div>
+				{/if}
 			{/snippet}
 			<div class="mb-2 flex items-center justify-between gap-3">
 				<h2 class="flex items-center gap-1.5 text-sm font-semibold text-ink">
@@ -586,8 +570,12 @@
 					{/if}
 					{#if data.scPwdClaim}
 						<div class="mt-2 text-xs text-ink-muted">
-							{data.scPwdClaim.claimantType === 'pwd' ? 'PWD' : 'Senior Citizen'} discount applied —
-							{data.scPwdClaim.claimantName}, ID {data.scPwdClaim.idNumber} (−₱{(
+							Senior/PWD discount applied —
+							{(data.scPwdClaim.claimants ?? [
+								{ type: data.scPwdClaim.claimantType, name: data.scPwdClaim.claimantName, idNumber: data.scPwdClaim.idNumber }
+							])
+								.map((c) => `${c.type === 'pwd' ? 'PWD' : 'Senior'} ${c.name}, ID ${c.idNumber}`)
+								.join('; ')}{data.scPwdClaim.guestCount ? ` (${data.scPwdClaim.claimants?.length ?? 1} of ${data.scPwdClaim.guestCount} guests)` : ''} (−₱{(
 								(data.scPwdClaim.vatRemovedCentavos + data.scPwdClaim.discountCentavos) /
 								100
 							).toFixed(2)}). Reverse or re-flag from the front-desk occupant panel.
@@ -623,7 +611,7 @@
 						{@render securityDepositFields()}
 						{@render scPwdFields()}
 						<div class="mt-3">
-							<Button type="submit" size="sm">Check in</Button>
+							<Button type="submit" size="sm" disabled={scPwdBlocks}>Check in</Button>
 						</div>
 					{:else}
 						<Label
@@ -655,7 +643,7 @@
 							{@render securityDepositFields()}
 						{@render scPwdFields()}
 							<div class="mt-3">
-								<Button type="submit" size="sm">Check in</Button>
+								<Button type="submit" size="sm" disabled={scPwdBlocks}>Check in</Button>
 							</div>
 						{/if}
 					{/if}
