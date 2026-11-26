@@ -2700,6 +2700,7 @@
 												id={o.bookingId}
 												balanceCentavos={formFolio.balanceCentavos}
 												cashier={data.cashier}
+												otaNames={data.otaNames}
 												onDone={() => (roomPayOpen = false)}
 											/>
 											<Button

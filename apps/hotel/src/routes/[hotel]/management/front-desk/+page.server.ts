@@ -53,6 +53,7 @@ import {
 } from '$lib/server/housekeeping';
 import { FinanceError } from '$lib/server/finance/shared';
 import { recordPayment, refundPayment, voidPayment } from '$lib/server/finance/payments';
+import { chargeToOta } from '$lib/server/finance/ota';
 import { sendBookingReviewRequest } from '$lib/server/email/send-booking-review-request';
 import {
 	reconcileSettledDeposit,
@@ -760,6 +761,39 @@ export const actions: Actions = {
 		requireCap(event.locals.user, event.locals.role, 'folio:write');
 		const hotelId = event.locals.hotel!.id;
 		const raw = Object.fromEntries(await event.request.formData());
+
+		// "Online booking": no cash now — the OTA owes it, so it joins the OTA payouts instead of a payment.
+		if (raw.method === 'online_booking') {
+			const o = z
+				.object({
+					kind: z.literal('room'),
+					id: z.string().uuid(),
+					amount: z.coerce.number().positive(),
+					otaName: z.string().trim().min(1),
+					referenceNo: z.string().trim().min(1).max(120)
+				})
+				.safeParse(raw);
+			if (!o.success) return fail(400, { folioError: 'Pick the OTA and enter its booking ID.' });
+			try {
+				await chargeToOta({
+					hotelId,
+					bookingId: o.data.id,
+					otaName: o.data.otaName,
+					reference: o.data.referenceNo,
+					amountCentavos: Math.round(o.data.amount * 100),
+					actor: event.locals.user
+				});
+				return {
+					...(await loadRoomDetailPayload(hotelId, o.data.id)),
+					paymentOk: `Charged to ${o.data.otaName} — it shows under Finance → OTA payouts until they pay it.`
+				};
+			} catch (e) {
+				if (e instanceof FinanceError || e instanceof FolioError)
+					return fail(400, { ...(await loadRoomDetailPayload(hotelId, o.data.id)), folioError: e.message });
+				throw e;
+			}
+		}
+
 		const parsed = z
 			.object({
 				kind: z.enum(['room', 'hall']),

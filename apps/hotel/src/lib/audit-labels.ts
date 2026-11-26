@@ -57,6 +57,7 @@ export const ACTION_LABELS: Record<string, string> = {
 	'finance.day_close': 'Closed the business day',
 	'finance.day_reopen': 'Reopened the business day',
 	'finance.open_receivable': 'Opened a city-ledger receivable',
+	'finance.ota_charge': 'Charged a folio balance to an OTA',
 	'finance.settle_receivable': 'Collected a receivable',
 	'finance.write_off_receivable': 'Wrote off a receivable',
 	'finance.reopen_receivable': 'Reopened a receivable',
