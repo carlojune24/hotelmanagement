@@ -31,6 +31,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
 	return {
 		today,
+		vatRateBps: hotel.vatRateBps,
 		rows,
 		categories,
 		vendors,

@@ -31,6 +31,12 @@ async function hotelVatRate(hotelId: string): Promise<number> {
 	return h?.bps ?? 1200;
 }
 
+function assertWithholding(wht: number, gross: number): void {
+	if (!Number.isInteger(wht) || wht < 0 || wht >= gross) {
+		throw new FinanceError('Withholding tax must be less than the amount on the receipt.');
+	}
+}
+
 export interface CreateExpenseInput {
 	hotelId: string;
 	expenseDate: string;
@@ -57,6 +63,7 @@ export async function createExpense(
 		throw new FinanceError('Enter an expense amount greater than zero.');
 	}
 	if (!input.description.trim()) throw new FinanceError('Give the expense a description.');
+	assertWithholding(input.withholdingTaxCentavos ?? 0, input.grossCentavos);
 
 	const [cat] = await db
 		.select({ id: expenseCategories.id })
@@ -126,6 +133,8 @@ export async function updateExpense(
 		throw new FinanceError("A paid or voided expense can't be edited.");
 
 	const gross = patch.grossCentavos ?? e.grossCentavos;
+	const wht = patch.withholdingTaxCentavos ?? e.withholdingTaxCentavos;
+	assertWithholding(wht, gross);
 	const isVatable = patch.isVatable ?? e.isVatable;
 	const vatRate = await hotelVatRate(hotelId);
 	const inputVat = isVatable
@@ -147,7 +156,7 @@ export async function updateExpense(
 			isVatable,
 			inputVatCentavos: inputVat,
 			netOfVatCentavos: gross - inputVat,
-			withholdingTaxCentavos: patch.withholdingTaxCentavos ?? e.withholdingTaxCentavos,
+			withholdingTaxCentavos: wht,
 			notes: patch.notes === undefined ? e.notes : patch.notes?.trim() || null,
 			attachmentUrl: patch.attachmentUrl === undefined ? e.attachmentUrl : patch.attachmentUrl,
 			updatedAt: new Date()
@@ -220,7 +229,10 @@ export async function markExpensePaid(input: {
 		)
 		.limit(1);
 	if (!account || !account.isActive) throw new FinanceError('Pick a valid account to pay from.');
-	if (account.currentBalanceCentavos < e.grossCentavos) {
+	// The withheld part is not paid to the vendor; it stays here until remitted to BIR.
+	const payout = e.grossCentavos - e.withholdingTaxCentavos;
+	if (payout <= 0) throw new FinanceError('Withholding tax must be less than the amount on the receipt.');
+	if (account.currentBalanceCentavos < payout) {
 		throw new FinanceError(`${account.name} doesn't hold enough to cover this expense.`);
 	}
 
@@ -261,7 +273,7 @@ export async function markExpensePaid(input: {
 				direction: 'out',
 				category,
 				cashAccountId: input.paidFromAccountId,
-				amountCentavos: e.grossCentavos,
+				amountCentavos: payout,
 				counterpartyType: 'vendor',
 				counterpartyName: vendor?.name ?? null,
 				counterpartyId: e.vendorId ?? null,
@@ -298,7 +310,11 @@ export async function markExpensePaid(input: {
 		action: 'finance.pay_expense',
 		entityType: 'expense',
 		entityId: e.id,
-		after: { paidFromAccountId: input.paidFromAccountId, amountCentavos: e.grossCentavos }
+		after: {
+			paidFromAccountId: input.paidFromAccountId,
+			amountCentavos: payout,
+			withholdingTaxCentavos: e.withholdingTaxCentavos
+		}
 	});
 }
 

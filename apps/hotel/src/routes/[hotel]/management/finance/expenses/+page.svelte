@@ -9,6 +9,7 @@
 	import * as Table from '$lib/components/ui/table/index.js';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import PrinterIcon from '@lucide/svelte/icons/printer';
+	import { vatPortion } from '$lib/dining-orders';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -20,12 +21,23 @@
 			toast.success(form.ok);
 			showNew = false;
 			payingId = null;
+			grossInput = whtInput = null;
+			isVatable = false;
 		}
 		if (form && 'error' in form && form.error) toast.error(form.error);
 	});
 
 	let showNew = $state(false);
 	let payingId = $state<string | null>(null);
+
+	// Live breakdown so staff see what the VAT box and withholding do before saving.
+	let grossInput = $state<number | null>(null);
+	let whtInput = $state<number | null>(null);
+	let isVatable = $state(false);
+	const vatPct = $derived(data.vatRateBps / 100);
+	const grossC = $derived(Math.round((grossInput ?? 0) * 100));
+	const whtC = $derived(Math.round((whtInput ?? 0) * 100));
+	const vatC = $derived(isVatable ? vatPortion(grossC, data.vatRateBps) : 0);
 
 	const statusClass: Record<string, string> = {
 		draft: 'border-border bg-surface-2 text-ink-muted',
@@ -90,11 +102,33 @@
 			</div>
 			<div class="sm:col-span-2"><Label class="text-xs">Description</Label><Input name="description" required maxlength={300} class="mt-1" /></div>
 			<div><Label class="text-xs">Vendor invoice/OR no.</Label><Input name="vendorInvoiceNo" maxlength={120} class="mt-1" /></div>
-			<div><Label class="text-xs">Gross amount (₱)</Label><Input name="gross" type="number" min="0.01" step="0.01" required class="mt-1" /></div>
-			<div><Label class="text-xs">Withholding tax (₱)</Label><Input name="withholdingTax" type="number" min="0" step="0.01" class="mt-1" /></div>
-			<label class="flex items-center gap-2 pt-5 text-sm text-ink">
-				<input type="checkbox" name="isVatable" class="size-4" /> VAT-inclusive (12% input VAT)
-			</label>
+			<div>
+				<Label for="exp-gross" class="text-xs">Amount on receipt (₱)</Label>
+				<Input id="exp-gross" name="gross" type="number" min="0.01" step="0.01" required bind:value={grossInput} class="mt-1" />
+				<p class="mt-1 text-xs text-ink-muted">The total you actually pay — never add VAT on top.</p>
+			</div>
+			<div>
+				<Label for="exp-wht" class="text-xs">Withholding tax (₱)</Label>
+				<Input id="exp-wht" name="withholdingTax" type="number" min="0" step="0.01" bind:value={whtInput} class="mt-1" />
+				<p class="mt-1 text-xs text-ink-muted">Only if you withhold from this supplier (e.g. rent, professional fees). Base is the amount net of VAT.</p>
+			</div>
+			<div class="pt-5">
+				{#if data.vatRateBps > 0}
+					<label class="flex items-center gap-2 text-sm text-ink">
+						<input type="checkbox" name="isVatable" bind:checked={isVatable} class="size-4" /> Receipt includes {vatPct}% VAT
+					</label>
+					<p class="mt-1 text-xs text-ink-muted">VAT-registered supplier with VAT on the invoice/OR. Leave unchecked for palengke, transport or NON-VAT receipts.</p>
+				{:else}
+					<p class="text-xs text-ink-muted">This hotel isn't VAT-registered, so VAT on purchases can't be claimed — it's part of the cost. Just enter the receipt total.</p>
+				{/if}
+			</div>
+			{#if grossC > 0}
+				<p class="text-sm text-ink-muted sm:col-span-3" aria-live="polite">
+					Input VAT <span class="tabular-nums text-ink">{peso(vatC)}</span> · Net of VAT
+					<span class="tabular-nums text-ink">{peso(grossC - vatC)}</span>
+					{#if whtC > 0}· Pay vendor <span class="tabular-nums text-ink">{peso(grossC - whtC)}</span>{/if}
+				</p>
+			{/if}
 			<div class="sm:col-span-2"><Label class="text-xs">Notes</Label><Input name="notes" maxlength={1000} class="mt-1" /></div>
 			<div><Label class="text-xs">Receipt photo</Label><Input name="attachment" type="file" accept="image/*" class="mt-1" /></div>
 			<div class="flex items-end sm:col-span-3">
@@ -230,7 +264,10 @@
 									</div>
 									<div><Label class="text-xs">Reference</Label><Input name="paymentReferenceNo" class="mt-1 h-8" /></div>
 									<div><Label class="text-xs">Paid on</Label><Input name="paidOn" type="date" value={data.today} class="mt-1 h-8" /></div>
-									<Button type="submit" size="sm">Confirm payment ({peso(r.grossCentavos)})</Button>
+									<Button type="submit" size="sm">Confirm payment ({peso(r.grossCentavos - r.withholdingTaxCentavos)})</Button>
+									{#if r.withholdingTaxCentavos > 0}
+										<span class="pb-1.5 text-xs text-ink-muted">{peso(r.withholdingTaxCentavos)} withheld — remit to BIR</span>
+									{/if}
 								</form>
 							</Table.Cell>
 						</Table.Row>
