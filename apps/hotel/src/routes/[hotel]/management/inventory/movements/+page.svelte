@@ -16,11 +16,12 @@
 		adjust_out: 'Count down',
 		order: 'Dining order',
 		order_reverse: 'Order cancelled',
-		checkin_kit: 'Check-in amenities'
+		checkin_kit: 'Check-in amenities',
+		restock_void: 'Receipt voided'
 	};
 	const FILTERS: { key: string; label: string; types: Kind[] }[] = [
 		{ key: '', label: 'All', types: [] },
-		{ key: 'in', label: 'Received', types: ['restock'] },
+		{ key: 'in', label: 'Received', types: ['restock', 'restock_void'] },
 		{ key: 'orders', label: 'Orders', types: ['order', 'order_reverse'] },
 		{ key: 'checkins', label: 'Check-ins', types: ['checkin_kit'] },
 		{ key: 'waste', label: 'Waste', types: ['waste'] },

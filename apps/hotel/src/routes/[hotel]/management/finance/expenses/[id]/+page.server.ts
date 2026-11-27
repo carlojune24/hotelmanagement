@@ -2,6 +2,7 @@ import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { requireCap } from '$lib/server/auth/rbac';
 import { getExpense } from '$lib/server/finance/expenses';
+import { restockForExpense } from '$lib/server/stock';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, params }) => {
@@ -10,5 +11,6 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 	if (!z.string().uuid().safeParse(params.id).success) error(404, 'Expense not found');
 	const expense = await getExpense(locals.hotel!.id, params.id);
 	if (!expense) error(404, 'Expense not found');
-	return { expense };
+	// An expense made by Inventory → Restock links back to its receipt and items.
+	return { expense, restock: await restockForExpense(locals.hotel!.id, params.id) };
 };

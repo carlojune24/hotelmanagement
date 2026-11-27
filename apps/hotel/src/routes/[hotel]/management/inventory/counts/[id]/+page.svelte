@@ -42,6 +42,8 @@
 	const differing = $derived(data.lines.filter((l) => (diffOf(l) ?? 0) !== 0));
 	const needReason = $derived(differing.filter((l) => !typed[l.itemId]!.reason.trim()));
 	let busy = $state(false);
+	/** Finish was pressed with a remark missing: highlight the boxes that need one. */
+	let tried = $state(false);
 	let confirmDiscard = $state(false);
 
 	const signed = (milli: number, unit: Line['unit']) => `${milli > 0 ? '+' : ''}${formatQty(milli, unit)}`;
@@ -120,15 +122,17 @@
 											{d == null ? '—' : d === 0 ? 'Matches' : signed(d, l.unit)}
 										</span>
 									</div>
-									<!-- Always posted so the fields stay aligned per line; shown only where it matters. -->
-									<div class={d != null && d !== 0 ? 'mt-2' : 'hidden'}>
+									{@const missing = d != null && d !== 0 && !typed[l.itemId]!.reason.trim()}
+									<div class="mt-2">
 										<Input
+											id="remark-{l.itemId}"
 											name="reason"
 											bind:value={typed[l.itemId]!.reason}
 											maxlength={300}
-											placeholder="Why? Lost, damaged, taken by a guest, found in laundry…"
-											class="h-10"
-											aria-label="Reason for the difference on {l.name}"
+											placeholder={d != null && d !== 0 ? 'Required: why? Lost, damaged, taken by a guest, found in laundry…' : 'Remarks (optional)'}
+											class="h-10 {missing && tried ? 'border-danger' : ''}"
+											aria-label="Remarks for {l.name}"
+											aria-invalid={missing && tried}
 										/>
 									</div>
 								{:else}
@@ -148,7 +152,7 @@
 											{/if}
 										{/if}
 									</div>
-									{#if l.reason && (isOpen || l.varianceMilli)}<p class="mt-0.5 text-xs text-ink-muted">{l.reason}</p>{/if}
+									{#if l.reason}<p class="mt-0.5 text-xs text-ink-muted">{l.reason}</p>{/if}
 								{/if}
 							</li>
 						{/each}
@@ -160,11 +164,28 @@
 				<div class="sticky bottom-0 mt-6 flex flex-wrap items-center gap-3 border-t border-border bg-surface py-3">
 					<p class="flex-1 text-sm text-ink-muted" aria-live="polite">
 						{done} of {data.lines.length} counted{differing.length ? ` · ${differing.length} differ` : ''}{needReason.length
-							? ` · ${needReason.length} need a reason`
+							? ` · ${needReason.length} need a remark`
 							: ''}
 					</p>
+					{#if tried && needReason.length}
+						<p class="w-full text-sm text-danger" role="alert">
+							Add a remark for {needReason.map((l) => l.name).join(', ')}: {needReason.length === 1 ? 'it differs' : 'they differ'} from what the system shows.
+						</p>
+					{/if}
 					<Button type="submit" variant="outline" class="h-11" disabled={busy}>Save progress</Button>
-					<Button type="submit" formaction="?/finish" class="h-11" disabled={busy || done === 0 || needReason.length > 0}>Finish count</Button>
+					<Button
+						type="submit"
+						formaction="?/finish"
+						class="h-11"
+						disabled={busy || done === 0}
+						onclick={(e) => {
+							// Say what is missing instead of a silently disabled button.
+							if (!needReason.length) return;
+							e.preventDefault();
+							tried = true;
+							document.getElementById(`remark-${needReason[0]!.itemId}`)?.focus();
+						}}>Finish count</Button
+					>
 				</div>
 			{/if}
 		</form>

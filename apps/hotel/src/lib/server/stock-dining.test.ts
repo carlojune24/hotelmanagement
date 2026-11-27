@@ -58,7 +58,9 @@ describe.skipIf(!hasDb)('stock: dining recipes (live DB)', async () => {
 	});
 
 	afterAll(async () => {
-		if (hotel) await db.delete(s.hotels).where(eq(s.hotels.id, hotel));
+		if (!hotel) return;
+		await db.delete(s.auditLog).where(eq(s.auditLog.hotelId, hotel)); // audit_log has no FK, so it would outlive the hotel
+		await db.delete(s.hotels).where(eq(s.hotels.id, hotel));
 	});
 
 	const onHand = async (itemId: string) => (await stock.listStock(hotel)).find((r) => r.id === itemId)!.onHandMilli;
@@ -129,6 +131,7 @@ describe.skipIf(!hasDb)('stock: dining recipes (live DB)', async () => {
 			const foreign = await stock.createStockItem(other!.id, { name: 'Salt', department: 'dining', kind: 'consumable', unit: 'g', reorderLevelMilli: null }, null);
 			await expect(stock.setRecipe(hotel, { menuItemId: plain!.id }, [{ stockItemId: foreign, qtyMilli: 1_000 }], null)).rejects.toThrow(/not found/);
 		} finally {
+			await db.delete(s.auditLog).where(inArray(s.auditLog.hotelId, [other!.id]));
 			await db.delete(s.hotels).where(inArray(s.hotels.id, [other!.id]));
 		}
 	});

@@ -59,6 +59,8 @@ export interface CreateExpenseInput {
 	notes?: string | null;
 	attachmentUrl?: string | null;
 	actor: SessionUser | null;
+	/** Run inside the caller's transaction (an Inventory restock adds its stock in the same one). */
+	tx?: Tx;
 }
 
 export async function createExpense(
@@ -111,14 +113,15 @@ export async function createExpense(
 		approvedAt: status === 'approved' ? new Date() : null
 	};
 
-	const [row] = await db.insert(expenses).values(values).returning({ id: expenses.id });
+	const [row] = await (input.tx ?? db).insert(expenses).values(values).returning({ id: expenses.id });
 	await writeAudit({
 		hotelId: input.hotelId,
 		actor: input.actor,
 		action: 'finance.create_expense',
 		entityType: 'expense',
 		entityId: row!.id,
-		after: { grossCentavos: input.grossCentavos, status }
+		after: { grossCentavos: input.grossCentavos, status },
+		tx: input.tx
 	});
 	return { expenseId: row!.id, status };
 }
@@ -329,10 +332,13 @@ export async function voidExpense(
 	hotelId: string,
 	expenseId: string,
 	reason: string,
-	actor: SessionUser | null
+	actor: SessionUser | null,
+	/** Run inside the caller's transaction (voiding an Inventory restock undoes its stock too). */
+	outerTx?: Tx
 ): Promise<void> {
 	if (!reason.trim()) throw new FinanceError('A void needs a reason.');
-	await db.transaction(async (tx: Tx) => {
+	const run = <T>(fn: (tx: Tx) => Promise<T>) => (outerTx ? fn(outerTx) : db.transaction(fn));
+	await run(async (tx: Tx) => {
 		const [e] = await tx
 			.select()
 			.from(expenses)
@@ -387,7 +393,8 @@ export async function voidExpense(
 		action: 'finance.void_expense',
 		entityType: 'expense',
 		entityId: expenseId,
-		after: { reason }
+		after: { reason },
+		tx: outerTx
 	});
 }
 

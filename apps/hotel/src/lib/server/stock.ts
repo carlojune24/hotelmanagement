@@ -8,6 +8,7 @@ import {
 	diningOrderItemAddons,
 	diningOrderItems,
 	diningOrders,
+	expenses,
 	guests,
 	orders,
 	roomTypes,
@@ -17,11 +18,14 @@ import {
 	stockItems,
 	stockMovements,
 	stockRecipeLines,
+	stockRestocks,
 	users,
 	type StockItem
 } from '$lib/server/db/schema/index';
 import type { SessionUser } from '$lib/server/auth/session';
 import { writeAudit } from '$lib/server/audit';
+import { createExpense, voidExpense } from '$lib/server/finance/expenses';
+import { formatQty } from '$lib/stock-units';
 
 /**
  * Stock ledger. No prices. FIFO follows WashSuite's `consumeStock`: positive movements are
@@ -495,12 +499,12 @@ export async function listRecipes(hotelId: string) {
 		.where(and(eq(stockRecipeLines.hotelId, hotelId), isNull(stockItems.deletedAt)));
 }
 
-/** What a recipe may use: the hotel's live, active stock items. */
+/** What a recipe may use: the hotel's live, active Dining stock (not front-desk soap or linens). */
 export async function listStockChoices(hotelId: string) {
 	return db
 		.select({ id: stockItems.id, name: stockItems.name, unit: stockItems.unit, department: stockItems.department })
 		.from(stockItems)
-		.where(and(eq(stockItems.hotelId, hotelId), isNull(stockItems.deletedAt), eq(stockItems.isActive, true)))
+		.where(and(eq(stockItems.hotelId, hotelId), isNull(stockItems.deletedAt), eq(stockItems.isActive, true), eq(stockItems.department, 'dining')))
 		.orderBy(asc(stockItems.name));
 }
 
@@ -596,7 +600,11 @@ export async function suggestedKit(hotelId: string, bookingId: string) {
 			)
 		)
 		.orderBy(asc(stockItems.name));
-	return lines.map((l) => ({ ...l, qtyMilli: l.qtyMilli * (l.per === 'room' ? b.rooms : b.guests) }));
+	return lines.map((l) => {
+		const times = l.per === 'room' ? b.rooms : b.guests;
+		// `perMilli` × `times` is shown beside the number, so staff can see where it came from.
+		return { ...l, perMilli: l.qtyMilli, times, qtyMilli: l.qtyMilli * times };
+	});
 }
 
 /**
@@ -717,7 +725,7 @@ export async function finishCount(hotelId: string, countId: string, actor: Sessi
 			await tx.update(stockCountLines).set({ expectedMilli: before, varianceMilli: diff }).where(eq(stockCountLines.id, l.id));
 		}
 		// Thrown inside the transaction, so every adjustment above rolls back with it.
-		if (missingReason.length) throw new StockError(`Give a reason for the difference on: ${missingReason.join(', ')}.`);
+		if (missingReason.length) throw new StockError(`Add a remark for the difference on: ${missingReason.join(", ")}.`);
 		await tx.update(stockCounts).set({ status: 'finished', finishedBy: actor?.id ?? null, finishedAt: new Date() }).where(eq(stockCounts.id, countId));
 		await writeAudit({ hotelId, actor, action: 'stock_count.finish', entityType: 'stock_count', entityId: countId, after: { adjusted, skipped: lines.length - counted.length }, tx });
 		return { adjusted, skipped: lines.length - counted.length };
@@ -734,8 +742,10 @@ export async function discardCount(hotelId: string, countId: string, actor: Sess
 }
 
 export async function listCounts(hotelId: string, onlyId?: string) {
-	const starter = sql<string | null>`(select name from users where users.id = ${stockCounts.startedBy})`;
-	const finisher = sql<string | null>`(select name from users where users.id = ${stockCounts.finishedBy})`;
+	// Correlated subqueries name the outer table in full: Drizzle writes a column of a single-table
+	// select unqualified, and inside a subquery a bare "id" would bind to the subquery's own row.
+	const starter = sql<string | null>`(select u.name from users u where u.id = stock_counts.started_by)`;
+	const finisher = sql<string | null>`(select u.name from users u where u.id = stock_counts.finished_by)`;
 	return db
 		.select({
 			id: stockCounts.id,
@@ -746,8 +756,8 @@ export async function listCounts(hotelId: string, onlyId?: string) {
 			finishedAt: stockCounts.finishedAt,
 			startedByName: starter,
 			finishedByName: finisher,
-			lines: sql<number>`(select count(*)::int from stock_count_lines l where l.count_id = ${stockCounts.id})`,
-			adjusted: sql<number>`(select count(*)::int from stock_count_lines l where l.count_id = ${stockCounts.id} and l.variance_milli <> 0)`
+			lines: sql<number>`(select count(*)::int from stock_count_lines l where l.count_id = stock_counts.id)`,
+			adjusted: sql<number>`(select count(*)::int from stock_count_lines l where l.count_id = stock_counts.id and l.variance_milli <> 0)`
 		})
 		.from(stockCounts)
 		.where(and(eq(stockCounts.hotelId, hotelId), onlyId ? eq(stockCounts.id, onlyId) : undefined))
@@ -770,7 +780,7 @@ export async function getCount(hotelId: string, countId: string) {
 			reason: stockCountLines.reason,
 			expectedMilli: stockCountLines.expectedMilli,
 			varianceMilli: stockCountLines.varianceMilli,
-			onHandMilli: sql<string>`(select coalesce(sum(m.qty_milli), 0) from stock_movements m where m.item_id = ${stockItems.id})`
+			onHandMilli: sql<string>`(select coalesce(sum(m.qty_milli), 0) from stock_movements m where m.item_id = stock_items.id)`
 		})
 		.from(stockCountLines)
 		.innerJoin(stockItems, eq(stockItems.id, stockCountLines.itemId))
@@ -790,4 +800,217 @@ export async function countLowStock(hotelId: string): Promise<number> {
 		) x
 		where x.qty < 0 or (x.lvl is not null and x.qty <= x.lvl)`);
 	return Number(r?.n ?? 0);
+}
+
+// ---------------------------------------------------------------------------
+// Restock: one supplier receipt → stock batches + one Finance expense
+// ---------------------------------------------------------------------------
+
+export interface RestockLine {
+	itemId: string;
+	qtyMilli: number;
+	expiresOn?: string | null;
+}
+
+export interface RestockInput {
+	hotelId: string;
+	receiptDate: string;
+	vendorId: string | null;
+	vendorName: string | null;
+	receiptNo: string | null;
+	totalCentavos: number;
+	isVatable: boolean;
+	categoryId: string;
+	source: 'hotel' | 'dining';
+	attachmentUrl: string | null;
+	note: string | null;
+	lines: RestockLine[];
+	actor: SessionUser | null;
+}
+
+/**
+ * Encodes a supplier receipt: every line becomes a FIFO batch tagged with the restock, and the
+ * receipt total becomes one expense (unpaid — Finance pays it) in the same transaction, so stock
+ * and money can never disagree. Returns the restock id.
+ */
+export async function createRestock(input: RestockInput): Promise<string> {
+	if (!input.lines.length) throw new StockError('Add at least one item from the receipt.');
+	const ids = input.lines.map((l) => l.itemId);
+	if (new Set(ids).size !== ids.length) throw new StockError('An item is listed twice. Put its whole quantity on one line.');
+	for (const l of input.lines) assertQty(l.qtyMilli);
+	if (!Number.isSafeInteger(input.totalCentavos) || input.totalCentavos <= 0) throw new StockError('Enter the receipt total.');
+	const supplier = input.vendorName?.trim() || null;
+
+	return db.transaction(async (tx) => {
+		const items = await tx
+			.select({ id: stockItems.id, name: stockItems.name, unit: stockItems.unit, isActive: stockItems.isActive })
+			.from(stockItems)
+			.where(and(eq(stockItems.hotelId, input.hotelId), inArray(stockItems.id, ids), isNull(stockItems.deletedAt)));
+		if (items.length !== ids.length) throw new StockError('An item on the receipt was not found.');
+		const inactive = items.filter((i) => !i.isActive);
+		if (inactive.length) throw new StockError(`${inactive.map((i) => i.name).join(', ')} is inactive. Turn it back on first.`);
+		const byId = new Map(items.map((i) => [i.id, i]));
+
+		const [r] = await tx
+			.insert(stockRestocks)
+			.values({
+				hotelId: input.hotelId,
+				receiptDate: input.receiptDate,
+				vendorId: input.vendorId,
+				vendorName: input.vendorId ? null : supplier,
+				receiptNo: input.receiptNo?.trim() || null,
+				totalCentavos: input.totalCentavos,
+				attachmentUrl: input.attachmentUrl,
+				note: input.note?.trim() || null,
+				createdBy: input.actor?.id ?? null
+			})
+			.returning({ id: stockRestocks.id });
+
+		const label = input.receiptNo?.trim() ? `Receipt ${input.receiptNo.trim()}` : 'Restock';
+		for (const l of [...input.lines].sort((a, b) => a.itemId.localeCompare(b.itemId))) {
+			await lockItem(tx, input.hotelId, l.itemId);
+			const before = await onHand(tx, l.itemId);
+			await tx.insert(stockMovements).values({
+				hotelId: input.hotelId,
+				itemId: l.itemId,
+				type: 'restock',
+				qtyMilli: l.qtyMilli,
+				qtyRemainingMilli: batchCredit(before, l.qtyMilli),
+				expiresOn: l.expiresOn || null,
+				note: label,
+				restockId: r!.id,
+				createdBy: input.actor?.id ?? null
+			});
+		}
+
+		const listed = input.lines.map((l) => `${byId.get(l.itemId)!.name} ${formatQty(l.qtyMilli, byId.get(l.itemId)!.unit)}`).join('; ');
+		const { expenseId } = await createExpense({
+			hotelId: input.hotelId,
+			expenseDate: input.receiptDate,
+			categoryId: input.categoryId,
+			vendorId: input.vendorId,
+			vendorName: input.vendorId ? null : supplier,
+			description: `Stock restock${supplier ? ` — ${supplier}` : ''}`.slice(0, 300),
+			source: input.source,
+			vendorInvoiceNo: input.receiptNo?.trim() || null,
+			grossCentavos: input.totalCentavos,
+			isVatable: input.isVatable,
+			notes: `From Inventory → Restock: ${listed}`.slice(0, 1000),
+			attachmentUrl: input.attachmentUrl,
+			actor: input.actor,
+			tx
+		});
+		await tx.update(stockRestocks).set({ expenseId }).where(eq(stockRestocks.id, r!.id));
+		return r!.id;
+	});
+}
+
+/**
+ * Voids a wrongly-encoded receipt: takes its batches back out and voids its expense, together.
+ * Refused once any of the delivery has been used (correct the count instead) or once Finance has
+ * paid the expense (the payment has to be undone in Finance first).
+ */
+export async function voidRestock(hotelId: string, restockId: string, reason: string, actor: SessionUser | null): Promise<void> {
+	const why = reason.trim();
+	if (!why) throw new StockError('Say why this receipt is being voided.');
+	await db.transaction(async (tx) => {
+		const [r] = await tx
+			.select()
+			.from(stockRestocks)
+			.where(and(eq(stockRestocks.id, restockId), eq(stockRestocks.hotelId, hotelId)))
+			.for('update');
+		if (!r) throw new StockError('That receipt was not found.');
+		if (r.voidedAt) throw new StockError('This receipt is already voided.');
+		if (r.expenseId) {
+			const [e] = await tx.select({ status: expenses.status }).from(expenses).where(eq(expenses.id, r.expenseId));
+			if (e?.status === 'paid') throw new StockError('Finance has already paid this receipt. Ask Finance to void the expense first.');
+		}
+
+		const batches = await tx
+			.select({ id: stockMovements.id, itemId: stockMovements.itemId, qty: stockMovements.qtyMilli, left: stockMovements.qtyRemainingMilli })
+			.from(stockMovements)
+			.where(and(eq(stockMovements.restockId, restockId), eq(stockMovements.type, 'restock')))
+			.orderBy(asc(stockMovements.itemId));
+		const used: string[] = [];
+		for (const b of batches) {
+			const item = await lockItem(tx, hotelId, b.itemId);
+			const [fresh] = await tx.select({ left: stockMovements.qtyRemainingMilli }).from(stockMovements).where(eq(stockMovements.id, b.id));
+			if ((fresh?.left ?? 0) !== b.qty) used.push(item.name);
+		}
+		if (used.length) throw new StockError(`Some of this delivery is already used (${used.join(', ')}). Correct the count instead of voiding.`);
+
+		for (const b of batches) {
+			await tx.update(stockMovements).set({ qtyRemainingMilli: 0 }).where(eq(stockMovements.id, b.id));
+			await tx.insert(stockMovements).values({
+				hotelId,
+				itemId: b.itemId,
+				type: 'restock_void',
+				qtyMilli: -b.qty,
+				consumedFromId: b.id,
+				restockId,
+				note: `Receipt voided: ${why}`,
+				createdBy: actor?.id ?? null
+			});
+		}
+		if (r.expenseId) {
+			const [e] = await tx.select({ status: expenses.status }).from(expenses).where(eq(expenses.id, r.expenseId));
+			if (e && e.status !== 'void') await voidExpense(hotelId, r.expenseId, `Restock voided: ${why}`, actor, tx);
+		}
+		await tx.update(stockRestocks).set({ voidedAt: new Date(), voidedBy: actor?.id ?? null, voidReason: why }).where(eq(stockRestocks.id, restockId));
+		await writeAudit({ hotelId, actor, action: 'stock_restock.void', entityType: 'stock_restock', entityId: restockId, after: { reason: why }, tx });
+	});
+}
+
+const restockSupplier = sql<string | null>`coalesce((select v.name from vendors v where v.id = stock_restocks.vendor_id), stock_restocks.vendor_name)`;
+
+export async function listRestocks(hotelId: string, onlyId?: string) {
+	return db
+		.select({
+			id: stockRestocks.id,
+			receiptDate: stockRestocks.receiptDate,
+			supplier: restockSupplier,
+			receiptNo: stockRestocks.receiptNo,
+			totalCentavos: stockRestocks.totalCentavos,
+			attachmentUrl: stockRestocks.attachmentUrl,
+			note: stockRestocks.note,
+			expenseId: stockRestocks.expenseId,
+			expenseStatus: sql<string | null>`(select e.status from expenses e where e.id = stock_restocks.expense_id)`,
+			createdAt: stockRestocks.createdAt,
+			createdByName: sql<string | null>`(select u.name from users u where u.id = stock_restocks.created_by)`,
+			voidedAt: stockRestocks.voidedAt,
+			voidReason: stockRestocks.voidReason,
+			lines: sql<number>`(select count(*)::int from stock_movements m where m.restock_id = stock_restocks.id and m.type = 'restock')`
+		})
+		.from(stockRestocks)
+		.where(and(eq(stockRestocks.hotelId, hotelId), onlyId ? eq(stockRestocks.id, onlyId) : undefined))
+		.orderBy(desc(stockRestocks.receiptDate), desc(stockRestocks.createdAt))
+		.limit(200);
+}
+
+export async function getRestock(hotelId: string, restockId: string) {
+	const [restock] = await listRestocks(hotelId, restockId);
+	if (!restock) return null;
+	const lines = await db
+		.select({
+			itemId: stockItems.id,
+			name: stockItems.name,
+			unit: stockItems.unit,
+			qtyMilli: stockMovements.qtyMilli,
+			remainingMilli: stockMovements.qtyRemainingMilli,
+			expiresOn: stockMovements.expiresOn
+		})
+		.from(stockMovements)
+		.innerJoin(stockItems, eq(stockItems.id, stockMovements.itemId))
+		.where(and(eq(stockMovements.restockId, restockId), eq(stockMovements.type, 'restock')))
+		.orderBy(asc(stockItems.name));
+	return { restock, lines };
+}
+
+/** The restock an expense came from, if any — Finance links back to it. */
+export async function restockForExpense(hotelId: string, expenseId: string) {
+	const [r] = await db
+		.select({ id: stockRestocks.id, receiptNo: stockRestocks.receiptNo })
+		.from(stockRestocks)
+		.where(and(eq(stockRestocks.hotelId, hotelId), eq(stockRestocks.expenseId, expenseId)));
+	return r ?? null;
 }

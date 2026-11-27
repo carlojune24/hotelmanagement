@@ -450,7 +450,12 @@
 							{#each data.checkinKit as k (k.stockItemId)}
 								<li class="flex items-center gap-3">
 									<input type="hidden" name="kitItem" value={k.stockItemId} />
-									<Label for="kit-{k.stockItemId}" class="min-w-0 flex-1 truncate text-sm font-normal">{k.name}</Label>
+									<Label for="kit-{k.stockItemId}" class="min-w-0 flex-1 text-sm font-normal">
+										<span class="block truncate">{k.name}</span>
+										<span class="block text-xs text-ink-muted">
+											{k.perMilli / 1000} per {k.per} × {k.times} {k.per}{k.times === 1 ? '' : 's'}
+										</span>
+									</Label>
 									<Input
 										id="kit-{k.stockItemId}"
 										name="kitQty"
