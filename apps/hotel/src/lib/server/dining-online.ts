@@ -13,6 +13,7 @@ import {
 	hotels
 } from './db/schema/index';
 import { writeAudit } from './audit';
+import { syncDiningOrderStock } from './stock';
 import type { SessionUser } from './auth/session';
 import { FinanceError, businessDateFor } from './finance/shared';
 import { recordCashMovement } from './finance/cash';
@@ -529,6 +530,7 @@ export async function confirmDiningPayment(args: {
 				updatedAt: new Date()
 			})
 			.where(eq(diningOrders.id, order.id));
+		await syncDiningOrderStock(tx, order.hotelId, order.id);
 
 		// A pre-order paid after its party was already seated joins that table's bill now; otherwise it
 		// would sit with no table. If the table carries someone else's bill it is left for staff to place.
@@ -835,6 +837,7 @@ export async function cancelDiningOrderAsGuest(hotelId: string, code: string, to
 		if (order.paymentStatus !== 'unpaid') throw new OrderError('This order is paid. Please send a cancellation request instead.');
 		if (order.status !== 'pending_payment' && order.status !== 'pending_acceptance' && order.status !== 'new') throw new OrderError('The kitchen has already started this order. Please contact the restaurant.');
 		await tx.update(diningOrders).set({ status: 'cancelled', cancelledAt: new Date(), cancelReason: 'Cancelled by the guest.', updatedAt: new Date() }).where(eq(diningOrders.id, order.id));
+		await syncDiningOrderStock(tx, hotelId, order.id);
 		const pending = await tx
 			.select({ id: diningPayments.id, session: diningPayments.paymongoCheckoutSessionId })
 			.from(diningPayments)
@@ -898,6 +901,7 @@ export async function respondToDiningCancellation(args: { hotelId: string; order
 				.update(diningOrders)
 				.set({ status: 'cancelled', cancelledAt: new Date(), cancelReason: 'Cancelled at the guest\'s request.', cancelRequestedAt: null, updatedAt: new Date() })
 				.where(eq(diningOrders.id, order.id));
+			await syncDiningOrderStock(tx, args.hotelId, order.id, args.actor?.id ?? null);
 		} else {
 			await tx.update(diningOrders).set({ cancelRequestedAt: null, updatedAt: new Date() }).where(eq(diningOrders.id, order.id));
 		}

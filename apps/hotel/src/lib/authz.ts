@@ -82,15 +82,18 @@ export const ROLE_CAPS: Record<MembershipRole, string[]> = {
 		// the Kitchen module, so front desk only gets a read-only view of it.
 		'dining:read',
 		'dining:write',
-		'kitchen:read'
+		'kitchen:read',
+		// Guest-amenity stock (soap, shampoo) — receive and write off; adding items stays with admin.
+		'inventory:read',
+		'inventory:write'
 	],
-	housekeeping: ['housekeeping:*', 'room:read'],
+	housekeeping: ['housekeeping:*', 'room:read', 'inventory:read', 'inventory:write'],
 	// A dining account runs the Dining section end to end: Floor, Orders, Reservations and the guest bill,
 	// plus setting the floor up (areas, tables, QR codes), the menu and add-ons (`dining:manage`).
 	// `dining:shift` is its own till, not the front desk's: the Orders toolbar can only ever open
 	// and close the drawer Finance assigned to dining. No payments module, finance, bookings,
 	// Kitchen or hotel admin.
-	dining: ['dining:read', 'dining:write', 'dining:manage', 'dining:shift', 'dining:sell'],
+	dining: ['dining:read', 'dining:write', 'dining:manage', 'dining:shift', 'dining:sell', 'inventory:read', 'inventory:write'],
 	// A cook sees only the Kitchen module: live board, prep list, sold-out list and history.
 	// No Dining, payments or finance. Station setup (`kitchen:manage`) stays with hotel_admin.
 	kitchen: ['kitchen:read', 'kitchen:write'],
@@ -185,6 +188,7 @@ export const PERMISSION_SECTIONS = [
 	'Dining',
 	'Kitchen',
 	'Customer Support',
+	'Inventory',
 	'Settings',
 	'Across the app'
 ] as const;
@@ -270,6 +274,11 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 	{ cap: 'support:*', label: 'Everything in Customer Support', section: 'Customer Support' },
 	{ cap: 'support:read', label: 'Answer guest chats in the Support inbox', section: 'Customer Support' },
 	{ cap: 'support:manage', label: 'Edit the support FAQ and close any chat', section: 'Customer Support' },
+
+	{ cap: 'inventory:*', label: 'Everything in Inventory', section: 'Inventory' },
+	{ cap: 'inventory:read', label: 'See stock on hand and the stock movements', section: 'Inventory' },
+	{ cap: 'inventory:write', label: 'Receive stock, record waste and stock corrections', section: 'Inventory' },
+	{ cap: 'inventory:manage', label: 'Add and edit stock items (name, department, unit, reorder level)', section: 'Inventory' },
 
 	{
 		cap: 'hotel:admin',

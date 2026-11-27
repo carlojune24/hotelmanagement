@@ -13,6 +13,7 @@
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import LayersIcon from '@lucide/svelte/icons/layers';
 	import type { AddonGroupWithAddons } from '$lib/server/dining-menu';
+	import RecipeEditor from '$lib/components/stock/recipe-editor.svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -257,7 +258,7 @@
 
 <!-- Add-on editor -->
 <Dialog.Root bind:open={addonDialog.open}>
-	<Dialog.Content class="sm:max-w-sm">
+	<Dialog.Content class="max-h-[90vh] overflow-y-auto sm:max-w-md">
 		{#if addonDialog.addon}
 			{@const addon = addonDialog.addon}
 			<Dialog.Header>
@@ -286,6 +287,17 @@
 					Available today
 				</Label>
 			</form>
+			{#if data.stockChoices}
+				{#key addon.id}
+					<RecipeEditor
+						hidden={{ owner: 'addonId', ownerId: addon.id }}
+						hint="Taken from stock each time a guest picks this, per pick. Saved on its own."
+						lines={data.recipes.filter((r) => r.addonId === addon.id)}
+						choices={data.stockChoices}
+						inventoryHref="/{page.params.hotel}/management/inventory/items"
+					/>
+				{/key}
+			{/if}
 			<Dialog.Footer class="sm:justify-between">
 				<form method="POST" action="?/deleteAddon" use:enhance>
 					<input type="hidden" name="addonId" value={addon.id} />

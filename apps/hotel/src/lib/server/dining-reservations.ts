@@ -15,6 +15,7 @@ import {
 	type DiningTable
 } from './db/schema/index';
 import { writeAudit } from './audit';
+import { syncDiningOrderStock } from './stock';
 import { OrderError, createDiningOrder, ensureOpenCheck, type OrderLineInput } from './dining-orders';
 import type { SessionUser } from './auth/session';
 import { heldForReservation } from './dining-hold';
@@ -432,6 +433,7 @@ async function releasePreOrders(
 		)
 		.returning({ id: diningOrders.id, code: diningOrders.code, paymentStatus: diningOrders.paymentStatus });
 	for (const o of cancelled) {
+		await syncDiningOrderStock(tx, hotelId, o.id, actor?.id ?? null);
 		await writeAudit({
 			tx,
 			hotelId,

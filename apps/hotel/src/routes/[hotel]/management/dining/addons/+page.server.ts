@@ -8,6 +8,8 @@ import { requireCap } from '$lib/server/auth/rbac';
 import { writeAudit } from '$lib/server/audit';
 import { loadVenueMenu, venueBelongsToHotel } from '$lib/server/dining-menu';
 import { friendlyIssue, moneyPhp, recordId } from '$lib/rate-validation';
+import { listRecipes, listStockChoices } from '$lib/server/stock';
+import { saveRecipeAction } from '$lib/server/stock-recipe-action';
 import type { RequestEvent } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -23,7 +25,11 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const requested = url.searchParams.get('venue');
 	const venue = venues.find((v) => v.id === requested) ?? venues[0] ?? null;
 	const menu = venue ? await loadVenueMenu(hotelId, venue.id) : null;
-	return { venues, venue, groups: (menu?.groups ?? []).filter((g) => !g.menuItemId) }; // a dish's own sizes are edited on the dish
+	const { user, role } = locals;
+	const canManage = !!user?.isPlatformAdmin || (!!role && (roleCan(role.capabilities, 'hotel:admin') || roleCan(role.capabilities, 'dining:manage')));
+	const [stockChoices, recipes] = canManage ? await Promise.all([listStockChoices(hotelId), listRecipes(hotelId)]) : [null, []];
+	// a dish's own sizes are edited on the dish
+	return { venues, venue, groups: (menu?.groups ?? []).filter((g) => !g.menuItemId), stockChoices, recipes };
 };
 
 function requireManage(event: RequestEvent) {
@@ -56,6 +62,10 @@ const groupSchema = z
 const firstMessage = (e: z.ZodError, fallback: string) => e.issues[0]?.message ?? fallback;
 
 export const actions: Actions = {
+	saveRecipe: async (event) => {
+		requireManage(event);
+		return saveRecipeAction(event);
+	},
 	createGroup: async (event) => {
 		requireManage(event);
 		const hotelId = event.locals.hotel!.id;

@@ -17,6 +17,7 @@
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import BanIcon from '@lucide/svelte/icons/ban';
 	import type { MenuItemWithAddons } from '$lib/server/dining-menu';
+	import RecipeEditor from '$lib/components/stock/recipe-editor.svelte';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -514,6 +515,17 @@
 					</Label>
 				</div>
 			</form>
+			{#if item && data.stockChoices}
+				{#key item.id}
+					<RecipeEditor
+						hidden={{ owner: 'menuItemId', ownerId: item.id }}
+						hint="Taken from stock each time this is ordered, per serving. Saved on its own."
+						lines={data.recipes.filter((r) => r.menuItemId === item.id)}
+						choices={data.stockChoices}
+						inventoryHref="/{page.params.hotel}/management/inventory/items"
+					/>
+				{/key}
+			{/if}
 			<Dialog.Footer class="sm:justify-between">
 				{#if item}
 					<form method="POST" action="?/deleteItem" use:enhance>

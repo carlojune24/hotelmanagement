@@ -23,6 +23,8 @@ import {
 	venueBelongsToHotel
 } from '$lib/server/dining-menu';
 import { friendlyIssue, moneyPhp, recordId } from '$lib/rate-validation';
+import { listRecipes, listStockChoices } from '$lib/server/stock';
+import { saveRecipeAction } from '$lib/server/stock-recipe-action';
 import type { RequestEvent } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -69,7 +71,10 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		(!!role && (roleCan(role.capabilities, 'hotel:admin') || roleCan(role.capabilities, 'dining:manage')));
 	const stations = canManage ? await ensureDefaultStation(hotelId) : await listStations(hotelId);
 
-	return { venues, venue, menu, stations, removedItems };
+	// Ingredients are edited by whoever edits the menu.
+	const [stockChoices, recipes] = canManage ? await Promise.all([listStockChoices(hotelId), listRecipes(hotelId)]) : [null, []];
+
+	return { venues, venue, menu, stations, removedItems, stockChoices, recipes };
 };
 
 /** Menu edits need `dining:manage` (hotel admins also qualify through `hotel:admin`). */
@@ -121,6 +126,10 @@ function readSizes(form: FormData) {
 }
 
 export const actions: Actions = {
+	saveRecipe: async (event) => {
+		requireManage(event);
+		return saveRecipeAction(event);
+	},
 	createCategory: async (event) => {
 		requireManage(event);
 		const hotelId = event.locals.hotel!.id;

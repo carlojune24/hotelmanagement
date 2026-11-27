@@ -855,6 +855,34 @@
       "when": 1795522969881,
       "tag": "0121_paymongo_paused",
       "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1795778219641,
+      "tag": "0122_stock",
+      "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1795780057488,
+      "tag": "0123_stock_recipes",
+      "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1795781468902,
+      "tag": "0124_stock_checkin_kits",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1795782421376,
+      "tag": "0125_stock_counts",
+      "breakpoints": true
     }
   ]
 }

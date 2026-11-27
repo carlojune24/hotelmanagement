@@ -4,6 +4,7 @@ import { NO_BADGES, listDiningBadges } from '$lib/server/dining-badges';
 import { countUnreadGuestMessages } from '$lib/server/guest-messages';
 import { countUpcomingReservations } from '$lib/server/reservations';
 import { countSupportAttention } from '$lib/server/support-chat';
+import { countLowStock } from '$lib/server/stock';
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = async ({ locals, url, route, params, depends }) => {
@@ -15,6 +16,7 @@ export const load: LayoutServerLoad = async ({ locals, url, route, params, depen
 			user: locals.user,
 			hotel: locals.hotel,
 			role: locals.role,
+			lowStockCount: 0,
 			unreadMessageCount: 0,
 			upcomingReservationCount: 0,
 			supportBadge: 0,
@@ -59,10 +61,14 @@ export const load: LayoutServerLoad = async ({ locals, url, route, params, depen
 		? await countSupportAttention(locals.hotel!.id, locals.user.id)
 		: { queued: 0, unreadMine: 0 };
 
+	// Stock items low or below zero, for the Inventory sidebar item.
+	const lowStockCount = can('inventory:read') ? await countLowStock(locals.hotel!.id) : 0;
+
 	return {
 		user: locals.user,
 		hotel: locals.hotel,
 		role: locals.role,
+		lowStockCount,
 		unreadMessageCount,
 		upcomingReservationCount,
 		supportBadge: supportAttention.queued + supportAttention.unreadMine,

@@ -96,8 +96,13 @@ describe('the dining role', () => {
 			'dining:write',
 			'dining:manage',
 			'dining:shift',
-			'dining:sell'
+			'dining:sell',
+			// Kitchen stock: receive and write off. Adding items (`inventory:manage`) stays with admin.
+			'inventory:read',
+			'inventory:write'
 		]);
+		expect(roleCan(ROLE_CAPS.dining, 'inventory:manage')).toBe(false);
+		expect(isDiningOnly(ROLE_CAPS.dining)).toBe(true);
 		// `dining:shift` is dining's own drawer, not the front desk's — the Orders toolbar can
 		// only ever open and close the till Finance assigned to dining, and "Everything in
 		// Dining" (`dining:*`) covers it.

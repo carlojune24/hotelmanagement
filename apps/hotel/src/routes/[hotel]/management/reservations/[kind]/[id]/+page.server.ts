@@ -46,6 +46,7 @@ import {
 } from '$lib/server/booking-modify';
 import { getHoldDeadline, PENDING_ORDER_TTL_MINUTES } from '$lib/server/orders';
 import { saveUpload } from '$lib/server/uploads';
+import { StockError, suggestedKit } from '$lib/server/stock';
 import {
 	SecurityDepositError,
 	collectSecurityDeposit,
@@ -125,12 +126,15 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		// What the SC/PWD discount could cover, for the check-in form (only while none is applied).
 		const scPwdOptions = scPwdClaim ? null : await loadScPwdOptions(hotelId, params.id);
 		await markThreadReadByStaff(detail.order.id);
+		// The room type's amenity kit, scaled to this booking, for the check-in form to pre-fill.
+		const checkinKit = detail.booking.status === 'confirmed' ? await suggestedKit(hotelId, params.id) : [];
 
 		return {
 			kind: 'room' as const,
 			detail,
 			ota,
 			eligibleRooms,
+			checkinKit,
 			cancelQuote,
 			canMarkNoShow,
 			canModifyStay,
@@ -220,6 +224,15 @@ export const actions: Actions = {
 		const touristCount =
 			Number.isInteger(touristRaw) && touristRaw >= 1 && touristRaw <= 99 ? touristRaw : null;
 
+		// Amenities handed out: only the kit's own items, at whatever quantity staff confirmed
+		// (in the item's base unit; 0 or blank = not given). Anything else in the form is ignored.
+		const kitAllowed = new Set((await suggestedKit(hotelId, event.params.id)).map((k) => k.stockItemId));
+		const kitQtys = raw.getAll('kitQty').map(Number);
+		const kit = raw
+			.getAll('kitItem')
+			.map((id, i) => ({ stockItemId: String(id), qtyMilli: Math.round((kitQtys[i] ?? 0) * 1000) }))
+			.filter((k) => kitAllowed.has(k.stockItemId) && Number.isSafeInteger(k.qtyMilli) && k.qtyMilli > 0);
+
 		try {
 			const result = await checkInBooking(
 				hotelId,
@@ -227,7 +240,8 @@ export const actions: Actions = {
 				parsed.data,
 				event.locals.user,
 				guestIdPhotoUrl,
-				touristCount
+				touristCount,
+				kit
 			);
 
 			// Optional — a refundable security deposit hold, amount pre-filled from the
@@ -306,7 +320,7 @@ export const actions: Actions = {
 			// `room_assignments` row instead.
 			redirect(303, `/${event.params.hotel}/management/front-desk?roomId=${result.roomIds[0]}`);
 		} catch (e) {
-			if (e instanceof CheckInError) return fail(400, { error: e.message });
+			if (e instanceof CheckInError || e instanceof StockError) return fail(400, { error: e.message });
 			throw e;
 		}
 	},
