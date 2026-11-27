@@ -1,0 +1,1 @@
+ALTER TABLE "expenses" ADD COLUMN "vendor_name" text;

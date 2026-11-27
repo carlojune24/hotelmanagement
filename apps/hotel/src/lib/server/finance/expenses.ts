@@ -43,6 +43,8 @@ export interface CreateExpenseInput {
 	expenseDate: string;
 	categoryId: string;
 	vendorId?: string | null;
+	/** One-off vendor name, used only when no saved `vendorId`. */
+	vendorName?: string | null;
 	description: string;
 	/** Hotel or dining; defaults to hotel. */
 	source?: Expense['source'];
@@ -90,6 +92,7 @@ export async function createExpense(
 		expenseDate: input.expenseDate,
 		categoryId: input.categoryId,
 		vendorId: input.vendorId ?? null,
+		vendorName: input.vendorId ? null : input.vendorName?.trim() || null,
 		description: input.description.trim(),
 		source: input.source ?? 'hotel',
 		vendorInvoiceNo: input.vendorInvoiceNo?.trim() || null,
@@ -148,6 +151,7 @@ export async function updateExpense(
 			expenseDate: patch.expenseDate ?? e.expenseDate,
 			categoryId: patch.categoryId ?? e.categoryId,
 			vendorId: patch.vendorId === undefined ? e.vendorId : patch.vendorId,
+			vendorName: patch.vendorName === undefined ? e.vendorName : patch.vendorName?.trim() || null,
 			description: patch.description?.trim() ?? e.description,
 			vendorInvoiceNo:
 				patch.vendorInvoiceNo === undefined
@@ -276,7 +280,7 @@ export async function markExpensePaid(input: {
 				cashAccountId: input.paidFromAccountId,
 				amountCentavos: payout,
 				counterpartyType: 'vendor',
-				counterpartyName: vendor?.name ?? null,
+				counterpartyName: vendor?.name ?? e.vendorName ?? null,
 				counterpartyId: e.vendorId ?? null,
 				sourceType: 'expense',
 				sourceId: e.id,
@@ -430,7 +434,7 @@ export async function listExpenses(hotelId: string, filters: ExpenseFilters = {}
 			source: expenses.source,
 			categoryName: expenseCategories.name,
 			categoryGroup: expenseCategories.group,
-			vendorName: vendors.name,
+			vendorName: sql<string | null>`coalesce(${vendors.name}, ${expenses.vendorName})`,
 			grossCentavos: expenses.grossCentavos,
 			inputVatCentavos: expenses.inputVatCentavos,
 			netOfVatCentavos: expenses.netOfVatCentavos,
