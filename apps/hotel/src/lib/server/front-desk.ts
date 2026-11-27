@@ -42,6 +42,7 @@ import { getBirSettings, issueInvoice } from './finance/documents';
 import { priceEventHall, type PriceBreakdown } from './pricing';
 import { addFlatFeeCentavos, scaleRoomPrice } from '$lib/pricing-utils';
 import { writeAudit } from './audit';
+import { handOutKit } from './stock';
 import {
 	ScPwdDiscountError,
 	applyScPwdDiscountTx,
@@ -130,7 +131,10 @@ export async function checkInBooking(
 	 *  widget). Optional: check-in never blocks on it. */
 	guestIdPhotoUrl?: string | null,
 	/** Optional headcount recorded at check-in; null/undefined = not recorded. */
-	touristCount?: number | null
+	touristCount?: number | null,
+	/** Guest amenities handed out, already confirmed by staff (see `suggestedKit`). Taken from
+	 *  stock in this same transaction; may take stock below zero but never blocks check-in. */
+	kit: { stockItemId: string; qtyMilli: number }[] = []
 ): Promise<{ roomIds: string[] }> {
 	const uniqueRoomIds = [...new Set(roomIds)];
 	if (uniqueRoomIds.length !== roomIds.length) {
@@ -249,6 +253,7 @@ export async function checkInBooking(
 			toStatus: 'checked_in',
 			note: notes.length ? notes.join(' · ') : null
 		});
+		await handOutKit(tx, { hotelId, bookingId, lines: kit, actorId: actor?.id ?? null });
 
 		return finalRoomIds;
 	});

@@ -21,6 +21,7 @@
 	import StarIcon from '@lucide/svelte/icons/star';
 	import AccessibilityIcon from '@lucide/svelte/icons/accessibility';
 	import ImageIcon from '@lucide/svelte/icons/image';
+	import RecipeEditor from '$lib/components/stock/recipe-editor.svelte';
 	import type { ActionData, PageData } from './$types';
 	import type { BedConfigEntry, RoomPhoto } from '$lib/server/db/schema/inventory';
 
@@ -735,6 +736,23 @@
 		</Select.Root>
 		<Button type="submit" variant="outline" size="sm">Upload photos</Button>
 	</form>
+</div>
+
+<div class="mt-6 rounded-xl border border-border bg-surface p-4 shadow-sm [&>section]:border-t-0 [&>section]:pt-0">
+	{#key t.id}
+		<RecipeEditor
+			action="?/saveKit"
+			hidden={{}}
+			title="Check-in amenity kit"
+			hint="Handed to the guest at check-in and taken from stock. Per room counts once per room booked; per guest counts once per booked guest. The front desk can change the numbers on the check-in form. Leave empty for no kit."
+			withPer
+			saveLabel="Save kit"
+			emptyChoices="No front desk or housekeeping supplies in stock yet."
+			lines={data.kit}
+			choices={data.kitChoices}
+			inventoryHref="{base}/inventory/items"
+		/>
+	{/key}
 </div>
 
 <Separator class="my-6" />

@@ -14,6 +14,7 @@ import {
 } from '$lib/server/db/schema/index';
 import { AMENITY_CATEGORY_LABELS, AMENITY_CATEGORY_ORDER } from '$lib/server/amenities/catalog';
 import { requireCap } from '$lib/server/auth/rbac';
+import { getKit, listKitChoices, setKit, StockError } from '$lib/server/stock';
 import { writeAudit } from '$lib/server/audit';
 import { deleteUploadIfOwned, saveUpload, UploadValidationError } from '$lib/server/uploads';
 import type { BedConfigEntry, RoomPhoto } from '$lib/server/db/schema/inventory';
@@ -93,9 +94,15 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		amenityGroups,
 		selectedAmenities,
 		currency: locals.hotel!.currency,
-		vatRateBps: locals.hotel!.vatRateBps
+		vatRateBps: locals.hotel!.vatRateBps,
+		kit: await getKit(locals.hotel!.id, params.roomTypeId),
+		kitChoices: await listKitChoices(locals.hotel!.id)
 	};
 };
+
+const kitSchema = z
+	.array(z.object({ stockItemId: z.string().uuid(), qtyMilli: z.number().int().positive().max(1e12), per: z.enum(['room', 'guest']) }))
+	.max(50);
 
 const updateSchema = z.object({
 	name: z.string().min(2).max(120),
@@ -135,6 +142,22 @@ function parseJsonArray<T>(raw: string): T[] {
 }
 
 export const actions: Actions = {
+	saveKit: async (event) => {
+		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
+		let lines: z.infer<typeof kitSchema>;
+		try {
+			lines = kitSchema.parse(JSON.parse(String((await event.request.formData()).get('lines') ?? '[]')));
+		} catch {
+			return fail(400, { error: 'Check the kit quantities.' });
+		}
+		try {
+			await setKit(event.locals.hotel!.id, event.params.roomTypeId, lines, event.locals.user);
+		} catch (e) {
+			if (e instanceof StockError) return fail(400, { error: e.message });
+			throw e;
+		}
+		return { ok: lines.length ? 'Amenity kit saved.' : 'Amenity kit cleared.' };
+	},
 	update: async (event) => {
 		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
 		const hotelId = event.locals.hotel!.id;

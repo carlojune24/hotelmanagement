@@ -1,0 +1,114 @@
+<script lang="ts">
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
+	import * as Select from '$lib/components/ui/select/index.js';
+	import { formatQty } from '$lib/stock-units';
+	import type { PageData } from './$types';
+
+	let { data }: { data: PageData } = $props();
+
+	type Move = PageData['movements'][number];
+	type Kind = Move['type'];
+	const LABEL: Record<Kind, string> = {
+		restock: 'Received',
+		adjust_in: 'Count up',
+		waste: 'Waste',
+		adjust_out: 'Count down',
+		order: 'Dining order',
+		order_reverse: 'Order cancelled',
+		checkin_kit: 'Check-in amenities'
+	};
+	const FILTERS: { key: string; label: string; types: Kind[] }[] = [
+		{ key: '', label: 'All', types: [] },
+		{ key: 'in', label: 'Received', types: ['restock'] },
+		{ key: 'orders', label: 'Orders', types: ['order', 'order_reverse'] },
+		{ key: 'checkins', label: 'Check-ins', types: ['checkin_kit'] },
+		{ key: 'waste', label: 'Waste', types: ['waste'] },
+		{ key: 'count', label: 'Corrections', types: ['adjust_in', 'adjust_out'] }
+	];
+	let kind = $state('');
+	const shown = $derived.by(() => {
+		const f = FILTERS.find((x) => x.key === kind)!;
+		return f.types.length ? data.movements.filter((m) => f.types.includes(m.type)) : data.movements;
+	});
+
+	const when = $derived(
+		new Intl.DateTimeFormat('en-PH', { timeZone: data.timezone, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+	);
+	const dateFmt = new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+
+	const itemLabel = $derived(data.items.find((i) => i.id === data.itemId)?.name ?? 'All items');
+	function pickItem(id: string) {
+		const url = new URL(page.url);
+		if (id) url.searchParams.set('item', id);
+		else url.searchParams.delete('item');
+		goto(url, { keepFocus: true, noScroll: true });
+	}
+</script>
+
+<svelte:head><title>Movements · Inventory</title></svelte:head>
+
+<div class="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
+	<div class="max-w-5xl">
+		<h2 class="text-base font-semibold text-ink">Stock movements</h2>
+		<p class="mt-1 text-sm text-ink-muted">Every change to stock, newest first. A delivery shows how much of it is still left.</p>
+
+		<div class="mt-4 flex flex-wrap items-center gap-3">
+			<Select.Root type="single" value={data.itemId ?? ''} onValueChange={pickItem}>
+				<Select.Trigger class="h-11 w-56" aria-label="Item">{itemLabel}</Select.Trigger>
+				<Select.Content>
+					<Select.Item value="" label="All items" />
+					{#each data.items as i (i.id)}<Select.Item value={i.id} label={i.name} />{/each}
+				</Select.Content>
+			</Select.Root>
+			<div class="inline-flex rounded-md border border-border p-0.5 text-sm" role="radiogroup" aria-label="Kind of movement">
+				{#each FILTERS as f (f.key)}
+					<button
+						type="button"
+						role="radio"
+						aria-checked={kind === f.key}
+						class="h-10 rounded px-3 {kind === f.key ? 'bg-surface-2 font-medium text-ink' : 'text-ink-muted hover:text-ink'}"
+						onclick={() => (kind = f.key)}>{f.label}</button
+					>
+				{/each}
+			</div>
+		</div>
+
+		{#if shown.length}
+			<ul class="mt-6 divide-y divide-border border-t border-border">
+				{#each shown as m (m.id)}
+					<li class="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 py-2.5 sm:grid-cols-[8.5rem_1fr_auto]">
+						<span class="text-sm tabular-nums text-ink-muted sm:row-span-2">{when.format(new Date(m.createdAt))}</span>
+						<p class="col-start-1 min-w-0 truncate text-sm text-ink sm:col-start-2">
+							<span class="font-medium">{m.itemName}</span>
+							<span class="text-ink-muted">· {LABEL[m.type]}</span>
+						</p>
+						<span
+							class="row-span-2 self-center text-right text-base font-medium tabular-nums sm:col-start-3 sm:row-start-1 {m.qtyMilli < 0 ? 'text-ink' : 'text-brand'}"
+						>
+							{m.qtyMilli > 0 ? '+' : ''}{formatQty(m.qtyMilli, m.unit)}
+						</span>
+						<p class="col-start-1 min-w-0 text-xs text-ink-muted sm:col-start-2">
+							{[
+								m.note,
+								m.qtyRemainingMilli != null && m.qtyMilli > 0 ? `${formatQty(m.qtyRemainingMilli, m.unit)} of it left` : null,
+								m.packCount ? `${m.packCount}${m.packBonus ? ` + ${m.packBonus} free` : ''} × ${formatQty(m.packSizeMilli ?? 0, m.unit)}` : null,
+								m.expiresOn ? `expires ${dateFmt.format(new Date(`${m.expiresOn}T00:00:00Z`))}` : null,
+								m.type !== 'order' && m.type !== 'order_reverse' ? (m.byName ?? null) : null
+							]
+								.filter(Boolean)
+								.join(' · ')}
+						</p>
+					</li>
+				{/each}
+			</ul>
+			{#if data.movements.length >= 300}
+				<p class="mt-3 text-xs text-ink-muted">Showing the newest 300. Pick an item to narrow it down.</p>
+			{/if}
+		{:else}
+			<p class="mt-8 rounded-lg border border-dashed border-border px-4 py-10 text-center text-sm text-ink-muted">
+				{data.movements.length ? 'Nothing of that kind.' : 'No stock has moved yet.'}
+			</p>
+		{/if}
+	</div>
+</div>

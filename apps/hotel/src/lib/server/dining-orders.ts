@@ -24,6 +24,7 @@ import {
 	type DiningOrderType
 } from './db/schema/index';
 import { writeAudit } from './audit';
+import { syncDiningOrderStock } from './stock';
 import type { SessionUser } from './auth/session';
 import { FinanceError, businessDateFor } from './finance/shared';
 import { changeFor } from './finance/calc';
@@ -329,6 +330,7 @@ export async function createDiningOrder(
 			}
 		}
 
+		await syncDiningOrderStock(tx, hotelId, order.id, input.actor?.id ?? null);
 		await writeAudit({
 			tx,
 			hotelId,
@@ -617,6 +619,7 @@ export async function cancelDiningOrder(args: {
 			.update(diningOrders)
 			.set({ status: 'cancelled', cancelledAt: new Date(), cancelReason: reason, updatedAt: new Date() })
 			.where(eq(diningOrders.id, order.id));
+		await syncDiningOrderStock(tx, args.hotelId, order.id, args.actor?.id ?? null);
 		await writeAudit({
 			tx,
 			hotelId: args.hotelId,
@@ -657,6 +660,7 @@ export async function voidDiningOrder(args: { hotelId: string; orderId: string; 
 				.update(diningOrders)
 				.set({ status: 'cancelled', cancelledAt: new Date(), cancelReason: reason, updatedAt: new Date() })
 				.where(eq(diningOrders.id, locked.id));
+			await syncDiningOrderStock(tx, args.hotelId, locked.id, args.actor?.id ?? null);
 			await writeAudit({
 				tx,
 				hotelId: args.hotelId,
@@ -695,6 +699,7 @@ export async function acceptOrder(args: { hotelId: string; orderId: string; acto
 			.set({ status: 'new', checkId, updatedAt: new Date() })
 			.where(eq(diningOrders.id, order.id))
 			.returning();
+		await syncDiningOrderStock(tx, args.hotelId, order.id, args.actor?.id ?? null);
 		await writeAudit({
 			tx,
 			hotelId: args.hotelId,

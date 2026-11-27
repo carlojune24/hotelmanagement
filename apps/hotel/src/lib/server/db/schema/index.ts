@@ -8,6 +8,7 @@ export * from './roles';
 export * from './hotels';
 export * from './audit';
 export * from './inventory';
+export * from './stock';
 export * from './amenities';
 export * from './function-halls';
 export * from './dining';

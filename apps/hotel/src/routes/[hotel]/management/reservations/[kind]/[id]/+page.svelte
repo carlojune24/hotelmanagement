@@ -441,6 +441,33 @@
 					<span class="text-xs text-ink-muted">Booked for {data.detail.booking.occupancy}</span>
 				</div>
 			{/snippet}
+			{#snippet kitFields()}
+				{#if data.kind === 'room' && data.checkinKit.length}
+					<fieldset class="mt-3 rounded-md border border-border p-3">
+						<legend class="px-1 text-sm font-medium text-ink">Amenities handed out</legend>
+						<p class="text-xs text-ink-muted">From this room type's kit. Change a number if the guest gets more or less; 0 = not given.</p>
+						<ul class="mt-2 space-y-1.5">
+							{#each data.checkinKit as k (k.stockItemId)}
+								<li class="flex items-center gap-3">
+									<input type="hidden" name="kitItem" value={k.stockItemId} />
+									<Label for="kit-{k.stockItemId}" class="min-w-0 flex-1 truncate text-sm font-normal">{k.name}</Label>
+									<Input
+										id="kit-{k.stockItemId}"
+										name="kitQty"
+										type="number"
+										inputmode="decimal"
+										min="0"
+										step="any"
+										value={k.qtyMilli / 1000}
+										class="w-20 tabular-nums"
+									/>
+									<span class="w-8 text-xs text-ink-muted">{k.unit}</span>
+								</li>
+							{/each}
+						</ul>
+					</fieldset>
+				{/if}
+			{/snippet}
 			{#snippet securityDepositFields()}
 				{#if data.kind === 'room' && data.securityDeposit?.status === 'held'}
 					<p class="mt-3 text-sm text-ink-muted">
@@ -605,6 +632,7 @@
 							{/each}
 						</div>
 						{@render touristCountField()}
+						{@render kitFields()}
 						<div class="mt-3">
 							<IdCameraCapture />
 						</div>
@@ -637,6 +665,7 @@
 								{/each}
 							</div>
 							{@render touristCountField()}
+						{@render kitFields()}
 							<div class="mt-3">
 								<IdCameraCapture />
 							</div>

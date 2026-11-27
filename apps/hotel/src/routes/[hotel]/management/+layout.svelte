@@ -33,6 +33,7 @@
 	import StarIcon from '@lucide/svelte/icons/star';
 	import UtensilsIcon from '@lucide/svelte/icons/utensils';
 	import ChefHatIcon from '@lucide/svelte/icons/chef-hat';
+	import PackageIcon from '@lucide/svelte/icons/package';
 
 	let { data, children }: { data: LayoutData; children: import('svelte').Snippet } = $props();
 
@@ -124,6 +125,7 @@
 			// A cook's account, or anyone who runs the Kitchen (`kitchen:manage` — the manager, a
 			// platform admin). Front desk only has a read-only view of it, so it stays off their sidebar.
 			{ seg: 'kitchen', label: 'Kitchen', icon: ChefHatIcon, show: kitchenOnly || can('kitchen:manage') },
+			{ seg: 'inventory', label: 'Inventory', icon: PackageIcon, show: can('inventory:read') },
 			{ seg: 'reviews', label: 'Reviews', icon: StarIcon, show: can('review:read') },
 			{ seg: 'finance', label: 'Finance', icon: WalletIcon, show: can('finance:read') },
 			{
@@ -252,6 +254,15 @@
 												title="Dining: orders, reservations and tables waiting"
 											>
 												{diningBadge}
+											</Badge>
+										{/if}
+										{#if item.seg === 'inventory' && data.lowStockCount > 0}
+											<Badge
+												variant="outline"
+												class="ml-auto border-transparent bg-warning/20 px-1.5 text-ink"
+												title="Stock items low or below zero"
+											>
+												{data.lowStockCount}
 											</Badge>
 										{/if}
 										{#if item.seg === 'kitchen' && data.badges.kitchen > 0}
