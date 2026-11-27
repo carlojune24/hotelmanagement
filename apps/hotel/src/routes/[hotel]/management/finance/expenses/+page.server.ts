@@ -31,6 +31,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
 	return {
 		today,
+		vatRateBps: hotel.vatRateBps || 1200, // same fallback as hotelVatRate in expenses.ts
+		hotelIsVat: hotel.vatRateBps > 0,
 		rows,
 		categories,
 		vendors,
@@ -53,7 +55,7 @@ export const actions: Actions = {
 			.object({
 				expenseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 				categoryId: z.string().uuid(),
-				vendorId: z.string().uuid().optional().or(z.literal('')),
+				vendor: z.string().max(200).optional(),
 				description: z.string().min(1).max(300),
 				source: z.enum(['hotel', 'dining']),
 				vendorInvoiceNo: z.string().max(120).optional(),
@@ -78,12 +80,19 @@ export const actions: Actions = {
 			}
 		}
 
+		// A typed name that matches a saved vendor links to it; anything else is a one-off name.
+		const vendorText = parsed.data.vendor?.trim() ?? '';
+		const saved = vendorText
+			? (await listVendors(hotel.id)).find((v) => v.name.toLowerCase() === vendorText.toLowerCase())
+			: undefined;
+
 		try {
 			await createExpense({
 				hotelId: hotel.id,
 				expenseDate: parsed.data.expenseDate,
 				categoryId: parsed.data.categoryId,
-				vendorId: parsed.data.vendorId || null,
+				vendorId: saved?.id ?? null,
+				vendorName: saved ? null : vendorText || null,
 				description: parsed.data.description,
 				source: parsed.data.source,
 				vendorInvoiceNo: parsed.data.vendorInvoiceNo || null,

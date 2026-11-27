@@ -18,6 +18,7 @@
 		cashier,
 		mode = 'payment',
 		defaultReason = '',
+		otaNames = [],
 		onDone
 	}: {
 		action: string;
@@ -29,6 +30,8 @@
 		mode?: 'payment' | 'refund';
 		/** Refund mode: text the Reason box starts with (staff can change it). */
 		defaultReason?: string;
+		/** Active OTAs (Settings → OTA). When given, "Online booking" is offered: no cash now, the OTA owes it and it goes to Finance → OTA payouts. */
+		otaNames?: string[];
 		onDone?: () => void;
 	} = $props();
 
@@ -41,8 +44,13 @@
 		{ v: 'bank_transfer', label: 'Bank transfer' },
 		{ v: 'cheque', label: 'Cheque' }
 	] as const;
+	const methods = $derived(
+		mode === 'payment' && otaNames.length > 0
+			? [...METHODS, { v: 'online_booking', label: 'Online booking' }]
+			: METHODS
+	);
 
-	let method = $state<'cash' | 'card' | 'gcash' | 'maya' | 'bank_transfer' | 'cheque'>('cash');
+	let method = $state<string>('cash');
 	let amount = $state((balanceCentavos / 100).toFixed(2));
 	let tendered = $state('');
 	let submitting = $state(false);
@@ -124,7 +132,7 @@
 				bind:value={method}
 				class="mt-1 w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm"
 			>
-				{#each METHODS as m (m.v)}
+				{#each methods as m (m.v)}
 					<option value={m.v}>{m.label}</option>
 				{/each}
 			</select>
@@ -232,6 +240,30 @@
 		</div>
 	{/if}
 
+	{#if method === 'online_booking'}
+		<div class="grid grid-cols-2 gap-2">
+			<div>
+				<Label class="text-xs">OTA</Label>
+				<select
+					name="otaName"
+					required
+					class="mt-1 w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm"
+				>
+					{#each otaNames as n (n)}
+						<option value={n}>{n}</option>
+					{/each}
+				</select>
+			</div>
+			<div>
+				<Label class="text-xs">Booking ID</Label>
+				<Input name="referenceNo" maxlength={120} class="mt-1" required />
+			</div>
+		</div>
+		<p class="text-xs text-ink-muted">
+			No cash now: the OTA owes this. It shows under Finance → OTA payouts until its statement pays it.
+		</p>
+	{/if}
+
 	{#if mode === 'refund'}
 		<div>
 			<Label class="text-xs">Reason</Label>
@@ -256,7 +288,9 @@
 	<Button type="submit" size="sm" class="w-full" disabled={!canSubmit}>
 		{mode === 'refund'
 			? 'Record refund'
-			: method === 'cash'
+			: method === 'online_booking'
+				? 'Charge to OTA'
+				: method === 'cash'
 				? 'Take cash payment'
 				: 'Record payment'}
 	</Button>

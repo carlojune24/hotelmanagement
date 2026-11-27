@@ -9,6 +9,10 @@
 	import * as Table from '$lib/components/ui/table/index.js';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import PrinterIcon from '@lucide/svelte/icons/printer';
+	import { Combobox } from 'bits-ui';
+	import CheckIcon from '@lucide/svelte/icons/check';
+	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
+	import { vatPortion } from '$lib/dining-orders';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -20,12 +24,36 @@
 			toast.success(form.ok);
 			showNew = false;
 			payingId = null;
+			grossInput = whtInput = null;
+			isVatable = false;
+			vendorText = '';
 		}
 		if (form && 'error' in form && form.error) toast.error(form.error);
 	});
 
 	let showNew = $state(false);
 	let payingId = $state<string | null>(null);
+	// Own state, not value={data.today}: the staff layout refreshes `data` every 30 s, which would reset a picked date.
+	let expenseDate = $state('');
+	let paidOn = $state('');
+
+	// Live breakdown so staff see what the VAT box and withholding do before saving.
+	let grossInput = $state<number | null>(null);
+	let whtInput = $state<number | null>(null);
+	let isVatable = $state(false);
+	const vatPct = $derived(data.vatRateBps / 100);
+	const grossC = $derived(Math.round((grossInput ?? 0) * 100));
+	const whtC = $derived(Math.round((whtInput ?? 0) * 100));
+	const vatC = $derived(isVatable ? vatPortion(grossC, data.vatRateBps) : 0);
+
+	// Vendor: pick a saved one or type a one-off name (the server matches names case-insensitively).
+	let vendorText = $state('');
+	const vendorMatches = $derived(
+		data.vendors.filter((v) => v.name.toLowerCase().includes(vendorText.trim().toLowerCase()))
+	);
+	const vendorExact = $derived(
+		data.vendors.some((v) => v.name.toLowerCase() === vendorText.trim().toLowerCase())
+	);
 
 	const statusClass: Record<string, string> = {
 		draft: 'border-border bg-surface-2 text-ink-muted',
@@ -53,7 +81,7 @@
 		<div class="flex gap-2">
 			<a href="{base}/expenses/recurring" class="text-sm text-ink-muted underline underline-offset-2">Recurring</a>
 			{#if data.finance.canExpense}
-				<Button size="sm" onclick={() => (showNew = !showNew)}>New expense</Button>
+				<Button size="sm" onclick={() => { showNew = !showNew; expenseDate = data.today; }}>New expense</Button>
 			{/if}
 		</div>
 	</div>
@@ -66,7 +94,7 @@
 			use:enhance
 			class="mb-6 grid gap-3 rounded-xl border border-border p-4 sm:grid-cols-3"
 		>
-			<div><Label class="text-xs">Date</Label><Input name="expenseDate" type="date" value={data.today} required class="mt-1" /></div>
+			<div><Label class="text-xs">Date</Label><Input name="expenseDate" type="date" bind:value={expenseDate} required class="mt-1" /></div>
 			<div>
 				<Label class="text-xs">Category</Label>
 				<select name="categoryId" required class="mt-1 w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-sm">
@@ -74,11 +102,47 @@
 				</select>
 			</div>
 			<div>
-				<Label class="text-xs">Vendor</Label>
-				<select name="vendorId" class="mt-1 w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-sm">
-					<option value="">— none —</option>
-					{#each data.vendors as v (v.id)}<option value={v.id}>{v.name}</option>{/each}
-				</select>
+				<Label for="exp-vendor" class="text-xs">Vendor</Label>
+				<Combobox.Root type="single" inputValue={vendorText} onValueChange={(v) => (vendorText = v)}>
+					<div class="relative mt-1">
+						<Combobox.Input
+							id="exp-vendor"
+							maxlength={200}
+							placeholder="Pick a saved vendor or type a name"
+							oninput={(e) => (vendorText = e.currentTarget.value)}
+							class="h-9 w-full min-w-0 rounded-md border border-input bg-transparent py-1 pr-9 pl-2.5 text-base shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30"
+						/>
+						<Combobox.Trigger aria-label="Show saved vendors" class="absolute inset-y-0 right-0 flex w-9 items-center justify-center text-ink-muted hover:text-ink">
+							<ChevronsUpDownIcon class="size-4" aria-hidden="true" />
+						</Combobox.Trigger>
+					</div>
+					<Combobox.Portal>
+						<Combobox.Content
+							sideOffset={4}
+							class="z-50 max-h-64 w-(--bits-combobox-anchor-width) min-w-48 overflow-y-auto rounded-md bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10"
+						>
+							{#each vendorMatches as v (v.id)}
+								<Combobox.Item
+									value={v.name}
+									label={v.name}
+									class="relative flex w-full cursor-default items-center rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground"
+								>
+									{#snippet children({ selected })}
+										{v.name}
+										{#if selected}<CheckIcon class="absolute right-2 size-4" aria-hidden="true" />{/if}
+									{/snippet}
+								</Combobox.Item>
+							{/each}
+							{#if vendorText.trim() && !vendorExact}
+								<p class="px-2 py-1.5 text-sm text-ink-muted">Use “{vendorText.trim()}” as a one-off vendor</p>
+							{:else if vendorMatches.length === 0}
+								<p class="px-2 py-1.5 text-sm text-ink-muted">No saved vendors yet — type a name.</p>
+							{/if}
+						</Combobox.Content>
+					</Combobox.Portal>
+				</Combobox.Root>
+				<input type="hidden" name="vendor" value={vendorText} />
+				<p class="mt-1 text-xs text-ink-muted">Typed names are saved on this expense only.</p>
 			</div>
 			<div>
 				<Label class="text-xs">For</Label>
@@ -90,11 +154,32 @@
 			</div>
 			<div class="sm:col-span-2"><Label class="text-xs">Description</Label><Input name="description" required maxlength={300} class="mt-1" /></div>
 			<div><Label class="text-xs">Vendor invoice/OR no.</Label><Input name="vendorInvoiceNo" maxlength={120} class="mt-1" /></div>
-			<div><Label class="text-xs">Gross amount (₱)</Label><Input name="gross" type="number" min="0.01" step="0.01" required class="mt-1" /></div>
-			<div><Label class="text-xs">Withholding tax (₱)</Label><Input name="withholdingTax" type="number" min="0" step="0.01" class="mt-1" /></div>
-			<label class="flex items-center gap-2 pt-5 text-sm text-ink">
-				<input type="checkbox" name="isVatable" class="size-4" /> VAT-inclusive (12% input VAT)
-			</label>
+			<div>
+				<Label for="exp-gross" class="text-xs">Amount on receipt (₱)</Label>
+				<Input id="exp-gross" name="gross" type="number" min="0.01" step="0.01" required bind:value={grossInput} class="mt-1" />
+				<p class="mt-1 text-xs text-ink-muted">The total you actually pay — never add VAT on top.</p>
+			</div>
+			<div>
+				<Label for="exp-wht" class="text-xs">Withholding tax (₱)</Label>
+				<Input id="exp-wht" name="withholdingTax" type="number" min="0" step="0.01" bind:value={whtInput} class="mt-1" />
+				<p class="mt-1 text-xs text-ink-muted">Only if you withhold from this supplier (e.g. rent, professional fees). Base is the amount net of VAT.</p>
+			</div>
+			<div class="pt-5">
+				<label class="flex items-center gap-2 text-sm text-ink">
+					<input type="checkbox" name="isVatable" bind:checked={isVatable} class="size-4" /> Receipt includes {vatPct}% VAT (optional)
+				</label>
+				<p class="mt-1 text-xs text-ink-muted">
+					VAT-registered supplier with VAT on the invoice/OR. Leave unchecked for palengke, transport or NON-VAT receipts.
+					{#if !data.hotelIsVat}This hotel isn't VAT-registered, so it's recorded for reference only.{/if}
+				</p>
+			</div>
+			{#if grossC > 0}
+				<p class="text-sm text-ink-muted sm:col-span-3" aria-live="polite">
+					Input VAT <span class="tabular-nums text-ink">{peso(vatC)}</span> · Net of VAT
+					<span class="tabular-nums text-ink">{peso(grossC - vatC)}</span>
+					{#if whtC > 0}· Pay vendor <span class="tabular-nums text-ink">{peso(grossC - whtC)}</span>{/if}
+				</p>
+			{/if}
 			<div class="sm:col-span-2"><Label class="text-xs">Notes</Label><Input name="notes" maxlength={1000} class="mt-1" /></div>
 			<div><Label class="text-xs">Receipt photo</Label><Input name="attachment" type="file" accept="image/*" class="mt-1" /></div>
 			<div class="flex items-end sm:col-span-3">
@@ -179,7 +264,7 @@
 							{#if r.vendorName}<span class="block text-xs text-ink-muted">{r.vendorName}</span>{/if}
 						</Table.Cell>
 						<Table.Cell class="max-w-[16rem] text-ink-muted">
-							{r.description}
+							<a href="{listPath}/{r.id}" class="hover:text-ink hover:underline underline-offset-2">{r.description}</a>
 							{#if r.vendorInvoiceNo}<span class="block text-xs">#{r.vendorInvoiceNo}</span>{/if}
 							{#if r.attachmentUrl}<a href={r.attachmentUrl} target="_blank" class="text-xs underline underline-offset-2">receipt</a>{/if}
 						</Table.Cell>
@@ -187,16 +272,17 @@
 						<Table.Cell class="text-right tabular-nums text-ink-muted">{r.inputVatCentavos ? peso(r.inputVatCentavos) : '—'}</Table.Cell>
 						<Table.Cell><Badge variant="outline" class={statusClass[r.status]}>{r.status}</Badge></Table.Cell>
 						<Table.Cell class="text-right whitespace-nowrap">
+							<a href="{listPath}/{r.id}" class="text-xs text-ink underline underline-offset-2">Details</a>
 							{#if r.status === 'draft' && data.finance.canExpense}
 								<form method="POST" action="?/approve" use:enhance class="inline">
 									<input type="hidden" name="id" value={r.id} />
-									<button class="text-xs text-brand underline underline-offset-2">Approve</button>
+									<button class="ml-2 text-xs text-brand underline underline-offset-2">Approve</button>
 								</form>
 							{/if}
 							{#if (r.status === 'approved' || r.status === 'draft') && data.finance.canExpense}
 								<button
 									type="button"
-									onclick={() => (payingId = payingId === r.id ? null : r.id)}
+									onclick={() => { payingId = payingId === r.id ? null : r.id; paidOn = data.today; }}
 									class="ml-2 text-xs text-ok underline underline-offset-2"
 								>
 									Pay
@@ -229,8 +315,11 @@
 										</select>
 									</div>
 									<div><Label class="text-xs">Reference</Label><Input name="paymentReferenceNo" class="mt-1 h-8" /></div>
-									<div><Label class="text-xs">Paid on</Label><Input name="paidOn" type="date" value={data.today} class="mt-1 h-8" /></div>
-									<Button type="submit" size="sm">Confirm payment ({peso(r.grossCentavos)})</Button>
+									<div><Label class="text-xs">Paid on</Label><Input name="paidOn" type="date" bind:value={paidOn} class="mt-1 h-8" /></div>
+									<Button type="submit" size="sm">Confirm payment ({peso(r.grossCentavos - r.withholdingTaxCentavos)})</Button>
+									{#if r.withholdingTaxCentavos > 0}
+										<span class="pb-1.5 text-xs text-ink-muted">{peso(r.withholdingTaxCentavos)} withheld — remit to BIR</span>
+									{/if}
 								</form>
 							</Table.Cell>
 						</Table.Row>

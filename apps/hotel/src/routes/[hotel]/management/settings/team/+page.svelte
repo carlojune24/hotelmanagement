@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { page } from '$app/state';
 	import { enhance } from '$app/forms';
 	import { toast } from 'svelte-sonner';
@@ -116,7 +117,7 @@
 											type="single"
 											name="role"
 											value={m.roleSlug}
-											onValueChange={() => roleForms[m.userId]?.requestSubmit()}
+											onValueChange={() => tick().then(() => roleForms[m.userId]?.requestSubmit())}
 										>
 											<Select.Trigger class="w-40">{m.roleName}</Select.Trigger>
 											<Select.Content>

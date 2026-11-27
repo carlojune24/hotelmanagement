@@ -1,6 +1,6 @@
 {
-  "id": "af4640d0-9d6c-41c4-8725-41c15e43ef16",
-  "prevId": "5d537890-870e-445e-bdd8-df1421e688fc",
+  "id": "9d857649-aaa4-43c0-a66d-4fd7d0c8173a",
+  "prevId": "9af7e2d5-18b0-43c8-a66a-3e406b2a13cf",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2348,6 +2348,395 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.stock_checkin_kit_lines": {
+      "name": "stock_checkin_kit_lines",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "hotel_id": {
+          "name": "hotel_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "room_type_id": {
+          "name": "room_type_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stock_item_id": {
+          "name": "stock_item_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "qty_milli": {
+          "name": "qty_milli",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "per": {
+          "name": "per",
+          "type": "stock_kit_basis",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'room'"
+        }
+      },
+      "indexes": {
+        "stock_checkin_kit_lines_uq": {
+          "name": "stock_checkin_kit_lines_uq",
+          "columns": [
+            {
+              "expression": "room_type_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "stock_item_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "stock_checkin_kit_lines_hotel_idx": {
+          "name": "stock_checkin_kit_lines_hotel_idx",
+          "columns": [
+            {
+              "expression": "hotel_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "stock_checkin_kit_lines_hotel_id_hotels_id_fk": {
+          "name": "stock_checkin_kit_lines_hotel_id_hotels_id_fk",
+          "tableFrom": "stock_checkin_kit_lines",
+          "tableTo": "hotels",
+          "columnsFrom": [
+            "hotel_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "stock_checkin_kit_lines_room_type_id_room_types_id_fk": {
+          "name": "stock_checkin_kit_lines_room_type_id_room_types_id_fk",
+          "tableFrom": "stock_checkin_kit_lines",
+          "tableTo": "room_types",
+          "columnsFrom": [
+            "room_type_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "stock_checkin_kit_lines_stock_item_id_stock_items_id_fk": {
+          "name": "stock_checkin_kit_lines_stock_item_id_stock_items_id_fk",
+          "tableFrom": "stock_checkin_kit_lines",
+          "tableTo": "stock_items",
+          "columnsFrom": [
+            "stock_item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "stock_checkin_kit_lines_qty_positive": {
+          "name": "stock_checkin_kit_lines_qty_positive",
+          "value": "\"stock_checkin_kit_lines\".\"qty_milli\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.stock_count_lines": {
+      "name": "stock_count_lines",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "count_id": {
+          "name": "count_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "counted_milli": {
+          "name": "counted_milli",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expected_milli": {
+          "name": "expected_milli",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "variance_milli": {
+          "name": "variance_milli",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "stock_count_lines_uq": {
+          "name": "stock_count_lines_uq",
+          "columns": [
+            {
+              "expression": "count_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "item_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "stock_count_lines_count_id_stock_counts_id_fk": {
+          "name": "stock_count_lines_count_id_stock_counts_id_fk",
+          "tableFrom": "stock_count_lines",
+          "tableTo": "stock_counts",
+          "columnsFrom": [
+            "count_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "stock_count_lines_item_id_stock_items_id_fk": {
+          "name": "stock_count_lines_item_id_stock_items_id_fk",
+          "tableFrom": "stock_count_lines",
+          "tableTo": "stock_items",
+          "columnsFrom": [
+            "item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.stock_counts": {
+      "name": "stock_counts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "hotel_id": {
+          "name": "hotel_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "department": {
+          "name": "department",
+          "type": "stock_department",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "stock_count_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'open'"
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "started_by": {
+          "name": "started_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "finished_by": {
+          "name": "finished_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "stock_counts_hotel_idx": {
+          "name": "stock_counts_hotel_idx",
+          "columns": [
+            {
+              "expression": "hotel_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "stock_counts_one_open_uq": {
+          "name": "stock_counts_one_open_uq",
+          "columns": [
+            {
+              "expression": "hotel_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"stock_counts\".\"status\" = 'open'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "stock_counts_hotel_id_hotels_id_fk": {
+          "name": "stock_counts_hotel_id_hotels_id_fk",
+          "tableFrom": "stock_counts",
+          "tableTo": "hotels",
+          "columnsFrom": [
+            "hotel_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "stock_counts_started_by_users_id_fk": {
+          "name": "stock_counts_started_by_users_id_fk",
+          "tableFrom": "stock_counts",
+          "tableTo": "users",
+          "columnsFrom": [
+            "started_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "stock_counts_finished_by_users_id_fk": {
+          "name": "stock_counts_finished_by_users_id_fk",
+          "tableFrom": "stock_counts",
+          "tableTo": "users",
+          "columnsFrom": [
+            "finished_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.stock_items": {
       "name": "stock_items",
       "schema": "",
@@ -2577,6 +2966,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "booking_id": {
+          "name": "booking_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "count_id": {
+          "name": "count_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by": {
           "name": "created_by",
           "type": "uuid",
@@ -2639,6 +3040,21 @@
           "columns": [
             {
               "expression": "dining_order_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "stock_movements_booking_idx": {
+          "name": "stock_movements_booking_idx",
+          "columns": [
+            {
+              "expression": "booking_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2718,6 +3134,32 @@
           "tableTo": "dining_orders",
           "columnsFrom": [
             "dining_order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "stock_movements_booking_id_bookings_id_fk": {
+          "name": "stock_movements_booking_id_bookings_id_fk",
+          "tableFrom": "stock_movements",
+          "tableTo": "bookings",
+          "columnsFrom": [
+            "booking_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "stock_movements_count_id_stock_counts_id_fk": {
+          "name": "stock_movements_count_id_stock_counts_id_fk",
+          "tableFrom": "stock_movements",
+          "tableTo": "stock_counts",
+          "columnsFrom": [
+            "count_id"
           ],
           "columnsTo": [
             "id"
@@ -10690,6 +11132,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "vendor_name": {
+          "name": "vendor_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "description": {
           "name": "description",
           "type": "text",
@@ -17751,6 +18199,14 @@
         "fixed"
       ]
     },
+    "public.stock_count_status": {
+      "name": "stock_count_status",
+      "schema": "public",
+      "values": [
+        "open",
+        "finished"
+      ]
+    },
     "public.stock_department": {
       "name": "stock_department",
       "schema": "public",
@@ -17768,6 +18224,14 @@
         "reusable"
       ]
     },
+    "public.stock_kit_basis": {
+      "name": "stock_kit_basis",
+      "schema": "public",
+      "values": [
+        "room",
+        "guest"
+      ]
+    },
     "public.stock_movement_type": {
       "name": "stock_movement_type",
       "schema": "public",
@@ -17777,7 +18241,8 @@
         "waste",
         "adjust_out",
         "order",
-        "order_reverse"
+        "order_reverse",
+        "checkin_kit"
       ]
     },
     "public.stock_unit": {

@@ -402,6 +402,8 @@ export const expenses = pgTable(
 			.notNull()
 			.references(() => expenseCategories.id, { onDelete: 'restrict' }),
 		vendorId: uuid('vendor_id').references(() => vendors.id, { onDelete: 'set null' }),
+		/** One-off vendor typed on the expense; not in the vendor list. Set only when `vendorId` is null. */
+		vendorName: text('vendor_name'),
 		description: text('description').notNull(),
 		source: expenseSource('source').notNull().default('hotel'),
 		/** The vendor's own invoice / OR number. */

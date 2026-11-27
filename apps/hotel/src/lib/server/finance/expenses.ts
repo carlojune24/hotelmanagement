@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '../db/index';
 import {
 	cashAccounts,
@@ -7,6 +8,7 @@ import {
 	expenses,
 	hotels,
 	recurringExpenses,
+	users,
 	vendors,
 	type Expense,
 	type NewExpense
@@ -28,7 +30,14 @@ async function hotelVatRate(hotelId: string): Promise<number> {
 		.from(hotels)
 		.where(eq(hotels.id, hotelId))
 		.limit(1);
-	return h?.bps ?? 1200;
+	// Input VAT is the supplier's VAT, so a non-VAT hotel (rate 0) still records the standard 12%.
+	return h?.bps || 1200;
+}
+
+function assertWithholding(wht: number, gross: number): void {
+	if (!Number.isInteger(wht) || wht < 0 || wht >= gross) {
+		throw new FinanceError('Withholding tax must be less than the amount on the receipt.');
+	}
 }
 
 export interface CreateExpenseInput {
@@ -36,6 +45,8 @@ export interface CreateExpenseInput {
 	expenseDate: string;
 	categoryId: string;
 	vendorId?: string | null;
+	/** One-off vendor name, used only when no saved `vendorId`. */
+	vendorName?: string | null;
 	description: string;
 	/** Hotel or dining; defaults to hotel. */
 	source?: Expense['source'];
@@ -57,6 +68,7 @@ export async function createExpense(
 		throw new FinanceError('Enter an expense amount greater than zero.');
 	}
 	if (!input.description.trim()) throw new FinanceError('Give the expense a description.');
+	assertWithholding(input.withholdingTaxCentavos ?? 0, input.grossCentavos);
 
 	const [cat] = await db
 		.select({ id: expenseCategories.id })
@@ -82,6 +94,7 @@ export async function createExpense(
 		expenseDate: input.expenseDate,
 		categoryId: input.categoryId,
 		vendorId: input.vendorId ?? null,
+		vendorName: input.vendorId ? null : input.vendorName?.trim() || null,
 		description: input.description.trim(),
 		source: input.source ?? 'hotel',
 		vendorInvoiceNo: input.vendorInvoiceNo?.trim() || null,
@@ -126,6 +139,8 @@ export async function updateExpense(
 		throw new FinanceError("A paid or voided expense can't be edited.");
 
 	const gross = patch.grossCentavos ?? e.grossCentavos;
+	const wht = patch.withholdingTaxCentavos ?? e.withholdingTaxCentavos;
+	assertWithholding(wht, gross);
 	const isVatable = patch.isVatable ?? e.isVatable;
 	const vatRate = await hotelVatRate(hotelId);
 	const inputVat = isVatable
@@ -138,6 +153,7 @@ export async function updateExpense(
 			expenseDate: patch.expenseDate ?? e.expenseDate,
 			categoryId: patch.categoryId ?? e.categoryId,
 			vendorId: patch.vendorId === undefined ? e.vendorId : patch.vendorId,
+			vendorName: patch.vendorName === undefined ? e.vendorName : patch.vendorName?.trim() || null,
 			description: patch.description?.trim() ?? e.description,
 			vendorInvoiceNo:
 				patch.vendorInvoiceNo === undefined
@@ -147,7 +163,7 @@ export async function updateExpense(
 			isVatable,
 			inputVatCentavos: inputVat,
 			netOfVatCentavos: gross - inputVat,
-			withholdingTaxCentavos: patch.withholdingTaxCentavos ?? e.withholdingTaxCentavos,
+			withholdingTaxCentavos: wht,
 			notes: patch.notes === undefined ? e.notes : patch.notes?.trim() || null,
 			attachmentUrl: patch.attachmentUrl === undefined ? e.attachmentUrl : patch.attachmentUrl,
 			updatedAt: new Date()
@@ -220,7 +236,10 @@ export async function markExpensePaid(input: {
 		)
 		.limit(1);
 	if (!account || !account.isActive) throw new FinanceError('Pick a valid account to pay from.');
-	if (account.currentBalanceCentavos < e.grossCentavos) {
+	// The withheld part is not paid to the vendor; it stays here until remitted to BIR.
+	const payout = e.grossCentavos - e.withholdingTaxCentavos;
+	if (payout <= 0) throw new FinanceError('Withholding tax must be less than the amount on the receipt.');
+	if (account.currentBalanceCentavos < payout) {
 		throw new FinanceError(`${account.name} doesn't hold enough to cover this expense.`);
 	}
 
@@ -261,9 +280,9 @@ export async function markExpensePaid(input: {
 				direction: 'out',
 				category,
 				cashAccountId: input.paidFromAccountId,
-				amountCentavos: e.grossCentavos,
+				amountCentavos: payout,
 				counterpartyType: 'vendor',
-				counterpartyName: vendor?.name ?? null,
+				counterpartyName: vendor?.name ?? e.vendorName ?? null,
 				counterpartyId: e.vendorId ?? null,
 				sourceType: 'expense',
 				sourceId: e.id,
@@ -298,7 +317,11 @@ export async function markExpensePaid(input: {
 		action: 'finance.pay_expense',
 		entityType: 'expense',
 		entityId: e.id,
-		after: { paidFromAccountId: input.paidFromAccountId, amountCentavos: e.grossCentavos }
+		after: {
+			paidFromAccountId: input.paidFromAccountId,
+			amountCentavos: payout,
+			withholdingTaxCentavos: e.withholdingTaxCentavos
+		}
 	});
 }
 
@@ -413,7 +436,7 @@ export async function listExpenses(hotelId: string, filters: ExpenseFilters = {}
 			source: expenses.source,
 			categoryName: expenseCategories.name,
 			categoryGroup: expenseCategories.group,
-			vendorName: vendors.name,
+			vendorName: sql<string | null>`coalesce(${vendors.name}, ${expenses.vendorName})`,
 			grossCentavos: expenses.grossCentavos,
 			inputVatCentavos: expenses.inputVatCentavos,
 			netOfVatCentavos: expenses.netOfVatCentavos,
@@ -429,6 +452,54 @@ export async function listExpenses(hotelId: string, filters: ExpenseFilters = {}
 		.where(and(...conds))
 		.orderBy(desc(expenses.expenseDate), desc(expenses.createdAt))
 		.limit(filters.limit ?? 500);
+}
+
+/** One expense with everything the detail page shows, or null if it isn't this hotel's. */
+export async function getExpense(hotelId: string, expenseId: string) {
+	const createdBy = alias(users, 'created_by');
+	const approvedBy = alias(users, 'approved_by');
+	const [row] = await db
+		.select({
+			id: expenses.id,
+			expenseDate: expenses.expenseDate,
+			description: expenses.description,
+			source: expenses.source,
+			status: expenses.status,
+			categoryName: expenseCategories.name,
+			vendorName: sql<string | null>`coalesce(${vendors.name}, ${expenses.vendorName})`,
+			vendorInvoiceNo: expenses.vendorInvoiceNo,
+			grossCentavos: expenses.grossCentavos,
+			isVatable: expenses.isVatable,
+			inputVatCentavos: expenses.inputVatCentavos,
+			netOfVatCentavos: expenses.netOfVatCentavos,
+			withholdingTaxCentavos: expenses.withholdingTaxCentavos,
+			paidAt: expenses.paidAt,
+			paidFromName: cashAccounts.name,
+			paymentMethod: expenses.paymentMethod,
+			paymentReferenceNo: expenses.paymentReferenceNo,
+			notes: expenses.notes,
+			attachmentUrl: expenses.attachmentUrl,
+			recurringExpenseId: expenses.recurringExpenseId,
+			createdAt: expenses.createdAt,
+			createdByName: createdBy.name,
+			approvedAt: expenses.approvedAt,
+			approvedByName: approvedBy.name
+		})
+		.from(expenses)
+		.innerJoin(expenseCategories, eq(expenseCategories.id, expenses.categoryId))
+		.leftJoin(vendors, eq(vendors.id, expenses.vendorId))
+		.leftJoin(cashAccounts, eq(cashAccounts.id, expenses.paidFromAccountId))
+		.leftJoin(createdBy, eq(createdBy.id, expenses.createdByUserId))
+		.leftJoin(approvedBy, eq(approvedBy.id, expenses.approvedByUserId))
+		.where(
+			and(
+				eq(expenses.id, expenseId),
+				eq(expenses.hotelId, hotelId),
+				sql`${expenses.deletedAt} is null`
+			)
+		)
+		.limit(1);
+	return row ?? null;
 }
 
 /** Creates a draft expense for every active recurring template due on/before `asOf`,

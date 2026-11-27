@@ -895,8 +895,9 @@ export async function createWalkInBooking(params: {
 	/** Charge to the city ledger instead of taking payment at the desk. Authorised by the caller
 	 *  (hotel admin only — enforced in the route action, as at check-out). */
 	cityLedger?: CityLedgerHandoff;
-	/** Extras (breakfast, custom items) charged on the first room's folio and paid with the booking.
-	 *  Catalog lines are re-priced here; the client's prices are never trusted. Not for OTA bookings. */
+	/** Extras (breakfast, custom items) charged on the first room's folio and paid with the booking —
+	 *  or, on an OTA booking, left owing on that folio for the guest to pay.
+	 *  Catalog lines are re-priced here; the client's prices are never trusted. */
 	extras?: WalkInExtra[];
 	/** A Senior Citizen / PWD claim on one room (`lineIndex` = its cart line), applied now so the guest
 	 *  pays the discounted amount — not refunded after. The rate is the hotel's setting. Not for OTA bookings. */
@@ -1216,18 +1217,19 @@ export async function createWalkInBooking(params: {
 		let extrasCentavos = 0;
 		let scPwdReductionCentavos = 0;
 		let scPwdApplied: { id: string; bookingId: string; discountBps: number; reduction: number } | null = null;
+		if (params.extras && params.extras.length > 0) {
+			extrasCentavos = await addWalkInExtras(
+				tx,
+				hotelId,
+				{ kind: 'room', bookingId: bookingIds[0]! },
+				params.extras,
+				actor,
+				{ honourTaxable: true }
+			);
+			// On an OTA booking the guest owes their own extras: they stay open on the folio, out of the OTA receivable.
+			if (!ota) bookingTotals[0]! += extrasCentavos;
+		}
 		if (!ota) {
-			if (params.extras && params.extras.length > 0) {
-				extrasCentavos = await addWalkInExtras(
-					tx,
-					hotelId,
-					{ kind: 'room', bookingId: bookingIds[0]! },
-					params.extras,
-					actor,
-					{ honourTaxable: true }
-				);
-				bookingTotals[0]! += extrasCentavos;
-			}
 			if (params.scPwd) {
 				const roomIdx = lineOfBooking.indexOf(params.scPwd.lineIndex);
 				if (roomIdx < 0) throw new WalkInError('Pick the room the discount applies to.');
