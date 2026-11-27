@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '../db/index';
 import {
 	cashAccounts,
@@ -7,6 +8,7 @@ import {
 	expenses,
 	hotels,
 	recurringExpenses,
+	users,
 	vendors,
 	type Expense,
 	type NewExpense
@@ -450,6 +452,54 @@ export async function listExpenses(hotelId: string, filters: ExpenseFilters = {}
 		.where(and(...conds))
 		.orderBy(desc(expenses.expenseDate), desc(expenses.createdAt))
 		.limit(filters.limit ?? 500);
+}
+
+/** One expense with everything the detail page shows, or null if it isn't this hotel's. */
+export async function getExpense(hotelId: string, expenseId: string) {
+	const createdBy = alias(users, 'created_by');
+	const approvedBy = alias(users, 'approved_by');
+	const [row] = await db
+		.select({
+			id: expenses.id,
+			expenseDate: expenses.expenseDate,
+			description: expenses.description,
+			source: expenses.source,
+			status: expenses.status,
+			categoryName: expenseCategories.name,
+			vendorName: sql<string | null>`coalesce(${vendors.name}, ${expenses.vendorName})`,
+			vendorInvoiceNo: expenses.vendorInvoiceNo,
+			grossCentavos: expenses.grossCentavos,
+			isVatable: expenses.isVatable,
+			inputVatCentavos: expenses.inputVatCentavos,
+			netOfVatCentavos: expenses.netOfVatCentavos,
+			withholdingTaxCentavos: expenses.withholdingTaxCentavos,
+			paidAt: expenses.paidAt,
+			paidFromName: cashAccounts.name,
+			paymentMethod: expenses.paymentMethod,
+			paymentReferenceNo: expenses.paymentReferenceNo,
+			notes: expenses.notes,
+			attachmentUrl: expenses.attachmentUrl,
+			recurringExpenseId: expenses.recurringExpenseId,
+			createdAt: expenses.createdAt,
+			createdByName: createdBy.name,
+			approvedAt: expenses.approvedAt,
+			approvedByName: approvedBy.name
+		})
+		.from(expenses)
+		.innerJoin(expenseCategories, eq(expenseCategories.id, expenses.categoryId))
+		.leftJoin(vendors, eq(vendors.id, expenses.vendorId))
+		.leftJoin(cashAccounts, eq(cashAccounts.id, expenses.paidFromAccountId))
+		.leftJoin(createdBy, eq(createdBy.id, expenses.createdByUserId))
+		.leftJoin(approvedBy, eq(approvedBy.id, expenses.approvedByUserId))
+		.where(
+			and(
+				eq(expenses.id, expenseId),
+				eq(expenses.hotelId, hotelId),
+				sql`${expenses.deletedAt} is null`
+			)
+		)
+		.limit(1);
+	return row ?? null;
 }
 
 /** Creates a draft expense for every active recurring template due on/before `asOf`,

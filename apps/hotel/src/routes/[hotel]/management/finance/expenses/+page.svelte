@@ -33,6 +33,9 @@
 
 	let showNew = $state(false);
 	let payingId = $state<string | null>(null);
+	// Own state, not value={data.today}: the staff layout refreshes `data` every 30 s, which would reset a picked date.
+	let expenseDate = $state('');
+	let paidOn = $state('');
 
 	// Live breakdown so staff see what the VAT box and withholding do before saving.
 	let grossInput = $state<number | null>(null);
@@ -78,7 +81,7 @@
 		<div class="flex gap-2">
 			<a href="{base}/expenses/recurring" class="text-sm text-ink-muted underline underline-offset-2">Recurring</a>
 			{#if data.finance.canExpense}
-				<Button size="sm" onclick={() => (showNew = !showNew)}>New expense</Button>
+				<Button size="sm" onclick={() => { showNew = !showNew; expenseDate = data.today; }}>New expense</Button>
 			{/if}
 		</div>
 	</div>
@@ -91,7 +94,7 @@
 			use:enhance
 			class="mb-6 grid gap-3 rounded-xl border border-border p-4 sm:grid-cols-3"
 		>
-			<div><Label class="text-xs">Date</Label><Input name="expenseDate" type="date" value={data.today} required class="mt-1" /></div>
+			<div><Label class="text-xs">Date</Label><Input name="expenseDate" type="date" bind:value={expenseDate} required class="mt-1" /></div>
 			<div>
 				<Label class="text-xs">Category</Label>
 				<select name="categoryId" required class="mt-1 w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-sm">
@@ -261,7 +264,7 @@
 							{#if r.vendorName}<span class="block text-xs text-ink-muted">{r.vendorName}</span>{/if}
 						</Table.Cell>
 						<Table.Cell class="max-w-[16rem] text-ink-muted">
-							{r.description}
+							<a href="{listPath}/{r.id}" class="hover:text-ink hover:underline underline-offset-2">{r.description}</a>
 							{#if r.vendorInvoiceNo}<span class="block text-xs">#{r.vendorInvoiceNo}</span>{/if}
 							{#if r.attachmentUrl}<a href={r.attachmentUrl} target="_blank" class="text-xs underline underline-offset-2">receipt</a>{/if}
 						</Table.Cell>
@@ -269,16 +272,17 @@
 						<Table.Cell class="text-right tabular-nums text-ink-muted">{r.inputVatCentavos ? peso(r.inputVatCentavos) : '—'}</Table.Cell>
 						<Table.Cell><Badge variant="outline" class={statusClass[r.status]}>{r.status}</Badge></Table.Cell>
 						<Table.Cell class="text-right whitespace-nowrap">
+							<a href="{listPath}/{r.id}" class="text-xs text-ink underline underline-offset-2">Details</a>
 							{#if r.status === 'draft' && data.finance.canExpense}
 								<form method="POST" action="?/approve" use:enhance class="inline">
 									<input type="hidden" name="id" value={r.id} />
-									<button class="text-xs text-brand underline underline-offset-2">Approve</button>
+									<button class="ml-2 text-xs text-brand underline underline-offset-2">Approve</button>
 								</form>
 							{/if}
 							{#if (r.status === 'approved' || r.status === 'draft') && data.finance.canExpense}
 								<button
 									type="button"
-									onclick={() => (payingId = payingId === r.id ? null : r.id)}
+									onclick={() => { payingId = payingId === r.id ? null : r.id; paidOn = data.today; }}
 									class="ml-2 text-xs text-ok underline underline-offset-2"
 								>
 									Pay
@@ -311,7 +315,7 @@
 										</select>
 									</div>
 									<div><Label class="text-xs">Reference</Label><Input name="paymentReferenceNo" class="mt-1 h-8" /></div>
-									<div><Label class="text-xs">Paid on</Label><Input name="paidOn" type="date" value={data.today} class="mt-1 h-8" /></div>
+									<div><Label class="text-xs">Paid on</Label><Input name="paidOn" type="date" bind:value={paidOn} class="mt-1 h-8" /></div>
 									<Button type="submit" size="sm">Confirm payment ({peso(r.grossCentavos - r.withholdingTaxCentavos)})</Button>
 									{#if r.withholdingTaxCentavos > 0}
 										<span class="pb-1.5 text-xs text-ink-muted">{peso(r.withholdingTaxCentavos)} withheld — remit to BIR</span>

@@ -21,6 +21,8 @@
 		if (form && 'error' in form && form.error) toast.error(form.error);
 	});
 	let showNew = $state(false);
+	// Own state, not value={data.today}: the staff layout refreshes `data` every 30 s, which would reset a picked date.
+	let nextDueOn = $state('');
 </script>
 
 <div class="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6">
@@ -36,7 +38,7 @@
 					Generate due now{data.dueCount ? ` (${data.dueCount})` : ''}
 				</Button>
 			</form>
-			<Button size="sm" onclick={() => (showNew = !showNew)}>New template</Button>
+			<Button size="sm" onclick={() => { showNew = !showNew; nextDueOn = data.today; }}>New template</Button>
 		</div>
 	</div>
 
@@ -72,7 +74,7 @@
 				</select>
 			</div>
 			<div><Label class="text-xs">Anchor day (1–31, or 0–6 weekly)</Label><Input name="anchorDay" type="number" min="0" max="31" value="1" class="mt-1" /></div>
-			<div><Label class="text-xs">Next due on</Label><Input name="nextDueOn" type="date" value={data.today} required class="mt-1" /></div>
+			<div><Label class="text-xs">Next due on</Label><Input name="nextDueOn" type="date" bind:value={nextDueOn} required class="mt-1" /></div>
 			<label class="flex items-center gap-2 pt-5 text-sm text-ink"><input type="checkbox" name="isVatable" class="size-4" /> VAT-inclusive</label>
 			<div class="flex items-end sm:col-span-3"><Button type="submit" size="sm">Save template</Button></div>
 		</form>
