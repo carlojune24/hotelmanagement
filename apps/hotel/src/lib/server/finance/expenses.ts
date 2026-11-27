@@ -28,7 +28,8 @@ async function hotelVatRate(hotelId: string): Promise<number> {
 		.from(hotels)
 		.where(eq(hotels.id, hotelId))
 		.limit(1);
-	return h?.bps ?? 1200;
+	// Input VAT is the supplier's VAT, so a non-VAT hotel (rate 0) still records the standard 12%.
+	return h?.bps || 1200;
 }
 
 function assertWithholding(wht: number, gross: number): void {

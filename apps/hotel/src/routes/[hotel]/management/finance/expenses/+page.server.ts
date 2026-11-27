@@ -31,7 +31,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
 	return {
 		today,
-		vatRateBps: hotel.vatRateBps,
+		vatRateBps: hotel.vatRateBps || 1200, // same fallback as hotelVatRate in expenses.ts
+		hotelIsVat: hotel.vatRateBps > 0,
 		rows,
 		categories,
 		vendors,

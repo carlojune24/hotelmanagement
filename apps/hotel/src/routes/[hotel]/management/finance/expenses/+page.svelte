@@ -113,14 +113,13 @@
 				<p class="mt-1 text-xs text-ink-muted">Only if you withhold from this supplier (e.g. rent, professional fees). Base is the amount net of VAT.</p>
 			</div>
 			<div class="pt-5">
-				{#if data.vatRateBps > 0}
-					<label class="flex items-center gap-2 text-sm text-ink">
-						<input type="checkbox" name="isVatable" bind:checked={isVatable} class="size-4" /> Receipt includes {vatPct}% VAT
-					</label>
-					<p class="mt-1 text-xs text-ink-muted">VAT-registered supplier with VAT on the invoice/OR. Leave unchecked for palengke, transport or NON-VAT receipts.</p>
-				{:else}
-					<p class="text-xs text-ink-muted">This hotel isn't VAT-registered, so VAT on purchases can't be claimed — it's part of the cost. Just enter the receipt total.</p>
-				{/if}
+				<label class="flex items-center gap-2 text-sm text-ink">
+					<input type="checkbox" name="isVatable" bind:checked={isVatable} class="size-4" /> Receipt includes {vatPct}% VAT (optional)
+				</label>
+				<p class="mt-1 text-xs text-ink-muted">
+					VAT-registered supplier with VAT on the invoice/OR. Leave unchecked for palengke, transport or NON-VAT receipts.
+					{#if !data.hotelIsVat}This hotel isn't VAT-registered, so it's recorded for reference only.{/if}
+				</p>
 			</div>
 			{#if grossC > 0}
 				<p class="text-sm text-ink-muted sm:col-span-3" aria-live="polite">

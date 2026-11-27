@@ -34,18 +34,12 @@ test('VAT box splits input VAT, withholding is held back at Pay', async ({ page 
 	await expect(preview).toContainText('Input VAT ₱0.00');
 
 	const [h] = await sql<{ bps: number }[]>`select vat_rate_bps as bps from hotels where id = ${hotelId}`;
-	const vatBox = form.getByLabel(/Receipt includes .*VAT/);
-	// Shape of the assertions below assumes 12% (56 → 6 VAT) or a non-VAT hotel (no box at all).
-	const vat = h!.bps === 1200 ? '₱6.00' : '—';
-	if (h!.bps > 0) {
-		test.skip(h!.bps !== 1200, 'Spec amounts assume a 12% VAT rate.');
-		await vatBox.check();
-		await expect(preview).toContainText('Input VAT ₱6.00');
-		await expect(preview).toContainText('Net of VAT ₱50.00');
-	} else {
-		await expect(vatBox).toHaveCount(0);
-		await expect(form).toContainText("isn't VAT-registered");
-	}
+	// A non-VAT hotel (rate 0) still records the supplier's 12%, so both cases give 56 → 6 VAT.
+	test.skip(h!.bps !== 0 && h!.bps !== 1200, 'Spec amounts assume a 12% VAT rate.');
+	const vat = '₱6.00';
+	await form.getByLabel(/Receipt includes .*VAT/).check();
+	await expect(preview).toContainText('Input VAT ₱6.00');
+	await expect(preview).toContainText('Net of VAT ₱50.00');
 
 	// Withholding equal to the whole receipt is refused.
 	await form.locator('input[name="withholdingTax"]').fill('56');
