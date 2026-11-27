@@ -9,6 +9,7 @@
 	const tabs = $derived(
 		[
 			{ seg: '', label: 'Stock' },
+			{ seg: '/restock', label: 'Restock' },
 			{ seg: '/counts', label: 'Counts' },
 			{ seg: '/movements', label: 'Movements' },
 			{ seg: '/items', label: 'Items', show: data.inventory.canManage }

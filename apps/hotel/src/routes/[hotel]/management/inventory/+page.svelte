@@ -51,22 +51,16 @@
 	const dateFmt = new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 	const fmtDate = (d: string) => dateFmt.format(new Date(`${d}T00:00:00Z`));
 
-	// ---- the one side sheet: receive / waste / correct count ----
-	type Mode = 'receive' | 'remove' | 'count';
-	let sheet = $state<{ open: boolean; mode: Mode; item: Row | null }>({ open: false, mode: 'receive', item: null });
+	// ---- the one side sheet: waste / correct count (stock comes in through Restock, with its receipt) ----
+	type Mode = 'remove' | 'count';
+	let sheet = $state<{ open: boolean; mode: Mode; item: Row | null }>({ open: false, mode: 'remove', item: null });
 	let qty = $state('');
 	let unit = $state('pcs');
-	let byPacks = $state(false);
-	let packCount = $state('');
-	let packSize = $state('');
-	let packBonus = $state('');
 	let busy = $state(false);
 
 	function open(mode: Mode, item: Row) {
 		qty = '';
 		unit = item.unit;
-		byPacks = false;
-		packCount = packSize = packBonus = '';
 		sheet = { open: true, mode, item };
 	}
 
@@ -74,23 +68,10 @@
 	const units = $derived(item ? UNITS[item.unit] : []);
 	const unitLabel = $derived(units.find((u) => u.key === unit)?.label ?? unit);
 	/** What the form would move, in thousandths of the base unit, for the live preview. */
-	const entered = $derived.by(() => {
-		if (!item) return null;
-		if (sheet.mode === 'receive' && byPacks) {
-			const size = toMilli(Number(packSize), unit, item.unit);
-			const n = Number(packCount) + (Number(packBonus) || 0);
-			return size && n > 0 ? size * n : null;
-		}
-		return qty === '' ? null : toMilli(Number(qty), unit, item.unit);
-	});
-	const after = $derived.by(() => {
-		if (!item || entered == null) return null;
-		if (sheet.mode === 'receive') return item.onHandMilli + entered;
-		if (sheet.mode === 'remove') return item.onHandMilli - entered;
-		return entered;
-	});
+	const entered = $derived(!item || qty === '' ? null : toMilli(Number(qty), unit, item.unit));
+	const after = $derived(!item || entered == null ? null : sheet.mode === 'remove' ? item.onHandMilli - entered : entered);
 
-	const TITLES: Record<Mode, string> = { receive: 'Receive', remove: 'Record waste', count: 'Correct count' };
+	const TITLES: Record<Mode, string> = { remove: 'Record waste', count: 'Correct count' };
 
 	$effect(() => {
 		if (form?.error) toast.error(form.error);
@@ -121,7 +102,7 @@
 					</p>
 					<p class="mt-1 text-sm text-ink-muted">{[...negative, ...low].map((r) => r.name).join(' · ')}</p>
 					{#if negative.length}
-						<p class="mt-1 text-xs text-ink-muted">Below zero means more was used than was received. Receive the delivery or correct the count.</p>
+						<p class="mt-1 text-xs text-ink-muted">Below zero means more was used than was received. Encode the delivery in Restock or correct the count.</p>
 					{/if}
 				{/if}
 			</div>
@@ -172,8 +153,8 @@
 							{formatQty(r.onHandMilli, r.unit)}
 						</span>
 						{#if data.inventory.canWrite && r.isActive}
-							<Button variant="outline" class="h-11 gap-1.5" onclick={() => open('receive', r)} aria-label="Receive {r.name}">
-								<PackagePlusIcon class="size-4" aria-hidden="true" /><span class="hidden sm:inline">Receive</span>
+							<Button variant="outline" class="h-11 gap-1.5" href="/{page.params.hotel}/management/inventory/restock/new?item={r.id}" aria-label="Restock {r.name}">
+								<PackagePlusIcon class="size-4" aria-hidden="true" /><span class="hidden sm:inline">Restock</span>
 							</Button>
 							<DropdownMenu.Root>
 								<DropdownMenu.Trigger>
@@ -202,7 +183,7 @@
 				<p class="font-medium text-ink">No stock items yet.</p>
 				{#if data.inventory.canManage}
 					<p class="mt-1">
-						<a class="underline" href="/{page.params.hotel}/management/inventory/items">Add your items</a> — rice, soap, towels — then receive your first delivery.
+						<a class="underline" href="/{page.params.hotel}/management/inventory/items">Add your items</a> — rice, soap, towels — then encode your first delivery in Restock.
 					</p>
 				{:else}
 					<p class="mt-1">Ask a hotel admin to add the items you keep in stock.</p>
@@ -241,56 +222,23 @@
 				}}
 			>
 				<input type="hidden" name="itemId" value={item.id} />
-				<input type="hidden" name="mode" value={byPacks ? 'packs' : 'qty'} />
 				<input type="hidden" name="unit" value={unit} />
 
-				{#if sheet.mode === 'receive'}
-					<div class="inline-flex self-start rounded-md border border-border p-0.5 text-sm" role="radiogroup" aria-label="How it came">
-						<button type="button" role="radio" aria-checked={!byPacks} class="rounded px-3 py-1 {byPacks ? 'text-ink-muted' : 'bg-surface-2 font-medium text-ink'}" onclick={() => (byPacks = false)}>Quantity</button>
-						<button type="button" role="radio" aria-checked={byPacks} class="rounded px-3 py-1 {byPacks ? 'bg-surface-2 font-medium text-ink' : 'text-ink-muted'}" onclick={() => (byPacks = true)}>Bought in packs</button>
+				<div>
+					<Label for="qty">{sheet.mode === 'count' ? 'Counted on the shelf' : 'Quantity wasted'}</Label>
+					<div class="mt-1 flex gap-2">
+						<Input id="qty" name="qty" bind:value={qty} type="number" min="0" step="any" inputmode="decimal" class="h-11 flex-1 tabular-nums" required />
+						<Select.Root type="single" bind:value={unit}>
+							<Select.Trigger id="qtyUnit" class="w-24" aria-label="Unit">{unitLabel}</Select.Trigger>
+							<Select.Content>
+								{#each units as u (u.key)}<Select.Item value={u.key} label={u.label} />{/each}
+							</Select.Content>
+						</Select.Root>
 					</div>
-				{/if}
-
-				{#snippet unitPicker(id: string)}
-					<Select.Root type="single" bind:value={unit}>
-						<Select.Trigger {id} class="w-24" aria-label="Unit">{unitLabel}</Select.Trigger>
-						<Select.Content>
-							{#each units as u (u.key)}<Select.Item value={u.key} label={u.label} />{/each}
-						</Select.Content>
-					</Select.Root>
-				{/snippet}
-
-				{#if sheet.mode === 'receive' && byPacks}
-					<div class="grid grid-cols-2 gap-3">
-						<div>
-							<Label for="packCount">Packs</Label>
-							<Input id="packCount" name="packCount" bind:value={packCount} type="number" min="1" step="1" inputmode="numeric" class="mt-1 h-11 tabular-nums" required />
-						</div>
-						<div>
-							<Label for="packBonus">Free packs</Label>
-							<Input id="packBonus" name="packBonus" bind:value={packBonus} type="number" min="0" step="1" inputmode="numeric" placeholder="0" class="mt-1 h-11 tabular-nums" />
-						</div>
-					</div>
-					<div>
-						<Label for="packSize">In one pack</Label>
-						<div class="mt-1 flex gap-2">
-							<Input id="packSize" name="packSize" bind:value={packSize} type="number" min="0" step="any" inputmode="decimal" class="h-11 flex-1 tabular-nums" required />
-							{@render unitPicker('packUnit')}
-						</div>
-					</div>
-				{:else}
-					<div>
-						<Label for="qty">{sheet.mode === 'count' ? 'Counted on the shelf' : sheet.mode === 'remove' ? 'Quantity wasted' : 'Quantity received'}</Label>
-						<div class="mt-1 flex gap-2">
-							<Input id="qty" name="qty" bind:value={qty} type="number" min="0" step="any" inputmode="decimal" class="h-11 flex-1 tabular-nums" required />
-							{@render unitPicker('qtyUnit')}
-						</div>
-					</div>
-				{/if}
+				</div>
 
 				{#if after != null && entered != null}
 					<p class="text-sm text-ink-muted" aria-live="polite">
-						{#if sheet.mode === 'receive'}Adds <span class="tabular-nums text-ink">{formatQty(entered, item.unit)}</span>.{/if}
 						On hand after: <span class="font-medium tabular-nums {after < 0 ? 'text-danger' : 'text-ink'}">{formatQty(after, item.unit)}</span>
 						{#if sheet.mode === 'count' && after !== item.onHandMilli}
 							({after > item.onHandMilli ? '+' : ''}{formatQty(after - item.onHandMilli, item.unit)})
@@ -301,21 +249,14 @@
 					{/if}
 				{/if}
 
-				{#if sheet.mode === 'receive'}
-					<div>
-						<Label for="expiresOn">Expiry date (optional)</Label>
-						<Input id="expiresOn" name="expiresOn" type="date" class="mt-1 h-11 w-48" />
-					</div>
-				{/if}
-
 				<div>
-					<Label for="note">{sheet.mode === 'receive' ? 'Supplier / DR no. (optional)' : 'Reason'}</Label>
+					<Label for="note">Reason</Label>
 					<Textarea
 						id="note"
 						name="note"
 						rows={2}
 						maxlength={300}
-						required={sheet.mode !== 'receive'}
+						required
 						class="mt-1"
 						placeholder={sheet.mode === 'remove' ? 'Spoiled, dropped, expired…' : sheet.mode === 'count' ? 'Monthly count, found extra in storeroom…' : ''}
 					/>
@@ -324,7 +265,7 @@
 				<div class="mt-auto flex justify-end gap-2 border-t border-border pt-4">
 					<Button type="button" variant="outline" class="h-11" onclick={() => (sheet.open = false)}>Cancel</Button>
 					<Button type="submit" class="h-11" disabled={busy || entered == null || (sheet.mode !== 'count' && entered <= 0)}>
-						{sheet.mode === 'receive' ? 'Receive' : sheet.mode === 'remove' ? 'Record waste' : 'Save count'}
+						{sheet.mode === 'remove' ? 'Record waste' : 'Save count'}
 					</Button>
 				</div>
 			</form>

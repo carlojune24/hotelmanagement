@@ -148,13 +148,16 @@ describe.skipIf(!hasDb)('stock ledger (live DB)', async () => {
 		await expect(stock.startCount(linens, null, null, null)).rejects.toThrow(/already open/);
 		const c = await stock.getCount(linens, id);
 		expect(c!.lines.map((l) => l.name).sort()).toEqual(['Bed sheet', 'Curtain', 'Towel']); // housekeeping only
+		// The summary and each line's live on hand come from subqueries; they must see this count's rows.
+		expect([c!.count.lines, c!.count.adjusted]).toEqual([3, 0]);
+		expect(c!.lines.every((l) => l.onHandMilli === 50_000)).toBe(true);
 
 		await stock.saveCount(linens, id, [
 			{ itemId: towel, countedMilli: 47_000, reason: null },
 			{ itemId: sheet, countedMilli: 50_000, reason: null }
 		]);
 		// Towel differs with no reason → nothing posted.
-		await expect(stock.finishCount(linens, id, null)).rejects.toThrow(/reason.*Towel/);
+		await expect(stock.finishCount(linens, id, null)).rejects.toThrow(/remark.*Towel/);
 		expect((await stock.listStock(linens)).find((r) => r.id === towel)!.onHandMilli).toBe(50_000);
 
 		// A towel is written off between saving and finishing: the count must not take it twice.
@@ -168,6 +171,7 @@ describe.skipIf(!hasDb)('stock ledger (live DB)', async () => {
 		const done = await stock.getCount(linens, id);
 		const t = done!.lines.find((l) => l.itemId === towel)!;
 		expect([t.expectedMilli, t.varianceMilli]).toEqual([49_000, -2_000]);
+		expect([done!.count.lines, done!.count.adjusted, done!.count.status]).toEqual([3, 1, 'finished']);
 		await expect(stock.saveCount(linens, id, [])).rejects.toThrow(/already finished/);
 		expect(await stock.countLowStock(linens)).toBe(0);
 	});

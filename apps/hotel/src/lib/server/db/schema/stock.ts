@@ -5,6 +5,7 @@ import { users } from './auth';
 import { diningAddons, diningMenuItems, diningOrders } from './dining';
 import { bookings } from './bookings';
 import { roomTypes } from './inventory';
+import { expenses, vendors } from './finance';
 import { hotels } from './hotels';
 
 /**
@@ -52,6 +53,7 @@ export const stockItems = pgTable(
  * `waste` / `adjust_out` / `order` draw down oldest-batch-first, one row per batch drawn from.
  * `order_reverse` puts a cancelled dining order's ingredients back (see `syncDiningOrderStock`).
  * `checkin_kit` is the guest amenities handed out at a room check-in.
+ * `restock_void` takes back an untouched batch when its supplier receipt (restock) is voided.
  */
 export const stockMovementType = pgEnum('stock_movement_type', [
 	'restock',
@@ -60,7 +62,8 @@ export const stockMovementType = pgEnum('stock_movement_type', [
 	'adjust_out',
 	'order',
 	'order_reverse',
-	'checkin_kit'
+	'checkin_kit',
+	'restock_void'
 ]);
 
 /**
@@ -98,6 +101,8 @@ export const stockMovements = pgTable(
 		diningOrderId: uuid('dining_order_id').references(() => diningOrders.id, { onDelete: 'set null' }),
 		/** The room booking a `checkin_kit` row was handed out for. */
 		bookingId: uuid('booking_id').references(() => bookings.id, { onDelete: 'set null' }),
+		/** The supplier receipt a `restock` / `restock_void` row belongs to. */
+		restockId: uuid('restock_id').references((): AnyPgColumn => stockRestocks.id, { onDelete: 'set null' }),
 		/** The stock count an `adjust_in` / `adjust_out` row was posted from. */
 		countId: uuid('count_id').references((): AnyPgColumn => stockCounts.id, { onDelete: 'set null' }),
 		createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
@@ -108,6 +113,7 @@ export const stockMovements = pgTable(
 		index('stock_movements_hotel_idx').on(t.hotelId, t.createdAt),
 		index('stock_movements_dining_order_idx').on(t.diningOrderId),
 		index('stock_movements_booking_idx').on(t.bookingId),
+		index('stock_movements_restock_idx').on(t.restockId),
 		index('stock_movements_open_batch_idx').on(t.itemId, t.createdAt).where(sql`${t.qtyRemainingMilli} > 0`)
 	]
 );
@@ -167,6 +173,42 @@ export const stockCheckinKitLines = pgTable(
 		check('stock_checkin_kit_lines_qty_positive', sql`${t.qtyMilli} > 0`),
 		uniqueIndex('stock_checkin_kit_lines_uq').on(t.roomTypeId, t.stockItemId),
 		index('stock_checkin_kit_lines_hotel_idx').on(t.hotelId)
+	]
+);
+
+/**
+ * One supplier receipt encoded in Inventory → Restock: its lines are `restock` movements (FIFO
+ * batches, `restockId` set) and its total becomes one expense in Finance, created in the same
+ * transaction and paid later by Finance. No per-line prices: the receipt's total is the cost.
+ */
+export const stockRestocks = pgTable(
+	'stock_restocks',
+	{
+		id: pk(),
+		hotelId: uuid('hotel_id')
+			.notNull()
+			.references(() => hotels.id, { onDelete: 'cascade' }),
+		receiptDate: date('receipt_date', { mode: 'string' }).notNull(),
+		vendorId: uuid('vendor_id').references(() => vendors.id, { onDelete: 'set null' }),
+		/** One-off supplier typed on the receipt; set only when `vendorId` is null. */
+		vendorName: text('vendor_name'),
+		/** The supplier's OR / invoice / DR number. */
+		receiptNo: text('receipt_no'),
+		totalCentavos: bigint('total_centavos', { mode: 'number' }).notNull(),
+		/** `/uploads/<hotelId>/<file>` — the receipt photo, also attached to the expense. */
+		attachmentUrl: text('attachment_url'),
+		note: text('note'),
+		expenseId: uuid('expense_id').references(() => expenses.id, { onDelete: 'set null' }),
+		createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+		voidedAt: timestamp('voided_at', { withTimezone: true }),
+		voidedBy: uuid('voided_by').references(() => users.id, { onDelete: 'set null' }),
+		voidReason: text('void_reason')
+	},
+	(t) => [
+		index('stock_restocks_hotel_idx').on(t.hotelId, t.receiptDate),
+		index('stock_restocks_expense_idx').on(t.expenseId),
+		check('stock_restocks_total_positive', sql`${t.totalCentavos} > 0`)
 	]
 );
 

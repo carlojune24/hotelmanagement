@@ -27,7 +27,7 @@
 		hint,
 		withPer = false,
 		saveLabel = 'Save ingredients',
-		emptyChoices = 'No stock items yet.',
+		emptyChoices = 'No Dining stock items yet.',
 		inventoryHref
 	}: {
 		action?: string;
@@ -62,6 +62,10 @@
 		)
 	);
 	const incomplete = $derived(rows.some((r) => !r.stockItemId || !(Number(r.qty) > 0)));
+	// What was last saved, so the editor can say when it holds changes the page's own Save won't keep.
+	// svelte-ignore state_referenced_locally
+	let saved = $state(payload);
+	const dirty = $derived(payload !== saved || rows.length !== JSON.parse(saved).length);
 	const taken = $derived(new Set(rows.map((r) => r.stockItemId)));
 	const uid = $props.id();
 
@@ -82,7 +86,15 @@
 			{emptyChoices} <a class="underline" href={inventoryHref}>Add them in Inventory</a> first.
 		</p>
 	{:else}
-		<form method="POST" {action} use:enhance={() => async ({ update }) => update({ reset: false })} class="space-y-2">
+		<form
+			method="POST"
+			{action}
+			use:enhance={() => async ({ result, update }) => {
+				if (result.type === 'success') saved = payload;
+				await update({ reset: false });
+			}}
+			class="space-y-2"
+		>
 			{#each Object.entries(hidden) as [name, value] (name)}<input type="hidden" {name} {value} />{/each}
 			<input type="hidden" name="lines" value={payload} />
 			{#each rows as row, i (i)}
@@ -131,7 +143,10 @@
 				<Button type="button" variant="ghost" size="sm" class="px-2" onclick={() => rows.push({ stockItemId: '', qty: '', unit: 'pcs', per: 'room' })}>
 					<PlusIcon class="size-4" /> Add item
 				</Button>
-				<Button type="submit" variant="outline" size="sm" disabled={incomplete}>{saveLabel}</Button>
+				<div class="flex items-center gap-2">
+					{#if dirty}<span class="text-xs font-medium text-warning" role="status">Not saved yet</span>{/if}
+					<Button type="submit" variant={dirty ? 'default' : 'outline'} size="sm" disabled={incomplete || !dirty}>{saveLabel}</Button>
+				</div>
 			</div>
 		</form>
 	{/if}

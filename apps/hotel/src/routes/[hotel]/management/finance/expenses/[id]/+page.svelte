@@ -36,6 +36,9 @@
 		<span class="tabular-nums">{e.expenseDate}</span>
 		<span class="rounded px-1.5 py-0.5 text-[11px] font-medium {e.source === 'dining' ? 'bg-warning/20 text-ink' : 'bg-brand/10 text-brand'}">{e.source === 'dining' ? 'Dining' : 'Hotel'}</span>
 		<Badge variant="outline" class={statusClass[e.status]}>{e.status}</Badge>
+		{#if data.restock}
+			<a class="underline" href="/{page.params.hotel}/management/inventory/restock/{data.restock.id}">From Inventory restock{data.restock.receiptNo ? ` ${data.restock.receiptNo}` : ''}</a>
+		{/if}
 	</p>
 
 	<dl class="mb-6 grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
