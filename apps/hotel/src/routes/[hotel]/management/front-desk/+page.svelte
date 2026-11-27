@@ -3658,6 +3658,18 @@
 								</div>
 								<p class="text-xs text-ink-muted">The net shows under Finance → OTA payouts until the OTA pays it out.</p>
 							</section>
+							<WalkinExtras
+								bind:extras={walkInExtras}
+								options={data.amenityItemOptions}
+								vatRateBps={data.vatRateBps}
+								note="Charged to the first room. The guest pays these, not {otaName || 'the OTA'}, at the desk or at check-out."
+							/>
+							{#if walkInExtrasTotal > 0}
+								<p class="flex justify-between rounded-lg bg-surface-2 px-3 py-2 text-sm font-semibold text-ink">
+									<span>Extras the guest owes</span>
+									<span class="tabular-nums">{peso(walkInExtrasTotal)}</span>
+								</p>
+							{/if}
 						{:else}
 							<GuestContactFields prefix="wi" bind:valid={walkInContactValid} />
 							<div>

@@ -37,12 +37,14 @@
 		extras = $bindable([]),
 		options,
 		vatRateBps,
-		idPrefix = 'wi'
+		idPrefix = 'wi',
+		note = 'Charged to the first room and paid with the booking.'
 	}: {
 		extras: WalkInExtraLine[];
 		options: { id: string; name: string; priceCentavos: number; taxable: boolean }[];
 		vatRateBps: number;
 		idPrefix?: string;
+		note?: string;
 	} = $props();
 
 	const peso = (c: number) => `₱${(c / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
@@ -136,6 +138,6 @@
 		</div>
 		<Button type="button" variant="outline" onclick={addCustom}>Add</Button>
 	</div>
-	<p class="text-xs text-ink-muted">Charged to the first room and paid with the booking.</p>
+	<p class="text-xs text-ink-muted">{note}</p>
 	<input type="hidden" name="extrasJson" value={extrasJson(extras)} />
 </section>

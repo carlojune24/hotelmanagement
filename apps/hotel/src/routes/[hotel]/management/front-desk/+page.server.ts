@@ -1365,6 +1365,13 @@ export const actions: Actions = {
 			return fail(400, { walkInError: 'Your cart looks empty — add a room before continuing.' });
 		}
 
+		let extras: z.infer<typeof hallExtrasSchema>;
+		try {
+			extras = hallExtrasSchema.parse(JSON.parse(typeof raw.extrasJson === 'string' && raw.extrasJson ? raw.extrasJson : '[]'));
+		} catch {
+			return fail(400, { walkInError: 'Check the extras and try again.' });
+		}
+
 		const override = readCapacityOverride(event.locals, raw);
 		if (override && 'error' in override) return fail(override.status, { walkInError: override.error });
 
@@ -1375,6 +1382,7 @@ export const actions: Actions = {
 				businessDate: todayInTimezone(hotel.timezone),
 				guest: { fullName: d.fullName, email: d.email, phone: d.phone ?? null, specialRequests: d.specialRequests ?? null },
 				rooms: items,
+				extras,
 				ota: {
 					name: d.otaName,
 					reference: d.otaReference,

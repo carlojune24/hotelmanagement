@@ -222,6 +222,29 @@ test.describe('OTA bookings · end to end', () => {
 		expect((await orderRow(made.C!.orderId)).ota_name).toBe('Booking.com');
 	});
 
+	test('extras on an OTA booking: on the guest folio, owed by the guest, kept out of the OTA receivable', async ({ page }) => {
+		const sheet = await addRoom(page, B + 44, 1);
+		await fillOta(sheet, { guest: 'DUMMY OTA Guest EXTRAS', ota: 'Agoda', ref: ref('EXTRAS'), net: '3000' });
+		await sheet.locator('#wiExtraName').fill('Extra breakfast');
+		await sheet.locator('#wiExtraQty').fill('2');
+		await sheet.locator('#wiExtraPrice').fill('188');
+		await sheet.getByRole('button', { name: 'Add', exact: true }).last().click();
+		await expect(sheet.getByText('Extras the guest owes')).toBeVisible();
+		await expect(sheet.getByText('Payment method')).toHaveCount(0);
+		await sheet.getByRole('button', { name: 'Create OTA booking' }).click();
+		await expect(page).toHaveURL(/\/management\/transactions\/[0-9a-f-]{36}/);
+		const orderId = page.url().match(/transactions\/([0-9a-f-]{36})/)![1]!;
+		made.EXTRAS = { orderId, ref: ref('EXTRAS') };
+
+		// The OTA owes the net only; the extras stay on the guest's folio, unpaid.
+		expect(await orderRow(orderId)).toMatchObject({ n: 300_000, total: 300_000 });
+		expect(await receivableOf(orderId)).toMatchObject({ status: 'open', outstanding: 300_000 });
+		const line = (await sql`select c.quantity::int q, c.total_centavos::int t from folio_charges c join folios f on f.id = c.folio_id join bookings b on b.id = f.booking_id where b.order_id = ${orderId} and c.description = 'Extra breakfast'`)[0];
+		expect(line).toMatchObject({ q: 2, t: 37_600 });
+		const bal = (await sql`select (select coalesce(sum(c.total_centavos),0) from folio_charges c join folios f on f.id = c.folio_id join bookings b on b.id = f.booking_id where b.order_id = ${orderId} and c.voided_at is null) - (select coalesce(sum(amount_centavos),0) from payments where order_id = ${orderId} and status = 'paid' and voided_at is null) as bal`)[0]!.bal;
+		expect(Number(bal)).toBe(37_600);
+	});
+
 	test('the same OTA reference twice is refused with a plain message', async ({ page }) => {
 		const sheet = await addRoom(page, B + 4, 2);
 		await fillOta(sheet, { guest: 'DUMMY OTA Duplicate', ota: 'Agoda', ref: ref('A'), net: '5000' });
