@@ -44,7 +44,7 @@
 		{/if}
 		<div class="mt-3 flex flex-wrap items-start justify-between gap-3">
 			<div>
-				<h2 class="text-base font-semibold {r.voidedAt ? 'text-ink-muted line-through decoration-1' : 'text-ink'}">
+				<h2 class="text-base font-semibold {r.voidedAt ?'text-ink-muted line-through decoration-1' : 'text-ink'}">
 					{r.supplier ?? 'No supplier named'}{r.receiptNo ? ` · ${r.receiptNo}` : ''}
 				</h2>
 				<p class="mt-1 text-sm text-ink-muted">
@@ -105,14 +105,14 @@
 					<form method="POST" action="?/void" use:enhance class="flex flex-wrap items-end gap-3">
 						<div class="min-w-64 flex-1">
 							<Label for="reason">Why void this receipt?</Label>
-							<Input id="reason" name="reason" required maxlength={300} placeholder="Wrong supplier, encoded twice…" class="mt-1 h-11" />
+							<Input id="reason" name="reason" required maxlength={300} placeholder="Wrong supplier, encoded twice…" class="mt-1" />
 						</div>
-						<Button type="submit" variant="destructive" class="h-11">Void receipt</Button>
-						<Button type="button" variant="ghost" class="h-11" onclick={() => (confirming = false)}>Keep it</Button>
+						<Button type="submit" variant="destructive" class="">Void receipt</Button>
+						<Button type="button" variant="ghost" class="" onclick={() => (confirming = false)}>Keep it</Button>
 						<p class="w-full text-xs text-ink-muted">Takes these items back out of stock and voids the expense in Finance.</p>
 					</form>
 				{:else}
-					<Button variant="ghost" class="h-11 text-danger hover:text-danger" onclick={() => (confirming = true)}>Void this receipt</Button>
+					<Button variant="ghost" class="text-danger hover:text-danger" onclick={() => (confirming = true)}>Void this receipt</Button>
 				{/if}
 			</div>
 		{:else if !r.voidedAt && r.expenseStatus === 'paid'}

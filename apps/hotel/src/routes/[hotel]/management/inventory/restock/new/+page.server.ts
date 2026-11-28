@@ -13,13 +13,14 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const hotel = locals.hotel!;
 	const [stock, vendors, categories] = await Promise.all([listStock(hotel.id), listVendors(hotel.id), listExpenseCategories(hotel.id)]);
 	const items = stock.filter((i) => i.isActive).map((i) => ({ id: i.id, name: i.name, unit: i.unit, department: i.department }));
-	const preset = url.searchParams.get('item');
+	// `?item=` (repeatable) pre-fills lines — from a Stock row or a Shopping list supplier group.
+	const wanted = new Set(url.searchParams.getAll('item'));
 	return {
 		items,
 		vendors: vendors.map((v) => ({ id: v.id, name: v.name })),
 		categories: categories.map((c) => ({ id: c.id, name: c.name })),
 		today: businessDateFor(hotel.timezone),
-		preset: items.some((i) => i.id === preset) ? preset : null,
+		presets: items.filter((i) => wanted.has(i.id)).map((i) => i.id),
 		vatRateBps: hotel.vatRateBps || 1200 // supplier VAT even when the hotel isn't VAT-registered; same fallback as Expenses
 	};
 };

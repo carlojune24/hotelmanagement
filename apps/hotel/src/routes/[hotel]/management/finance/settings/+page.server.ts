@@ -9,16 +9,13 @@ import { FinanceError } from '$lib/server/finance/shared';
 import {
 	createCashAccount,
 	createExpenseCategory,
-	createVendor,
 	deleteCashAccount,
 	deleteExpenseCategory,
-	deleteVendor,
 	listCashAccounts,
 	listExpenseCategories,
 	listVendors,
 	updateCashAccount,
 	updateExpenseCategory,
-	updateVendor
 } from '$lib/server/finance/accounts';
 import { ensureFinanceSettings, getFinanceSettings, updateFinanceSettings } from '$lib/server/finance/settings';
 import { createApiKey, listApiKeysForHotel, revokeApiKey } from '$lib/server/auth/api-key';
@@ -63,7 +60,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 	return {
 		accounts,
 		categories,
-		vendors,
+		vendorCount: vendors.filter((v) => v.isActive).length,
 		settings,
 		apiKeys,
 		hotelDetails,
@@ -240,58 +237,6 @@ export const actions: Actions = {
 		const id = (await event.request.formData()).get('id');
 		if (typeof id !== 'string') return fail(400, { error: 'Missing category.' });
 		return wrap(() => deleteExpenseCategory(event.locals.hotel!.id, id, event.locals.user), 'Category removed.');
-	},
-
-	createVendor: async (event) => {
-		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
-		const p = z
-			.object({
-				name: z.string().min(1).max(160),
-				tin: z.string().max(40).optional(),
-				address: z.string().max(300).optional(),
-				contactName: z.string().max(120).optional(),
-				contactPhone: z.string().max(40).optional(),
-				contactEmail: z.string().max(160).optional()
-			})
-			.safeParse(Object.fromEntries(await event.request.formData()));
-		if (!p.success) return fail(400, { error: 'Check the vendor.' });
-		return wrap(() => createVendor(event.locals.hotel!.id, p.data, event.locals.user), 'Vendor added.');
-	},
-
-	updateVendor: async (event) => {
-		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
-		const fd = Object.fromEntries(await event.request.formData());
-		const p = z
-			.object({
-				id: z.string().uuid(),
-				name: z.string().min(1).max(160).optional(),
-				tin: z.string().max(40).optional(),
-				address: z.string().max(300).optional(),
-				contactName: z.string().max(120).optional(),
-				contactPhone: z.string().max(40).optional(),
-				contactEmail: z.string().max(160).optional(),
-				isActive: z.enum(['true', 'false']).optional()
-			})
-			.safeParse(fd);
-		if (!p.success) return fail(400, { error: 'Check the fields.' });
-		const { id, isActive, ...rest } = p.data;
-		return wrap(
-			() =>
-				updateVendor(
-					event.locals.hotel!.id,
-					id,
-					{ ...rest, isActive: isActive === undefined ? undefined : isActive === 'true' },
-					event.locals.user
-				),
-			'Vendor updated.'
-		);
-	},
-
-	deleteVendor: async (event) => {
-		requireCap(event.locals.user, event.locals.role, 'hotel:admin');
-		const id = (await event.request.formData()).get('id');
-		if (typeof id !== 'string') return fail(400, { error: 'Missing vendor.' });
-		return wrap(() => deleteVendor(event.locals.hotel!.id, id, event.locals.user), 'Vendor removed.');
 	},
 
 	updateSettings: async (event) => {

@@ -3,7 +3,7 @@ import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
 	const hotelId = locals.hotel!.id;
-	const items = (await listStock(hotelId)).map((r) => ({ id: r.id, name: r.name }));
+	const items = (await listStock(hotelId)).map((r) => ({ id: r.id, name: r.name, unit: r.unit, onHandMilli: r.onHandMilli }));
 	const requested = url.searchParams.get('item');
 	const itemId = items.some((i) => i.id === requested) ? requested! : null;
 	return {

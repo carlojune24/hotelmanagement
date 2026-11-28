@@ -16,7 +16,7 @@ import { hotels } from './hotels';
  * same idea as centavos: 1 kg rice = 1_000_000 (g × 1000), half a lemon = 500 (pcs × 1000).
  * Conversions live in `$lib/stock-units.ts`.
  */
-export const stockDepartment = pgEnum('stock_department', ['dining', 'front_desk', 'housekeeping']);
+export const stockDepartment = pgEnum('stock_department', ['dining', 'hotel']);
 
 /** `consumable` is used up (soap, rice). `reusable` is only counted and audited (towels, sheets). */
 export const stockKind = pgEnum('stock_kind', ['consumable', 'reusable']);
@@ -37,6 +37,10 @@ export const stockItems = pgTable(
 		unit: stockUnit('unit').notNull(),
 		/** At or below this on-hand quantity the item shows as low. Null = never flagged. */
 		reorderLevelMilli: bigint('reorder_level_milli', { mode: 'number' }),
+		/** Days the supplier takes to deliver: order once it would run out within this. Null = default. */
+		leadTimeDays: integer('lead_time_days'),
+		/** Days of use one order should cover (the shopping list's suggested quantity). Null = default. */
+		coverDays: integer('cover_days'),
 		isActive: boolean('is_active').notNull().default(true),
 		createdAt: createdAt(),
 		updatedAt: updatedAt(),

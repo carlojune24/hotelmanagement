@@ -45,6 +45,9 @@ export interface StockItemInput {
 	kind: Kind;
 	unit: Unit;
 	reorderLevelMilli: number | null;
+	/** Shopping list settings; null = the default (`$lib/stock-forecast`), undefined = leave as is. */
+	leadTimeDays?: number | null;
+	coverDays?: number | null;
 	isActive?: boolean;
 }
 
@@ -53,6 +56,8 @@ function cleanItem(input: StockItemInput): StockItemInput {
 	if (!name) throw new StockError('Give the item a name.');
 	if (input.reorderLevelMilli != null && (!Number.isSafeInteger(input.reorderLevelMilli) || input.reorderLevelMilli < 0))
 		throw new StockError('Reorder level must be zero or more.');
+	for (const d of [input.leadTimeDays, input.coverDays])
+		if (d != null && (!Number.isInteger(d) || d < 0 || d > 365)) throw new StockError('Days must be a whole number from 0 to 365.');
 	return { ...input, name };
 }
 
@@ -68,7 +73,16 @@ export async function createStockItem(hotelId: string, input: StockItemInput, ac
 		return await db.transaction(async (tx) => {
 			const [row] = await tx
 				.insert(stockItems)
-				.values({ hotelId, name: v.name, department: v.department, kind: v.kind, unit: v.unit, reorderLevelMilli: v.reorderLevelMilli })
+				.values({
+					hotelId,
+					name: v.name,
+					department: v.department,
+					kind: v.kind,
+					unit: v.unit,
+					reorderLevelMilli: v.reorderLevelMilli,
+					leadTimeDays: v.leadTimeDays ?? null,
+					coverDays: v.coverDays ?? null
+				})
 				.returning();
 			await writeAudit({ hotelId, actor, action: 'stock_item.create', entityType: 'stock_item', entityId: row!.id, after: row, tx });
 			return row!.id;
@@ -321,7 +335,10 @@ export async function listMovements(hotelId: string, opts: { itemId?: string; li
 			packSizeMilli: stockMovements.packSizeMilli,
 			note: stockMovements.note,
 			createdAt: stockMovements.createdAt,
-			byName: users.name
+			byName: users.name,
+			// On hand right after this movement. Windows run before LIMIT, over the item's whole history,
+			// in the same (created_at, id) order the list is shown in.
+			balanceMilli: sql<string>`sum(${stockMovements.qtyMilli}) over (partition by ${stockMovements.itemId} order by ${stockMovements.createdAt}, ${stockMovements.id})`
 		})
 		.from(stockMovements)
 		.innerJoin(stockItems, eq(stockItems.id, stockMovements.itemId))
@@ -518,7 +535,7 @@ export interface KitLine {
 	per: 'room' | 'guest';
 }
 
-/** What a kit may hold: live, active consumables the front desk or housekeeping keeps (no linens). */
+/** What a kit may hold: live, active Hotel consumables (no linens). */
 export async function listKitChoices(hotelId: string) {
 	return db
 		.select({ id: stockItems.id, name: stockItems.name, unit: stockItems.unit })
@@ -529,7 +546,7 @@ export async function listKitChoices(hotelId: string) {
 				isNull(stockItems.deletedAt),
 				eq(stockItems.isActive, true),
 				eq(stockItems.kind, 'consumable'),
-				inArray(stockItems.department, ['front_desk', 'housekeeping'])
+				eq(stockItems.department, 'hotel')
 			)
 		)
 		.orderBy(asc(stockItems.name));

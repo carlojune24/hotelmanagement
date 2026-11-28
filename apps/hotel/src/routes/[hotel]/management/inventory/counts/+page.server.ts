@@ -12,7 +12,7 @@ export const actions: Actions = {
 	start: async ({ locals, request, params }) => {
 		requireCap(locals.user, locals.role, 'inventory:write');
 		const p = z
-			.object({ department: z.enum(['all', 'dining', 'front_desk', 'housekeeping']), note: z.string().max(300).optional() })
+			.object({ department: z.enum(['all', 'dining', 'hotel']), note: z.string().max(300).optional() })
 			.safeParse(Object.fromEntries(await request.formData()));
 		if (!p.success) return fail(400, { error: 'Pick what to count.' });
 		let id: string;

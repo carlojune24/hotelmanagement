@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { enhance } from '$app/forms';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -23,7 +24,6 @@
 	});
 	let showAccount = $state(false);
 	let showCategory = $state(false);
-	let showVendor = $state(false);
 	let showApiKey = $state(false);
 	const kindLabel = (k: string) => k.replace(/_/g, ' ');
 
@@ -313,43 +313,14 @@
 		</div>
 	</section>
 
-	<!-- Vendors -->
+	<!-- Vendors: managed in Inventory → Suppliers -->
 	<section class="rounded-xl border border-border p-5">
-		<div class="mb-3 flex items-center justify-between">
-			<h2 class="text-sm font-semibold text-ink">Vendors</h2>
-			<Button size="sm" variant="outline" onclick={() => (showVendor = !showVendor)}>Add vendor</Button>
-		</div>
-		{#if showVendor}
-			<form method="POST" action="?/createVendor" use:enhance class="mb-3 grid gap-2 rounded-lg border border-border p-3 sm:grid-cols-3">
-				<Input name="name" placeholder="Name" required />
-				<Input name="tin" placeholder="TIN" />
-				<Input name="contactPhone" placeholder="Phone" />
-				<Input name="address" placeholder="Address" class="sm:col-span-2" />
-				<Input name="contactEmail" placeholder="Email" />
-				<Button type="submit" size="sm">Add</Button>
-			</form>
-		{/if}
-		<div class="divide-y divide-border">
-			{#each data.vendors as v (v.id)}
-				<div class="flex items-center justify-between py-2 text-sm {v.isActive ? '' : 'opacity-50'}">
-					<div>
-						<span class="text-ink">{v.name}</span>
-						{#if v.tin}<span class="ml-2 text-xs text-ink-muted">TIN {v.tin}</span>{/if}
-					</div>
-					<div class="flex gap-2">
-						<form method="POST" action="?/updateVendor" use:enhance>
-							<input type="hidden" name="id" value={v.id} />
-							<input type="hidden" name="isActive" value={v.isActive ? 'false' : 'true'} />
-							<button class="text-xs text-ink-muted underline underline-offset-2">{v.isActive ? 'Deactivate' : 'Activate'}</button>
-						</form>
-						<form method="POST" action="?/deleteVendor" use:enhance>
-							<input type="hidden" name="id" value={v.id} />
-							<button class="text-xs text-ink-muted underline underline-offset-2 hover:text-danger">Delete</button>
-						</form>
-					</div>
-				</div>
-			{/each}
-		</div>
+		<h2 class="text-sm font-semibold text-ink">Vendors</h2>
+		<p class="mt-1 text-sm text-ink-muted">
+			Suppliers are now managed in
+			<a class="font-medium text-ink underline" href="/{page.params.hotel}/management/inventory/suppliers">Inventory → Suppliers</a>
+			({data.vendorCount} active). Expenses and Restock both pick from that list.
+		</p>
 	</section>
 
 	<!-- API keys -->

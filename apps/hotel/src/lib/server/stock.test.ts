@@ -137,17 +137,17 @@ describe.skipIf(!hasDb)('stock ledger (live DB)', async () => {
 	it('a stock count posts differences against on hand at finish, needs reasons, and allows one open count', async () => {
 		const linens = await mkHotel('count');
 		const mk = (name: string) =>
-			stock.createStockItem(linens, { name, department: 'housekeeping', kind: 'reusable', unit: 'pcs', reorderLevelMilli: null }, null);
+			stock.createStockItem(linens, { name, department: 'hotel', kind: 'reusable', unit: 'pcs', reorderLevelMilli: null }, null);
 		const towel = await mk('Towel');
 		const sheet = await mk('Bed sheet');
 		const curtain = await mk('Curtain');
 		for (const id of [towel, sheet, curtain]) await stock.receiveStock({ hotelId: linens, itemId: id, qtyMilli: 50_000, actor: null });
 		await stock.createStockItem(linens, { name: 'Rice', department: 'dining', kind: 'consumable', unit: 'g', reorderLevelMilli: null }, null);
 
-		const id = await stock.startCount(linens, 'housekeeping', 'Monthly linen audit', null);
+		const id = await stock.startCount(linens, 'hotel', 'Monthly linen audit', null);
 		await expect(stock.startCount(linens, null, null, null)).rejects.toThrow(/already open/);
 		const c = await stock.getCount(linens, id);
-		expect(c!.lines.map((l) => l.name).sort()).toEqual(['Bed sheet', 'Curtain', 'Towel']); // housekeeping only
+		expect(c!.lines.map((l) => l.name).sort()).toEqual(['Bed sheet', 'Curtain', 'Towel']); // Hotel only
 		// The summary and each line's live on hand come from subqueries; they must see this count's rows.
 		expect([c!.count.lines, c!.count.adjusted]).toEqual([3, 0]);
 		expect(c!.lines.every((l) => l.onHandMilli === 50_000)).toBe(true);
@@ -177,9 +177,9 @@ describe.skipIf(!hasDb)('stock ledger (live DB)', async () => {
 	});
 
 	it('refuses a duplicate item name in the same hotel (any case)', async () => {
-		await stock.createStockItem(hotelA, { name: 'Bath Soap', department: 'front_desk', kind: 'consumable', unit: 'pcs', reorderLevelMilli: null }, null);
+		await stock.createStockItem(hotelA, { name: 'Bath Soap', department: 'hotel', kind: 'consumable', unit: 'pcs', reorderLevelMilli: null }, null);
 		await expect(
-			stock.createStockItem(hotelA, { name: 'bath soap', department: 'front_desk', kind: 'consumable', unit: 'pcs', reorderLevelMilli: null }, null)
+			stock.createStockItem(hotelA, { name: 'bath soap', department: 'hotel', kind: 'consumable', unit: 'pcs', reorderLevelMilli: null }, null)
 		).rejects.toThrow(/already an item/);
 	});
 });

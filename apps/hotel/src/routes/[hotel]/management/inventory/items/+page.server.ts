@@ -13,10 +13,12 @@ export const load: PageServerLoad = async ({ locals }) => {
 const schema = z.object({
 	itemId: z.union([z.literal(''), z.string().uuid()]).optional(),
 	name: z.string().trim().min(1, 'Give the item a name.').max(120),
-	department: z.enum(['dining', 'front_desk', 'housekeeping']),
+	department: z.enum(['dining', 'hotel']),
 	kind: z.enum(['consumable', 'reusable']),
 	unit: z.enum(['g', 'ml', 'pcs']),
 	reorderQty: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().min(0).finite().optional()),
+	leadTimeDays: z.preprocess((v) => (v === '' || v == null ? null : v), z.coerce.number().int('Days must be whole days.').min(0).max(365).nullable()),
+	coverDays: z.preprocess((v) => (v === '' || v == null ? null : v), z.coerce.number().int('Days must be whole days.').min(1).max(365).nullable()),
 	reorderUnit: z.string().optional(),
 	isActive: z.literal('on').optional()
 });
@@ -30,7 +32,16 @@ export const actions: Actions = {
 		const d = p.data;
 		const reorderLevelMilli = d.reorderQty == null ? null : toMilli(d.reorderQty, d.reorderUnit ?? d.unit, d.unit);
 		if (d.reorderQty != null && reorderLevelMilli == null) return fail(400, { error: 'Pick a unit for the reorder level.' });
-		const input = { name: d.name, department: d.department, kind: d.kind, unit: d.unit, reorderLevelMilli, isActive: d.isActive === 'on' };
+		const input = {
+			name: d.name,
+			department: d.department,
+			kind: d.kind,
+			unit: d.unit,
+			reorderLevelMilli,
+			leadTimeDays: d.leadTimeDays,
+			coverDays: d.coverDays,
+			isActive: d.isActive === 'on'
+		};
 		try {
 			if (d.itemId) await updateStockItem(hotelId, d.itemId, input, locals.user);
 			else await createStockItem(hotelId, input, locals.user);

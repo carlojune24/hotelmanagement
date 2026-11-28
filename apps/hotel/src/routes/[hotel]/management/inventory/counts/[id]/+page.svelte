@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import PrinterIcon from '@lucide/svelte/icons/printer';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { COUNT_UNIT, formatQty } from '$lib/stock-units';
 	import type { ActionData, PageData } from './$types';
@@ -10,7 +11,7 @@
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
 	const back = $derived(`/${page.params.hotel}/management/inventory/counts`);
-	const DEPT: Record<string, string> = { dining: 'Dining', front_desk: 'Front desk', housekeeping: 'Housekeeping' };
+	const DEPT: Record<string, string> = { dining: 'Dining', hotel: 'Hotel' };
 	const isOpen = $derived(data.count.status === 'open');
 	const canEdit = $derived(isOpen && data.inventory.canWrite);
 	const when = $derived(new Intl.DateTimeFormat('en-PH', { timeZone: data.timezone, month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }));
@@ -24,7 +25,8 @@
 		)
 	);
 	const countedMilli = (l: Line) => {
-		const v = typed[l.itemId]!.counted.trim();
+		// A number input bound with bind:value hands back a number (or null when cleared), not text.
+		const v = String(typed[l.itemId]!.counted ?? '').trim();
 		const n = Number(v);
 		return v === '' || !Number.isFinite(n) || n < 0 ? null : Math.round(n * COUNT_UNIT[l.unit].milli);
 	};
@@ -33,10 +35,10 @@
 		const c = countedMilli(l);
 		return c == null ? null : c - l.onHandMilli;
 	};
+	// Grouped by the departments the lines actually have, so no line can drop out of view.
+	const deptLabel = (d: string | null) => (d ? (DEPT[d] ?? d) : 'Everything');
 	const groups = $derived(
-		Object.keys(DEPT)
-			.map((k) => ({ key: k, label: DEPT[k]!, lines: data.lines.filter((l) => l.department === k) }))
-			.filter((g) => g.lines.length)
+		[...new Set(data.lines.map((l) => l.department))].map((k) => ({ key: k, label: deptLabel(k), lines: data.lines.filter((l) => l.department === k) }))
 	);
 	const done = $derived(data.lines.filter((l) => countedMilli(l) != null).length);
 	const differing = $derived(data.lines.filter((l) => (diffOf(l) ?? 0) !== 0));
@@ -58,9 +60,12 @@
 
 <div class="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
 	<div class="max-w-4xl">
-		<a href={back} class="text-sm text-ink-muted hover:text-ink">← All counts</a>
+		<div class="flex items-center justify-between gap-3 print:hidden">
+			<a href={back} class="text-sm text-ink-muted hover:text-ink">← All counts</a>
+			<Button variant="outline" size="sm" onclick={() => window.print()}><PrinterIcon class="size-4" />Print</Button>
+		</div>
 		<h2 class="mt-2 text-base font-semibold text-ink">
-			{isOpen ? 'Count in progress' : 'Count'}: {data.count.department ? DEPT[data.count.department] : 'Everything'}
+			{isOpen ? 'Count in progress' : 'Stock count'}: {deptLabel(data.count.department)}
 		</h2>
 		<p class="mt-1 text-sm text-ink-muted">
 			{data.count.note ? `${data.count.note} · ` : ''}Started {when.format(new Date(data.count.startedAt))}{data.count.startedByName
@@ -113,12 +118,12 @@
 												min="0"
 												step="any"
 												inputmode="decimal"
-												class="h-11 w-24 tabular-nums"
+												class="w-24 tabular-nums"
 												aria-label="{l.name} counted, in {unit.label}"
 											/>
 											<span class="w-8 text-sm text-ink-muted">{unit.label}</span>
 										</div>
-										<span class="w-24 text-right text-sm font-medium tabular-nums {d == null || d === 0 ? 'text-ink-muted' : d < 0 ? 'text-danger' : 'text-brand'}">
+										<span class="w-24 text-right text-sm font-medium tabular-nums {d == null || d === 0 ?'text-ink-muted' : d < 0 ? 'text-danger' : 'text-brand'}">
 											{d == null ? '—' : d === 0 ? 'Matches' : signed(d, l.unit)}
 										</span>
 									</div>
@@ -130,7 +135,7 @@
 											bind:value={typed[l.itemId]!.reason}
 											maxlength={300}
 											placeholder={d != null && d !== 0 ? 'Required: why? Lost, damaged, taken by a guest, found in laundry…' : 'Remarks (optional)'}
-											class="h-10 {missing && tried ? 'border-danger' : ''}"
+											class={missing && tried ? 'border-danger' : ''}
 											aria-label="Remarks for {l.name}"
 											aria-invalid={missing && tried}
 										/>
@@ -146,7 +151,7 @@
 												{formatQty(l.countedMilli, l.unit)}
 											</span>
 											{#if !isOpen}
-												<span class="w-24 text-right text-sm font-medium tabular-nums {l.varianceMilli ? (l.varianceMilli < 0 ? 'text-danger' : 'text-brand') : 'text-ink-muted'}">
+												<span class="w-24 text-right text-sm font-medium tabular-nums {l.varianceMilli ? (l.varianceMilli < 0 ?'text-danger' : 'text-brand') : 'text-ink-muted'}">
 													{l.varianceMilli ? signed(l.varianceMilli, l.unit) : 'Matched'}
 												</span>
 											{/if}
@@ -161,7 +166,7 @@
 			{/each}
 
 			{#if canEdit}
-				<div class="sticky bottom-0 mt-6 flex flex-wrap items-center gap-3 border-t border-border bg-surface py-3">
+				<div class="sticky bottom-0 mt-6 flex flex-wrap items-center gap-3 border-t border-border bg-surface py-3 print:hidden">
 					<p class="flex-1 text-sm text-ink-muted" aria-live="polite">
 						{done} of {data.lines.length} counted{differing.length ? ` · ${differing.length} differ` : ''}{needReason.length
 							? ` · ${needReason.length} need a remark`
@@ -172,11 +177,11 @@
 							Add a remark for {needReason.map((l) => l.name).join(', ')}: {needReason.length === 1 ? 'it differs' : 'they differ'} from what the system shows.
 						</p>
 					{/if}
-					<Button type="submit" variant="outline" class="h-11" disabled={busy}>Save progress</Button>
+					<Button type="submit" variant="outline" class="" disabled={busy}>Save progress</Button>
 					<Button
 						type="submit"
 						formaction="?/finish"
-						class="h-11"
+						class=""
 						disabled={busy || done === 0}
 						onclick={(e) => {
 							// Say what is missing instead of a silently disabled button.
@@ -191,15 +196,15 @@
 		</form>
 
 		{#if canEdit}
-			<div class="mt-6 border-t border-border pt-4">
+			<div class="mt-6 border-t border-border pt-4 print:hidden">
 				{#if confirmDiscard}
 					<form method="POST" action="?/discard" use:enhance class="flex flex-wrap items-center gap-3">
 						<p class="text-sm text-ink">Discard this count? Nothing has been posted, so stock is unchanged.</p>
-						<Button type="submit" variant="destructive" class="h-11">Discard count</Button>
-						<Button type="button" variant="ghost" class="h-11" onclick={() => (confirmDiscard = false)}>Keep it</Button>
+						<Button type="submit" variant="destructive" class="">Discard count</Button>
+						<Button type="button" variant="ghost" class="" onclick={() => (confirmDiscard = false)}>Keep it</Button>
 					</form>
 				{:else}
-					<Button variant="ghost" class="h-11 text-danger hover:text-danger" onclick={() => (confirmDiscard = true)}>Discard count</Button>
+					<Button variant="ghost" class="text-danger hover:text-danger" onclick={() => (confirmDiscard = true)}>Discard count</Button>
 				{/if}
 			</div>
 		{/if}
