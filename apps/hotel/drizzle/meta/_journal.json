@@ -876,6 +876,20 @@
       "when": 1795787392775,
       "tag": "0124_stock_restocks",
       "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1795789466768,
+      "tag": "0125_stock_lead_cover",
+      "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1795822530565,
+      "tag": "0126_stock_departments",
+      "breakpoints": true
     }
   ]
 }

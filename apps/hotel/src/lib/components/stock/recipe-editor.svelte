@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import * as ToggleGroup from '$lib/components/ui/toggle-group/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import * as Select from '$lib/components/ui/select/index.js';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -122,17 +123,17 @@
 						</Select.Content>
 					</Select.Root>
 					{#if withPer}
-						<div class="inline-flex rounded-md border border-border p-0.5 text-xs" role="radiogroup" aria-label="Item {i + 1} counted per">
-							{#each ['room', 'guest'] as const as p (p)}
-								<button
-									type="button"
-									role="radio"
-									aria-checked={row.per === p}
-									class="rounded px-2 py-1 {row.per === p ? 'bg-surface-2 font-medium text-ink' : 'text-ink-muted'}"
-									onclick={() => (row.per = p)}>per {p}</button
-								>
-							{/each}
-						</div>
+						<ToggleGroup.Root
+							type="single"
+							variant="outline"
+							size="sm"
+							value={row.per}
+							onValueChange={(v) => v && (row.per = v as Per)}
+							aria-label="Item {i + 1} counted per"
+						>
+							<ToggleGroup.Item value="room" class="px-2.5">per room</ToggleGroup.Item>
+							<ToggleGroup.Item value="guest" class="px-2.5">per guest</ToggleGroup.Item>
+						</ToggleGroup.Root>
 					{/if}
 					<Button type="button" variant="ghost" size="icon" aria-label="Remove item {i + 1}" onclick={() => rows.splice(i, 1)}>
 						<XIcon class="size-4" />

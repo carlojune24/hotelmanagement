@@ -27,7 +27,7 @@
 				</p>
 			</div>
 			{#if data.inventory.canWrite}
-				<Button class="h-11" href="{base}/new"><PlusIcon class="size-4" />New restock</Button>
+				<Button class="" href="{base}/new"><PlusIcon class="size-4" />New restock</Button>
 			{/if}
 		</div>
 
@@ -37,7 +37,7 @@
 					<li>
 						<a href="{base}/{r.id}" class="flex items-center gap-3 py-2.5 hover:bg-surface-2">
 							<div class="min-w-0 flex-1">
-								<p class="truncate text-base {r.voidedAt ? 'text-ink-muted line-through decoration-1' : 'text-ink'}">
+								<p class="truncate text-base {r.voidedAt ?'text-ink-muted line-through decoration-1' : 'text-ink'}">
 									{r.supplier ?? 'No supplier named'}{r.receiptNo ? ` · ${r.receiptNo}` : ''}
 								</p>
 								<p class="text-xs text-ink-muted">

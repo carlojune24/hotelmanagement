@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import * as ToggleGroup from '$lib/components/ui/toggle-group/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
@@ -16,6 +17,8 @@
 	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
 	import PackagePlusIcon from '@lucide/svelte/icons/package-plus';
 	import { UNITS, formatQty, toMilli } from '$lib/stock-units';
+	import { daysLeftLabel } from '$lib/stock-forecast';
+	import ShoppingCartIcon from '@lucide/svelte/icons/shopping-cart';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -24,8 +27,7 @@
 	type Dept = Row['department'];
 	const DEPTS: { key: Dept; label: string }[] = [
 		{ key: 'dining', label: 'Dining' },
-		{ key: 'front_desk', label: 'Front desk' },
-		{ key: 'housekeeping', label: 'Housekeeping' }
+		{ key: 'hotel', label: 'Hotel' }
 	];
 
 	let dept = $state<Dept | ''>('');
@@ -37,6 +39,8 @@
 	const negative = $derived(active.filter((r) => r.onHandMilli < 0));
 	const low = $derived(active.filter((r) => r.isLow && r.onHandMilli >= 0));
 	const inactiveCount = $derived(data.stock.length - active.length);
+	const toOrder = $derived(active.filter((r) => data.ahead[r.id]?.needsOrder));
+	const leftOf = (id: string) => daysLeftLabel(data.ahead[id]?.daysLeft ?? null);
 	const shown = $derived(
 		data.stock.filter(
 			(r) =>
@@ -68,7 +72,8 @@
 	const units = $derived(item ? UNITS[item.unit] : []);
 	const unitLabel = $derived(units.find((u) => u.key === unit)?.label ?? unit);
 	/** What the form would move, in thousandths of the base unit, for the live preview. */
-	const entered = $derived(!item || qty === '' ? null : toMilli(Number(qty), unit, item.unit));
+	// bind:value on a number input yields a number, or null once cleared — never count an empty box as 0.
+	const entered = $derived(!item || qty === '' || qty == null ? null : toMilli(Number(qty), unit, item.unit));
 	const after = $derived(!item || entered == null ? null : sheet.mode === 'remove' ? item.onHandMilli - entered : entered);
 
 	const TITLES: Record<Mode, string> = { remove: 'Record waste', count: 'Correct count' };
@@ -90,7 +95,7 @@
 
 		{#if active.length > 0}
 			<div
-				class="mt-4 rounded-lg border px-4 py-3 {negative.length || low.length ? 'border-warning/60 bg-warning/10' : 'border-border bg-surface'}"
+				class="mt-4 rounded-lg border px-4 py-3 {negative.length || low.length ?'border-warning/60 bg-warning/10' : 'border-border bg-surface'}"
 				aria-live="polite"
 			>
 				{#if !negative.length && !low.length}
@@ -106,25 +111,38 @@
 					{/if}
 				{/if}
 			</div>
+			{#if toOrder.length}
+				<a
+					href="/{page.params.hotel}/management/inventory/shopping-list"
+					class="mt-2 flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-3 text-sm hover:bg-surface-2"
+				>
+					<ShoppingCartIcon class="size-4 shrink-0 text-ink" aria-hidden="true" />
+					<span class="min-w-0 flex-1 truncate"
+						><span class="font-semibold text-ink">{toOrder.length} to order</span>
+						<span class="text-ink-muted">· {toOrder.map((r) => r.name).join(' · ')}</span></span
+					>
+					<span class="shrink-0 font-medium text-ink">Shopping list →</span>
+				</a>
+			{/if}
 		{/if}
 
 		<div class="mt-4 flex flex-wrap items-center gap-3">
-			<div class="inline-flex rounded-md border border-border p-0.5 text-sm" role="radiogroup" aria-label="Department">
-				{#each [{ key: '', label: 'All' }, ...DEPTS] as d (d.key)}
-					<button
-						type="button"
-						role="radio"
-						aria-checked={dept === d.key}
-						class="h-10 rounded px-3 {dept === d.key ? 'bg-surface-2 font-medium text-ink' : 'text-ink-muted hover:text-ink'}"
-						onclick={() => (dept = d.key as Dept | '')}>{d.label}</button
-					>
+			<ToggleGroup.Root
+				type="single"
+				variant="outline"
+				value={dept || 'all'}
+				onValueChange={(v) => v && (dept = v === 'all' ? '' : (v as Dept))}
+				aria-label="Department"
+			>
+				{#each [{ key: 'all', label: 'All' }, ...DEPTS] as d (d.key)}
+					<ToggleGroup.Item value={d.key} class="px-3">{d.label}</ToggleGroup.Item>
 				{/each}
-			</div>
+			</ToggleGroup.Root>
 			<div class="relative min-w-56 flex-1">
 				<SearchIcon class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-muted" aria-hidden="true" />
-				<Input bind:value={query} type="search" placeholder="Search items" aria-label="Search items" class="h-11 pl-9" />
+				<Input bind:value={query} type="search" placeholder="Search items" aria-label="Search items" class="pl-9" />
 			</div>
-			<Button variant={lowOnly ? 'default' : 'outline'} class="h-11" aria-pressed={lowOnly} onclick={() => (lowOnly = !lowOnly)}>Low only</Button>
+			<Button variant={lowOnly ? 'default' : 'outline'} class="" aria-pressed={lowOnly} onclick={() => (lowOnly = !lowOnly)}>Low only</Button>
 		</div>
 	</div>
 
@@ -137,29 +155,35 @@
 				{#each g.rows as r (r.id)}
 					<li class="flex items-center gap-3 py-2.5">
 						<div class="min-w-0 flex-1">
-							<p class="truncate text-base {r.isActive ? 'text-ink' : 'text-ink-muted'}">
+							<p class="truncate text-base {r.isActive ?'text-ink' : 'text-ink-muted'}">
 								{r.name}
 								{#if r.kind === 'reusable'}<span class="ml-1 text-xs text-ink-muted">reusable</span>{/if}
 								{#if !r.isActive}<span class="ml-1 text-xs text-ink-muted">inactive</span>{/if}
 							</p>
-							{#if r.nextExpiry}<p class="text-xs text-ink-muted">Next expiry {fmtDate(r.nextExpiry)}</p>{/if}
+							{#if leftOf(r.id) || r.nextExpiry}
+								<p class="text-xs text-ink-muted">
+									{#if leftOf(r.id)}<span class={data.ahead[r.id]?.needsOrder ? 'font-medium text-warning' : ''}>{leftOf(r.id)}</span>{/if}{#if leftOf(r.id) && r.nextExpiry}
+										·
+									{/if}{#if r.nextExpiry}Next expiry {fmtDate(r.nextExpiry)}{/if}
+								</p>
+							{/if}
 						</div>
 						{#if r.onHandMilli < 0}
 							<span class="rounded bg-danger/10 px-1.5 py-0.5 text-xs font-medium text-danger">Below zero</span>
 						{:else if r.isLow}
 							<span class="rounded bg-warning/15 px-1.5 py-0.5 text-xs font-medium text-ink">Low</span>
 						{/if}
-						<span class="w-28 text-right text-base font-medium tabular-nums {r.onHandMilli < 0 ? 'text-danger' : 'text-ink'}">
+						<span class="w-28 text-right text-base font-medium tabular-nums {r.onHandMilli < 0 ?'text-danger' : 'text-ink'}">
 							{formatQty(r.onHandMilli, r.unit)}
 						</span>
 						{#if data.inventory.canWrite && r.isActive}
-							<Button variant="outline" class="h-11 gap-1.5" href="/{page.params.hotel}/management/inventory/restock/new?item={r.id}" aria-label="Restock {r.name}">
+							<Button variant="outline" class="gap-1.5" href="/{page.params.hotel}/management/inventory/restock/new?item={r.id}" aria-label="Restock {r.name}">
 								<PackagePlusIcon class="size-4" aria-hidden="true" /><span class="hidden sm:inline">Restock</span>
 							</Button>
 							<DropdownMenu.Root>
 								<DropdownMenu.Trigger>
 									{#snippet child({ props })}
-										<Button {...props} variant="ghost" size="icon" class="size-11" aria-label="More for {r.name}">
+										<Button {...props} variant="ghost" size="icon" class="" aria-label="More for {r.name}">
 											<EllipsisIcon class="size-4" />
 										</Button>
 									{/snippet}
@@ -227,7 +251,7 @@
 				<div>
 					<Label for="qty">{sheet.mode === 'count' ? 'Counted on the shelf' : 'Quantity wasted'}</Label>
 					<div class="mt-1 flex gap-2">
-						<Input id="qty" name="qty" bind:value={qty} type="number" min="0" step="any" inputmode="decimal" class="h-11 flex-1 tabular-nums" required />
+						<Input id="qty" name="qty" bind:value={qty} type="number" min="0" step="any" inputmode="decimal" class="flex-1 tabular-nums" required />
 						<Select.Root type="single" bind:value={unit}>
 							<Select.Trigger id="qtyUnit" class="w-24" aria-label="Unit">{unitLabel}</Select.Trigger>
 							<Select.Content>
@@ -239,7 +263,7 @@
 
 				{#if after != null && entered != null}
 					<p class="text-sm text-ink-muted" aria-live="polite">
-						On hand after: <span class="font-medium tabular-nums {after < 0 ? 'text-danger' : 'text-ink'}">{formatQty(after, item.unit)}</span>
+						On hand after: <span class="font-medium tabular-nums {after < 0 ?'text-danger' : 'text-ink'}">{formatQty(after, item.unit)}</span>
 						{#if sheet.mode === 'count' && after !== item.onHandMilli}
 							({after > item.onHandMilli ? '+' : ''}{formatQty(after - item.onHandMilli, item.unit)})
 						{/if}
@@ -263,8 +287,8 @@
 				</div>
 
 				<div class="mt-auto flex justify-end gap-2 border-t border-border pt-4">
-					<Button type="button" variant="outline" class="h-11" onclick={() => (sheet.open = false)}>Cancel</Button>
-					<Button type="submit" class="h-11" disabled={busy || entered == null || (sheet.mode !== 'count' && entered <= 0)}>
+					<Button type="button" variant="outline" class="" onclick={() => (sheet.open = false)}>Cancel</Button>
+					<Button type="submit" class="" disabled={busy || entered == null || (sheet.mode !== 'count' && entered <= 0)}>
 						{sheet.mode === 'remove' ? 'Record waste' : 'Save count'}
 					</Button>
 				</div>

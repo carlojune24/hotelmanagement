@@ -12,15 +12,14 @@
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
 	const base = $derived(`/${page.params.hotel}/management/inventory/counts`);
-	const DEPT: Record<string, string> = { dining: 'Dining', front_desk: 'Front desk', housekeeping: 'Housekeeping' };
+	const DEPT: Record<string, string> = { dining: 'Dining', hotel: 'Hotel' };
 	const scope = (d: string | null) => (d ? DEPT[d] : 'Everything');
 	const SCOPES = [
-		{ key: 'housekeeping', label: 'Housekeeping', hint: 'Linens, toiletries' },
-		{ key: 'front_desk', label: 'Front desk', hint: 'Guest amenities' },
+		{ key: 'hotel', label: 'Hotel', hint: 'Linens, guest amenities' },
 		{ key: 'dining', label: 'Dining', hint: 'Kitchen and bar stock' },
 		{ key: 'all', label: 'Everything', hint: 'Every department' }
 	];
-	let department = $state('housekeeping');
+	let department = $state('hotel');
 	let busy = $state(false);
 
 	const open = $derived(data.counts.find((c) => c.status === 'open'));
@@ -73,14 +72,13 @@
 				<fieldset>
 					<legend class="text-sm font-medium text-ink">Start a count</legend>
 					<input type="hidden" name="department" value={department} />
-					<div class="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="What to count">
+					<div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="What to count">
 						{#each SCOPES as sc (sc.key)}
 							<button
 								type="button"
 								role="radio"
 								aria-checked={department === sc.key}
-								class="rounded-md border px-3 py-2 text-left {department === sc.key
-									? 'border-ink bg-surface-2'
+								class="rounded-md border px-3 py-2 text-left {department === sc.key ?'border-ink bg-surface-2'
 									: 'border-border hover:border-ink-muted'}"
 								onclick={() => (department = sc.key)}
 							>
@@ -93,9 +91,9 @@
 				<div class="mt-3 flex flex-wrap items-end gap-3">
 					<div class="min-w-56 flex-1">
 						<Label for="countNote">Note (optional)</Label>
-						<Input id="countNote" name="note" maxlength={300} placeholder="Monthly linen audit" class="mt-1 h-11" />
+						<Input id="countNote" name="note" maxlength={300} placeholder="Monthly linen audit" class="mt-1" />
 					</div>
-					<Button type="submit" class="h-11" disabled={busy}>Start count</Button>
+					<Button type="submit" class="" disabled={busy}>Start count</Button>
 				</div>
 			</form>
 		{/if}
@@ -115,7 +113,7 @@
 										{when.format(new Date(c.finishedAt ?? c.startedAt))}{c.finishedByName ? ` · ${c.finishedByName}` : ''}
 									</p>
 								</div>
-								<span class="text-sm tabular-nums {c.adjusted ? 'text-ink' : 'text-ink-muted'}">
+								<span class="text-sm tabular-nums {c.adjusted ?'text-ink' : 'text-ink-muted'}">
 									{c.adjusted ? `${c.adjusted} of ${c.lines} adjusted` : `${c.lines} items, all matched`}
 								</span>
 								<ChevronRightIcon class="size-4 text-ink-muted" aria-hidden="true" />

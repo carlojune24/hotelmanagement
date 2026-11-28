@@ -109,20 +109,20 @@ test.beforeEach(async ({ page }) => {
 	await staffLogin(page);
 });
 
-test('items: add a dining, two front-desk and a reusable housekeeping item', async ({ page }) => {
+test('items: add a dining item, two hotel consumables and a reusable hotel item', async ({ page }) => {
 	await page.goto(`/${SLUG}/management/inventory/items`, { waitUntil: 'networkidle' });
 	await addItem(page, { name: PORK, dept: 'Dining', unit: 'Weight (g, kg, oz, lb)', reorder: { qty: '2', unit: 'kg' } });
-	await addItem(page, { name: SOAP, dept: 'Front desk', unit: 'Count (pcs, dozen)' });
-	await addItem(page, { name: BRUSH, dept: 'Front desk', unit: 'Count (pcs, dozen)' });
-	await addItem(page, { name: TOWEL, dept: 'Housekeeping', unit: 'Count (pcs, dozen)', reusable: true });
+	await addItem(page, { name: SOAP, dept: 'Hotel', unit: 'Count (pcs, dozen)' });
+	await addItem(page, { name: BRUSH, dept: 'Hotel', unit: 'Count (pcs, dozen)' });
+	await addItem(page, { name: TOWEL, dept: 'Hotel', unit: 'Count (pcs, dozen)', reusable: true });
 
 	const rows = await sql<{ name: string; department: string; kind: string; unit: string; reorder_level_milli: string | null }[]>`
 		select name, department, kind, unit, reorder_level_milli from stock_items where hotel_id = ${hotelId} and name like ${`E2E % ${RUN}`} order by name`;
 	expect(rows.map((r) => [r.name, r.department, r.kind, r.unit, r.reorder_level_milli])).toEqual([
 		[PORK, 'dining', 'consumable', 'g', '2000000'],
-		[SOAP, 'front_desk', 'consumable', 'pcs', null],
-		[BRUSH, 'front_desk', 'consumable', 'pcs', null],
-		[TOWEL, 'housekeeping', 'reusable', 'pcs', null]
+		[SOAP, 'hotel', 'consumable', 'pcs', null],
+		[BRUSH, 'hotel', 'consumable', 'pcs', null],
+		[TOWEL, 'hotel', 'reusable', 'pcs', null]
 	]);
 	// The same name twice (any case) is refused.
 	await page.getByRole('button', { name: 'Add item' }).click();
@@ -294,7 +294,7 @@ test('check-in: the room type kit is pre-filled, staff adjust it, and it leaves 
 	await kit.getByRole('button', { name: 'Add item' }).click();
 	await choose(page, kit.locator('[aria-label="Item 2"]'), BRUSH);
 	await kit.getByRole('spinbutton', { name: 'Quantity of item 2' }).fill('1');
-	await kit.getByRole('radiogroup', { name: 'Item 2 counted per' }).getByRole('radio', { name: 'per guest' }).click();
+	await kit.getByRole('group', { name: 'Item 2 counted per' }).getByRole('radio', { name: 'per guest' }).click();
 	await page.screenshot({ path: 'test-results/inventory-kit.png' });
 	await kit.getByRole('button', { name: 'Save kit' }).click();
 	await expect(page.getByText('Amenity kit saved.')).toBeVisible();
@@ -345,7 +345,7 @@ test('stock count: a linen audit posts the difference with its reason', async ({
 	test.skip(!!open, 'A stock count is already open in this hotel.');
 
 	await page.goto(`/${SLUG}/management/inventory/counts`, { waitUntil: 'networkidle' });
-	await page.getByRole('radio', { name: /Housekeeping/ }).click();
+	await page.getByRole('radio', { name: /^Hotel/ }).click();
 	await page.locator('#countNote').fill(`E2E linen audit ${RUN}`);
 	await page.getByRole('button', { name: 'Start count' }).click();
 	await page.waitForURL(/\/inventory\/counts\/[0-9a-f-]{36}$/);
@@ -371,4 +371,33 @@ test('stock count: a linen audit posts the difference with its reason', async ({
 	// The finished count is read-only and lists the difference.
 	await expect(page.locator('ul.divide-y > li', { hasText: TOWEL })).toContainText('Expected 20 pcs');
 	await expect(page.getByRole('button', { name: 'Finish count' })).toHaveCount(0);
+});
+
+test('suppliers: add one in Inventory, pick it on a receipt, remove it', async ({ page }) => {
+	const name = `E2E Vendor ${RUN}`;
+	await page.goto(`/${SLUG}/management/inventory/suppliers`, { waitUntil: 'networkidle' });
+	await page.getByRole('button', { name: 'Add supplier' }).click();
+	const sheet = page.locator('[data-slot="sheet-content"]');
+	await sheet.locator('#sp-name').fill(name);
+	await sheet.locator('#sp-tin').fill('123-456-789-000');
+	await sheet.getByRole('button', { name: 'Add supplier' }).click();
+	await expect(sheet).toBeHidden();
+	await expect(page.locator('ul.divide-y > li', { hasText: name })).toContainText('TIN 123-456-789-000');
+	const [v] = await sql<{ id: string }[]>`select id from vendors where hotel_id = ${hotelId} and name = ${name} and deleted_at is null`;
+	expect(v).toBeTruthy();
+
+	// The Restock supplier picker offers it.
+	await page.goto(`/${SLUG}/management/inventory/restock/new`, { waitUntil: 'networkidle' });
+	await page.getByRole('button', { name: 'Show saved vendors' }).click();
+	await expect(page.getByRole('option', { name, exact: true })).toBeVisible();
+	await page.keyboard.press('Escape');
+
+	// Never used, so it can be deleted (Finance's rule refuses once an expense names it).
+	await page.goto(`/${SLUG}/management/inventory/suppliers`, { waitUntil: 'networkidle' });
+	await page.getByRole('button', { name: `Edit ${name}` }).click();
+	await sheet.getByRole('button', { name: 'Delete' }).click();
+	await expect(page.locator('ul.divide-y > li', { hasText: name })).toHaveCount(0);
+	const [gone] = await sql<{ deleted: boolean }[]>`select deleted_at is not null deleted from vendors where id = ${v!.id}`;
+	expect(gone!.deleted).toBe(true);
+	await sql`delete from vendors where id = ${v!.id}`; // it was only ever a test row
 });

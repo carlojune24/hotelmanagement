@@ -10,9 +10,11 @@
 		[
 			{ seg: '', label: 'Stock' },
 			{ seg: '/restock', label: 'Restock' },
+			{ seg: '/shopping-list', label: 'Shopping list' },
 			{ seg: '/counts', label: 'Counts' },
 			{ seg: '/movements', label: 'Movements' },
-			{ seg: '/items', label: 'Items', show: data.inventory.canManage }
+			{ seg: '/items', label: 'Items', show: data.inventory.canManage },
+			{ seg: '/suppliers', label: 'Suppliers', show: data.inventory.canManage }
 		].filter((t) => t.show === undefined || t.show)
 	);
 

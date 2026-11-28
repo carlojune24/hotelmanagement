@@ -747,7 +747,7 @@
 			hint="Handed to the guest at check-in and taken from stock. Per room counts once per room booked; per guest counts once per booked guest. The front desk can change the numbers on the check-in form. Leave empty for no kit."
 			withPer
 			saveLabel="Save kit"
-			emptyChoices="No front desk or housekeeping supplies in stock yet."
+			emptyChoices="No Hotel supplies in stock yet."
 			lines={data.kit}
 			choices={data.kitChoices}
 			inventoryHref="{base}/inventory/items"

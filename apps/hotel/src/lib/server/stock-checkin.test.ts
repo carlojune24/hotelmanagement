@@ -74,10 +74,10 @@ describe.skipIf(!hasDb)('stock: check-in amenity kits (live DB)', async () => {
 		const [g] = await db.insert(s.guests).values({ hotelId: hotel, fullName: 'Juan Dela Cruz', email: 'jdc@example.com' }).returning();
 		guest = g!.id;
 
-		const mk = (name: string, department: 'front_desk' | 'housekeeping') =>
+		const mk = (name: string, department: 'hotel') =>
 			stock.createStockItem(hotel, { name, department, kind: 'consumable', unit: 'pcs', reorderLevelMilli: null }, null);
-		soap = await mk('Bath soap', 'housekeeping');
-		brush = await mk('Toothbrush', 'front_desk');
+		soap = await mk('Bath soap', 'hotel');
+		brush = await mk('Toothbrush', 'hotel');
 		await stock.receiveStock({ hotelId: hotel, itemId: soap, qtyMilli: pcs(100), actor: null });
 		await stock.receiveStock({ hotelId: hotel, itemId: brush, qtyMilli: pcs(100), actor: null });
 		await stock.setKit(
@@ -135,7 +135,7 @@ describe.skipIf(!hasDb)('stock: check-in amenity kits (live DB)', async () => {
 	});
 
 	it('refuses linens in a kit, and a room type from another hotel', async () => {
-		const towel = await stock.createStockItem(hotel, { name: 'Bath towel', department: 'housekeeping', kind: 'reusable', unit: 'pcs', reorderLevelMilli: null }, null);
+		const towel = await stock.createStockItem(hotel, { name: 'Bath towel', department: 'hotel', kind: 'reusable', unit: 'pcs', reorderLevelMilli: null }, null);
 		await expect(stock.setKit(hotel, deluxe, [{ stockItemId: towel, qtyMilli: pcs(1), per: 'room' }], null)).rejects.toThrow(/reusable/);
 		const other = await mkHotel('b');
 		const [t] = await db.insert(s.roomTypes).values({ hotelId: other, name: 'Theirs' }).returning();

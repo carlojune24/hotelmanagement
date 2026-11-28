@@ -3,10 +3,16 @@ import { z } from 'zod';
 import { requireCap } from '$lib/server/auth/rbac';
 import { correctCount, listStock, removeStock, StockError } from '$lib/server/stock';
 import { toMilli } from '$lib/stock-units';
+import { businessDateFor } from '$lib/server/finance/shared';
+import { stockForecast } from '$lib/server/stock-insights';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
-	return { stock: await listStock(locals.hotel!.id) };
+	const hotel = locals.hotel!;
+	const [stock, forecast] = await Promise.all([listStock(hotel.id), stockForecast(hotel.id, hotel.timezone, businessDateFor(hotel.timezone))]);
+	// Only what the rows show: days left and whether it is on the shopping list.
+	const ahead = Object.fromEntries(forecast.map((f) => [f.id, { daysLeft: f.daysLeft, needsOrder: f.needsOrder }]));
+	return { stock, ahead };
 };
 
 const num = z.coerce.number().finite();
