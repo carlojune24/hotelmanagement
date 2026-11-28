@@ -99,12 +99,16 @@
 	{/if}
 
 	<section aria-labelledby="receipt">
-		<h2 id="receipt" class="mb-2 text-sm font-semibold text-ink">Receipt photo</h2>
-		{#if e.attachmentUrl}
-			<a href={e.attachmentUrl} target="_blank" rel="noopener" class="inline-block">
-				<img src={e.attachmentUrl} alt="Receipt for {e.description}" class="max-h-96 rounded-lg border border-border" />
-			</a>
-			<p class="mt-1 text-xs text-ink-muted print:hidden">Click the photo to open it full size.</p>
+		<h2 id="receipt" class="mb-2 text-sm font-semibold text-ink">Receipt {e.attachmentUrls.length > 1 ? 'photos' : 'photo'}</h2>
+		{#if e.attachmentUrls.length}
+			<div class="flex flex-wrap gap-3">
+				{#each e.attachmentUrls as url, i (url)}
+					<a href={url} target="_blank" rel="noopener" class="inline-block">
+						<img src={url} alt="Receipt {i + 1} for {e.description}" class="max-h-96 rounded-lg border border-border" />
+					</a>
+				{/each}
+			</div>
+			<p class="mt-1 text-xs text-ink-muted print:hidden">Click a photo to open it full size.</p>
 		{:else}
 			<p class="text-sm text-ink-muted">No receipt photo attached.</p>
 		{/if}

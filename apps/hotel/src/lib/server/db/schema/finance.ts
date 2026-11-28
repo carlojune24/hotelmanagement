@@ -427,6 +427,8 @@ export const expenses = pgTable(
 		paymentReferenceNo: text('payment_reference_no'),
 		/** `/uploads/<hotelId>/<file>` — receipt/invoice scan, via `lib/server/uploads.ts`. */
 		attachmentUrl: text('attachment_url'),
+		/** Receipt photos (one or more). `attachment_url` above is the legacy single photo, backfilled into this. */
+		attachmentUrls: text('attachment_urls').array().notNull().default(sql`'{}'::text[]`),
 		notes: text('notes'),
 		createdByUserId: uuid('created_by_user_id').references(() => users.id, {
 			onDelete: 'set null'

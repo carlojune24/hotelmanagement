@@ -11,9 +11,10 @@ import {
 	voidExpense
 } from '$lib/server/finance/expenses';
 import { listCashAccounts, listExpenseCategories, listVendors } from '$lib/server/finance/accounts';
-import { saveUpload, UploadValidationError } from '$lib/server/uploads';
+import { deleteUploadIfOwned, saveUpload, UploadValidationError } from '$lib/server/uploads';
 import type { Actions, PageServerLoad } from './$types';
 
+const MAX_PHOTOS = 10;
 const PAY_METHODS = ['cash', 'card', 'gcash', 'maya', 'bank_transfer', 'cheque'] as const;
 
 export const load: PageServerLoad = async ({ locals, url }) => {
@@ -31,8 +32,6 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
 	return {
 		today,
-		vatRateBps: hotel.vatRateBps || 1200, // same fallback as hotelVatRate in expenses.ts
-		hotelIsVat: hotel.vatRateBps > 0,
 		rows,
 		categories,
 		vendors,
@@ -60,8 +59,6 @@ export const actions: Actions = {
 				source: z.enum(['hotel', 'dining']),
 				vendorInvoiceNo: z.string().max(120).optional(),
 				gross: z.coerce.number().positive(),
-				isVatable: z.enum(['on']).optional(),
-				withholdingTax: z.coerce.number().min(0).optional(),
 				notes: z.string().max(1000).optional()
 			})
 			.safeParse(Object.fromEntries(fd));
@@ -69,15 +66,15 @@ export const actions: Actions = {
 			return fail(400, { error: parsed.error.issues.some((i) => i.path[0] === 'source') ? 'Choose whether this expense is for the hotel or dining.' : 'Check the expense details.' });
 		}
 
-		let attachmentUrl: string | null = null;
-		const file = fd.get('attachment');
-		if (file instanceof File && file.size > 0) {
-			try {
-				attachmentUrl = await saveUpload(hotel.id, file, 'image');
-			} catch (e) {
-				if (e instanceof UploadValidationError) return fail(400, { error: e.message });
-				throw e;
-			}
+		const files = fd.getAll('attachment').filter((f): f is File => f instanceof File && f.size > 0);
+		if (files.length > MAX_PHOTOS) return fail(400, { error: `Attach up to ${MAX_PHOTOS} photos.` });
+		const attachmentUrls: string[] = [];
+		try {
+			for (const f of files) attachmentUrls.push(await saveUpload(hotel.id, f, 'image'));
+		} catch (e) {
+			await Promise.all(attachmentUrls.map(deleteUploadIfOwned)); // don't leave the earlier photos orphaned
+			if (e instanceof UploadValidationError) return fail(400, { error: e.message });
+			throw e;
 		}
 
 		// A typed name that matches a saved vendor links to it; anything else is a one-off name.
@@ -97,14 +94,14 @@ export const actions: Actions = {
 				source: parsed.data.source,
 				vendorInvoiceNo: parsed.data.vendorInvoiceNo || null,
 				grossCentavos: Math.round(parsed.data.gross * 100),
-				isVatable: parsed.data.isVatable === 'on',
-				withholdingTaxCentavos: Math.round((parsed.data.withholdingTax ?? 0) * 100),
+				isVatable: false,
 				notes: parsed.data.notes || null,
-				attachmentUrl,
+				attachmentUrls,
 				actor: event.locals.user
 			});
 			return { ok: 'Expense recorded.' };
 		} catch (e) {
+			await Promise.all(attachmentUrls.map(deleteUploadIfOwned));
 			if (e instanceof FinanceError) return fail(400, { error: e.message });
 			throw e;
 		}

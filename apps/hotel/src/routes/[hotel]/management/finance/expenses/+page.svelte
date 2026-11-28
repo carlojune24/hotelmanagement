@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { enhance } from '$app/forms';
+	import { untrack } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
@@ -10,7 +11,6 @@
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import PrinterIcon from '@lucide/svelte/icons/printer';
 	import VendorCombobox from '$lib/components/staff/vendor-combobox.svelte';
-	import { vatPortion } from '$lib/dining-orders';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -22,9 +22,8 @@
 			toast.success(form.ok);
 			showNew = false;
 			payingId = null;
-			grossInput = whtInput = null;
-			isVatable = false;
 			vendorText = '';
+			untrack(clearPhotos); // untracked: reading `photos` here would re-run this effect forever
 		}
 		if (form && 'error' in form && form.error) toast.error(form.error);
 	});
@@ -35,14 +34,33 @@
 	let expenseDate = $state('');
 	let paidOn = $state('');
 
-	// Live breakdown so staff see what the VAT box and withholding do before saving.
-	let grossInput = $state<number | null>(null);
-	let whtInput = $state<number | null>(null);
-	let isVatable = $state(false);
-	const vatPct = $derived(data.vatRateBps / 100);
-	const grossC = $derived(Math.round((grossInput ?? 0) * 100));
-	const whtC = $derived(Math.round((whtInput ?? 0) * 100));
-	const vatC = $derived(isVatable ? vatPortion(grossC, data.vatRateBps) : 0);
+	// Receipt photos picked in the form. The native input would forget the earlier pick on every
+	// new one, so keep the files here and write them back into the input.
+	const MAX_PHOTOS = 10;
+	let photos = $state<{ file: File; url: string }[]>([]);
+	function syncPhotos() {
+		const input = document.getElementById('exp-photos') as HTMLInputElement | null;
+		if (!input) return;
+		const dt = new DataTransfer();
+		photos.forEach((p) => dt.items.add(p.file));
+		input.files = dt.files;
+	}
+	function clearPhotos() {
+		photos.forEach((p) => URL.revokeObjectURL(p.url));
+		photos = [];
+	}
+	function addPhotos(e: Event) {
+		const picked = Array.from((e.currentTarget as HTMLInputElement).files ?? []);
+		const room = MAX_PHOTOS - photos.length;
+		if (picked.length > room) toast.error(`Up to ${MAX_PHOTOS} photos — the extra ones were left out.`);
+		photos = [...photos, ...picked.slice(0, room).map((file) => ({ file, url: URL.createObjectURL(file) }))];
+		syncPhotos();
+	}
+	function removePhoto(i: number) {
+		URL.revokeObjectURL(photos[i]!.url);
+		photos = photos.filter((_, j) => j !== i);
+		syncPhotos();
+	}
 
 	// Vendor: pick a saved one or type a one-off name (the server matches names case-insensitively).
 	let vendorText = $state('');
@@ -73,7 +91,7 @@
 		<div class="flex gap-2">
 			<a href="{base}/expenses/recurring" class="text-sm text-ink-muted underline underline-offset-2">Recurring</a>
 			{#if data.finance.canExpense}
-				<Button size="sm" onclick={() => { showNew = !showNew; expenseDate = data.today; }}>New expense</Button>
+				<Button size="sm" onclick={() => { showNew = !showNew; expenseDate = data.today; clearPhotos(); }}>New expense</Button>
 			{/if}
 		</div>
 	</div>
@@ -115,32 +133,25 @@
 			<div><Label class="text-xs">Vendor invoice/OR no.</Label><Input name="vendorInvoiceNo" maxlength={120} class="mt-1" /></div>
 			<div>
 				<Label for="exp-gross" class="text-xs">Amount on receipt (₱)</Label>
-				<Input id="exp-gross" name="gross" type="number" min="0.01" step="0.01" required bind:value={grossInput} class="mt-1" />
-				<p class="mt-1 text-xs text-ink-muted">The total you actually pay — never add VAT on top.</p>
+				<Input id="exp-gross" name="gross" type="number" min="0.01" step="0.01" required class="mt-1" />
+				<p class="mt-1 text-xs text-ink-muted">The total you actually pay.</p>
 			</div>
-			<div>
-				<Label for="exp-wht" class="text-xs">Withholding tax (₱)</Label>
-				<Input id="exp-wht" name="withholdingTax" type="number" min="0" step="0.01" bind:value={whtInput} class="mt-1" />
-				<p class="mt-1 text-xs text-ink-muted">Only if you withhold from this supplier (e.g. rent, professional fees). Base is the amount net of VAT.</p>
-			</div>
-			<div class="pt-5">
-				<label class="flex items-center gap-2 text-sm text-ink">
-					<input type="checkbox" name="isVatable" bind:checked={isVatable} class="size-4" /> Receipt includes {vatPct}% VAT (optional)
-				</label>
-				<p class="mt-1 text-xs text-ink-muted">
-					VAT-registered supplier with VAT on the invoice/OR. Leave unchecked for palengke, transport or NON-VAT receipts.
-					{#if !data.hotelIsVat}This hotel isn't VAT-registered, so it's recorded for reference only.{/if}
-				</p>
-			</div>
-			{#if grossC > 0}
-				<p class="text-sm text-ink-muted sm:col-span-3" aria-live="polite">
-					Input VAT <span class="tabular-nums text-ink">{peso(vatC)}</span> · Net of VAT
-					<span class="tabular-nums text-ink">{peso(grossC - vatC)}</span>
-					{#if whtC > 0}· Pay vendor <span class="tabular-nums text-ink">{peso(grossC - whtC)}</span>{/if}
-				</p>
-			{/if}
 			<div class="sm:col-span-2"><Label class="text-xs">Notes</Label><Input name="notes" maxlength={1000} class="mt-1" /></div>
-			<div><Label class="text-xs">Receipt photo</Label><Input name="attachment" type="file" accept="image/*" class="mt-1" /></div>
+			<div>
+				<Label for="exp-photos" class="text-xs">Receipt photos</Label>
+				<Input id="exp-photos" name="attachment" type="file" accept="image/*" multiple onchange={addPhotos} class="mt-1" />
+				<p class="mt-1 text-xs text-ink-muted">Pick one or more (up to {MAX_PHOTOS}). Pick again to add more.</p>
+				{#if photos.length}
+					<div class="mt-2 flex flex-wrap gap-2">
+						{#each photos as p, i (p.url)}
+							<div class="relative">
+								<a href={p.url} target="_blank" rel="noopener"><img src={p.url} alt="Selected receipt {i + 1}" class="size-16 rounded-md border border-border object-cover" /></a>
+								<button type="button" onclick={() => removePhoto(i)} aria-label="Remove photo {i + 1}" class="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full border border-border bg-background text-xs leading-none text-ink shadow-sm hover:bg-surface-2">×</button>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</div>
 			<div class="flex items-end sm:col-span-3">
 				<Button type="submit" size="sm">Save expense</Button>
 			</div>
@@ -225,7 +236,7 @@
 						<Table.Cell class="max-w-[16rem] text-ink-muted">
 							<a href="{listPath}/{r.id}" class="hover:text-ink hover:underline underline-offset-2">{r.description}</a>
 							{#if r.vendorInvoiceNo}<span class="block text-xs">#{r.vendorInvoiceNo}</span>{/if}
-							{#if r.attachmentUrl}<a href={r.attachmentUrl} target="_blank" class="text-xs underline underline-offset-2">receipt</a>{/if}
+							{#if r.attachmentUrls.length === 1}<a href={r.attachmentUrls[0]} target="_blank" class="text-xs underline underline-offset-2">receipt</a>{:else if r.attachmentUrls.length > 1}<a href="{listPath}/{r.id}" class="text-xs underline underline-offset-2">receipts ({r.attachmentUrls.length})</a>{/if}
 						</Table.Cell>
 						<Table.Cell class="text-right tabular-nums text-ink">{peso(r.grossCentavos)}</Table.Cell>
 						<Table.Cell class="text-right tabular-nums text-ink-muted">{r.inputVatCentavos ? peso(r.inputVatCentavos) : '—'}</Table.Cell>

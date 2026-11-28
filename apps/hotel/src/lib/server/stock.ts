@@ -913,7 +913,7 @@ export async function createRestock(input: RestockInput): Promise<string> {
 			grossCentavos: input.totalCentavos,
 			isVatable: input.isVatable,
 			notes: `From Inventory → Restock: ${listed}`.slice(0, 1000),
-			attachmentUrl: input.attachmentUrl,
+			attachmentUrls: input.attachmentUrl ? [input.attachmentUrl] : [],
 			actor: input.actor,
 			tx
 		});

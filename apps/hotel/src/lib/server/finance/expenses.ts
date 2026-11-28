@@ -57,7 +57,7 @@ export interface CreateExpenseInput {
 	inputVatCentavos?: number | null;
 	withholdingTaxCentavos?: number;
 	notes?: string | null;
-	attachmentUrl?: string | null;
+	attachmentUrls?: string[];
 	actor: SessionUser | null;
 	/** Run inside the caller's transaction (an Inventory restock adds its stock in the same one). */
 	tx?: Tx;
@@ -107,7 +107,7 @@ export async function createExpense(
 		withholdingTaxCentavos: input.withholdingTaxCentavos ?? 0,
 		status,
 		notes: input.notes?.trim() || null,
-		attachmentUrl: input.attachmentUrl ?? null,
+		attachmentUrls: input.attachmentUrls ?? [],
 		createdByUserId: input.actor?.id ?? null,
 		approvedByUserId: status === 'approved' ? (input.actor?.id ?? null) : null,
 		approvedAt: status === 'approved' ? new Date() : null
@@ -168,7 +168,7 @@ export async function updateExpense(
 			netOfVatCentavos: gross - inputVat,
 			withholdingTaxCentavos: wht,
 			notes: patch.notes === undefined ? e.notes : patch.notes?.trim() || null,
-			attachmentUrl: patch.attachmentUrl === undefined ? e.attachmentUrl : patch.attachmentUrl,
+			attachmentUrls: patch.attachmentUrls === undefined ? e.attachmentUrls : patch.attachmentUrls,
 			updatedAt: new Date()
 		})
 		.where(eq(expenses.id, expenseId));
@@ -450,7 +450,7 @@ export async function listExpenses(hotelId: string, filters: ExpenseFilters = {}
 			withholdingTaxCentavos: expenses.withholdingTaxCentavos,
 			status: expenses.status,
 			paidAt: expenses.paidAt,
-			attachmentUrl: expenses.attachmentUrl,
+			attachmentUrls: expenses.attachmentUrls,
 			vendorInvoiceNo: expenses.vendorInvoiceNo
 		})
 		.from(expenses)
@@ -485,7 +485,7 @@ export async function getExpense(hotelId: string, expenseId: string) {
 			paymentMethod: expenses.paymentMethod,
 			paymentReferenceNo: expenses.paymentReferenceNo,
 			notes: expenses.notes,
-			attachmentUrl: expenses.attachmentUrl,
+			attachmentUrls: expenses.attachmentUrls,
 			recurringExpenseId: expenses.recurringExpenseId,
 			createdAt: expenses.createdAt,
 			createdByName: createdBy.name,
