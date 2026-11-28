@@ -31,10 +31,10 @@ const ALLOWED_VIDEO_TYPES: Record<string, string> = {
 };
 
 export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024; // 8 MB
-/** Video is much heavier than a photo but this still runs on local disk with no CDN in
-    front of it — 50 MB is generous for a short, muted, looping backdrop clip without
-    letting an upload balloon disk usage or request time unreasonably. */
-export const MAX_VIDEO_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
+/** Video is much heavier than a photo. Cloudflare rejects any request body over 100 MB (Free plan)
+    before it reaches us, so stay under that; the server's BODY_SIZE_LIMIT and nginx
+    client_max_body_size must stay above this. */
+export const MAX_VIDEO_UPLOAD_BYTES = 95 * 1024 * 1024; // 95 MB
 
 // Matches exactly what saveUpload writes (`<hotelId>/<ulid>.<ext>`) — anything else is
 // ignored rather than resolved, so a malformed/legacy value can never walk outside
@@ -60,7 +60,7 @@ export async function saveUpload(
 
 	if (kind === 'video') {
 		if (file.size > MAX_VIDEO_UPLOAD_BYTES) {
-			throw new UploadValidationError('Videos must be 50 MB or smaller.');
+			throw new UploadValidationError('Videos must be 95 MB or smaller.');
 		}
 		const ext = ALLOWED_VIDEO_TYPES[file.type];
 		if (!ext) throw new UploadValidationError('Use an MP4 or WebM video.');

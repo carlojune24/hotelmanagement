@@ -443,7 +443,7 @@
 		<Label>Hero video (optional)</Label>
 		<p class="mt-1 text-xs text-ink-muted">
 			Used as your hero's backdrop when set — falls back to the hero image above. MP4 or WebM, up
-			to 50 MB.
+			to 95 MB.
 		</p>
 
 		{#if data.branding.heroVideoUrl}
