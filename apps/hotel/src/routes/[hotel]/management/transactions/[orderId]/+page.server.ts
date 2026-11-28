@@ -528,7 +528,9 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		guest: {
 			fullName: guest?.fullName ?? '—',
 			email: guest?.email ?? '',
-			phone: guest?.phone ?? null
+			phone: guest?.phone ?? null,
+			address: guest?.address ?? null,
+			specialRequests: guest?.specialRequests ?? null
 		},
 		lines,
 		cancelledCount,

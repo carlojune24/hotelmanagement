@@ -132,16 +132,18 @@
 		p.provider !== 'paymongo' &&
 		p.method !== 'house_use' &&
 		p.method !== 'security_deposit';
+	// The OTA's stand-in address (see createWalkInBooking) is not a real email.
+	const realEmail = $derived(data.guest.email && !data.guest.email.endsWith('@invalid') ? data.guest.email : null);
 </script>
+
+{#snippet missing()}<span class="text-ink-muted italic">Not provided</span>{/snippet}
+
 
 <div class="mx-auto max-w-5xl space-y-6 p-6">
 	<div class="flex flex-wrap items-start justify-between gap-4">
 		<div>
 			<h1 class="text-xl font-semibold tracking-tight text-ink">{data.guest.fullName}</h1>
 			<div class="mt-2"><ConfirmationCode orderId={data.order.id} /></div>
-			<p class="mt-2 text-sm text-ink-muted">
-				{[data.guest.email, data.guest.phone].filter(Boolean).join(' · ')}
-			</p>
 			<div class="mt-2 flex flex-wrap items-center gap-2">
 				<Badge variant="outline" class={statusClass(data.order.status)}>
 					{statusLabel(data.order.status)}
@@ -206,6 +208,36 @@
 			{/if}
 		</div>
 	</div>
+
+	<section class="rounded-lg border border-border" aria-labelledby="guest-details-h">
+		<h2 id="guest-details-h" class="border-b border-border px-4 py-2.5 text-sm font-semibold text-ink">Guest details</h2>
+		<dl class="grid gap-x-8 gap-y-4 px-4 py-3.5 sm:grid-cols-2">
+			<div>
+				<dt class="text-xs text-ink-muted">Phone</dt>
+				<dd class="mt-0.5 text-sm break-words text-ink">
+					{#if data.guest.phone}<a href="tel:{data.guest.phone}" class="underline-offset-2 hover:underline">{data.guest.phone}</a>{:else}{@render missing()}{/if}
+				</dd>
+			</div>
+			<div>
+				<dt class="text-xs text-ink-muted">Email</dt>
+				<dd class="mt-0.5 text-sm break-all text-ink">
+					{#if realEmail}<a href="mailto:{realEmail}" class="underline-offset-2 hover:underline">{realEmail}</a>{:else}{@render missing()}{/if}
+				</dd>
+			</div>
+			<div class="sm:col-span-2">
+				<dt class="text-xs text-ink-muted">Address</dt>
+				<dd class="mt-0.5 text-sm break-words text-ink">
+					{#if data.guest.address}{data.guest.address}{:else}{@render missing()}{/if}
+				</dd>
+			</div>
+			{#if data.guest.specialRequests}
+				<div class="sm:col-span-2">
+					<dt class="text-xs text-ink-muted">Special requests</dt>
+					<dd class="mt-0.5 text-sm break-words whitespace-pre-line text-ink">{data.guest.specialRequests}</dd>
+				</div>
+			{/if}
+		</dl>
+	</section>
 
 	<div class="grid gap-6 lg:grid-cols-[1fr_320px] lg:items-start">
 		<div class="min-w-0 space-y-6">
