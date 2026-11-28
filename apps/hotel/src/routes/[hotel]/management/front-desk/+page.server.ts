@@ -327,6 +327,7 @@ const createSchema = z
 		fullName: z.string().min(2).max(160).refine((v) => !nameError(v), 'Check the guest name.'),
 		email: z.string().email().refine((v) => !emailCheck(v).error, 'Check the email address.'),
 		phone: z.string().max(40).refine((v) => !phoneError(v), 'Check the phone number.').optional(),
+		address: z.string().trim().max(300).optional(),
 		specialRequests: z.string().max(1000).optional(),
 		itemsJson: z.string(),
 		// Charge the whole booking to the city ledger instead of taking payment (hotel admin only).
@@ -1284,6 +1285,7 @@ export const actions: Actions = {
 					fullName: d.fullName,
 					email: d.email,
 					phone: d.phone ?? null,
+					address: d.address ?? null,
 					specialRequests: d.specialRequests ?? null
 				},
 				rooms: items,
@@ -1337,6 +1339,7 @@ export const actions: Actions = {
 			.object({
 				fullName: z.string().min(2).max(160).refine((v) => !nameError(v), 'Check the guest name.'),
 				email: z.union([z.string().email().refine((v) => !emailCheck(v).error, 'Check the email address.'), z.literal('')]).default(''),
+				address: z.string().trim().max(300).optional(),
 				phone: z.string().max(40).refine((v) => !phoneError(v), 'Check the phone number.').optional(),
 				specialRequests: z.string().max(1000).optional(),
 				itemsJson: z.string(),
@@ -1380,7 +1383,7 @@ export const actions: Actions = {
 			const result = await createWalkInBooking({
 				hotelId: hotel.id,
 				businessDate: todayInTimezone(hotel.timezone),
-				guest: { fullName: d.fullName, email: d.email, phone: d.phone ?? null, specialRequests: d.specialRequests ?? null },
+				guest: { fullName: d.fullName, email: d.email, phone: d.phone ?? null, address: d.address ?? null, specialRequests: d.specialRequests ?? null },
 				rooms: items,
 				extras,
 				ota: {

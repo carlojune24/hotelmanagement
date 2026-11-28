@@ -884,7 +884,7 @@ function walkInAllocations(
 export async function createWalkInBooking(params: {
 	hotelId: string;
 	businessDate: string;
-	guest: { fullName: string; email: string; phone: string | null; specialRequests: string | null };
+	guest: { fullName: string; email: string; phone: string | null; address?: string | null; specialRequests: string | null };
 	rooms: WalkInRoomItem[];
 	/** How the full total is settled at the desk. Defaults to cash. */
 	payment?: WalkInPaymentInput;
@@ -1076,6 +1076,7 @@ export async function createWalkInBooking(params: {
 				// The OTA often gives no real email; the column is not null, so use a recognisable placeholder.
 				email: guest.email.trim().toLowerCase() || (ota ? `ota-${ota.reference.toLowerCase()}@invalid` : ''),
 				phone: guest.phone?.trim() || null,
+				address: guest.address?.trim() || null,
 				specialRequests: guest.specialRequests?.trim() || null
 			})
 			.returning({ id: guests.id });

@@ -389,6 +389,7 @@
 			<div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-sm text-ink-muted">
 				<span class="truncate">{data.detail.guest.email}</span>
 				{#if data.detail.guest.phone}<span>{data.detail.guest.phone}</span>{/if}
+				{#if data.detail.guest.address}<span>{data.detail.guest.address}</span>{/if}
 			</div>
 			{#if data.detail.guest.specialRequests}
 				<div class="mt-3">

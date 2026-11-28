@@ -31,6 +31,8 @@ export const guests = pgTable(
 		fullName: text('full_name').notNull(),
 		email: text('email').notNull(),
 		phone: text('phone'),
+		/** Home address, taken at the front desk on a walk-in; optional. */
+		address: text('address'),
 		specialRequests: text('special_requests'),
 		createdAt: createdAt(),
 		updatedAt: updatedAt()

@@ -96,3 +96,7 @@
 		{#if touched.phone && pErr}<p class="mt-1 text-xs text-danger" role="alert">{pErr}</p>{/if}
 	</div>
 </div>
+<div>
+	<Label for="{prefix}Address">Address (optional)</Label>
+	<Input id="{prefix}Address" name="address" maxlength={300} autocomplete="street-address" placeholder="Street, barangay, city" class="mt-1" />
+</div>
